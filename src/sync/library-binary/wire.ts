@@ -70,8 +70,9 @@ export function limits(v:unknown):Limits {
  Number(o.maxManifestPageBytes)<13||Number(o.maxControlHeaderBytes)<1)fail('CAPABILITY_MISMATCH');
  return o as Limits;
 }
-const KINDS=['articleBody','articleMetadata','noteAsset','readerMetadata','readerResource','rssSource'];
-function kindVersion(v:unknown,cap:boolean):KindVersion&Partial<{send:boolean;receive:boolean}>{const o=exact(v,cap?['kind','schemaVersion','send','receive']:['kind','schemaVersion']);if(!(cap?[...KINDS,'bookState','bookPackageSegment','bookPackageCommit','bookReading']:KINDS).includes(text(o.kind,32))||o.schemaVersion!==1)fail('UNSUPPORTED_KIND');if(cap){bool(o.send);bool(o.receive);}return o as unknown as KindVersion;}
+export const BOOK_KINDS=['bookState','bookPackageSegment','bookPackageCommit','bookReading'] as const;
+export const KINDS:readonly string[]=['articleBody','articleMetadata','bookPackageCommit','bookPackageSegment','bookReading','bookState','noteAsset','readerMetadata','readerResource','rssSource'];
+function kindVersion(v:unknown,cap:boolean):KindVersion&Partial<{send:boolean;receive:boolean}>{const o=exact(v,cap?['kind','schemaVersion','send','receive']:['kind','schemaVersion']);if(!KINDS.includes(text(o.kind,32))||o.schemaVersion!==1)fail('UNSUPPORTED_KIND');if(cap){bool(o.send);bool(o.receive);}return o as unknown as KindVersion;}
 export function selection(v:unknown):Selection{const o=exact(v,['profile','kinds','chunkBytes','limits']),ks=array(o.kinds,6).map(k=>kindVersion(k,false));if(!ks.length||o.profile!=='merge-b2'||o.chunkBytes!==65536)fail('CAPABILITY_MISMATCH');sorted(ks.map(k=>k.kind));if(ks.some(k=>k.kind==='articleBody')&&!ks.some(k=>k.kind==='articleMetadata')||ks.some(k=>k.kind==='readerResource')&&!ks.some(k=>k.kind==='readerMetadata'))fail('CAPABILITY_MISMATCH');limits(o.limits);return o as unknown as Selection;}
 export function capability(v:unknown):Capability{const o=exact(v,['version','profile','kinds','chunkSizes','limits']);if(o.version!==2||o.profile!=='merge-b2'||!Array.isArray(o.chunkSizes)||o.chunkSizes.length!==1||o.chunkSizes[0]!==65536)fail('CAPABILITY_MISMATCH');const ks=array(o.kinds,10).map(k=>kindVersion(k,true));if(!ks.length)fail('CAPABILITY_MISMATCH');sorted(ks.map(k=>k.kind));limits(o.limits);return o as unknown as Capability;}
 export function snapshot(v:unknown):Snapshot{const o=exact(v,['snapshotId','manifestDigest','fromExclusive','toInclusive']);if(!/^[A-Za-z0-9_.:-]{1,128}$/.test(text(o.snapshotId,128)))fail();hex(o.manifestDigest);integer(o.fromExclusive);integer(o.toInclusive);if(Number(o.fromExclusive)>Number(o.toInclusive))fail('PLAN_CONFLICT');return o as unknown as Snapshot;}
@@ -81,10 +82,10 @@ export function binding(v:unknown):Binding{const o=exact(v,['direction','jobId',
  * lone surrogates. C envelope numbers are unsigned integral lexical tokens;
  * embedded legacy metadata is separately decoded with integersOnly=false.
  */
-export function strictJson(source:string,integersOnly=true):Row {
+export function strictJson(source:string,integersOnly=true,maxNodes=32768):Row {
  let i=0,nodes=0;const ws=()=>{while(i<source.length&&/[\x20\t\r\n]/.test(source[i]!))i++;};
  const str=():string=>{ws();if(source[i++]!=='"')fail();const start=i-1;let escaped=false;while(i<source.length){const ch=source[i++]!;if(escaped){escaped=false;continue;}if(ch==='\\'){escaped=true;continue;}if(ch==='"'){let value:string;try{value=JSON.parse(source.slice(start,i));}catch{fail();}utf8(value);return value;}}fail();};
- const value=(depth:number):void=>{if(depth>16||++nodes>32768)fail();ws();const ch=source[i];if(ch==='"'){str();return;}if(ch==='{'){i++;const keys=new Set<string>();ws();if(source[i]==='}'){i++;return;}for(;;){const key=str();if(keys.has(key))fail();keys.add(key);ws();if(source[i++]!==':')fail();value(depth+1);ws();const next=source[i++];if(next==='}')return;if(next!==',')fail();}}
+ const value=(depth:number):void=>{if(depth>16||++nodes>maxNodes)fail();ws();const ch=source[i];if(ch==='"'){str();return;}if(ch==='{'){i++;const keys=new Set<string>();ws();if(source[i]==='}'){i++;return;}for(;;){const key=str();if(keys.has(key))fail();keys.add(key);ws();if(source[i++]!==':')fail();value(depth+1);ws();const next=source[i++];if(next==='}')return;if(next!==',')fail();}}
   if(ch==='['){i++;ws();if(source[i]===']'){i++;return;}for(;;){value(depth+1);ws();const next=source[i++];if(next===']')return;if(next!==',')fail();}}
   for(const lit of ['true','false','null'])if(source.slice(i,i+lit.length)===lit){i+=lit.length;return;}
   const token=/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/.exec(source.slice(i))?.[0];if(!token)fail();i+=token.length;

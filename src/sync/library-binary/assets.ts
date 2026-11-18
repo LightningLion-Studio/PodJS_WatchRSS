@@ -1,5 +1,7 @@
 import type {VerifiedChunkStore,ObjectLease,VerifiedObject} from '@podjs/framework/verified-chunk-store';
-import type {BinaryStore,ReceiptBoundary} from './store';
+import type {SourceFileRange} from './codec';
+import type {BinaryBooks,FrozenBookFile} from './books';
+import type {BinaryStore,Job,ReceiptBoundary} from './store';
 import type {BinaryLibraryKinds} from './kinds';
 import {descriptor,objectId,D} from './digests';
 import {CHUNK_BYTES,fail,hash,utf8,strictJson,exact,type ObjectDescriptor,type Kind,type Row,type Snapshot,type Selection,type Limits} from './wire';
@@ -16,12 +18,12 @@ export interface BinaryAssetFiles {
  commit(path:string,target:string,size:number,sha256:string,expectedTargetSha256?:string|null):Promise<{path:string}>;
  remove(path:string):Promise<void>;
 }
-export interface BinarySourcePlan {objects:readonly ObjectDescriptor[];read(object:ObjectDescriptor,index:number):Promise<Uint8Array>}
+export interface BinarySourcePlan {objects:readonly ObjectDescriptor[];read(object:ObjectDescriptor,index:number):Promise<Uint8Array>;range?(object:ObjectDescriptor,index:number):SourceFileRange|undefined}
 /** Data never becomes a JSON/base64 string. Copies and reads retain one 64KiB
  * block. Frozen spools are immutable, persisted before their witness is offered. */
 export class BinaryAssets {
  private outcomes=new Map<string,'merged'|'alreadyPresent'|'retainedLocal'>();
- constructor(private readonly files:BinaryAssetFiles,private readonly store:BinaryStore,private readonly chunks:VerifiedChunkStore,private readonly check:()=>void=()=>{},private readonly unit:()=>void=()=>{},private readonly kinds?:BinaryLibraryKinds){}
+ constructor(private readonly files:BinaryAssetFiles,private readonly store:BinaryStore,private readonly chunks:VerifiedChunkStore,private readonly check:()=>void=()=>{},private readonly unit:()=>void=()=>{},private readonly kinds?:BinaryLibraryKinds,private readonly books?:BinaryBooks){}
  private metadata(d:ObjectDescriptor){const m=exact(strictJson(d.metadataUtf8,false),['storageKey','sha256','size']);if(d.kind!=='noteAsset'||d.encoding!=='raw'||!/^([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/.test(String(m.storageKey))||m.storageKey!==d.businessId||m.sha256!==d.sha256||m.size!==d.size||d.size>5*1024*1024||d.dependsOn.length)fail('BUSINESS_REJECTED');return m;}
  private conflict(d:ObjectDescriptor){return 'notes/asset-conflicts/'+hash(utf8(d.businessId))+'-'+d.sha256+'.bin';}
  private async verified(path:string,d:Pick<ObjectDescriptor,'size'|'sha256'>,code='SOURCE_CHANGED'){const h=await this.files.hash(path);this.check();if(h.size!==d.size||h.sha256!==d.sha256)fail(code);this.unit();}
@@ -46,13 +48,22 @@ export class BinaryAssets {
    if(objects.length>=limits.maxPlanObjects||manifestBytes>limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
    objects.push(d);
   }
+  if(send&&this.books)await this.books.freeze(scope,id,limits,send,(d,file)=>{
+   manifestBytes+=utf8(JSON.stringify(d)).length+1;
+   if(objects.length>=limits.maxPlanObjects||manifestBytes>limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
+   objects.push(d);if(file)paths[d.objectId]=file.path;
+  },bytes=>this.peak(limits,bytes));
   objects.sort((a,b)=>a.objectId<b.objectId?-1:1);return {witness:{snapshotId:id,manifestDigest:hash(utf8(JSON.stringify(objects))),fromExclusive:0,toInclusive:0},inventory:{objects,paths}};
  }
  private async noteEntries(){
   const exists=await this.files.stat('notes/assets');if(exists.file)fail('LOCAL_IO');
   return (await this.files.list('notes/assets')).entries;
  }
- private validate(d:ObjectDescriptor){
+ private validate(d:ObjectDescriptor,limits:Limits){
+  if(d.kind.startsWith('book')){
+   if(!this.books)fail('UNSUPPORTED_KIND');
+   return this.books.validate(d,limits);
+  }
   if(d.kind==='noteAsset')return this.metadata(d);
   if(!this.kinds)fail('UNSUPPORTED_KIND');
   return this.kinds.validate(d);
@@ -60,8 +71,21 @@ export class BinaryAssets {
  async source(scope:string,witness:Snapshot,selection:Selection):Promise<BinarySourcePlan>{
   const frozen=await this.store.snapshot(scope,witness.snapshotId);if(!frozen||(['snapshotId','manifestDigest','fromExclusive','toInclusive'] as const).some(k=>frozen.witness[k]!==witness[k]))fail('SOURCE_CHANGED');
   const inv=frozen.inventory as {objects:ObjectDescriptor[];paths:Record<string,string>};if(!Array.isArray(inv.objects)||hash(utf8(JSON.stringify(inv.objects)))!==witness.manifestDigest||inv.objects.length>selection.limits.maxPlanObjects)fail('SOURCE_CHANGED');
-  const objects=inv.objects.filter(o=>selection.kinds.some(k=>k.kind===o.kind)).map(o=>descriptor(o,selection.limits));for(const d of objects){this.validate(d);if(d.kind!=='noteAsset')continue;const expected='library-binary/spool/'+D('wrss.library-binary.v2/spool',[scope,d.objectId])+'.bin';if(inv.paths[d.objectId]!==expected)fail('JOURNAL_CORRUPT');}
-  return {objects,read:async(d,index)=>{this.check();if(d.kind!=='noteAsset')fail('SOURCE_CHANGED');const r=await this.files.readBytes(inv.paths[d.objectId]!,index*CHUNK_BYTES,CHUNK_BYTES);this.check();if(r.size!==d.size||r.bytes.length!==Math.min(CHUNK_BYTES,d.size-index*CHUNK_BYTES)||hash(r.bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');this.unit();return r.bytes;}};
+  const objects=inv.objects.filter(o=>selection.kinds.some(k=>k.kind===o.kind)).map(o=>descriptor(o,selection.limits));
+  const bookFiles=new Map<string,FrozenBookFile>();
+  for(const d of objects){
+   this.validate(d,selection.limits);
+   if(d.kind.startsWith('book')){
+    const file=this.books?.source(scope,witness.snapshotId,d,selection.limits);
+    if(file){if(inv.paths[d.objectId]!==file.path)fail('JOURNAL_CORRUPT');bookFiles.set(d.objectId,file);}
+   }
+   if(d.kind!=='noteAsset')continue;const expected='library-binary/spool/'+D('wrss.library-binary.v2/spool',[scope,d.objectId])+'.bin';if(inv.paths[d.objectId]!==expected)fail('JOURNAL_CORRUPT');}
+  return {objects,range:(d,index)=>{
+   const file=bookFiles.get(d.objectId);if(!file)return;
+   const offset=index*CHUNK_BYTES,sha256=d.chunkHashes[index];
+   if(!sha256)fail('OBJECT_CONFLICT');
+   return {path:file.path,offset:file.offset+offset,size:Math.min(CHUNK_BYTES,d.size-offset),sha256};
+  },read:async(d,index)=>{this.check();if(d.kind!=='noteAsset')fail('SOURCE_CHANGED');const r=await this.files.readBytes(inv.paths[d.objectId]!,index*CHUNK_BYTES,CHUNK_BYTES);this.check();if(r.size!==d.size||r.bytes.length!==Math.min(CHUNK_BYTES,d.size-index*CHUNK_BYTES)||hash(r.bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');this.unit();return r.bytes;}};
  }
  async peak(limits:Limits,incoming:number){
   const stat=await this.files.stat('notes/assets');this.check();
@@ -73,8 +97,11 @@ export class BinaryAssets {
  }
  async reserve(scope:string,job:string,limits:Limits,objects:readonly ObjectDescriptor[]){
   if(!objects.length)return;
-  let incoming=this.kinds?.shadowBytes(objects)??0;
-  for(const d of objects){this.validate(d);incoming+=d.size*STAGING_COPIES;}
+  let incoming=(this.kinds?.shadowBytes(objects)??0)+(this.books?.peak(objects,limits)??0);
+  for(const d of objects){
+   this.validate(d,limits);
+   if(d.kind!=='bookPackageSegment')incoming+=d.size*STAGING_COPIES;
+  }
   const old=(await this.store.db.query('SELECT bytes FROM library_binary_peaks WHERE scope=? AND job_id=?',[scope,job]))[0];
   await this.peak(limits,incoming-Number(old?.bytes??0));this.check();
   await this.store.db.execute('INSERT OR REPLACE INTO library_binary_peaks VALUES(?,?,?)',[scope,job,incoming]);this.unit();
@@ -83,6 +110,16 @@ export class BinaryAssets {
   const rows=await this.store.db.query("SELECT path FROM library_binary_source_files f WHERE expires_at<? AND NOT EXISTS(SELECT 1 FROM library_binary_snapshot_files sf JOIN library_binary_snapshots s ON s.scope=sf.scope AND s.snapshot_id=sf.snapshot_id WHERE sf.path=f.path) LIMIT 64",[this.store.now()]);
   for(const row of rows){this.check();const path=String(row.path);if(!/^library-binary\/spool\/[A-Za-z0-9._-]{1,160}$/.test(path))fail('JOURNAL_CORRUPT');await this.files.remove(path);await this.store.db.execute('DELETE FROM library_binary_source_files WHERE path=?',[path]);this.unit();}
  }
- async publish(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor){if(d.kind!=='noteAsset')return this.chunks.finalize(lease,object);this.metadata(d);this.check();const target='notes/assets/'+d.businessId;let present=false;if((await this.files.stat(target)).file){const h=await this.files.hash(target);present=h.sha256===d.sha256&&h.size===d.size;}this.outcomes.set(d.objectId,present?'alreadyPresent':'merged');try{return await this.chunks.finalize(lease,object,target);}catch(e){if(!(e instanceof Error)||e.message!=='PUBLICATION_CONFLICT')throw e;this.outcomes.set(d.objectId,'retainedLocal');return this.chunks.finalize(lease,object,this.conflict(d));}}
- async apply(d:ObjectDescriptor,path:string,boundary:ReceiptBoundary,peer?:string){if(d.kind!=='noteAsset'){if(!this.kinds||!peer)fail('UNSUPPORTED_KIND');return this.kinds.apply(d,path,peer,boundary);}this.metadata(d);const conflict=path===this.conflict(d);if(path!=='notes/assets/'+d.businessId&&!conflict)fail('OBJECT_CONFLICT');await this.verified(path,d,'HASH_MISMATCH');boundary.check?.();const outcome=conflict?'retainedLocal':this.outcomes.get(d.objectId)??'alreadyPresent';await this.store.db.transaction([...boundary.before,{sql:'INSERT INTO library_binary_assets VALUES(?,?,?,?,?) ON CONFLICT(storage_key,sha256) DO UPDATE SET path=excluded.path,outcome=excluded.outcome',params:[d.businessId,d.sha256,d.size,path,outcome]},...boundary.after(outcome)]);this.unit();}
+ async publish(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job?:Job){
+  if(d.kind==='bookPackageSegment'){
+   if(!this.books||!job)fail('UNSUPPORTED_KIND');
+   return this.books.publish(job,lease,object,d);
+  }
+  if(d.kind!=='noteAsset')return this.chunks.finalize(lease,object);this.metadata(d);this.check();const target='notes/assets/'+d.businessId;let present=false;if((await this.files.stat(target)).file){const h=await this.files.hash(target);present=h.sha256===d.sha256&&h.size===d.size;}this.outcomes.set(d.objectId,present?'alreadyPresent':'merged');try{return await this.chunks.finalize(lease,object,target);}catch(e){if(!(e instanceof Error)||e.message!=='PUBLICATION_CONFLICT')throw e;this.outcomes.set(d.objectId,'retainedLocal');return this.chunks.finalize(lease,object,this.conflict(d));}}
+ async apply(d:ObjectDescriptor,path:string,boundary:ReceiptBoundary,peer?:string,job?:Job){
+  if(d.kind.startsWith('book')){
+   if(!this.books||!job)fail('UNSUPPORTED_KIND');
+   return this.books.apply(job,d,path,boundary);
+  }
+  if(d.kind!=='noteAsset'){if(!this.kinds||!peer)fail('UNSUPPORTED_KIND');return this.kinds.apply(d,path,peer,boundary);}this.metadata(d);const conflict=path===this.conflict(d);if(path!=='notes/assets/'+d.businessId&&!conflict)fail('OBJECT_CONFLICT');await this.verified(path,d,'HASH_MISMATCH');boundary.check?.();const outcome=conflict?'retainedLocal':this.outcomes.get(d.objectId)??'alreadyPresent';await this.store.db.transaction([...boundary.before,{sql:'INSERT INTO library_binary_assets VALUES(?,?,?,?,?) ON CONFLICT(storage_key,sha256) DO UPDATE SET path=excluded.path,outcome=excluded.outcome',params:[d.businessId,d.sha256,d.size,path,outcome]},...boundary.after(outcome)]);this.unit();}
 }

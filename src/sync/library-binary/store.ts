@@ -1,10 +1,11 @@
+import {readSqlText} from '@podjs/framework/sql';
 import type {SqlDatabase,SqlParams} from '../../core/types';
-import {MAX_REQUEST_BINDINGS} from './receive-index';
+import {bindingCapacity} from './receive-index';
 import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot,requestDigest} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
 export type Statement={sql:string;params?:SqlParams};
-export interface ReceiptBoundary {check?():void;before:Statement[];after(outcome:Outcome):Statement[]}
+export interface ReceiptBoundary {check?():void;transaction?(statements:Statement[]):Promise<void>;before:Statement[];after(outcome:Outcome):Statement[]}
 export type JobState='PLANNING'|'READY'|'TRANSFERRING'|'APPLIED'|'COMPLETE'|'CANCELLED';
 export interface Job {scope:string;jobId:string;planDigest:string;description:BeginPayload;state:JobState;connectionId:string;epoch:number;expiresAt:number;nextPage:number;completion:Completion|null;lease:Row|null;role:'receiver'|'source'}
 const lanes=new WeakMap<SqlDatabase,Promise<unknown>>();
@@ -33,6 +34,10 @@ export class BinaryStore {
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_cancellations(scope TEXT NOT NULL,job_id TEXT NOT NULL,reason TEXT NOT NULL,expires_at INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_peaks(scope TEXT NOT NULL,job_id TEXT NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_assets(storage_key TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(storage_key,sha256))'},
+   {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_states(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,state_json TEXT NOT NULL,PRIMARY KEY(scope,job_id,book_id))"},
+   {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_files(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,ready INTEGER NOT NULL,PRIMARY KEY(scope,job_id,object_id))"},
+   {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_pages(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,page INTEGER NOT NULL,first_chapter INTEGER NOT NULL,last_chapter INTEGER NOT NULL,PRIMARY KEY(scope,job_id,book_id,page))"},
+   {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_chapters(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,chapter INTEGER NOT NULL,PRIMARY KEY(scope,job_id,book_id,chapter))"},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_connections(connection_id TEXT PRIMARY KEY,revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),expires_at INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_guard(id INTEGER PRIMARY KEY CHECK(id=1),ok INTEGER NOT NULL CHECK(ok=1))'},
    {sql:'INSERT OR IGNORE INTO library_binary_guard VALUES(1,1)'},
@@ -63,14 +68,21 @@ export class BinaryStore {
  private requestQuota(job:Job,peer:string,r:Envelope):Statement[]{return [
   {sql:'INSERT OR IGNORE INTO library_binary_request_quota VALUES(1,0)'},
   {sql:'UPDATE library_binary_request_quota SET bytes=bytes+CASE WHEN EXISTS(SELECT 1 FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?) THEN 0 ELSE 1024 END WHERE id=1',params:[job.scope,job.jobId,peer,r.requestId]},
-  {sql:'UPDATE library_binary_guard SET ok=CASE WHEN (SELECT bytes FROM library_binary_request_quota WHERE id=1)<=? THEN 1 ELSE 0 END WHERE id=1',params:[Math.min(8388608,job.description.selection.limits.maxJournalBytes-25165824)]},
+  {sql:'UPDATE library_binary_guard SET ok=CASE WHEN (SELECT bytes FROM library_binary_request_quota WHERE id=1)<=? THEN 1 ELSE 0 END WHERE id=1',params:[Math.min(bindingCapacity(job.description.selection)*1024,job.description.selection.limits.maxJournalBytes-25165824)]},
   ...this.bind(job,peer,r),
  ];}
- async receiveBindings(job:Job,peer:string):Promise<Pick<Envelope,'requestId'|'requestDigest'>[]>{
-  const rows=await this.db.query('SELECT request_id,digest FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? LIMIT ?',
-   [job.scope,job.jobId,peer,MAX_REQUEST_BINDINGS+1]);
-  if(rows.length>MAX_REQUEST_BINDINGS)fail('JOURNAL_CORRUPT');
-  return rows.map(r=>({requestId:hex(r.request_id,32),requestDigest:hex(r.digest)}));
+ async *receiveBindings(job:Job,peer:string):AsyncGenerator<Pick<Envelope,'requestId'|'requestDigest'>>{
+  const limit=bindingCapacity(job.description.selection);
+  let after='',count=0;
+  for(;;){
+   const rows=await this.db.query('SELECT request_id,digest FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id>? ORDER BY request_id LIMIT 128',
+    [job.scope,job.jobId,peer,after]);
+   for(const r of rows){
+    if(++count>limit)fail('JOURNAL_CORRUPT');
+    after=hex(r.request_id,32);yield {requestId:after,requestDigest:hex(r.digest)};
+   }
+   if(rows.length<128)return;
+  }
  }
  async boundRequest(job:Job,peer:string,r:Envelope,onReplay?:()=>void){
   const existing=(await this.db.query('SELECT digest,result FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];
@@ -106,11 +118,23 @@ export class BinaryStore {
   const old=(await this.db.query('SELECT digest FROM library_binary_prepare_requests WHERE scope=? AND connection_id=? AND request_id=?',[scope,connectionId,id]))[0];if(old){if(old.digest!==digest)fail('REQUEST_CONFLICT');await this.db.execute('UPDATE library_binary_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',[this.now()+RETENTION,scope,connectionId]);return;}await this.budget(1024);await this.db.execute('INSERT INTO library_binary_prepare_requests VALUES(?,?,?,?,?)',[scope,connectionId,id,digest,this.now()+RETENTION]);
  }
  async saveSnapshot(scope:string,witness:Snapshot,inventory:unknown):Promise<void>{
-  const encoded=JSON.stringify(inventory),encodedBytes=utf8(encoded).length;if(encodedBytes>1048576)fail('LIMIT_EXCEEDED');const old=(await this.db.query('SELECT witness,inventory FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,witness.snapshotId]))[0];if(old&&(JSON.stringify(parse(old.witness))!==JSON.stringify(witness)||String(old.inventory)!==encoded))fail('PLAN_CONFLICT');
-  const paths=(inventory as {paths?:Record<string,unknown>}).paths;if(!paths||typeof paths!=='object'||Array.isArray(paths))fail('JOURNAL_CORRUPT');const values=Object.values(paths);if(values.length>512||values.some(p=>typeof p!=='string'||!/^library-binary\/spool\/[0-9a-f]{64}\.bin$/.test(p)))fail('JOURNAL_CORRUPT');
+  const encoded=JSON.stringify(inventory),encodedBytes=utf8(encoded).length;
+  if(encodedBytes>1048576)fail('LIMIT_EXCEEDED');
+  const old=(await this.db.query('SELECT witness FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,witness.snapshotId]))[0];
+  if(old&&(JSON.stringify(parse(old.witness))!==JSON.stringify(witness)||await this.snapshotInventory(scope,witness.snapshotId)!==encoded))fail('PLAN_CONFLICT');
+  const paths=(inventory as {paths?:Record<string,unknown>}).paths;if(!paths||typeof paths!=='object'||Array.isArray(paths))fail('JOURNAL_CORRUPT');const values=[...new Set(Object.values(paths))];if(values.length>512||values.some(p=>typeof p!=='string'||!/^library-binary\/spool\/[0-9a-f]{64}\.bin$/.test(p)))fail('JOURNAL_CORRUPT');
   await this.budget(encodedBytes+1024+values.length*512);await this.db.transaction([{sql:'INSERT OR IGNORE INTO library_binary_snapshots VALUES(?,?,?,?,?)',params:[scope,witness.snapshotId,JSON.stringify(witness),encoded,this.now()+RETENTION]},...values.map(path=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_files VALUES(?,?,?)',params:[scope,witness.snapshotId,path]}))]);
  }
- async snapshot(scope:string,id:string):Promise<{witness:Snapshot;inventory:unknown}|null>{const r=(await this.db.query('SELECT witness,inventory,expires_at FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id]))[0];if(!r||Number(r.expires_at)<this.now())return null;return {witness:parse(r.witness),inventory:parse(r.inventory)};}
+ private snapshotInventory(scope:string,id:string):Promise<string|null>{
+  return readSqlText(this.db,'SELECT inventory AS value FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id],{maxBytes:1048576});
+ }
+ async snapshot(scope:string,id:string):Promise<{witness:Snapshot;inventory:unknown}|null>{
+  const r=(await this.db.query('SELECT witness,expires_at FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id]))[0];
+  if(!r||Number(r.expires_at)<this.now())return null;
+  const inventory=await this.snapshotInventory(scope,id);
+  if(inventory===null)fail('JOURNAL_CORRUPT');
+  return {witness:parse(r.witness),inventory:parse(inventory)};
+ }
  async preparation(scope:string,digest:string,body:Row):Promise<void>{await this.budget(utf8(JSON.stringify(body)).length+1024);await this.db.execute('INSERT OR IGNORE INTO library_binary_preparations VALUES(?,?,?,?)',[scope,digest,JSON.stringify(body),this.now()+RETENTION]);}
  /** All scopes share a single journal budget. Reserve the native journal's
   * full 16 MiB bound once, and account outstanding per-job reservations. A
@@ -130,6 +154,10 @@ export class BinaryStore {
   const shared=(await this.db.query(`SELECT
    (SELECT COUNT(*)*512 FROM library_binary_snapshot_refs)+(SELECT COUNT(*)*512 FROM library_binary_snapshot_files)+(SELECT COUNT(*)*1024 FROM library_binary_source_files)+(SELECT COUNT(*)*1024 FROM library_binary_cancellations)+
    (SELECT COUNT(*)*512 FROM library_binary_connections)+
+   (SELECT COUNT(*)*1024 FROM library_binary_book_files)+
+   (SELECT COUNT(*)*512 FROM library_binary_book_pages)+
+   (SELECT COUNT(*)*256 FROM library_binary_book_chapters)+
+   (SELECT COALESCE(SUM(length(CAST(state_json AS BLOB))+1024),0) FROM library_binary_book_states)+
    (SELECT COUNT(*)*1024 FROM library_binary_prepare_requests)+
    (SELECT COALESCE(SUM(length(CAST(inventory AS BLOB))+2048),0) FROM library_binary_snapshots)+
    (SELECT COALESCE(SUM(length(CAST(body AS BLOB))+2048),0) FROM library_binary_preparations) AS bytes`))[0];
@@ -165,7 +193,20 @@ export class BinaryStore {
    ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,params:[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]};
   await this.db.transaction([statement,...[p.phoneSnapshot,p.watchSnapshot].map(s=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_refs VALUES(?,?,?)',params:[scope,r.jobId,s.snapshotId]})),...(!old?[{sql:'INSERT INTO library_binary_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
  }
- async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{return (await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_binary_objects WHERE scope=? AND job_id=? ORDER BY ordinal',[job.scope,job.jobId])).map(r=>({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:Number(r.ordinal)}));}
+ async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{
+  const objects:{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]=[];
+  // The host caps a SQLite reply at 512 KiB. A full 512 MiB book has
+  // 8192 chunk hashes, so even its compact manifest spans multiple replies.
+  let after=-1;
+  for(;;){
+   const rows=await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_binary_objects WHERE scope=? AND job_id=? AND ordinal>? ORDER BY ordinal LIMIT 8',[job.scope,job.jobId,after]);
+   for(const r of rows){
+    after=Number(r.ordinal);
+    objects.push({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:after});
+   }
+   if(rows.length<8)return objects;
+  }
+ }
  async objectAt(job:Job,slot:number):Promise<ObjectDescriptor|null>{const r=(await this.db.query('SELECT description FROM library_binary_objects WHERE scope=? AND job_id=? AND ordinal=?',[job.scope,job.jobId,slot]))[0];return r?descriptor(parse(r.description),job.description.selection.limits):null;}
  async object(job:Job,id:string){const r=(await this.db.query('SELECT object_id,description,receipt FROM library_binary_objects WHERE scope=? AND job_id=? AND object_id=?',[job.scope,job.jobId,id]))[0];if(!r)fail();return {descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,id,r.receipt)};}
  private receipt(job:Job,id:string,raw:unknown):AppliedReceipt|null {
@@ -193,7 +234,7 @@ export class BinaryStore {
   await this.budget(entries.reduce((n,e)=>n+utf8(JSON.stringify(e)).length+4096,0),job.description.selection.limits.maxJournalBytes,reserve===undefined?undefined:{scope:job.scope,jobId:job.jobId,bytes:reserve});
   await this.db.transaction([this.guard(job),...this.bind(job,peer,r,result),...(reserve===undefined?[]:[{sql:'UPDATE library_binary_reservations SET bytes=? WHERE scope=? AND job_id=?',params:[reserve,job.scope,job.jobId]}]),...entries.map((o,i)=>({sql:'INSERT INTO library_binary_objects(scope,job_id,object_id,ordinal,description) VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,o.objectId,start+i,JSON.stringify(o)]})),{sql:'INSERT INTO library_binary_pages VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,index,digest,JSON.stringify(result)]},{sql:'UPDATE library_binary_jobs SET next_page=?,state=? WHERE scope=? AND job_id=?',params:[index+1,result.state,job.scope,job.jobId]}]);return result;
  }
- boundary(job:Job,r:Envelope,peer:string,oid:string,receiver:string,check:()=>void=()=>{}):ReceiptBoundary{return {check,before:[this.guard(job),...this.bind(job,peer,r)],after:outcome=>{const receipt=appliedReceipt(r,oid,receiver,outcome);return [this.guard(job),{sql:'UPDATE library_binary_objects SET receipt=? WHERE scope=? AND job_id=? AND object_id=? AND receipt IS NULL',params:[JSON.stringify(receipt),job.scope,job.jobId,oid]},{sql:"UPDATE library_binary_jobs SET state=CASE WHEN NOT EXISTS(SELECT 1 FROM library_binary_objects WHERE scope=? AND job_id=? AND receipt IS NULL) THEN 'APPLIED' ELSE 'TRANSFERRING' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[job.scope,job.jobId,this.now()+RETENTION,job.scope,job.jobId]}];}};}
+ boundary(job:Job,r:Envelope,peer:string,oid:string,receiver:string,check:()=>void=()=>{}):ReceiptBoundary{return {check,transaction:statements=>this.db.transaction(statements),before:[this.guard(job),...this.bind(job,peer,r)],after:outcome=>{const receipt=appliedReceipt(r,oid,receiver,outcome);return [this.guard(job),{sql:'UPDATE library_binary_objects SET receipt=? WHERE scope=? AND job_id=? AND object_id=? AND receipt IS NULL',params:[JSON.stringify(receipt),job.scope,job.jobId,oid]},{sql:"UPDATE library_binary_jobs SET state=CASE WHEN NOT EXISTS(SELECT 1 FROM library_binary_objects WHERE scope=? AND job_id=? AND receipt IS NULL) THEN 'APPLIED' ELSE 'TRANSFERRING' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[job.scope,job.jobId,this.now()+RETENTION,job.scope,job.jobId]}];}};}
  async complete(job:Job,r:Envelope,peer:string,p:Row):Promise<Completion>{
   if(job.completion){if(p.receiptsRoot!==job.completion.receiptsRoot||p.objectCount!==job.completion.objectCount||p.ackToInclusive!==job.completion.ackToInclusive)fail('RECEIPT_CONFLICT');await this.db.transaction([this.guard(job),...this.bind(job,peer,r,job.completion as unknown as Row)]);return job.completion;}
   const objects=await this.objects(job);if(objects.length!==job.description.objectCount||objects.some(o=>!o.receipt))fail('DEPENDENCIES_PENDING');

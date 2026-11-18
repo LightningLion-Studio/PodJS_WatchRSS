@@ -16,6 +16,8 @@ import {onlyChangedSql} from '@podjs/framework/sql-changes';
 import {canonical} from '../cloud/records';
 import {mergeBook,mergeBookReading,validateBook,validateBookReading,chapterHash,bookFingerprint,bookId,bookArticleId,bookInteracted,BOOK_MAX_PACKAGE_BYTES,type BookHash,type BookState,type BookReading,type BookChapter} from './protocol';
 import {isBookUrl,bookPackageLines,parseBookChapter,type BookPackageHeader} from './package';
+import type {StreamedBookChapter} from '../sync/library-binary/book-import';
+import type {ReceiptBoundary} from '../sync/library-binary/store';
 import type {BookFiles,BookFileInfo} from './files';
 type Row=Record<string,unknown>;type Statement={sql:string;params?:SqlParams};
 const str=(v:unknown)=>String(v??''),num=(v:unknown)=>Number(v??0);
@@ -54,11 +56,53 @@ export class SqlBookStore {
  async manifests(){const rows=await this.states(),out=[];for(const s of rows)out.push({...s,contentAvailable:!!await this.package(s.bookId)});return out;}
  private async guarded<T>(action:(revision:number)=>Promise<T>):Promise<T>{for(let attempt=0;attempt<3;attempt++){const revision=await libraryRevision(this.db);try{return await action(revision);}catch(error){if(await libraryRevision(this.db)===revision)throw error;}}throw Error('book_changed_repeatedly');}
  async merge(remote:BookState):Promise<number>{return this.work('book-state-merge',()=>this.mergeValue(remote));}
+ /** Callers keep the legacy domain until every local original has an
+  * immutable package. Legacy registration may hydrate an unbounded chapter. */
+ async binaryReady():Promise<boolean>{
+  const pending=await this.db.query(`SELECT 1 FROM articles a JOIN channels c ON c.id=a.channel_id
+   WHERE (c.url LIKE 'https://watchrss.local/import-txt-novel/%' OR c.url LIKE 'https://watchrss.local/import-epub/%'
+    OR a.link LIKE 'https://watchrss.local/import-content/txt/%')
+   AND NOT EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id
+    WHERE m.item_id=a.id AND b.registration_complete=1) LIMIT 1`);
+  return !pending.length;
+ }
+ private commitBinary(boundary:ReceiptBoundary,statements:Statement[]):Promise<void>{
+  boundary.check?.();
+  return boundary.transaction?.(statements)??this.db.transaction(statements);
+ }
+ async mergeBinaryState(remote:BookState,boundary:ReceiptBoundary,received:Statement):Promise<void>{
+  const state=await validateBook(remote,this.ports.sha256);
+  await this.guarded(async revision=>{
+   const previous=await this.record(state.bookId),old=previous?this.state(previous):undefined,next=mergeBook(old,state);
+   const changed=!old||canonical(old)!==canonical(next);
+   const replace=old&&compareLifecycleTokens(next.lifecycle,old.lifecycle)>0;
+   const writes:Statement[]=changed?[this.statement(next),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),
+    ...(replace?[{sql:'DELETE FROM sync_book_delete_members WHERE book_id=?',params:[next.bookId]},
+     {sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[next.bookId]}]:[]),
+    {sql:"UPDATE channels SET title=? WHERE title IS NOT ? AND url!='https://watchrss.local/import-content' AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[next.title,next.title,next.bookId]},
+    {sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]:[];
+   const deletion=await this.deletionStatements(next);
+   const outcome=compareLifecycleTokens(old?.lifecycle,state.lifecycle)>0?'retainedLocal':changed?'merged':'alreadyPresent';
+   await this.commitBinary(boundary,[revisionGuard(revision),...boundary.before,...writes,...deletion.members,...deletion.effects,
+    ...this.displayReceiptStatements(next.bookId),received,...boundary.after(outcome)]);
+  });
+ }
+ /** The display projection advances in the same transaction as remote title changes. */
+ private displayReceiptStatements(id:string):Statement[]{
+  return [
+   {sql:`INSERT INTO sync_book_display(book_id,projection) VALUES(?,(SELECT COALESCE(json_group_array(json_object('key',key,'title',title)),'[]') FROM
+    (SELECT DISTINCT CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN 'a:'||a.id ELSE 'c:'||c.id END AS key,
+    CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN a.title ELSE c.title END AS title
+    FROM sync_book_aliases m JOIN articles a ON a.id=m.item_id JOIN channels c ON c.id=a.channel_id WHERE m.book_id=? ORDER BY key)))
+    ON CONFLICT(book_id) DO UPDATE SET projection=excluded.projection`,params:[id,id]},
+   {sql:'DELETE FROM sync_book_display_dirty WHERE book_id=?',params:[id]},
+  ];
+ }
  private async mergeValue(remote:BookState):Promise<number>{await validateBook(remote,this.ports.sha256);return this.guarded(async revision=>{const previous=await this.record(remote.bookId),old=previous?this.state(previous):undefined,next=mergeBook(old,remote);let changed=0;if(!old||canonical(old)!==canonical(next)){await this.db.transaction([revisionGuard(revision),this.statement(next),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),...(old&&compareLifecycleTokens(next.lifecycle,old.lifecycle)>0?[{sql:'DELETE FROM sync_book_delete_members WHERE book_id=?',params:[next.bookId]},{sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[next.bookId]}]:[]),{sql:"UPDATE channels SET title=? WHERE title IS NOT ? AND url!='https://watchrss.local/import-content' AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[next.title,next.title,next.bookId]},{sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]);changed++;await this.rememberDisplay(next.bookId);}return changed+await this.applyDeletions(next);});}
  private async displayProjection(id:string){return this.rows(`SELECT DISTINCT CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN 'a:'||a.id ELSE 'c:'||c.id END AS key,CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN a.title ELSE c.title END AS title FROM sync_book_aliases m JOIN articles a ON a.id=m.item_id JOIN channels c ON c.id=a.channel_id WHERE m.book_id=? ORDER BY key`,[id]);}
  private async rememberDisplay(id:string){await this.guarded(async revision=>{const dirty=(await this.db.query('SELECT revision FROM sync_book_display_dirty WHERE book_id=?',[id]))[0],projection=canonical(await this.displayProjection(id));await this.db.transaction([revisionGuard(revision),{sql:'INSERT INTO sync_book_display(book_id,projection) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET projection=excluded.projection WHERE projection IS NOT excluded.projection',params:[id,projection]},...(dirty?[{sql:'DELETE FROM sync_book_display_dirty WHERE book_id=? AND revision=?',params:[id,dirty.revision]}]:[])]);});}
  private async captureDisplay(){for(const row of await this.rows('SELECT b.book_id,b.state_json,d.projection FROM sync_books b JOIN sync_book_display_dirty x ON x.book_id=b.book_id LEFT JOIN sync_book_display d ON d.book_id=b.book_id WHERE b.registration_complete=1 ORDER BY b.book_id')){const id=str(row.book_id),now=await this.displayProjection(id),previous=row.projection?JSON.parse(str(row.projection)) as Row[]:undefined;const edits=previous?now.filter(n=>previous.some(o=>o.key===n.key&&o.title!==n.title)):[];if(edits.length){const old=this.state(row),title=str(edits[edits.length-1]!.title);await this.merge({...old,title,updatedAt:Math.max((this.ports.now??Date.now)(),old.updatedAt+1),sourceDeviceId:await this.ports.deviceId()});}else await this.rememberDisplay(id);}}
- private async applyDeletions(s:BookState):Promise<number>{if(!s.deleted&&!s.deletedChapters.length)return 0;const memberStatements:Statement[]=[];for(let at=0;at<s.deletedChapters.length;at+=400){const part=s.deletedChapters.slice(at,at+400);memberStatements.push({sql:'INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) VALUES '+part.map(()=>'(?,?)').join(','),params:part.flatMap(i=>[s.bookId,i])});}if(memberStatements.length)await this.db.transaction(memberStatements);
+ private async deletionStatements(s:BookState):Promise<{members:Statement[];effects:Statement[]}>{if(!s.deleted&&!s.deletedChapters.length)return {members:[],effects:[]};const memberStatements:Statement[]=[];for(let at=0;at<s.deletedChapters.length;at+=400){const part=s.deletedChapters.slice(at,at+400);memberStatements.push({sql:'INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) VALUES '+part.map(()=>'(?,?)').join(','),params:part.flatMap(i=>[s.bookId,i])});}
   const selected='m.book_id=? AND (?=1 OR EXISTS(SELECT 1 FROM sync_book_delete_members d WHERE d.book_id=m.book_id AND d.chapter_index=m.chapter_index))',params=[s.bookId,s.deleted?1:0],clock=Math.max(1,s.deletionClock,s.deletedAt),source=s.sourceDeviceId||await this.ports.deviceId();
   const statements:Statement[]=[{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
    {sql:'INSERT INTO sync_article_deletions(article_id,url,changed_at,source_device_id,source_order) SELECT m.article_id,m.url,?,?,? FROM sync_book_aliases m WHERE '+selected+' AND m.wire_identity=1 ON CONFLICT(article_id) DO UPDATE SET changed_at=max(changed_at,excluded.changed_at),source_device_id=excluded.source_device_id,source_order=excluded.source_order',params:[clock,source,deviceOrder(source),...params]},
@@ -66,6 +110,12 @@ export class SqlBookStore {
    ...(s.deleted?[{sql:"INSERT INTO sync_source_states(url,source_device_id,title,description,site_url,image_url,created_at,updated_at,sort_order,is_pinned,deleted,deleted_at) SELECT c.url,?,c.title,COALESCE(c.description,''),NULL,c.image_url,c.created_at,?,-c.sort_order,c.is_pinned,1,? FROM channels c WHERE c.url!='https://watchrss.local/import-content' AND c.url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?) ON CONFLICT(url) DO UPDATE SET deleted=1,deleted_at=max(deleted_at,excluded.deleted_at),updated_at=max(updated_at,excluded.updated_at),source_device_id=excluded.source_device_id",params:[source,clock,clock,s.bookId]},
     {sql:"DELETE FROM channels WHERE url!='https://watchrss.local/import-content' AND NOT EXISTS(SELECT 1 FROM articles a WHERE a.channel_id=channels.id) AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[s.bookId]}]:[]),
    {sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'}];
+  return {members:memberStatements,effects:statements};
+ }
+ private async applyDeletions(s:BookState):Promise<number>{
+  if(!s.deleted&&!s.deletedChapters.length)return 0;
+  const {members,effects:statements}=await this.deletionStatements(s);
+  if(members.length)await this.db.transaction(members);
   if(!this.db.transactionChanges)throw Error('Book deletion requires committed counts');const n=await this.db.transactionChanges(statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})));let readingChanges=0;const affected=(await querySyncKeysetPages(this.db,'SELECT state_json,chapter_index FROM sync_book_reading WHERE book_id=? AND chapter_index>? ORDER BY chapter_index',[s.bookId],{key:'chapter_index'})).filter(r=>s.deleted||s.deletedChapters.includes(num(r.chapter_index))).map(r=>JSON.parse(str(r.state_json)) as BookReading);for(let at=0;at<affected.length;at+=100)readingChanges+=await this.mergeReadingBatch(affected.slice(at,at+100));return n[2]!+(s.deleted?n[4]!:0)+readingChanges;
  }
  /** Consume only the exact witnessed keys; a concurrent new deletion remains pending. */
@@ -141,8 +191,8 @@ export class SqlBookStore {
  async readingStates(capture=true){if(capture)await this.captureReading();const rows=await this.rows('SELECT r.* FROM sync_book_reading r LEFT JOIN sync_books b ON b.book_id=r.book_id WHERE b.book_id IS NULL OR r.chapter_index<=b.chapter_count ORDER BY r.book_id,r.chapter_index');return rows.map(r=>JSON.parse(str(r.state_json)) as BookReading);}
  async mergeReading(remote:BookReading):Promise<number>{return this.mergeReadingBatch([remote]);}
  /** One durable page; clocks are merged before projecting each affected book once. */
- async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[]}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
- private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[]}={}):Promise<number>{
+ async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
+ private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary}={}):Promise<number>{
   for(const value of incoming)validateBookReading(value);if(!incoming.length)return 0;if(incoming.length>100)throw Error('book_reading_batch_too_large');
   if(options.capture!==false)await this.captureReading();
   for(let attempt=0;attempt<3;attempt++){const revision=options.expectedRevision??await libraryRevision(this.db);try{
@@ -157,9 +207,20 @@ export class SqlBookStore {
     for(const p of ['favorite','watchLater'] as const){const source=next[`${p}SourceDeviceId`]??next.sourceDeviceId;values.push(next[`${p}Saved`]===undefined?null:next[`${p}Saved`]?1:0,next[`${p}ChangedAt`]??null,next[`${p}SortOrder`]??null,next[`${p}Saved`]===undefined?null:source,next[`${p}Saved`]===undefined?null:deviceOrder(source));}
     statements.push({sql:'INSERT INTO sync_book_reading('+cols.join(',')+') VALUES('+cols.map(()=>'?').join(',')+') ON CONFLICT(book_id,chapter_index) DO UPDATE SET '+cols.slice(2).map(c=>c+'=excluded.'+c).join(',')+' WHERE state_json IS NOT excluded.state_json',params:values});
    }
-   if(!affected.size){if(options.guards?.length)await this.db.transaction([revisionGuard(revision),...options.guards]);return 0;}if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
+   const boundary=options.boundary;
+   const guards=[...(boundary?.before??[]),...(options.guards??[])];
+   if(!affected.size){
+    if(boundary)await this.commitBinary(boundary,[revisionGuard(revision),...guards,...boundary.after('alreadyPresent')]);
+    else if(guards.length)await this.db.transaction([revisionGuard(revision),...guards]);
+    return 0;
+   }if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
    for(const id of affected)statements.push(...this.projectReadingStatements(id,[...merged].filter(([k,v])=>v.bookId===id&&canonical(v)!==canonical(before.get(k)??null)).map(([,v])=>v.chapterIndex)));
-   const counts=await this.db.transactionChanges([revisionGuard(revision),...(options.guards??[]),...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));return Math.max(counts.slice(1+(options.guards?.length??0),1+(options.guards?.length??0)+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
+   if(boundary){
+    await this.commitBinary(boundary,[revisionGuard(revision),...guards,...statements,...boundary.after('merged')]);
+    return writes;
+   }
+   const counts=await this.db.transactionChanges([revisionGuard(revision),...guards,...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));
+   return Math.max(counts.slice(1+guards.length,1+guards.length+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }
@@ -206,8 +267,81 @@ export class SqlBookStore {
   for(const r of await querySyncKeysetPages(this.db,'SELECT v.chapter_index,v.source_url FROM sync_book_validation v WHERE v.binding=? AND v.chapter_index>? ORDER BY v.chapter_index',[verified.binding],{key:'chapter_index'})){const clock=legacyDeletes.get(str(r.source_url))??0;if(clock>(state.lifecycle?.startedAt??state.updatedAt)){deletionSet.add(num(r.chapter_index));maxDelete=Math.max(maxDelete,clock);}}
   const next=mergeBook(state,{...state,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
   if(await libraryRevision(this.db)!==revision)throw Error('book_library_changed_during_staging');const published=await this.ports.files.publish(info,id);
-  const key=[id,info.sha256],where='s.book_id=? AND s.package_sha256=?',join='FROM sync_book_stage s LEFT JOIN channels ch ON ch.url=s.channel_url LEFT JOIN articles a ON a.id=s.existing_item OR (s.existing_item IS NULL AND a.channel_id=ch.id AND a.dedup_key=s.wire_id)';
-  const ss:Statement[]=[revisionGuard(revision),this.statement(next),{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
+  const ss=this.packageStatements(next,published,info.sha256,revision,verified.binding);
+  if(!this.db.transactionChanges)throw Error('Book install requires committed counts');const counts=await this.db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id);await this.captureReading();return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next);
+ }
+ /** Import into a job-owned shadow. No package path or chapter is readable
+  * until the revision, lifecycle, chapter rows and receipt commit together. */
+ async installBinaryPackage(info:BookFileInfo,incoming:BookState,stageKey:string,
+  scan:(visit:((header:BookPackageHeader,chapter:StreamedBookChapter)=>Promise<void>)|undefined)=>Promise<void>,
+  publish:()=>Promise<BookFileInfo>,boundary:ReceiptBoundary):Promise<void>{
+  await this.capture();
+  const revision=await libraryRevision(this.db),id=incoming.bookId;
+  const previous=await this.record(id);
+  if(!previous)throw Error('book_package_identity_or_size');
+  const current=this.state(previous),retained=current.deleted||incoming.deleted||
+   compareLifecycleTokens(current.lifecycle,incoming.lifecycle)!==0;
+  if(current.fingerprint!==incoming.fingerprint||current.instanceId!==incoming.instanceId)throw Error('book_package_identity_or_size');
+  const installed=await this.package(id);
+  const installedDirectory=installed?(await this.db.query('SELECT count(*) AS count FROM sync_book_chapters WHERE book_id=?',[id]))[0]:undefined;
+  if(retained||installed&&num(installedDirectory?.count)===current.chapterCount){
+   await scan(undefined);
+   let outcome:'retainedLocal'|'alreadyPresent'='retainedLocal';
+   if(!retained&&installed?.sha256===info.sha256){
+    const measured=await this.ports.files.hash(installed.path);
+    if(measured.size!==info.size||measured.sha256!==info.sha256)throw Error('book_package_changed');
+    outcome='alreadyPresent';
+   }
+   await this.commitBinary(boundary,[revisionGuard(revision),...boundary.before,...boundary.after(outcome)]);
+   return;
+  }
+  const key=[id,stageKey];
+  await this.db.transaction([revisionGuard(revision),{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:key}]);
+  const deletionSet=new Set(current.deletedChapters);
+  let maxDelete=current.deletionClock,staged:Statement[]=[],stagedBytes=0;
+  const urls=new Set<string>(),items=new Set<number>();
+  const flush=async()=>{
+   if(!staged.length)return;
+   boundary.check?.();
+   await this.db.transaction([revisionGuard(revision),...staged]);
+   staged=[];stagedBytes=0;urls.clear();items.clear();
+  };
+  await scan(async(header,chapter)=>{
+   const chapterIndex=chapter.chapterIndex;
+   const mapped=(await this.db.query('SELECT article_id,item_id FROM sync_book_chapters WHERE book_id=? AND chapter_index=?',[id,chapterIndex]))[0];
+   const found=mapped?.item_id==null?undefined:(await this.db.query(`SELECT a.id,a.link,c.url AS channel_url,i.article_id FROM articles a
+    JOIN channels c ON c.id=a.channel_id LEFT JOIN sync_article_ids i ON i.item_id=a.id WHERE a.id=?
+    AND NOT EXISTS(SELECT 1 FROM sync_book_stage WHERE book_id=? AND package_sha256=? AND existing_item=a.id)`,[mapped.item_id,...key]))[0];
+   const old=found&&!items.has(num(found.id))?found:undefined;
+   if(old)items.add(num(old.id));
+   const candidate=!!(await this.db.query('SELECT 1 FROM articles WHERE link=? LIMIT 1',[chapter.url])).length;
+   const repeated=urls.has(chapter.url)||!!(await this.db.query('SELECT 1 FROM sync_book_stage WHERE book_id=? AND package_sha256=? AND url=? LIMIT 1',[...key,chapter.url])).length;
+   const collision=candidate&&!old||repeated;
+   const root=`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}`;
+   const url=old?str(old.link):collision?`${root}/chapter/${chapterIndex}`:chapter.url;
+   const single=header.sourceUrl.startsWith('https://watchrss.local/import-content/txt/');
+   const channel=old?str(old.channel_url):candidate?root:single?'https://watchrss.local/import-content':header.sourceUrl;
+   const article=mapped?str(mapped.article_id):await bookArticleId(id,chapterIndex,this.ports.sha256);
+   const wire=old?.article_id?str(old.article_id):await this.ports.stableId(url);
+   const clock=num((await this.db.query('SELECT max(changed_at) AS clock FROM sync_article_deletions WHERE url=?',[chapter.url]))[0]?.clock);
+   if(clock>(current.lifecycle?.startedAt??current.updatedAt)){deletionSet.add(chapterIndex);maxDelete=Math.max(maxDelete,clock);}
+   staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    params:[...key,chapterIndex,article,wire,url,channel,single?'导入内容':current.title,chapter.title,chapter.content,chapter.html,chapter.text,deletionSet.has(chapterIndex)?1:0,old?num(old.id):null,chapter.chapterHash]});
+   urls.add(url);stagedBytes+=4*(chapter.title.length+url.length+channel.length+current.title.length)+1024;
+   if(staged.length>=32||stagedBytes>=262144)await flush();
+  });
+  await flush();
+  const next=mergeBook(current,{...current,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
+  boundary.check?.();
+  const published=await publish(),deletion=await this.deletionStatements(next);
+  boundary.check?.();
+  await this.commitBinary(boundary,this.packageStatements(next,published,stageKey,revision,null,boundary.before,
+   [...deletion.members,...deletion.effects,...this.displayReceiptStatements(id),...boundary.after('merged')]));
+ }
+ private packageStatements(next:BookState,published:BookFileInfo,stagedSha:string,revision:number,binding:string|null,prefix:readonly Statement[]=[],suffix:readonly Statement[]=[]):Statement[]{
+  const id=next.bookId;
+  const key=[id,stagedSha],where='s.book_id=? AND s.package_sha256=?',join='FROM sync_book_stage s LEFT JOIN channels ch ON ch.url=s.channel_url LEFT JOIN articles a ON a.id=s.existing_item OR (s.existing_item IS NULL AND a.channel_id=ch.id AND a.dedup_key=s.wire_id)';
+  const ss:Statement[]=[revisionGuard(revision),...prefix,this.statement(next),{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
    {sql:'DELETE FROM articles WHERE id IN(SELECT m.item_id FROM sync_book_aliases m JOIN sync_book_stage s ON s.book_id=m.book_id AND s.chapter_index=m.chapter_index WHERE '+where+' AND s.deleted=1)',params:key},
    {sql:'INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) SELECT DISTINCT s.channel_url,s.channel_title,1,-1 FROM sync_book_stage s WHERE '+where+' AND s.deleted=0',params:key},
    {sql:'INSERT OR IGNORE INTO source_preferences(channel_id,use_original_content,read_preset) SELECT DISTINCT ch.id,1,\'default\' FROM sync_book_stage s JOIN channels ch ON ch.url=s.channel_url WHERE '+where+' AND s.deleted=0',params:key},
@@ -216,8 +350,8 @@ export class SqlBookStore {
    {sql:'INSERT OR IGNORE INTO sync_article_ids(article_id,item_id,url) SELECT s.wire_id,a.id,s.url '+join+' WHERE '+where+' AND s.deleted=0 AND a.id IS NOT NULL',params:key},
    {sql:'INSERT INTO sync_book_chapters(book_id,chapter_index,article_id,item_id,url,chapter_hash) SELECT s.book_id,s.chapter_index,s.book_article_id,CASE WHEN s.deleted=1 THEN NULL ELSE a.id END,s.url,s.chapter_hash '+join+' WHERE '+where+' ON CONFLICT(book_id,chapter_index) DO UPDATE SET item_id=excluded.item_id',params:key}];
   for(const field of ['book_article_id','wire_id'])ss.push({sql:'INSERT INTO sync_book_aliases(book_id,chapter_index,article_id,item_id,url,channel_url,wire_identity) SELECT s.book_id,s.chapter_index,s.'+field+',CASE WHEN s.deleted=1 THEN NULL ELSE a.id END,s.url,s.channel_url,'+(field==='wire_id'?'1':'CASE WHEN s.book_article_id=s.wire_id THEN 1 ELSE 0 END')+' '+join+' WHERE '+where+' ON CONFLICT(book_id,chapter_index,article_id) DO UPDATE SET item_id=excluded.item_id,wire_identity=max(wire_identity,excluded.wire_identity)',params:key});
-  ss.push(...this.projectReadingStatements(id),{sql:'UPDATE sync_books SET registration_complete=1,package_path=?,package_sha256=?,package_bytes=? WHERE book_id=?',params:[published.path,published.sha256,published.size,id]},{sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'},{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:key},{sql:'UPDATE sync_book_install SET stage_revision=-1,stage_index=0,stage_offset=0 WHERE binding=?',params:[verified.binding]});
-  if(!this.db.transactionChanges)throw Error('Book install requires committed counts');const counts=await this.db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id);await this.captureReading();return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next);
+  ss.push(...this.projectReadingStatements(id),{sql:'UPDATE sync_books SET registration_complete=1,package_path=?,package_sha256=?,package_bytes=? WHERE book_id=?',params:[published.path,published.sha256,published.size,id]},{sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'},{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:key},...(binding?[{sql:'UPDATE sync_book_install SET stage_revision=-1,stage_index=0,stage_offset=0 WHERE binding=?',params:[binding]}]:[]));
+  return [...ss,...suffix];
  }
  private projectReadingStatements(id:string,indices?:readonly number[]):Statement[]{
   const filter=indices===undefined?'':' AND m.chapter_index IN('+indices.join(',')+')';

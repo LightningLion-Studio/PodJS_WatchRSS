@@ -2,15 +2,34 @@ import {SyncEventLog} from '../logs/sync-events.ts';
 import type {rfcomm,byteStreams,HostOperation} from '@podjs/framework/services';
 import {decodeBase64Async} from '@podjs/framework/bytes';
 import {StreamFrameConnection,type SyncByteStream} from './stream.ts';
+import type {SourceFileRange,SourceFileChunk} from './library-binary/codec';
+import {fail} from './library-binary/wire';
 import {LibrarySyncSession,type LibrarySessionRepository,type LibrarySessionOptions,type SessionActionResult} from './session.ts';
 export const WATCH_RSS_RFCOMM_NAME='WatchRSS Bluetooth Sync';
 export const WATCH_RSS_RFCOMM_UUID='bb2f0b7d-8f2f-4a96-95b2-d2c91d58a861';
-export interface RfcommPorts {radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'readBytes'|'writeBytes'>>}
+export interface RfcommPorts {radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'readBytes'|'writeBytes'|'prepareFile'|'readFile'|'writeFile'|'dropFile'>>}
 export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
  constructor(private readonly id:string,private readonly ports:RfcommPorts['streams']){}
  async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
  async write(bytes:Uint8Array,timeoutMs=120000){if(this.closed)throw new Error('Bluetooth stream closed');const result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,timeoutMs).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
+ async prepareFile(range:SourceFileRange){
+  if(this.closed||!this.ports.prepareFile)fail('AUTH_REVOKED');
+  const {reference}=await this.ports.prepareFile(this.id,range).result;
+  return {reference,length:range.size};
+ }
+ async readFile(size:number,timeoutMs:number,retain:boolean,sha256?:string){
+  if(this.closed||!this.ports.readFile)fail('AUTH_REVOKED');
+  const {reference,error}=await this.ports.readFile(this.id,size,timeoutMs,retain,sha256).result;
+  if(error)fail(error);
+  return reference?{stream:this.id,reference,length:size}:undefined;
+ }
+ async writeFile(header:Uint8Array,chunk:SourceFileChunk,timeoutMs:number){
+  if(this.closed||!this.ports.writeFile)fail('AUTH_REVOKED');
+  const {written}=await this.ports.writeFile(this.id,chunk.reference,header,timeoutMs).result;
+  if(written!==header.length+chunk.length)fail('LOCAL_IO');
+ }
+ async dropFile(reference:string){await this.ports.dropFile?.(this.id,reference).result;}
  async close(){if(this.closed)return;this.closed=true;await this.ports.close(this.id);}
 }
 /** One native-compatible secure RFCOMM session. Stop aborts pending

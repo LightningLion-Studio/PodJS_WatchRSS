@@ -1,4 +1,4 @@
-import {LIMIT_KEYS,capability,selection,exact,row,bool,fail,type Binding,type Capability,type Selection,type Direction,type KindVersion,type Row} from './wire';
+import {BOOK_KINDS,LIMIT_KEYS,capability,selection,exact,row,bool,fail,type Binding,type Capability,type Selection,type Direction,type KindVersion,type Row} from './wire';
 import {capability as resumeCapability} from '../library-resume/wire';
 import {capabilityDigest} from './digests';
 
@@ -39,17 +39,20 @@ export function classifyPeer(probe:unknown,ready:Ready):PeerRoute {
 }
 /** Advertise only adapters whose contracts are ready. */
 export function binaryCapability(readyKinds:Capability['kinds'],limits:Capability['limits']):Capability {
- if(readyKinds.some(k=>!['articleBody','articleMetadata','rssSource','readerMetadata','readerResource','noteAsset'].includes(k.kind)))fail('UNSUPPORTED_KIND');
  return capability({version:2,profile:'merge-b2',kinds:readyKinds,chunkSizes:[65536],limits});
 }
 export function s2Capability(readyKinds:Capability['kinds'],limits:Capability['limits']):Capability {
+ if(readyKinds.some(k=>k.kind.startsWith('book')))fail('UNSUPPORTED_KIND');
  return binaryCapability(readyKinds,{...limits,maxInFlightChunks:1,maxInFlightBytes:65536});
 }
 export function negotiate(source:Capability,receiver:Capability):Selection|null {
  capability(source);capability(receiver);
- const kinds:KindVersion[]=source.kinds.filter(k=>!k.kind.startsWith('book')&&k.send&&receiver.kinds.some(r=>r.kind===k.kind&&r.schemaVersion===k.schemaVersion&&r.receive)).map(({kind,schemaVersion})=>({kind,schemaVersion}));
+ const kinds:KindVersion[]=source.kinds.filter(k=>k.send&&receiver.kinds.some(r=>r.kind===k.kind&&r.schemaVersion===k.schemaVersion&&r.receive)).map(({kind,schemaVersion})=>({kind,schemaVersion}));
  // A body/resource without its metadata adapter stays on its existing v1 domain.
- const usable=kinds.filter(k=>k.kind!=='articleBody'||kinds.some(m=>m.kind==='articleMetadata')).filter(k=>k.kind!=='readerResource'||kinds.some(m=>m.kind==='readerMetadata'));
+ // The legacy books domain has one completion. Both directions must support
+ // the whole domain before either direction can replace syncBooks.
+ const booksReady=BOOK_KINDS.every(kind=>[source,receiver].every(c=>c.kinds.some(k=>k.kind===kind&&k.send&&k.receive)));
+ const usable=kinds.filter(k=>booksReady||!k.kind.startsWith('book')).filter(k=>k.kind!=='articleBody'||kinds.some(m=>m.kind==='articleMetadata')).filter(k=>k.kind!=='readerResource'||kinds.some(m=>m.kind==='readerMetadata'));
  if(!usable.length)return null;
  const limits=Object.fromEntries(Object.keys(source.limits).map(k=>[k,Math.min(source.limits[k as keyof Capability['limits']],receiver.limits[k as keyof Capability['limits']])]));
  return selection({profile:'merge-b2',kinds:usable,chunkBytes:65536,limits});

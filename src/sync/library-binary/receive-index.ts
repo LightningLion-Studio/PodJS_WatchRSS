@@ -1,6 +1,9 @@
-import {fail,hex,type Envelope,type ObjectDescriptor} from './wire';
+import {fail,hex,type Envelope,type ObjectDescriptor,type Selection} from './wire';
 
 export const MAX_REQUEST_BINDINGS=8192;
+export function bindingCapacity(selection:Selection):number{
+ return selection.kinds.some(k=>k.kind==='bookPackageSegment')?12288:MAX_REQUEST_BINDINGS;
+}
 type RequestBinding=Pick<Envelope,'requestId'|'requestDigest'>;
 
 /** Validated manifest rows are fixed for a connection grant. The caller loads
@@ -21,6 +24,7 @@ export class ReceiveIndex {
 /** Request bindings shared by the DATA and CONTROL lanes for one grant. */
 export class ReceiveBindings {
  private readonly requests=new Map<string,string>();
+ constructor(private readonly capacity=MAX_REQUEST_BINDINGS){}
  hasBinding(r:RequestBinding):boolean{
   const prior=this.requests.get(r.requestId);
   if(prior!==undefined&&prior!==r.requestDigest)fail('REQUEST_CONFLICT');
@@ -28,7 +32,7 @@ export class ReceiveBindings {
  }
  remember(r:RequestBinding):void{
   if(this.hasBinding(r))return;
-  if(this.requests.size>=MAX_REQUEST_BINDINGS)fail('STORAGE_PRESSURE');
+  if(this.requests.size>=this.capacity)fail('STORAGE_PRESSURE');
   this.requests.set(hex(r.requestId,32),hex(r.requestDigest));
  }
 }

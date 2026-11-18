@@ -17,11 +17,11 @@ const escaped:Record<string,string>={'"':'"','\\':'\\','/':'/','b':'\b','f':'\f'
 
 /** Parse the original body grammar while retaining at most one input chunk
  * and one decoded string chunk. Unknown fields are checked and discarded. */
-class BodyJsonReader {
+export class BodyJsonReader {
  private input='';
  private at=0;
  private eof=false;
- constructor(private readonly read:()=>Promise<{text:string;eof:boolean;invalidUtf8:boolean}>){}
+ constructor(private readonly read:()=>Promise<{text:string;eof:boolean;invalidUtf8:boolean}>,private readonly lineMode=false){}
  private async more(){
   if(this.at<this.input.length)return true;
   if(this.eof)return false;
@@ -32,7 +32,7 @@ class BodyJsonReader {
  }
  private async peek(){return await this.more()?this.input[this.at]!:'';}
  private async next(){const char=await this.peek();if(!char)fail('BUSINESS_REJECTED');this.at++;return char;}
- private async ws(){while(await this.more()){while(this.at<this.input.length&&whitespace.test(this.input[this.at]!))this.at++;if(this.at<this.input.length)return;}}
+ private async ws(){while(await this.more()){while(this.at<this.input.length&&(this.lineMode?/^[ \t]$/:whitespace).test(this.input[this.at]!))this.at++;if(this.at<this.input.length)return;}}
  private async expect(char:string){await this.ws();if(await this.next()!==char)fail('BUSINESS_REJECTED');}
  private async literal(value:string){for(const char of value)if(await this.next()!==char)fail('BUSINESS_REJECTED');}
  private async string(sink?:TextSink){
@@ -97,6 +97,58 @@ class BodyJsonReader {
   }
   this.at++;
  }
+ async line():Promise<string>{
+  let line='';
+  while(await this.more()){
+   const newline=this.input.indexOf('\n',this.at);
+   const end=newline<0?this.input.length:newline;
+   if(line.length+end-this.at>65536)fail('BUSINESS_REJECTED');
+   line+=this.input.slice(this.at,end);this.at=end+(newline<0?0:1);
+   if(newline>=0)return line;
+  }
+  return fail('BUSINESS_REJECTED');
+ }
+ async bookChapter(sink:(name:'contentHtml'|'contentText')=>TextSink):Promise<{chapterIndex:number;title:string;url:string;hasHtml:boolean}|undefined>{
+  if(!await this.peek())return;
+  await this.expect('{');await this.ws();
+  const keys=new Set<string>();let title:string|undefined,url:string|undefined,index:number|undefined,hasHtml:boolean|undefined;
+  while(await this.peek()!=='}'){
+   let key='';
+   await this.string(async value=>{if(key.length+value.length>128)fail('BUSINESS_REJECTED');key+=value;});
+   if(keys.has(key)||keys.size>=32)fail('BUSINESS_REJECTED');
+   keys.add(key);await this.expect(':');await this.ws();
+   switch(key){
+    case 'title':case 'url': {
+     let text='';
+     await this.string(async part=>{if(text.length+part.length>16384)fail('BUSINESS_REJECTED');text+=part;});
+     if(key==='title')title=text;else url=text;
+     break;
+    }
+    case 'chapterIndex': {
+     let digits='';
+     while(/[0-9]/.test(await this.peek())){
+      if(digits.length===6)fail('BUSINESS_REJECTED');
+      digits+=await this.next();
+     }
+     if(!/^[1-9][0-9]*$/.test(digits))fail('BUSINESS_REJECTED');
+     index=Number(digits);break;
+    }
+    case 'contentHtml':
+     hasHtml=await this.peek()!=='n';
+     if(hasHtml)await this.string(sink(key));else await this.literal('null');
+     break;
+    case 'contentText':await this.string(sink(key));break;
+    default:await this.skip();
+   }
+   await this.ws();
+   if(await this.peek()==='}')break;
+   await this.expect(',');await this.ws();
+   if(await this.peek()==='}')fail('BUSINESS_REJECTED');
+  }
+  await this.expect('}');await this.ws();
+  if(await this.next()!=='\n'||title===undefined||url===undefined||index===undefined||hasHtml===undefined||!keys.has('contentText'))fail('BUSINESS_REJECTED');
+  return {chapterIndex:index,title,url,hasHtml};
+ }
  async fields(sink:(name:'contentHtml'|'contentText')=>TextSink):Promise<{html:boolean;text:boolean}>{
   await this.expect('{');await this.ws();
   const seen=new Set<string>();let html=false,text=false;
@@ -117,7 +169,7 @@ class BodyJsonReader {
  }
 }
 
-class TextFile {
+export class TextFile {
  private offset=0;
  private readonly buffer=new Uint8Array(65536);
  private buffered=0;
@@ -163,15 +215,18 @@ class TextFile {
   if(result.size!==this.offset)fail('LOCAL_IO');
   this.buffered=0;this.work();
  }
- async publish(key:string){
-  await this.append('',true);
-  await this.flush();
+ async finish():Promise<number>{
+  await this.append('',true);await this.flush();
+  return this.offset;
+ }
+ async publish(key:string,commit?:(path:string,target:string,size:number,sha256:string)=>Promise<{path:string}>){
+  await this.finish();
   if(!this.offset)return {value:'',bytes:0,meaningful:false};
   const verified=await this.files.hash(this.path);this.work();
   if(verified.size!==this.offset)fail('LOCAL_IO');
   const name='v2-'+hash(utf8(key))+'-'+verified.sha256+'.txt';
   const target='article_content/'+name;
-  if((await this.files.commit(this.path,target,this.offset,verified.sha256)).path!==target)fail('LOCAL_IO');
+  if((await (commit?commit(this.path,target,this.offset,verified.sha256):this.files.commit(this.path,target,this.offset,verified.sha256))).path!==target)fail('LOCAL_IO');
   this.work();
   return {value:'watchrss-watch-content:'+name,bytes:this.offset,meaningful:this.meaningful};
  }

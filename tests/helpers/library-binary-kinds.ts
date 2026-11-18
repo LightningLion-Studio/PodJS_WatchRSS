@@ -13,7 +13,8 @@ import {objectId} from '../../src/sync/library-binary/digests';
 import {CHUNK_BYTES,hash,utf8,type ObjectDescriptor} from '../../src/sync/library-binary/wire';
 
 export async function attachBinaryLibrary(f:Awaited<ReturnType<typeof binaryRuntime>>,
- cleanupRemovedContent:SqlLibraryRepositoryPorts['cleanupRemovedContent']=async()=>{}){
+ cleanupRemovedContent:SqlLibraryRepositoryPorts['cleanupRemovedContent']=async()=>{},
+ bookFiles?:SqlLibraryRepositoryPorts['bookFiles']){
  f.db.transactionChanges=async statements=>f.sql.transaction(()=>statements.map(s=>f.sql.query(s.sql).run(...(s.params??[]) as SQLQueryBindings[]).changes))();
  await initializeSchema(f.db,{seedBuiltinChannels:false});
  await new SyncSavedStateStore(f.db).initializeDevice('watch');
@@ -21,7 +22,7 @@ export async function attachBinaryLibrary(f:Awaited<ReturnType<typeof binaryRunt
  const parseUri=async(value:string)=>{const u=new URL(value);return {valid:true,host:u.hostname,scheme:u.protocol.slice(0,-1),rawPath:u.pathname,rawQuery:u.search||null};};
  const repository=new SqlLibrarySessionRepository(f.db,{uri:{parseUri,parseAndroid:parseUri},
   codec:{encode:fail,decode:fail,sha256:async bytes=>hash(bytes)},text:{parseUri,htmlText:fail},
-  files:{storeText:fail,hydrate:fail},migrateReading:async()=>{},cleanupRemovedContent});
+  files:{storeText:fail,hydrate:fail},migrateReading:async()=>{},cleanupRemovedContent,bookFiles});
  const readers=new Map<string,AsyncIterator<string>>();
  const files={...f.files,
   gunzip:async(path:string,max:number,allowPlain:boolean)=>{

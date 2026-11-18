@@ -9,7 +9,12 @@ export interface DataFrame {
  requestId:string;requestDigest:string;payload:Uint8Array;
 }
 export interface DataHeader extends Omit<DataFrame,'payload'> {payloadBytes:number}
-export type DataReader=(header:DataHeader,read:(target:Uint8Array,activity?:boolean)=>Promise<void>)=>Promise<void>;
+export interface SourceFileRange {path:string;offset:number;size:number;sha256:string}
+export interface SourceFileChunk {reference:string;length:number}
+export interface InputFileChunk {stream:string;reference:string;length:number}
+export type ReadFileChunk=(retain:boolean,sha256?:string)=>Promise<InputFileChunk|undefined>;
+export type DataReader=(header:DataHeader,read:(target:Uint8Array,activity?:boolean)=>Promise<void>,readFile?:ReadFileChunk)=>Promise<void>;
+export type OutgoingData=Omit<DataFrame,'payload'>&{payload:Uint8Array|SourceFileChunk};
 export interface AckFrame {kind:'ack';streamId:1|2;epoch:number;ackSeq:number;entries:{txSeq:number;disposition:1|2}[]}
 export interface ControlFrame {kind:'control';envelope:Envelope}
 export type Frame=DataFrame|AckFrame|ControlFrame;
@@ -20,9 +25,9 @@ function set64(v:DataView,at:number,n:number):void {v.setBigUint64(at,BigInt(pos
 function get64(v:DataView,at:number):number {const n=v.getBigUint64(at);if(n>BigInt(Number.MAX_SAFE_INTEGER)||n===0n)fail();return Number(n);}
 function fromHex(s:string,n:number):Uint8Array {hex(s,n*2);return Uint8Array.from(s.match(/../g)!,h=>parseInt(h,16));}
 function toHex(b:Uint8Array):string {return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');}
-function base(kind:number,header:number,payload:number):{b:Uint8Array;v:DataView} {
+function base(kind:number,header:number,payload:number,headerOnly=false):{b:Uint8Array;v:DataView} {
  const length=12+header+payload;if(length>MAX_FRAME_LENGTH)fail('LIMIT_EXCEEDED');
- const b=new Uint8Array(4+length),v=new DataView(b.buffer);
+ const b=new Uint8Array(headerOnly?4+12+header:4+length),v=new DataView(b.buffer);
  v.setUint32(0,length);b.set([76,66,86,50],4);b[8]=kind;v.setUint32(12,header);return {b,v};
 }
 function checkJson(value:unknown,depth=0,budget={nodes:0}):void {
@@ -32,17 +37,23 @@ function checkJson(value:unknown,depth=0,budget={nodes:0}):void {
  if(typeof value==='number'){integer(value);return;}
  if(typeof value!=='object')fail();for(const [key,v] of Object.entries(value)){utf8(key);checkJson(v,depth+1,budget);}
 }
+export function encodeDataHeader(f:OutgoingData):Uint8Array {
+ stream(f.streamId);integer(f.objectSlot,4095);integer(f.chunkIndex,255);
+ const length=integer(f.payload.length,CHUNK_BYTES);
+ if(!length)fail();
+ const {b,v}=base(2,80,length,true);v.setUint32(16,f.streamId);v.setUint32(20,f.objectSlot);
+ set64(v,24,f.epoch);set64(v,32,f.txSeq);v.setUint32(40,f.chunkIndex);v.setUint32(44,length);
+ b.set(fromHex(f.requestId,16),48);b.set(fromHex(f.requestDigest,32),64);return b;
+}
 export function encodeFrame(frame:Frame):Uint8Array {
  if(frame.kind==='control'){
   checkJson(frame.envelope);const header=utf8(JSON.stringify(frame.envelope));if(header.length>131072)fail('LIMIT_EXCEEDED');
   const {b}=base(1,header.length,0);b.set(header,16);decodeFrame(b);return b;
  }
  if(frame.kind==='data'){
-  const f=frame;stream(f.streamId);integer(f.objectSlot,4095);integer(f.chunkIndex,255);
-  if(!(f.payload instanceof Uint8Array)||!f.payload.length||f.payload.length>CHUNK_BYTES)fail();
-  const {b,v}=base(2,80,f.payload.length);v.setUint32(16,f.streamId);v.setUint32(20,f.objectSlot);
-  set64(v,24,f.epoch);set64(v,32,f.txSeq);v.setUint32(40,f.chunkIndex);v.setUint32(44,f.payload.length);
-  b.set(fromHex(f.requestId,16),48);b.set(fromHex(f.requestDigest,32),64);b.set(f.payload,96);return b;
+  if(!(frame.payload instanceof Uint8Array))fail();
+  const header=encodeDataHeader(frame),bytes=new Uint8Array(header.length+frame.payload.length);
+  bytes.set(header);bytes.set(frame.payload,header.length);return bytes;
  }
  if(frame.entries.length<1||frame.entries.length>32)fail();
  const {b,v}=base(3,32+16*frame.entries.length,0);v.setUint32(16,stream(frame.streamId));
@@ -92,5 +103,8 @@ export interface ByteTransport {
  setNetworkProgress?(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void):void;
  readFrame(readData?:DataReader):Promise<Uint8Array|null>;
  writeFrame(bytes:Uint8Array):Promise<void>;
+ prepareFile?(range:SourceFileRange):Promise<SourceFileChunk>;
+ writeFile?(header:Uint8Array,chunk:SourceFileChunk):Promise<void>;
+ dropFile?(chunk:{reference:string}):Promise<void>;
  close():void;
 }

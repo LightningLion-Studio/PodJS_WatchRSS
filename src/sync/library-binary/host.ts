@@ -7,6 +7,8 @@ import type {VerifiedChunkStore,ObjectLease} from '@podjs/framework/verified-chu
 import {BinaryStore} from './store';
 import {BinaryAssets,STAGING_COPIES,type BinaryAssetFiles} from './assets';
 import {ARTICLE_IMPORT_SHADOW_BYTES,BinaryLibraryKinds} from './kinds';
+import {BinaryBooks} from './books';
+import type {BinaryBookFiles} from './book-import';
 import type {BinaryArticleFiles} from './article-file';
 import {BinaryByteTransport} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
@@ -14,7 +16,7 @@ import {SwitchGate,binaryCapability,negotiate,RELEASE_B2_ENABLED} from './routin
 import {RecoveryRules} from './recovery';
 import {D} from './digests';
 import type {SqlLibrarySessionRepository} from '../library-repository';
-import {HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
+import {BOOK_KINDS,HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
 export interface BinarySessionPort {
  probe(request:Row,context:SyncActionContext):Promise<Row>;
  accountConfirmed(request:Row,context:SyncActionContext):Promise<void>;
@@ -23,10 +25,13 @@ export interface BinarySessionPort {
  business?(context:SyncActionContext):void;
  acceptsLegacySubset?(peer:string,context:SyncActionContext):boolean;
 }
-interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean}
+interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean;books:boolean}
 export interface BinaryApplicationPorts {
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
+ books?:BinaryBookFiles;
+ /** Enabled after the native book pipeline meets its release acceptance gates. */
+ b2BooksEnabled?:boolean;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?(kind?:string):void;
@@ -55,12 +60,18 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
+  const books=!!(this.ports.b2BooksEnabled&&runtime.fileRefs&&this.ports.books&&this.ports.library&&
+   await (await this.ports.library.repository()).books?.binaryReady());
+  if(books){
+   for(const kind of BOOK_KINDS)kinds.push({kind,schemaVersion:1,send:true,receive:true});
+   kinds.sort((a,b)=>a.kind<b.kind?-1:1);
+  }
   const importBudget=this.ports.library?ARTICLE_IMPORT_SHADOW_BYTES:0;
-  const maxStagingBytes=Math.min(134217728,runtime.maxStagingBytes+importBudget);
+  const maxStagingBytes=books?HARD_LIMITS.maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes+importBudget);
   const maxObjectBytes=Math.min(this.ports.library?HARD_LIMITS.maxObjectBytes:5242880,runtime.maxObjectBytes,Math.floor((maxStagingBytes-importBudget)/STAGING_COPIES));
   if(maxObjectBytes<1)fail('CAPABILITY_MISMATCH');
-  const cap=binaryCapability(kinds,{...HARD_LIMITS,maxObjectBytes,maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes});
-  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
+  const cap=binaryCapability(kinds,{...HARD_LIMITS,maxObjectBytes,maxPlanObjects:512,maxManifestBytes:books?786432:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:books?HARD_LIMITS.maxJournalBytes:33554432,maxInFlightObjects:books?1:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes});
+  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false,books});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
  acceptsLegacySubset(peer:string,context:SyncActionContext){
@@ -93,10 +104,17 @@ export class BinaryApplicationService implements BinarySessionPort {
   let owner:LibraryBinaryConnection;
   const work=()=>{check();owner?.workUnit();};
   const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work):undefined;
-  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds);
-  await authorize(()=>this.ports.store.exclusive(async()=>{await this.ports.store.collect(scope,j=>this.ports.chunks.collect(D('wrss.library-binary.v2/native-scope',[scope,j.jobId]),false));await assets.collect();}));
+  const books=this.ports.books&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,this.ports.books,this.ports.chunks,work):undefined;
+  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined);
+  await authorize(()=>this.ports.store.exclusive(async()=>{
+   await this.ports.store.collect(scope,async job=>{
+    await this.ports.chunks.collect(D('wrss.library-binary.v2/native-scope',[scope,job.jobId]),false);
+    await books?.collect(job);
+   });
+   await assets.collect();
+  }));
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
-   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d)=>assets.publish(l,o,d),apply:(_j,d,path,b)=>assets.apply(d,path,b,n.peer),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease)for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
+   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(connection.detachStream() as SyncByteStream,this.ports.now));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});
   try{await owner.run();this.recovery.detach(connectionId);this.reconnected=false;}

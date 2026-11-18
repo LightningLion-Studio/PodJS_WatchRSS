@@ -2,7 +2,7 @@ import {fail,hex,integer,hash,envelope,ResumeError,type Envelope,type ObjectDesc
 import {requestDigest,offerDigest,appliedReceipt,completion} from './digests';
 import type {Capability,Snapshot,AppliedReceipt,BeginPayload} from './wire';
 import type {RegisteredManifest} from './lifecycle';
-import {type DataFrame,type AckFrame,type DataHeader} from './codec';
+import {type DataFrame,type OutgoingData,type AckFrame,type DataHeader} from './codec';
 
 export class TokenBucket {
  private tokens:number;private at:number;
@@ -42,7 +42,9 @@ export class SendWindow {
   return this.active&&this.pending.size>0&&epoch===this.epoch&&ackSeq===this.lastAckSeq+1;
  }
  /** Reserve credit at the writer, before encoding or writing the first byte. */
- reserve(input:Omit<DataFrame,'kind'|'streamId'|'epoch'|'txSeq'>):DataFrame {
+ reserve(input:Omit<DataFrame,'kind'|'streamId'|'epoch'|'txSeq'>):DataFrame;
+ reserve(input:Omit<OutgoingData,'kind'|'streamId'|'epoch'|'txSeq'>):OutgoingData;
+ reserve(input:Omit<OutgoingData,'kind'|'streamId'|'epoch'|'txSeq'>):OutgoingData {
   if(!this.active)fail('AUTH_REVOKED');
   if(!this.canSend(input.payload.length))fail('WINDOW_FULL');
   if(this.nextTxSeq>Number.MAX_SAFE_INTEGER){this.close();throw new SequenceExhausted();}

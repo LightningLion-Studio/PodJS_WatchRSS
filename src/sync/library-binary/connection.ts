@@ -1,10 +1,10 @@
-import {decodeFrame,encodeFrame,type ByteTransport,type Frame,type DataFrame,type DataReader} from './codec';
+import {decodeFrame,encodeFrame,encodeDataHeader,type ByteTransport,type Frame,type OutgoingData,type DataReader} from './codec';
 import {fail,HARD_LIMITS,ResumeError,type Limits} from './wire';
 import {SwitchGate} from './routing';
 import {Grant,TokenBucket} from './state';
 
 interface Queued {
- kind:number;bytes?:Uint8Array;data?:()=>DataFrame|null;receiveEpoch?:number;
+ kind:number;bytes?:Uint8Array;data?:()=>OutgoingData|null;receiveEpoch?:number;
  started?:()=>void;done:()=>void;reject:(e:unknown)=>void;
 }
 /** One reader and one writer; complete frames never interleave. Durable ACK,
@@ -39,7 +39,7 @@ export class BinaryConnection {
   if(control){this.queuedControls++;this.queuedControlBytes+=bytes.length-16;}
   return this.enqueue({kind:bytes[8]!,bytes,started,receiveEpoch},urgent);
  }
- writeData(data:()=>DataFrame|null):Promise<void>{
+ writeData(data:()=>OutgoingData|null):Promise<void>{
   this.check();
   if(this.normal.some(q=>q.kind===2))fail('LIMIT_EXCEEDED');
   return this.enqueue({kind:2,data},false);
@@ -67,9 +67,15 @@ export class BinaryConnection {
      this.check();
      const data=q.data?.();
      if(q.data&&!data){q.done();continue;}
-     const bytes=data?encodeFrame(data):q.bytes!;
-     if(bytes.length-4>this.limits.maxFrameBytes)fail('LIMIT_EXCEEDED');
-     q.started?.();await this.io.writeFrame(bytes);this.check();q.done();
+     if(data&&!(data.payload instanceof Uint8Array)){
+      if(!this.io.writeFile||data.payload.length+92>this.limits.maxFrameBytes)fail('CAPABILITY_MISMATCH');
+      await this.io.writeFile(encodeDataHeader(data),data.payload);
+     }else{
+      const bytes=data?encodeFrame({...data,payload:data.payload as Uint8Array}):q.bytes!;
+      if(bytes.length-4>this.limits.maxFrameBytes)fail('LIMIT_EXCEEDED');
+      q.started?.();await this.io.writeFrame(bytes);
+     }
+     this.check();q.done();
     }catch(e){q.reject(e);this.close();break;}
    }
   }finally{this.writing=false;}
