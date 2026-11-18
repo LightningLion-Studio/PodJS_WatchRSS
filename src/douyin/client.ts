@@ -21,7 +21,7 @@ import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems, normalizeItemsInTurns, type RecentFeed } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
 import {withoutDouyinSource} from "./playback-ingress.ts";
-import { douyinFeedSelection, mapProjectedDouyinFeed, parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
+import { douyinFeedSelection, mapProjectedDouyinFeed, parseDouyinDetail, parseDouyinFeedAsync, parseDouyinItem, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
 import type { DouyinClientOptions, DouyinErrorCode, DouyinContent, DouyinFeedPage, DouyinHistoryEntry, DouyinInteraction, DouyinItem, DouyinResult, DouyinSavedKind, DouyinSigner } from "./types.ts";
@@ -38,7 +38,7 @@ const BUDGETED_REFILL_ITEMS=5;
 export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
-type DouyinWireBody=string|Record<string,unknown>;
+type DouyinWireBody=string|{fields:Record<string,unknown>;items?:readonly DouyinItem[]};
 export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
 export interface DouyinPlaybackOptions {/** A reload owns a new request even if an abandoned resolution is still pending. */freshRequest?:boolean;forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
 export class DouyinClient {
@@ -207,7 +207,7 @@ export class DouyinClient {
         stage?.('request_io');
         const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
           background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{}),
-          ...(api==='feed'?{fileProjection:{selection:douyinFeedSelection,tokens:['blocked']}}:{})});
+          ...(api==='feed'?{fileProjection:{selection:douyinFeedSelection,tokens:['blocked'],rows:{field:'aweme_list',map:(row:unknown)=>parseDouyinItem(row,'feed')}}}:{})});
         observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,r.fileProjection?.size??r.body.length);
         observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -219,7 +219,7 @@ export class DouyinClient {
         if(projection){
           stage?.('request_file_projection');
           switch(projection.kind){
-            case 'object': body=JSON.parse(projection.json) as Record<string,unknown>;break;
+            case 'object': body={fields:JSON.parse(projection.json),items:projection.mappedRows as readonly DouyinItem[]|undefined};break;
             case 'html': body='<html>';break;
             case 'empty': body='';break;
             case 'token': body=projection.index===0?'blocked':'';break;
@@ -234,7 +234,7 @@ export class DouyinClient {
         observed.request_text_ms=elapsed(textStarted);
         stage?.('request_status');
         const statusStarted=Date.now();
-        const detailStatusCode=typeof body==='string'?(projection?undefined:await readDouyinStatusCode(body)):typeof body.status_code==='number'?body.status_code:undefined;
+        const detailStatusCode=typeof body==='string'?(projection?undefined:await readDouyinStatusCode(body)):typeof body.fields.status_code==='number'?body.fields.status_code:undefined;
         observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
         decodingResponse=false;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -344,7 +344,7 @@ export class DouyinClient {
     if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
     try{
       stage('projecting');
-      const parsed=await (typeof r.data==='string'?parseDouyinFeedAsync(r.data,stage):mapProjectedDouyinFeed(r.data,stage)),resolvedAtMillis=this.now();
+      const parsed=await (typeof r.data==='string'?parseDouyinFeedAsync(r.data,stage):mapProjectedDouyinFeed(r.data.fields,stage,r.data.items)),resolvedAtMillis=this.now();
       stage('mapping_done');
       if(web)parsed.nextCursor=web.nextCursor(parsed);
       stage('storage_wait');

@@ -77,14 +77,16 @@ export async function parseDouyinFeedAsync(raw:string,stage?:FeedMappingStage):P
  const {projectJsonAsync}=await import('@podjs/framework/json');
  return mapProjectedDouyinFeed(await projectJsonAsync(raw,douyinFeedSelection,{onProjectionPhase:phase=>stage?.(`project_${phase}`)}),stage);
 }
-export async function mapProjectedDouyinFeed(value:unknown,stage?:FeedMappingStage):Promise<DouyinFeedPage>{
- const {prepareTextLayout,yieldWorkTurn}=await import('@podjs/framework/text-layout');
+export async function mapProjectedDouyinFeed(value:unknown,stage?:FeedMappingStage,mappedRows?:readonly DouyinItem[]):Promise<DouyinFeedPage>{
  const root=object(value);
  stage?.('mapping');
  if(!root)throw new Error('响应不是 JSON 对象');
- const items:DouyinItem[]=[];
- function* steps():Generator<void,void>{for(const row of array(root!.aweme_list)){const item=traceServiceWork('douyin.feed.item',()=>parseDouyinItem(row,"feed"));if(item)items.push(item);yield;}}
- let key=0;const task=prepareTextLayout(steps(),{key:()=>key++,entry:()=>undefined,publish:()=>{}},{yieldTurn:yieldWorkTurn,rowLimit:1});await task.done;
+ const items=mappedRows?[...mappedRows]:[];
+ if(!mappedRows){
+  const {prepareTextLayout,yieldWorkTurn}=await import('@podjs/framework/text-layout');
+  function* steps():Generator<void,void>{for(const row of array(root!.aweme_list)){const item=traceServiceWork('douyin.feed.item',()=>parseDouyinItem(row,"feed"));if(item)items.push(item);yield;}}
+  let key=0;const task=prepareTextLayout(steps(),{key:()=>key++,entry:()=>undefined,publish:()=>{}},{yieldTurn:yieldWorkTurn,rowLimit:1});await task.done;
+ }
  const cursor=number(root.max_cursor)>0?String(number(root.max_cursor)):string(root.cursor).trim()||null;
  return {items,nextCursor:cursor,hasMore:number(root.has_more)==1};
 }

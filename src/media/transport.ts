@@ -2,7 +2,7 @@ import {readDownloadedBytes,withOwnedPrivateFile} from '@podjs/framework/private
 import {appLogger} from '../logs/app-logger.ts';
 import {MediaResponseReadError,mediaRequestFailure} from '../douyin/errors.ts';
 import type {HttpRequest,HttpResponse,HttpTransport} from '../cloud/types.ts';
-import type {DownloadResult,FileJsonProjection} from '@podjs/framework/services';
+import type {DownloadResult} from '@podjs/framework/services';
 import {videoOptEnabled} from './video-opt.ts';
 import {videoResponseBudget} from './traffic-policy.ts';
 
@@ -10,7 +10,7 @@ export interface MediaTransportPorts {
   download(args:Record<string,unknown>,background?:import('../cloud/types.ts').RequestLifetime):Promise<DownloadResult>;
   read(path:string,offset:number):Promise<Uint8Array>;
   readPortable?(path:string,offset:number):Promise<Uint8Array>;
-  project?(path:string,size:number,projection:NonNullable<HttpRequest['fileProjection']>,background?:HttpRequest['background']):Promise<FileJsonProjection>;
+  project?(path:string,size:number,projection:NonNullable<HttpRequest['fileProjection']>,background?:HttpRequest['background']):Promise<NonNullable<HttpResponse['fileProjection']>['value']>;
   remove(path:string):Promise<unknown>;
   base64(bytes:Uint8Array):string;
 }
@@ -74,4 +74,38 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
       appLogger.e('Network',`media request failed category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
     });
   }};
+}
+
+type ProjectedTextChunk={text:string;eof:boolean;invalidUtf8:boolean};
+
+/** The native spool contains one projected row per line. Keep only one input row. */
+export async function readProjectedRows(
+  read:()=>Promise<ProjectedTextChunk>,
+  map:(row:unknown)=>unknown,
+  background?:HttpRequest['background'],
+):Promise<unknown[]> {
+  const rows:unknown[]=[];
+  let line='';
+  for(;;){
+    if(background&&!background.isCurrent())throw Error('cancelled');
+    const {text,eof,invalidUtf8}=await read();
+    if(background&&!background.isCurrent())throw Error('cancelled');
+    if(invalidUtf8)throw Error('invalid projection UTF-8');
+    let start=0;
+    while(start<text.length){
+      const newline=text.indexOf('\n',start);
+      const end=newline<0?text.length:newline;
+      if(line.length+end-start>256*1024)throw Error('projected row limit');
+      line+=text.slice(start,end);
+      if(newline<0)break;
+      const row=map(JSON.parse(line));
+      if(row!==null&&row!==undefined)rows.push(row);
+      line='';
+      start=end+1;
+    }
+    if(eof){
+      if(line)throw Error('incomplete projected row');
+      return rows;
+    }
+  }
 }

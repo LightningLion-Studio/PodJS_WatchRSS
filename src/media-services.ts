@@ -10,7 +10,7 @@ import {createHostDouyinStock} from './douyin/stock-host.ts';
 import {createHostDouyinPreload} from './douyin/preload-host.ts';
 import {createHostBiliPreview} from './bili/preview-host.ts';
 import {appLogger} from './logs/app-logger.ts';
-import {createMediaTransport} from './media/transport.ts';
+import {createMediaTransport,readProjectedRows} from './media/transport.ts';
 import { clearBiliLogoutData, clearDouyinLogoutData } from "./media/logout.ts";
 import { managedCache } from "./cache/host.ts";
 import { readLocalBiliDetail } from "./bili/local-detail.ts";
@@ -28,7 +28,27 @@ export const mediaTransport=createMediaTransport({
   return backgroundResult(op,background);
  },
  read:async(path,offset)=>(await fileChunks.readBytes(path,offset)).bytes,
- project:(path,size,projection,background)=>backgroundResult(fileChunks.projectJson(path,size,projection.selection,projection.tokens),background),
+ project:async(path,size,projection,background)=>{
+  const value=await backgroundResult(fileChunks.projectJson(path,size,projection.selection,projection.tokens,projection.rows?.field),background);
+  if(value.kind!=='object'||!value.path)return value;
+  const spool=value.path;
+  try{
+   if(!projection.rows)return {kind:'invalid'};
+   if(background&&!background.isCurrent())throw Error('cancelled');
+   const {id}=await fileChunks.openText(spool,{strictUtf8:true});
+   try{
+    const mappedRows=await readProjectedRows(()=>fileChunks.readTextChunk(id,8192),projection.rows.map,background);
+    return {kind:'object',json:value.json,mappedRows};
+   }finally{
+    await fileChunks.closeText(id).catch(()=>{});
+   }
+  }catch(error){
+   if(background&&!background.isCurrent())throw error;
+   return {kind:'invalid'};
+  }finally{
+   await fileChunks.remove(spool).catch(()=>{});
+  }
+ },
  readPortable:async(path,offset)=>base64ToBytes((await fileChunks.read(path,offset,16*1024)).dataBase64),
  remove:path=>fileChunks.remove(path),
  base64:bytesToBase64,

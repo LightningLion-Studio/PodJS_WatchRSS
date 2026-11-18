@@ -13,14 +13,18 @@ export interface HttpRequest {
   timeoutMs?: number;
   readTimeoutMs?: number;
   acceptHttpErrors?: boolean;
-  fileProjection?: {selection:Readonly<Record<string,import('@podjs/framework/json').JsonSelection>>;tokens?:readonly string[]};
+  fileProjection?: {
+    selection:Readonly<Record<string,import('@podjs/framework/json').JsonSelection>>;
+    tokens?:readonly string[];
+    rows?:{field:string;map:(row:unknown)=>unknown};
+  };
 }
 
 export interface HttpResponse {
   status: number;
   headers: Record<string, string>;
   body: Uint8Array;
-  fileProjection?: {value:import('@podjs/framework/services').FileJsonProjection;size:number};
+  fileProjection?: {value:import('@podjs/framework/services').FileJsonProjection & {mappedRows?:readonly unknown[]};size:number};
 }
 
 export interface HttpTransport {

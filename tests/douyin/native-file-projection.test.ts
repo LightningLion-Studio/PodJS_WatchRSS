@@ -1,13 +1,13 @@
 import {expect,test} from 'bun:test';
 import {CString,dlopen,FFIType,ptr} from 'bun:ffi';
-import {mkdtempSync,openSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,openSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {projectJsonValue} from '@podjs/framework/json';
 import type {DownloadResult,FileJsonProjection} from '@podjs/framework/services';
-import {createMediaTransport} from '../../src/media/transport.ts';
+import {createMediaTransport,readProjectedRows} from '../../src/media/transport.ts';
 import {DouyinClient} from '../../src/douyin/client.ts';
-import {douyinFeedSelection,mapProjectedDouyinFeed,parseDouyinFeedAsync} from '../../src/douyin/parser.ts';
+import {douyinFeedSelection,mapProjectedDouyinFeed,parseDouyinFeedAsync,parseDouyinItem} from '../../src/douyin/parser.ts';
 
 const library=process.env.PODJS_FILE_JSON_TEST_LIB;
 const fixture={
@@ -40,6 +40,50 @@ test.skipIf(!library)('Rust file projector matches the old projection and map on
   expect(projected).toEqual(projectJsonValue(JSON.parse(raw),douyinFeedSelection));
   expect(await mapProjectedDouyinFeed(projected)).toEqual(await parseDouyinFeedAsync(raw));
  }finally{close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test.skipIf(!library)('Streams >256 KiB of selected rows with the same projection and feed result',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'pod-json-rows-test-'));
+ const input=join(dir,'feed.json'),spool=join(dir,'rows.ndjson');
+ const base=fixture.aweme_list[0]!;
+ const rows=Array.from({length:8},(_,index)=>({...base,aweme_id:`fixture-${index}`,desc:('测试🙂\n').repeat(5800)}));
+ const raw=JSON.stringify({...fixture,aweme_list:[...rows,fixture.aweme_list[1]]},null,1);
+ const selection=Buffer.from(JSON.stringify(douyinFeedSelection)),tokens=Buffer.from('[]'),field=Buffer.from('aweme_list');
+ const {symbols,close}=dlopen(library!,{
+  pod_file_project_json_rows:{args:[FFIType.i32,FFIType.i32,FFIType.ptr,FFIType.u64,FFIType.ptr,FFIType.u64,FFIType.ptr,FFIType.u64],returns:FFIType.ptr},
+  pod_file_project_json_free:{args:[FFIType.ptr],returns:FFIType.void},
+ });
+ try{
+  writeFileSync(input,raw);
+  const result=symbols.pod_file_project_json_rows(openSync(input,'r'),openSync(spool,'w'),ptr(selection),BigInt(selection.length),ptr(tokens),BigInt(tokens.length),ptr(field),BigInt(field.length));
+  expect(result).not.toBeNull();
+  let json:string;
+  try{json=new CString(result!).toString();}finally{symbols.pod_file_project_json_free(result);}
+  const header=JSON.parse(json);
+  expect(json.length).toBeLessThan(256);
+  expect(header.aweme_list).toEqual([]);
+  const lines=readFileSync(spool,'utf8');
+  expect(Buffer.byteLength(lines)).toBeGreaterThan(256*1024);
+  const stream=(map:(row:unknown)=>unknown)=>{
+   let offset=0;
+   return readProjectedRows(async()=>{
+    const text=lines.slice(offset,offset+4093);
+    offset+=text.length;
+    return {text,eof:offset===lines.length,invalidUtf8:false};
+   },map);
+  };
+  expect({...header,aweme_list:await stream(row=>row)}).toEqual(projectJsonValue(JSON.parse(raw),douyinFeedSelection));
+  const mapped=await stream(row=>parseDouyinItem(row,'feed')) as ReturnType<typeof parseDouyinItem>[];
+  expect(await mapProjectedDouyinFeed(header,undefined,mapped.filter(item=>item!==null))).toEqual(await parseDouyinFeedAsync(raw));
+ }finally{close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('row reader rejects incomplete or invalid input and honours cancellation',async()=>{
+ await expect(readProjectedRows(async()=>({text:'{}',eof:true,invalidUtf8:false}),x=>x)).rejects.toThrow('incomplete');
+ await expect(readProjectedRows(async()=>({text:'{}\n',eof:true,invalidUtf8:true}),x=>x)).rejects.toThrow('UTF-8');
+ let active=true;
+ await expect(readProjectedRows(async()=>{active=false;return {text:'{}\n',eof:true,invalidUtf8:false};},
+  ()=>{throw Error('stale row mapped');},{isCurrent:()=>active,onCancel:()=>()=>{}})).rejects.toThrow('cancelled');
 });
 
 function transportFixture(project:(path:string,size:number)=>Promise<FileJsonProjection>){
