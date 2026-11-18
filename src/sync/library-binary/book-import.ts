@@ -14,6 +14,34 @@ export interface BinaryBookFiles extends BinaryArticleFiles {
  durableRemove(path:string):Promise<void>;
  durableCommit(path:string,target:string,size:number,sha256:string):Promise<{path:string}>;
 }
+type BookHostOperation=<T>(method:string,args:Record<string,unknown>,progress?:(value:unknown)=>void)=>{result:Promise<T>;cancel():void};
+export function bookFileWork(files:BinaryArticleFiles,host:BookHostOperation,advance:()=>void){
+ const pending=new Set<()=>void>();
+ let stopped=false;
+ const run=<T>(method:string,args:Record<string,unknown>)=>{
+  if(stopped)fail('AUTH_REVOKED');
+  let bytes=0;
+  const op=host<T>(method,{...args,trackProgress:true},value=>{
+   const next=(value as {bytes?:number}|null)?.bytes;
+   if(!stopped&&typeof next==='number'&&Number.isSafeInteger(next)&&next>bytes){bytes=next;advance();}
+  });
+  const cancel=()=>op.cancel();
+  pending.add(cancel);
+  return op.result.finally(()=>pending.delete(cancel));
+ };
+ const bookFiles:BinaryBookFiles={...files,
+  copyRanges:options=>run('file.copyRanges',{...options}),
+  hash:path=>run('file.hash',{path}),
+  durableCommit:(path,target,size,sha256)=>run('file.commit',{path,target,expectedSize:size,expectedSha256:sha256,syncDirectory:true}),
+  durableRemove:async path=>{await host('file.delete',{path,syncDirectory:true}).result;},
+ };
+ return {files:bookFiles,stop(){
+  if(stopped)return;
+  stopped=true;
+  for(const cancel of pending)try{cancel();}catch{/* Cancel each outstanding operation. */}
+  pending.clear();
+ }};
+}
 export interface StreamedBookChapter {
  chapterIndex:number;
  title:string;

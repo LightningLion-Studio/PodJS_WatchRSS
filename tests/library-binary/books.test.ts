@@ -4,6 +4,7 @@ import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {attachBinaryBooks,sampleBook} from '../helpers/library-binary-books';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
 import {BinaryBooks} from '../../src/sync/library-binary/books';
+import {bookFileWork} from '../../src/sync/library-binary/book-import';
 import {BinaryAssets} from '../../src/sync/library-binary/assets';
 import {BOOK_SEGMENT_BYTES,bookObject,validateBookPlan} from '../../src/sync/library-binary/book-plan';
 import {capabilityDigest,pageDigest,objectsRoot,planDigest,preparationDigest,receiptsRoot,requestDigest,selectionDigest} from '../../src/sync/library-binary/digests';
@@ -249,6 +250,31 @@ test('expired book apply collects an unreferenced final package after rename',as
 test('the foreground factory applies the release B2 switch to books',()=>{
  const source=readFileSync(new URL('../../src/sync/application-host.ts',import.meta.url),'utf8');
  expect(source).toMatch(/new BinaryApplicationService\(\{[^\n]*\bb2BooksEnabled:RELEASE_B2_ENABLED\b/);
+});
+
+test('book host work advances only on completed bytes and stops in-flight calls',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files}=await attachBinaryBooks(f);
+  let progress:((value:unknown)=>void)|undefined,units=0,cancels=0;
+  const work=bookFileWork(files,<T>(_method:string,args:Record<string,unknown>,observe?:(value:unknown)=>void)=>{
+   expect(args.trackProgress).toBe(true);
+   progress=observe;
+   let reject!:(e:Error)=>void;
+   const result=new Promise<T>((_,fail)=>{reject=fail;});
+   return {result,cancel:()=>{cancels++;reject(Error('operation cancelled'));}};
+  },()=>{units++;});
+  const pending=work.files.hash('books/test');
+  const settled=expect(pending).rejects.toThrow('operation cancelled');
+  for(const bytes of [0,65536,65536,5,131072])progress?.({bytes});
+  expect(units).toBe(2);
+  work.stop();work.stop();
+  progress?.({bytes:196608});
+  await settled;
+  expect(cancels).toBe(1);
+  expect(units).toBe(2);
+  expect(()=>work.files.hash('books/late')).toThrow('AUTH_REVOKED');
+ }finally{await f.dispose();}
 });
 
 test('the books gate keeps syncBooks available when opted out independently',async()=>{

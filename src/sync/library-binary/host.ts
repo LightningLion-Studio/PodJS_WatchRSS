@@ -30,6 +30,7 @@ export interface BinaryApplicationPorts {
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  books?:BinaryBookFiles;
+ bookWork?(advance:()=>void):{files:BinaryBookFiles;stop():void};
  /** Enabled after the native book pipeline meets its release acceptance gates. */
  b2BooksEnabled?:boolean;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
@@ -60,7 +61,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
-  const books=!!(this.ports.b2BooksEnabled&&runtime.fileRefs&&this.ports.books&&this.ports.library&&
+  const books=!!(this.ports.b2BooksEnabled&&runtime.fileRefs&&(this.ports.books||this.ports.bookWork)&&this.ports.library&&
    await (await this.ports.library.repository()).books?.binaryReady());
   if(books){
    for(const kind of BOOK_KINDS)kinds.push({kind,schemaVersion:1,send:true,receive:true});
@@ -104,7 +105,8 @@ export class BinaryApplicationService implements BinarySessionPort {
   let owner:LibraryBinaryConnection;
   const work=()=>{check();owner?.workUnit();};
   const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work):undefined;
-  const books=this.ports.books&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,this.ports.books,this.ports.chunks,work):undefined;
+  const fileWork=this.ports.bookWork?.(work),bookFiles=fileWork?.files??this.ports.books;
+  const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work):undefined;
   const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined);
   await authorize(()=>this.ports.store.exclusive(async()=>{
    await this.ports.store.collect(scope,async job=>{
@@ -114,6 +116,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    await assets.collect();
   }));
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
+   stopLocalWork:fileWork?.stop,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(connection.detachStream() as SyncByteStream,this.ports.now));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});

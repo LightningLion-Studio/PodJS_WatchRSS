@@ -26,6 +26,7 @@ export interface BinaryPorts {
  apply(job:Job,object:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>;
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job:Job):Promise<VerifiedPublication>;
  cleanupCompleted?(job:Job):Promise<void>;
+ stopLocalWork?():void;
  supportsRange?(p:BeginPayload):Promise<boolean>;
  applied?(kind:ObjectDescriptor['kind']):void;
  reserve(job:Job,objects:readonly ObjectDescriptor[]):Promise<void>;
@@ -93,9 +94,9 @@ export class LibraryBinaryConnection {
  workUnit(){this.lastLocalUnit=this.ports.now();}
  private write(value:Envelope,started?:()=>void):Promise<void>{this.check();return this.binary.write({kind:'control',envelope:value},value.phase==='missing'&&value.payload?.limit===0?'urgent':'ordinary',started);}
  private reply(r:Envelope,result:Row|null,epoch:number|null,error?:ResumeError):Envelope{const {payload,...base}=r;return {...base,type:'response',success:!error,result,...(error?{error:error.wire()}:{}),epoch};}
- async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.ports.store.revokeConnection(this.ports.connectionId);}
+ async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.ports.store.revokeConnection(this.ports.connectionId);}
  cancel():Promise<void>{
-  if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;
+  if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;this.ports.stopLocalWork?.();
   this.receive?.window.grant.fence();const draining=this.receive?.pipeline?.fence();this.send?.window.close();
   for(const j of [this.receive?.job,this.send?.job])if(j)try{void this.binary.write({kind:'control',envelope:this.makeRequest('cancel',j.jobId,j.planDigest,j.epoch,{reason:'USER_CANCEL'})},'urgent').catch(()=>{});}catch{/* The transport may already be closed; tombstones remain mandatory. */}this.binary.close();
   for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);
@@ -186,7 +187,7 @@ export class LibraryBinaryConnection {
  }
  private tick(){const timer=this.ports.sleep(1000);this.heartbeatTimer=timer;void timer.result.then(async()=>{if(this.stopped)return;await this.ports.sampleClock?.();if(this.stopped)return;const at=this.ports.now();
   if(!this.clockSync)this.clockSync=this.ports.store.observeClock(Math.floor(at)).catch(e=>this.close(e)).finally(()=>{this.clockSync=undefined;});
-  const remoteWork=!!this.send?.window.credit.chunks||[...this.pending.values()].some(p=>['manifestPage','apply','complete','missing'].includes(p.request.phase));if(!remoteWork&&at-this.networkAt>=30000){await this.close(Error('SocketTimeout'));return;}if((this.localWorkAt!==null||this.receive?.pipeline?.working||this.sourceReading)&&at-this.lastLocalUnit>=30000){await this.close(new ResumeError('LOCAL_IO'));return;}
+  const remoteWork=!!this.send?.window.credit.chunks||[...this.pending.values()].some(p=>['manifestPage','apply','complete','missing'].includes(p.request.phase));const localWork=this.localWorkAt!==null||this.receive?.pipeline?.working||this.sourceReading;if(!remoteWork&&!localWork&&at-this.networkAt>=30000){await this.close(Error('SocketTimeout'));return;}if(localWork&&at-this.lastLocalUnit>=30000){await this.close(new ResumeError('LOCAL_IO'));return;}
   const source=this.sourceEpoch;if(source&&at-source.last>=8000&&!this.sourceHeartbeat){source.last=at;this.sourceHeartbeat=this.request('missing',source.job,source.plan,source.epoch,{afterObjectId:null,afterChunkIndex:null,limit:0},false);void this.sourceHeartbeat.catch(e=>{if(e instanceof ResumeError&&e.code==='LEASE_EXPIRED'){this.failData(e);for(const [id,p] of this.pending){this.retiredControls.set(id,p.request);if(this.retiredControls.size>2)this.retiredControls.delete(this.retiredControls.keys().next().value!);p.reject(e);}this.pending.clear();this.slots?.clear();}else return this.close(e);}).finally(()=>{this.sourceHeartbeat=undefined;});}this.tick();},e=>{if(!this.stopped)void this.close(e);}).catch(e=>this.close(e));}
  private async answerHeartbeat(r:Envelope){
   try{
