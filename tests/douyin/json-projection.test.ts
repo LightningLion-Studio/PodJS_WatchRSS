@@ -30,7 +30,10 @@ test('a successful refill traces the waits under one diagnostic sequence',async(
  client.readCookie=async()=> 'sessionid=private-fixture';
  try{
   expect(await client.fetchFeedPage({cursor:'private-cursor',deferPersistence:true})).toMatchObject({ok:true});
-  expect(observed.map(event=>event.feed_stage)).toEqual(['credentials','transport','transport_done','projecting','project_fallback','mapping','mapping_done','storage_wait','storage_enter','seen_read','ready']);
+  expect(observed.map(event=>event.feed_stage)).toEqual([
+   'credentials','request_config','transport','auth_queue','request_auth','request_io','request_decode','request_status',
+   'transport_done','projecting','project_fallback','mapping','mapping_done','storage_wait','storage_enter','seen_read','ready',
+  ]);
   expect(observed.slice(1).every(event=>event.seq===41)).toBe(true);
   expect(JSON.stringify(observed)).not.toContain('private');
  }finally{(globalThis as any).pod=previous;}

@@ -169,9 +169,11 @@ export class DouyinClient {
     });
   }
   async buildPlaybackHeaders():Promise<Record<string,string>>{return {...DOUYIN_PUBLIC_MEDIA_HEADERS};}
-  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime):Promise<DouyinResult<string>> {
+  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime,stage?:(value:FeedStage)=>void):Promise<DouyinResult<string>> {
     const requestStarted=Date.now(),elapsed=(start:number)=>Math.min(600000,Math.max(0,Date.now()-start));
+    stage?.('auth_queue');
     await this.cookieWrites.catch(()=>{});
+    stage?.('request_auth');
     const generation=this.authGeneration,cookie=await this.readCookie();
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
     if(!cookie)return fail('NOT_LOGGED_IN','未登录');
@@ -201,6 +203,7 @@ export class DouyinClient {
       try{
         if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
         const transportStarted=Date.now();
+        stage?.('request_io');
         const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
           background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
         observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,r.body.length);
@@ -208,7 +211,10 @@ export class DouyinClient {
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
         decodingResponse=true;
-        const textStarted=Date.now();const detailBody=await decodeMediaText(r.body);observed.request_text_ms=elapsed(textStarted);const statusStarted=Date.now();const detailStatusCode=await readDouyinStatusCode(detailBody);observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
+        stage?.('request_decode');
+        const textStarted=Date.now();const detailBody=await decodeMediaText(r.body);observed.request_text_ms=elapsed(textStarted);
+        stage?.('request_status');
+        const statusStarted=Date.now();const detailStatusCode=await readDouyinStatusCode(detailBody);observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
         decodingResponse=false;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(isDouyinHtmlChallenge(detailBody)){observed.challenge=true;observed.error_code='challenge';
@@ -294,7 +300,9 @@ export class DouyinClient {
     const seq=benchmark.begin('feed_stage',{feed_stage:'credentials'});
     const stage=(feed_stage:FeedStage)=>benchmark.mark('feed_stage',seq,{feed_stage});
     const generation=this.authGeneration;
-    const cookie=await this.readCookie(),config=await resolveDouyinRequestConfig(this.options.requestConfig);
+    const cookie=await this.readCookie();
+    stage('request_config');
+    const config=await resolveDouyinRequestConfig(this.options.requestConfig);
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
     // Continuation overlaps playback. Bound the bytes that coexist in the
     // response buffer, decoded text and projection for a budgeted process.
@@ -310,7 +318,7 @@ export class DouyinClient {
     }
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
     stage('transport');
-    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config,input.background);
+    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config,input.background,stage);
     stage('transport_done');
     if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
     try{

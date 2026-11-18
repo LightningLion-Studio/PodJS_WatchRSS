@@ -26,3 +26,11 @@ test('request phases copy bounded numbers only',()=>{
  douyinRequestDiagnostic({...base,request_queue_ms:12,request_text_ms:600000,response_bytes:67108864});expect(rows[0]).toMatchObject({request_queue_ms:12,request_text_ms:600000,response_bytes:67108864});
  douyinRequestDiagnostic({...base,request_queue_ms:-1,request_text_ms:600001,response_bytes:67108865,request_status_ms:'PRIVATE' as any});for(const key of ['request_queue_ms','request_text_ms','response_bytes','request_status_ms'])expect(rows[1][key]).toBeUndefined();expect(JSON.stringify(rows)).not.toContain('PRIVATE');
 });
+
+test('feed receipt traces auth and IO separately from response decoding',async()=>{
+ capture();await fixture(200,'{"status_code":0,"aweme_list":[]}').client.fetchFeedPage();
+ const stages=rows.filter(row=>row.code==='feed_stage').map(row=>row.feed_stage);
+ expect(stages.slice(0,9)).toEqual(['credentials','request_config','transport','auth_queue','request_auth','request_io','request_decode','request_status','transport_done']);
+ expect(stages.at(-1)).toBe('ready');
+ expect(JSON.stringify(rows)).not.toContain('PRIVATE');
+});
