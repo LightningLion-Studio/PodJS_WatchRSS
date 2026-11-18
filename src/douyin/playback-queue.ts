@@ -1,6 +1,7 @@
 import {benchmark} from '@podjs/framework/benchmark';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import {compactDouyinHistory} from './history-store.ts';
+import {formatDouyinError} from './errors.ts';
 import type { DouyinClient } from "./client.ts";
 import type { DouyinItem, DouyinResult } from "./types.ts";
 
@@ -162,7 +163,8 @@ export class DouyinPlaybackQueue {
     const work=(async():Promise<DouyinResult<null>>=>{
       // Repeated duplicate pages retry later, then refresh the feed, never mark it exhausted.
       const trace=benchmark.begin('pool_stage',{pool_stage:'refill_start',queue_index:this.queued().length,anchor_index:this.index});
-      const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12,deferPersistence:true});
+      const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12,deferPersistence:true})
+        .catch(()=>({ok:false as const,code:'REQUEST_FAILED' as const,message:formatDouyinError('REQUEST_FAILED')}));
       benchmark.mark('pool_stage',trace,{pool_stage:'refill_end',queue_index:page.ok?page.data.items.length:0,anchor_index:this.index});
       if(!page.ok)return page;
       if(cursor!==this.cursor)return cancelled();

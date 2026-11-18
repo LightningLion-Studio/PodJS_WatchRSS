@@ -11,6 +11,31 @@ test("new navigation cancels stale async queue results",async()=>{let release!:(
 
 test("page and playback failures remain typed failures",async()=>{const client={async resolvePlayback(){return {ok:false as const,code:"REQUEST_FAILED" as const,message:"media expired"};},async fetchFeedPage(){return {ok:false as const,code:"REQUEST_FAILED" as const,message:"feed 503"};}} as unknown as DouyinClient;const current=new DouyinPlaybackQueue(client,{items:[item("1")],selectedAwemeId:"1"});expect(await current.current()).toEqual({ok:false,code:"REQUEST_FAILED",message:"media expired"});const tail=new DouyinPlaybackQueue(client,{items:[item("1")],selectedAwemeId:"1",cursor:"c",hasMore:true});expect(await tail.next()).toEqual({ok:false,code:"REQUEST_FAILED",message:"feed 503"});});
 
+test('a rejected refill emits a receipt and the next swipe can refill at the same cursor',async()=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'pod'),events:Record<string,unknown>[]=[];
+ Object.defineProperty(globalThis,'pod',{configurable:true,value:{benchmark:(line:string)=>{events.push(JSON.parse(line));return 1;}}});
+ const cursors:(string|null|undefined)[]=[];
+ const client={
+  async fetchFeedPage({cursor}:{cursor?:string|null}){
+   cursors.push(cursor);
+   if(cursors.length===1)throw Error('private fixture');
+   return {ok:true,data:{items:[item('2')],nextCursor:null,hasMore:false}};
+  },
+  async resolvePlayback(id:string){return {ok:true,data:item(id)};},
+ } as unknown as DouyinClient;
+ try{
+  const queue=new DouyinPlaybackQueue(client,{items:[item('1')],selectedAwemeId:'1',cursor:'c',hasMore:true});
+  expect(await queue.next()).toMatchObject({ok:false,code:'REQUEST_FAILED'});
+  expect(queue.snapshot().item?.awemeId).toBe('1');
+  expect(await queue.next()).toMatchObject({ok:true,data:{item:{awemeId:'2'}}});
+  expect(cursors).toEqual(['c','c']);
+  expect(events.map(e=>e.pool_stage)).toEqual(['refill_start','refill_end','refill_start','refill_end']);
+  expect(events[1]?.queue_index).toBe(0);
+ }finally{
+  if(previous)Object.defineProperty(globalThis,'pod',previous);else Reflect.deleteProperty(globalThis,'pod');
+ }
+});
+
 test("session preview resolves ahead without moving the anchor until promotion",async()=>{const resolved:string[]=[];const client={async resolvePlayback(id:string){resolved.push(id);return {ok:true as const,data:{...item(id),description:`resolved-${id}`},source:"feed-cache" as const};}} as unknown as DouyinClient;const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2"),item("3")],selectedAwemeId:"1",hasMore:false});const preview=await queue.preview("next");expect(preview).toMatchObject({ok:true,data:{item:{awemeId:"2"},index:1}});expect(queue.snapshot().item?.awemeId).toBe("1");expect(queue.commitPreview("2")).toMatchObject({ok:true,data:{item:{awemeId:"2"},index:1}});expect(queue.snapshot().item?.awemeId).toBe("2");expect(resolved).toEqual(["2"]);});
 
 test("rapid adjacent previews cancel stale results without changing selection",async()=>{let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);const client={async resolvePlayback(id:string){if(id==="2")await gate;return {ok:true as const,data:item(id),source:"feed-cache" as const};}} as unknown as DouyinClient;const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2")],selectedAwemeId:"1",hasMore:false});const stale=queue.preview("next"),replacement=queue.preview("next");release();expect(await stale).toMatchObject({ok:false,code:"CANCELLED"});expect(await replacement).toMatchObject({ok:true,data:{item:{awemeId:"2"}}});expect(queue.snapshot().item?.awemeId).toBe("1");});

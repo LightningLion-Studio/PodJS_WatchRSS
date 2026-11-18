@@ -32,3 +32,32 @@ test('production defaults sign, decode and refresh through fresh host turns, ret
     expect(await decodeMediaText(malformed)).toBe(utf8Decode(malformed));
   }finally{(globalThis as any).pod=original;}
 });
+
+test('production media transport reads HTTP response files over the byte bridge',async()=>{
+  const original=(globalThis as any).pod;
+  const body=utf8Encode('{"aweme_list":[]}');
+  const methods:string[]=[],events:Record<string,unknown>[]=[];
+  const {__pumpPodEvents}=await import('@podjs/framework/watch');
+  (globalThis as any).pod={
+    capabilities:()=>JSON.stringify(['net.download','data.files.chunks','data.fs']),
+    kvGet:()=>null,
+    byteBridgeVersion:()=>1,
+    putBytes:()=>0,
+    takeBytes:()=>body,
+    dropBytes:()=>{},
+    takeEvents:()=>JSON.stringify(events.splice(0)),
+    emit:(raw:string)=>{
+      const {method,args,id}=JSON.parse(raw);
+      methods.push(method);
+      const value=method==='http.download'?{path:args.path,size:body.length,status:200,headers:{}}:
+        method==='file.read'?{dataBase64:Buffer.from(body).toString('base64')}:{offset:0,size:body.length,eof:true};
+      events.push({t:'service.result',id,ok:true,value,...(method==='file.read.bytes'?{byteHandle:1}:{})});
+      queueMicrotask(__pumpPodEvents);
+    },
+  };
+  try{
+    const {mediaTransport}=await import('../../src/media-services.ts');
+    expect((await mediaTransport.request({method:'GET',url:'https://fixture.invalid/feed',headers:{}})).body).toEqual(body);
+    expect(methods).toEqual(['http.download','file.read.bytes','file.delete']);
+  }finally{(globalThis as any).pod=original;}
+});
