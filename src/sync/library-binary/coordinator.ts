@@ -432,10 +432,13 @@ export class LibraryBinaryConnection {
     }finally{this.applying=undefined;}
     break;
    }
-   case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.nativeCommit(j)) as unknown as Row;if(await this.cleanupApplied(j)){
+   case 'complete':{
+    const released=await this.cleanupApplied(j);
+    result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.nativeCommit(j)) as unknown as Row;if(released){
     let clean=true;
     try{await this.ports.cleanupCompleted?.(j);}catch(e){clean=false;this.ports.diagnostic?.(e);}
     if(clean)await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}this.ports.recovery?.confirm('COMPLETE','phoneToWatch:'+j.description.objectsRoot);break;
+   }
    case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId,this.io.native?this.ports.durableTransaction:undefined);if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
    default:fail();
   }
@@ -563,6 +566,14 @@ export class LibraryBinaryConnection {
   if(!j.lease)return true;let released=true;
   for(const o of d?[await this.ports.store.object(j,d.objectId)]:await this.ports.store.objects(j)){
    if(!o.receipt)continue;
+   const receiver=this.receive,index=receiver?.job.jobId===j.jobId?receiver.index:undefined;
+   if(index&&!index.isApplied(o.descriptor.objectId)){
+    // The business receipt survived a pending native DATA window. Reconcile
+    // both indexes before releasing files or replying to a replay.
+    if(this.nativeReceive)await this.io.native!.markApplied(index.slot(o.descriptor.objectId));
+    index.didApply(o.descriptor.objectId);
+   }
+   this.activeReceive.delete(o.descriptor.objectId);
    try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource','bookPackageSegment'].includes(o.descriptor.kind));}catch(e){released=false;this.ports.diagnostic?.(e);}
   }return released;
  }
@@ -603,12 +614,10 @@ export class LibraryBinaryConnection {
   if(guarded&&o.descriptor.kind.startsWith('book'))boundary.transaction=guarded;
   await this.ports.apply(j,o.descriptor,final.path,boundary);this.check();
   const saved=await this.ports.store.object(j,o.descriptor.objectId);if(!saved.receipt)fail('RECEIPT_CONFLICT');
-  const receiveIndex=this.receive?.index;
-  receiveIndex?.didApply(o.descriptor.objectId);
-  if(this.nativeReceive&&receiveIndex)await this.io.native!.markApplied(receiveIndex.slot(o.descriptor.objectId));
-  // Business commit is authoritative. Cleanup is repeatable and cannot revoke it.
-  try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource','bookPackageSegment'].includes(o.descriptor.kind));}catch{}
-  this.activeReceive.delete(o.descriptor.objectId);this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);this.ports.applied?.(o.descriptor.kind);return {state:'APPLIED',receipt:saved.receipt};
+  this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);
+  this.ports.applied?.(o.descriptor.kind);
+  await this.cleanupApplied(j,o.descriptor);
+  return {state:'APPLIED',receipt:saved.receipt};
  }
  private makeRequest(phase:Envelope['phase'],job:string,plan:string,epoch:number|null,payload:Row,stable=true):Envelope{const digest=requestDigest(job,plan,phase,payload),id=stable?D('wrss.library-binary.v2/source-request',[job,digest]).slice(0,32):'';return {action:ACTION,version:VERSION,phase,type:'request',jobId:job,planDigest:plan,epoch,requestId:id,requestDigest:digest,payload};}
  private async request(phase:Envelope['phase'],job:string,plan:string,epoch:number|null,payload:Row,stable=true):Promise<Envelope>{

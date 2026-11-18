@@ -4,6 +4,8 @@ import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {attachBinaryBooks,sampleBook} from '../helpers/library-binary-books';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
 import {BinaryBooks} from '../../src/sync/library-binary/books';
+import {LibraryBinaryConnection} from '../../src/sync/library-binary/coordinator';
+import {ReceiveIndex} from '../../src/sync/library-binary/receive-index';
 import {pagedBookBoundary} from '../../src/sync/library-binary/book-metadata';
 import {bookFileWork} from '../../src/sync/library-binary/book-import';
 import type {Job} from '../../src/sync/library-binary/store';
@@ -459,3 +461,41 @@ test('paged book SQL follows ordinal order under reverse SQLite scans',async()=>
   expect(await f.db.query('SELECT count(*) AS parts FROM library_binary_book_text')).toEqual([{parts:0}]);
  }finally{await f.dispose();}
 });
+
+test('a durable book receipt replays after pending native DATA settles',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files,repository}=await attachBinaryBooks(f);
+  const book=await sampleBook(f,files,512),d=book.stateObject;
+  const peer=await receiver(f,[d]);
+  await peer.manifest();await transfer(peer,d,book.read);
+  const row=(await f.db.query('SELECT scope,job_id FROM library_binary_jobs'))[0]!;
+  const job=(await f.store.job(String(row.scope),String(row.job_id)))!;
+  const envelope=request('apply',{objectId:d.objectId},job.jobId,job.planDigest,job.epoch);
+  const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{});
+  const index=new ReceiveIndex([d],[]),activeReceive=new Set<string>();
+  let pending=true,nativeApplied=false,notified=0,commits=0,attempts=0;
+  const owner=Object.create(LibraryBinaryConnection.prototype) as LibraryBinaryConnection;
+  Object.assign(owner,{
+   nativeReceive:true,activeReceive,bindings:[peer.binding],receive:{job,index},io:{native:{id:'fixture',markApplied:async(slot:number)=>{
+    expect(slot).toBe(0);attempts++;
+    if(pending)throw Error('BUSY');
+    nativeApplied=true;
+   }}},ports:{
+    store:f.store,chunks:f.chunks,check:()=>{},phoneDeviceId:'phone',watchDeviceId:'watch',applied:()=>{notified++;},
+    apply:async(...args:Parameters<BinaryBooks['apply']>)=>{commits++;await books.apply(...args);},
+   },
+  });
+  await expect(owner['apply'](job,envelope)).rejects.toThrow('BUSY');
+  const receipt=(await f.store.object(job,d.objectId)).receipt;
+  expect(receipt).toMatchObject({applyRequestId:envelope.requestId,outcome:'merged'});
+  expect(index.isApplied(d.objectId)).toBe(false);
+  expect(activeReceive.has(d.objectId)).toBe(true);
+  pending=false;
+  expect(await owner['apply'](job,envelope)).toEqual({state:'APPLIED',receipt});
+  expect({nativeApplied,notified,commits,attempts}).toEqual({nativeApplied:true,notified:1,commits:1,attempts:2});
+  expect(index.isApplied(d.objectId)).toBe(true);
+  expect(activeReceive.has(d.objectId)).toBe(false);
+  await peer.session.pair.close();await peer.session.running.catch(()=>{});
+ }finally{await f.dispose();}
+},10000);
