@@ -2,7 +2,6 @@ import config from '../../../pod.config.json';
 import type {WatchAccountStore} from '../../account/store';
 import type {WatchAccountState} from '../../account/types';
 import type {SyncActionContext,SyncFrameConnection} from '../session';
-import type {SyncByteStream} from '../stream';
 import type {VerifiedChunkStore,ObjectLease} from '@podjs/framework/verified-chunk-store';
 import {BinaryStore} from './store';
 import {BinaryAssets,STAGING_COPIES,type BinaryAssetFiles} from './assets';
@@ -10,7 +9,7 @@ import {ARTICLE_IMPORT_SHADOW_BYTES,BinaryLibraryKinds} from './kinds';
 import {BinaryBooks} from './books';
 import type {BinaryBookFiles} from './book-import';
 import type {BinaryArticleFiles} from './article-file';
-import {BinaryByteTransport} from './transport';
+import {BinaryByteTransport,type FileStream} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
 import {SwitchGate,binaryCapability,negotiate,RELEASE_B2_ENABLED} from './routing';
 import {RecoveryRules} from './recovery';
@@ -115,10 +114,13 @@ export class BinaryApplicationService implements BinarySessionPort {
    });
    await assets.collect();
   }));
+  const stream=connection.detachStream() as FileStream;
+  if(n.books&&stream.claimBinary)try{await authorize(()=>stream.claimBinary!());}
+  catch(error){await stream.close();throw error;}
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
    stopLocalWork:fileWork?.stop,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
-  },gate,new BinaryByteTransport(connection.detachStream() as SyncByteStream,this.ports.now));
+  },gate,new BinaryByteTransport(stream,this.ports.now));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});
   try{await owner.run();this.recovery.detach(connectionId);this.reconnected=false;}
   catch(e){throw this.failed(e,context);}

@@ -52,3 +52,23 @@ test('a real decoded local session resumes the interrupted manual cloud run on c
   const local=f.listener.start({acquireSession:()=>activity.acquire()});const outcome=local.catch(e=>e);await ready;expect(check).toThrow('cloud_sync_suspended');finishCloud(false);await cloud;await settle();expect(calls).toBe(1);scheduler.foreground(true);expect(calls).toBe(1);finishLocal();const result=await outcome;if(failed)expect(String(result)).toContain('peer disconnected');await settle();expect(activity.active).toBe(false);expect(calls).toBe(2);scheduler.dispose();
  }
 });
+
+test('B2 handoff uses the returned host handle and honors a racing close',async()=>{
+ const f=setup(),handles:string[]=[];
+ f.ports.streams.claim=id=>{handles.push(id);return operation({id:'new-owner'});};
+ f.ports.streams.read=id=>{handles.push(id);return operation({eof:true,dataBase64:''});};
+ const stream=new HostSyncByteStream('original',f.ports.streams);
+ await stream.claimBinary();
+ expect(await stream.read(1,10)).toBeNull();
+ await stream.close();
+ expect(handles).toEqual(['original','new-owner']);
+ expect(f.closed.has('new-owner')).toBe(true);
+ let finish!:(v:{id:string})=>void;
+ f.ports.streams.claim=()=>({result:new Promise(resolve=>{finish=resolve;}),cancel(){}});
+ const late=new HostSyncByteStream('closing',f.ports.streams);
+ const claim=late.claimBinary();
+ await late.close();
+ finish({id:'late-owner'});
+ await expect(claim).rejects.toThrow('AUTH_REVOKED');
+ expect(f.closed.has('closing')).toBe(true);
+});

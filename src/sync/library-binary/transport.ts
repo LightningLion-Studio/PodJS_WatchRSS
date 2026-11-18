@@ -4,6 +4,7 @@ import {fail} from './wire';
 /** One exact-frame owner after detachStream(). Reads never consume a tail owned
  * by another codec. Native idle deadlines and a 60s frame deadline are separate. */
 export interface FileStream extends SyncByteStream {
+ claimBinary?():Promise<void>;
  write(bytes:Uint8Array,timeoutMs?:number):Promise<void>;
  prepareFile?(range:SourceFileRange):Promise<SourceFileChunk>;
  readFile?(size:number,timeoutMs:number,retain:boolean,sha256?:string):Promise<InputFileChunk|undefined>;
