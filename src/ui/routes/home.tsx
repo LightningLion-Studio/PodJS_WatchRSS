@@ -1,3 +1,5 @@
+import {NetworkRecoveryContext} from '../../network/context';
+import type {NetworkRecovery} from '../../network/recovery';
 import {idleHit} from '../../diagnostics/idle-counters';
 import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
@@ -47,6 +49,8 @@ interface HomeRoutesProps {
   speechState: () => SpeechPlaybackState | undefined;
   speechSpectrum: () => readonly number[];
   services: AppServices;
+  ownerChoiceNetwork?: NetworkRecovery;
+  foreground?: () => boolean;
   go: (page: Page) => Promise<void>;
   /** Pops back to the home page, dropping intermediate pages. */
   goHome: () => void;
@@ -64,9 +68,10 @@ interface HomeRoutesProps {
 }
 
 /** App-wide so leaving and reopening 云同步 joins the running manual sync instead of queueing another. */
-const manualCloud = coalescedRequest(() => manualCloudSync());
+const manualCloud = coalescedRequest((scope,retry,generation) => manualCloudSync('recent128',scope,retry,generation));
 
 export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
+  const cloudActive=()=>props.active()&&(props.foreground?.()??true);
   let homeObserved=false;
   createEffect(()=>{if(homeObserved||!props.active()||props.page()!=='home'||!props.channels().length)return;homeObserved=true;const seq=benchmark.begin('startup_stage',{startup_stage:'home_mounted'});benchmark.presented('home_first_frame',seq);});
 
@@ -159,9 +164,10 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
         <CloudSyncScreen
           width={props.width}
           height={props.height}
-          active={props.active}
+          active={cloudActive}
           load={props.services.readAccountStatus}
           subscribe={props.services.subscribeAccountStatus}
+          readCloud={readCloudAccountStatus}
           available={() => readCloudAccountStatus() !== undefined}
           sync={manualCloud}
           approval={applicationCloudApproval}
@@ -205,10 +211,12 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
         />
       </Show>
       <Show when={props.active() && cloudOwnerChoice()}>
-        <CloudSyncScreen width={props.width} height={props.height} active={props.active}
+        <NetworkRecoveryContext.Provider value={props.ownerChoiceNetwork}>
+        <CloudSyncScreen width={props.width} height={props.height} active={cloudActive}
           load={props.services.readAccountStatus} subscribe={props.services.subscribeAccountStatus}
-          available={()=>true} sync={manualCloud} actions={cloudActions} clearLocal={clearLocalPrivateLibrary}
+          readCloud={readCloudAccountStatus} available={()=>true} sync={manualCloud} actions={cloudActions} clearLocal={clearLocalPrivateLibrary}
           onPhone={()=>void props.go("phone-connection")} onError={props.setError} ref={()=>{}}/>
+        </NetworkRecoveryContext.Provider>
       </Show>
     </>
   );

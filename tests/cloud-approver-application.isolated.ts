@@ -15,9 +15,9 @@ mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:(
 mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyNotesChanged(){},notifyLibraryChanged(origin:string){for(const fn of channelListeners)fn({kind:"library",origin});},services:{subscribeChannel:(fn:(e:any)=>void)=>{channelListeners.add(fn);return()=>channelListeners.delete(fn);}}}));
 mock.module('../src/cloud/status.ts',()=>({connectCloudAccountStatus:()=>()=>{},notifyCloudAccountStatus(){}}));
 let doSync!:()=>Promise<unknown>;
-mock.module('../src/cloud/scheduler.ts',()=>({WatchCloudScheduler:class {constructor(p:any){doSync=()=>p.sync(false);}foreground(){}hold(){}accountChanged(){}async start(){}dispose(){}trigger(){triggers++;}async setUpgradeRequired(){}deferUntil(){}}}));
-mock.module('../src/cloud/manual-handoff.ts',()=>({manualEpochKey:()=>'',CloudManualHandoff:class {async authorized(){return undefined;}foregroundChanged(){}localTransferChanged(){}subscribe(){return()=>{};}accountChanged(){}async restore(){}dispose(){}}}));
-mock.module('../src/cloud/runtime.ts',()=>({createCloudRuntime:()=>({inspectOwner:async()=>true,approver,approvals:{active:false,state:{phase:'idle'},subscribe:()=>()=>{},setForeground(){},reset(){}},service:{status:{phase:'idle'},reset(){},subscribe:()=>()=>{},syncNow:async()=>syncResult}})}));
+mock.module('../src/cloud/scheduler.ts',()=>({WatchCloudScheduler:class {constructor(p:any){doSync=()=>p.sync(false,undefined,{current:true,bindIntent(){},publish(){}});}foreground(){}hold(){}fenceAccount(){}scheduleAccount(){}async start(){}dispose(){}trigger(){triggers++;}async setUpgradeRequired(){}deferUntil(){}}}));
+mock.module('../src/cloud/manual-handoff.ts',()=>({manualEpochKey:()=>'',sameManualIntent:()=>false,CloudManualHandoff:class {async authorized(){return undefined;}foregroundChanged(){}localTransferChanged(){}subscribe(){return()=>{};}accountChanged(){}async restore(){}dispose(){}}}));
+mock.module('../src/cloud/runtime.ts',()=>({createCloudRuntime:()=>({inspectOwner:async()=>true,approver,approvals:{active:false,state:{phase:'idle'},subscribe:()=>()=>{},setForeground(){},reset(){}},service:{status:{phase:'idle'},reset(){},subscribe:()=>()=>{},syncNowResult:async()=>({ok:syncResult})}})}));
 const {startApplicationCloudSync,stopApplicationCloudSync,applicationCloudApproval,applicationCloudApprover}=await import('../src/cloud/application');
 const {localTransferActivity}=await import('../src/sync/local-transfer');
 const flush=async()=>{for(let i=0;i<80;i++)await Promise.resolve();};

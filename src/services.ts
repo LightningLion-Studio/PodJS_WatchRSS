@@ -203,7 +203,7 @@ const readerSpeech = new ReaderSpeech(new ConfiguredSpeechPort(new TtsConfigStor
 const sqlReadingProgress = new SqlReadingProgressStore({query:async(q,p)=>{await init();return db.query(q,p);},execute:async(q,p)=>{await init();return db.execute(q,p);},transaction:async(s)=>{await init();return db.transaction(s);}},new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}}));
 export const services: AppServices = {
   async readAccountStatus(){return accountStatusSnapshot(await summaryAccountStore.read(),Date.now(),readCloudAccountStatus());},
-  subscribeAccountStatus(listener){const account=summaryAccountStore.subscribe(listener),cloud=subscribeCloudAccountStatus(listener);return ()=>{account();cloud();};},
+  subscribeAccountStatus(listener){const account=summaryAccountStore.subscribe(account=>listener({kind:"account",account})),cloud=subscribeCloudAccountStatus(()=>listener({kind:"cloud"}));return ()=>{account();cloud();};},
   readingProgress: sqlReadingProgress,
   async retryOfflineMedia(id){await init();return offlineMediaQueue.retry(Number(id));},
   loadImportedTextChunk(handle,index) {return importedTextStore.chunk(handle,index);},

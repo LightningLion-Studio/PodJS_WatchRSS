@@ -1,3 +1,4 @@
+import {cloudAccountIdentity} from './identity';
 import {SqlCloudChangeDetection} from './change-detection';
 import {idleHit} from '../diagnostics/idle-counters';
 import {ReadBatch} from '@podjs/framework/read-batch';
@@ -38,8 +39,8 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
   try{await ensureOwner(account,async()=>{guard.require();const latest=await accounts.read();if(!latest||latest.userId!==account.userId||latest.backendBaseUrl!==account.backendBaseUrl)throw Error('account_switch_rejected');});const latest=await accounts.read();if(!latest||latest.userId!==account.userId||latest.backendBaseUrl!==account.backendBaseUrl)return false;service.ownerResolved();return true;}
   catch(error){const latest=await accounts.read();if(!latest||latest.userId!==account.userId||latest.backendBaseUrl!==account.backendBaseUrl)return false;if(isLibraryOwnerMismatch(error)){service.requireOwnerChoice();return false;}throw error;}finally{await host('cloud.release',{});}
  };
- const openSession=async(check?:()=>void)=>{idleHit(44);
-   guard.require();const foreground=execution?.begin()??(()=>{});const assertRun=()=>{foreground();check?.();};const stored=await cloudStage('account_read',()=>accounts.read());assertRun();if(!stored)return undefined;
+ const openSession=async(check?:()=>void,expectedScope?:string)=>{idleHit(44);
+   guard.require();const foreground=execution?.begin()??(()=>{});const assertRun=()=>{foreground();check?.();};const stored=await cloudStage('account_read',()=>accounts.read());assertRun();if(expectedScope!==undefined&&cloudAccountIdentity(stored)!==expectedScope)throw Error('cloud_account_changed');if(!stored)return undefined;
    const accountReads=new ReadBatch<string,Awaited<ReturnType<typeof accounts.read>>>(()=>accounts.read());
    const readBatch=<T>(action:()=>Promise<T>):Promise<T>=>accountReads.active?action():withAccountLease(host,()=>accountReads.run(action));
    const assertAccountCurrent=async()=>{guard.require();const current=await cloudStage('account_current',()=>accountReads.get('account'));if(!current||current.userId!==stored.userId||current.backendBaseUrl!==stored.backendBaseUrl)throw Error('cloud_account_changed');};

@@ -103,3 +103,22 @@ test('typed owner choice outranks pending manual, local hold, background handoff
  for(const handoff of ['idle','held','queued','foreground']as const){const snapshot=accountStatusSnapshot(account,2500,status)!;expect(cloudSyncView(snapshot,true,true,2500,handoff)).toMatchObject({title:'需要选择资料归属',tone:'attention'});expect(cloudSyncView(snapshot,true,true,2500,handoff).button).toBeUndefined();}
  const foreign=accountStatusSnapshot(account,500,{...status,accountId:'different'})!;expect(foreign.cloud?.ownerChoiceRequired).toBeUndefined();expect(foreign.cloud?.errorCode).toBeUndefined();
 });
+
+test('a fresh sign-in of the same account never joins its old manual request', async () => {
+ const calls: (number|undefined)[]=[];
+ let finish!:()=>void;
+ const request=coalescedRequest(async (_scope,_retry,generation)=>{
+  calls.push(generation);
+  if(generation===1)await new Promise<void>(done=>{finish=done;});
+ });
+ const old=request.start('scope',false,1);
+ await Promise.resolve();
+ const current=request.start('scope',false,2);
+ expect(request.start('scope',false,2)).toBe(current);
+ await current;
+ expect(calls).toEqual([1,2]);
+ expect(request.pendingFor('scope',1)).toBe(true);
+ expect(request.pendingFor('scope',2)).toBe(false);
+ finish();
+ await old;
+});

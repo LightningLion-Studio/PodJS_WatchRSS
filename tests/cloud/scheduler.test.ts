@@ -76,3 +76,26 @@ test('restored durable manual grant shares the active run and respects its upgra
  expect(await s.manual('all',true)).toBe(false);expect(count).toBe(1);
  const explicit=s.manual('all');await settle();expect(count).toBe(2);finish(true);expect(await explicit).toBe(true);s.dispose();
 });
+
+test('a new explicit request waits for the previous account without receiving its follow-up error',async()=>{
+ let account='A',fail!: (reason:Error)=>void;
+ const calls:string[]=[];
+ const s=new WatchCloudScheduler({now:()=>0,delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  sync:async()=>{
+   calls.push(account);
+   if(account==='A')await new Promise<void>((_done,reject)=>{fail=reject;});
+   return true;
+  },
+ },enabled);
+ const old=s.manual().catch(error=>error);
+ account='B';
+ s.accountChanged();
+ const next=s.manual();
+ expect(calls).toEqual(['A']);
+ const cleanup=Error('A follow-up failed');
+ fail(cleanup);
+ expect(await old).toBe(cleanup);
+ expect(await next).toBe(true);
+ expect(calls).toEqual(['A','B']);
+ s.dispose();
+});

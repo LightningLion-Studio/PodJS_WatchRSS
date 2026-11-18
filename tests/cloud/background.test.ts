@@ -211,7 +211,7 @@ test('manual headless grant is bound to durable token and backend/account scope 
   if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
   methods.push(args.method);if(args.method.startsWith('sql.'))return stateSql.host(args.method,args.args);if(args.method==='secure.update')return {};if(args.method==='app.buildInfo')return {debugBuild:false};
   if(args.method==='secure.compareAndSet'){expect(args.args.key).toBe(MANUAL_INTENT_KEY);expect(args.args.value).toBeNull();return {updated:true};}if(args.method==='secure.get')return {exists:true,value:args.args.key===manualEpochKey(account)?'new-epoch':JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
- }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet','secure.update','sql.query','sql.transaction','sql.execute'].includes(m))).toBe(true);stateSql.db.close();
+ }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet','secure.update','sql.query','sql.transaction','sql.execute'].includes(m))).toBe(true);if(mismatch==='scope')expect(methods).not.toContain('secure.compareAndSet');stateSql.db.close();
  }
 });
 

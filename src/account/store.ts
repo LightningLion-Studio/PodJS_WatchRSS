@@ -8,13 +8,14 @@ const KEY = "state_json";
 const entitlement = (v: any): WatchEntitlementSnapshot => ({ plan: typeof v?.plan === "string" && v.plan ? v.plan : "free", active: v?.active !== false, expiresAtMillis: Number(v?.expiresAtMillis || 0), features: Array.isArray(v?.features) ? v.features.map(String).map((x: string) => x.trim()).filter(Boolean) : [] });
 const telemetry = (v: any): WatchTelemetryConfig => ({ anonymousEnabled: v?.anonymousEnabled !== false, diagnosticsEnabled: v?.diagnosticsEnabled === true, sampleRate: typeof v?.sampleRate === "number" ? v.sampleRate : 1 });
 
+export type WatchAccountIdentity = Pick<WatchAccountState,'userId'|'backendBaseUrl'>;
 export class WatchAccountStore {
   private tail:Promise<unknown>=Promise.resolve();
   private change<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>this.storage.exclusive?this.storage.exclusive(action):action());this.tail=result.catch(()=>{});return result;}
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(state?:WatchAccountIdentity|null) => void>();
   constructor(private readonly storage: SecureStorage, private readonly key = KEY) {}
-  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  private changed(): void { for (const listener of [...this.listeners]) { try { listener(); } catch { /* observers cannot invalidate a committed account write */ } } }
+  subscribe(listener: (state?:WatchAccountIdentity|null) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  private changed(state?:WatchAccountIdentity|null): void { for (const listener of [...this.listeners]) { try { listener(state); } catch { /* observers cannot invalidate a committed account write */ } } }
   /** The secure store changed outside save/clear; readers are uncached, observers must refresh. */
   invalidate():void { this.changed(); }
   /** Resume-library commits share the existing cross-guest account mutation
@@ -59,6 +60,6 @@ export class WatchAccountStore {
     await this.clearStored(current??undefined,false);
   });}
   clear(expected?:WatchAccountState): Promise<void> {return this.change(()=>this.clearStored(expected,true));}
-  private async clearStored(expected:WatchAccountState|undefined,revoke:boolean):Promise<void>{const account=await this.read();if(expected&&(!account||account.userId!==expected.userId||account.backendBaseUrl!==expected.backendBaseUrl||account.watchRefreshToken!==expected.watchRefreshToken))return;if(account&&revoke){try{await this.storage.revokeCloudScope?.(account);}catch{ /* Logout proceeds even if remote revocation fails. */ }}if(account&&!await this.storage.get('watchrss.library.owner'))await this.assertLibraryOwner(account);await this.storage.remove(this.key);this.changed();if(account)await this.storage.clearCloudScope?.(account);}
+  private async clearStored(expected:WatchAccountState|undefined,revoke:boolean):Promise<void>{const account=await this.read();if(expected&&(!account||account.userId!==expected.userId||account.backendBaseUrl!==expected.backendBaseUrl||account.watchRefreshToken!==expected.watchRefreshToken))return;if(account&&revoke){try{await this.storage.revokeCloudScope?.(account);}catch{ /* Logout proceeds even if remote revocation fails. */ }}if(account&&!await this.storage.get('watchrss.library.owner'))await this.assertLibraryOwner(account);await this.storage.remove(this.key);this.changed(null);if(account)await this.storage.clearCloudScope?.(account);}
 
 }

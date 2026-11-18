@@ -65,7 +65,7 @@ export type AddChannelPreview =
 
 export interface AppServices {
   readAccountStatus():Promise<import('../account/status.ts').AccountStatusSnapshot|null>;
-  subscribeAccountStatus(listener:()=>void):()=>void;
+  subscribeAccountStatus(listener:(change?:import('../account/status.ts').AccountStatusChange)=>void):()=>void;
   readingProgress?: Pick<import("../reader/progress.ts").ReadingProgressStore,"load"|"save">;
   retryOfflineMedia?(id:string):Promise<{available:Record<string,string>;failed:number}>;
   readSummaryUsage?():Promise<import("../llm/usage.ts").UsageSnapshot>;

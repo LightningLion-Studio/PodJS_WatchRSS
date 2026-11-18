@@ -38,7 +38,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     ...(restoreProgressView(cloud.restoreProgress) ?? {}),
     ...(cloud.quotaBytes > 0 ? {space: {label: `已用 ${formatBytes(cloud.usedBytes)} / ${formatBytes(cloud.quotaBytes)}`, fraction: Math.min(1, Math.max(0, cloud.usedBytes / cloud.quotaBytes))}} : {}),
   };
-  const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
+  const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&cloud.message!=='等待网络连接'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
   // A manual sync that left the foreground: queued is with the system, not finished.
   if (handoff === 'held') return {...base, title: '等待手机同步结束', detail: '蓝牙传输结束后会自动继续云同步。', tone: 'attention', button: {label: '同步中…', action: 'sync', enabled: false}};
   if ((phase==='waiting'||handoff==='waiting'&&canHandoff)&&!BUSY.has(phase)) return {...base,title:'等待继续',detail:'回到应用或系统后台接手后会自动续做。',tone:'attention',button:{label:'继续同步',action:'sync',enabled:true}};
@@ -86,12 +86,21 @@ export function formatSyncTime(at: number, now: number): string {
 }
 
 /** One user-started sync at a time across page visits; repeated taps join the running one. */
-export function coalescedRequest(run: () => Promise<unknown>) {
-  let current: Promise<void> | undefined;
+export function coalescedRequest<T>(run: (scope?:string,retry?:boolean,generation?:number) => Promise<T>) {
+  const requests=new Map<string,Promise<T|undefined>>();
+  const key=(scope?:string,generation?:number)=>JSON.stringify([scope,generation]);
+  const listeners=new Set<()=>void>();
+  const notify=()=>{for(const listener of listeners)listener();};
   return {
-    get pending() { return !!current; },
-    start(): Promise<void> {
-      return current ??= Promise.resolve().then(run).then(() => {}, () => {}).finally(() => { current = undefined; });
+    get pending() { return requests.size>0; },
+    pendingFor(scope?:string,generation?:number) { return requests.has(key(scope,generation)); },
+    subscribe(listener:()=>void) {listeners.add(listener);return()=>{listeners.delete(listener);};},
+    start(scope?:string,retry=false,generation?:number):Promise<T|undefined> {
+      const id=key(scope,generation),existing=requests.get(id);
+      if(existing)return existing;
+      const request=Promise.resolve().then(()=>run(scope,retry,generation)).catch(()=>undefined).finally(()=>{requests.delete(id);notify();});
+      requests.set(id,request);notify();
+      return request;
     },
   };
 }

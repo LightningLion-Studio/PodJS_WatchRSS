@@ -59,6 +59,7 @@ export default defineBackgroundHandler(async context=>{
  const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet','sql.query','sql.execute','sql.transaction'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,async()=>{try{await host('sql.notify',{topic:'watchrss-library'});}catch{/* Data is committed. Foreground resume refreshes if the worker deadline prevents notification. */}},execution,{restoreReceipt:id=>callsites.receipt(id),restoreGuardVersion:SNAPSHOT_GUARD_VERSION+':'+buildIdentity,restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
+ const scope=cloudAccountIdentity(account);
  const payload=context.payload as {manual?:boolean;token?:string}|null;
  let intent:ReturnType<typeof readManualIntent>;
  // Periodic work may win the writer lease before the dedicated manual job.
@@ -66,14 +67,15 @@ export default defineBackgroundHandler(async context=>{
  {const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(stored.value);
   if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
   if(intent){
-  if(intent.scope!==cloudAccountIdentity(account)){await completeManualIntent(host,intent);return 'success';}
+  // A foreign grant can belong to an account installed after this worker read.
+  if(intent.scope!==scope)return 'success';
   const epoch={value:await cloudStatePort(host).get(manualEpochKey(account))};
-  if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch.value||intent.version===1&&!epoch.value){await completeManualIntent(host,intent);return 'success';}
+  if(intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch.value||intent.version===1&&!epoch.value){await completeManualIntent(host,intent);return 'success';}
   if(intent.version===1||intent.epoch===null&&epoch.value){intent={...intent,version:2,epoch:epoch.value??null};if(!await compareManualIntent(host,stored.value,JSON.stringify(intent)))return 'success';}
   }
  }
  running=window.remainingMillis()>1000;
- const success=await runtime.service.syncNow(!!intent,intent?.mode);
+ const success=await runtime.service.syncNow(!!intent,intent?.mode,scope);
  if(success&&intent)await completeManualIntent(host,intent);
  // A deterministic missing host capability needs a fixed package, not a false
  // successful restore or an unbounded retry of the same manual grant.

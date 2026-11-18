@@ -190,7 +190,9 @@ export default function WatchRSS(props: {
   const page = () => current().page;
   const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
   onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
-  const recoveryEnabled = (entry:Entry) => entry.page !== 'cloud-sync' && entry.page !== 'sync-v2' && !cloudOwnerChoice();
+  const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && !cloudOwnerChoice();
+  const ownerChoiceNetwork=createHostNetworkRecovery();
+  onCleanup(()=>ownerChoiceNetwork.dispose());
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -519,6 +521,7 @@ export default function WatchRSS(props: {
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
+  createEffect(()=>ownerChoiceNetwork.setActive(cloudOwnerChoice()&&foreground()));
   const activityLog = new ActivityLog();
   const telemetrySession = new TelemetryScreenSession(usageTelemetry, () => globalThis.performance?.now?.() ?? Date.now());
   const telemetryReaders = new WeakSet<Entry>();
@@ -1568,6 +1571,8 @@ export default function WatchRSS(props: {
             }
           >
             <HomeRoutes
+              ownerChoiceNetwork={ownerChoiceNetwork}
+              foreground={foreground}
               goHome={goHome}
               entry={entry}
               page={entryPage}
@@ -1844,6 +1849,9 @@ export default function WatchRSS(props: {
         state={speechState()}
         onOpen={() => setPage("speech-playback")}
       />
+      <Show when={cloudOwnerChoice()}>
+        <NetworkRecoveryLayer network={ownerChoiceNetwork} width={width} height={height} round={metrics.shape==='round'}/>
+      </Show>
       <Show when={recoveryEnabled(current())}>
         <NetworkRecoveryLayer network={networkFor(current())} width={width} height={height} round={metrics.shape==='round'}/>
       </Show>

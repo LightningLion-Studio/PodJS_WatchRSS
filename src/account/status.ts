@@ -1,8 +1,11 @@
+import type {WatchAccountIdentity} from './store';
 import type {SnapshotDeferralCode} from '../cloud/snapshot-deferral';
 import type {WatchAccountState} from './types.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
+  resultSequence?:number;
+  accountRevision?:number;
   ownerChoiceRequired?:boolean;
   errorCode?:SnapshotDeferralCode|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';
   formatCompatibility?:import('../cloud/compatibility').CloudCompatibilityStatus;
@@ -32,6 +35,8 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
     message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
     ...(own.reservedBytes!==undefined?{reservedBytes:own.reservedBytes}:{}),
     ...(own.phase ? {phase: own.phase} : {}),
+    ...(own.accountRevision!==undefined?{accountRevision:own.accountRevision}:{}),
+    ...(own.resultSequence!==undefined?{resultSequence:own.resultSequence}:{}),
     ...(own.lastCompletedAt ? {lastCompletedAt: own.lastCompletedAt} : {}),
   };
 }
@@ -48,9 +53,16 @@ export interface AccountStatusSnapshot {
   cloud?: AccountCloudStatus;
 }
 
+// The cloud page can bind a gesture to the loaded account without putting
+// identity in the display snapshot or in its serialized form.
+const cloudAccounts=new WeakMap<AccountStatusSnapshot,WatchAccountIdentity>();
+export function accountStatusIdentity(status:AccountStatusSnapshot|null|undefined){
+  return status?cloudAccounts.get(status):undefined;
+}
+
 export function accountStatusSnapshot(state: WatchAccountState | null, now = Date.now(), cloud?: AccountCloudStatus): AccountStatusSnapshot | null {
   if (!state) return null;
-  return {
+  const snapshot:AccountStatusSnapshot={
     phoneLabel: state.phoneMasked || '已绑定账号',
     plan: state.entitlement.plan,
     active: state.entitlement.active,
@@ -60,6 +72,19 @@ export function accountStatusSnapshot(state: WatchAccountState | null, now = Dat
       : state.refreshTokenExpiresAtMillis > 0 && state.refreshTokenExpiresAtMillis <= now ? 'expired' : 'valid',
     ...(cloud ? {cloud: ownCloudStatus(state.userId, cloud,state.backendBaseUrl)} : {}),
   };
+  cloudAccounts.set(snapshot,{userId:state.userId,backendBaseUrl:state.backendBaseUrl});
+  return snapshot;
+}
+
+export type AccountStatusChange={kind:'account';account?:WatchAccountIdentity|null}|{kind:'cloud'};
+
+/** A cloud notification can refresh a loaded account without rereading secure storage. */
+export function refreshAccountCloudStatus(status:AccountStatusSnapshot,cloud:AccountCloudStatus|undefined):AccountStatusSnapshot{
+  const account=accountStatusIdentity(status);
+  if(!account)return status;
+  const snapshot={...status,cloud:cloud&&ownCloudStatus(account.userId,cloud,account.backendBaseUrl)};
+  cloudAccounts.set(snapshot,account);
+  return snapshot;
 }
 
 /** Native hides the whole cloud section when the service is unavailable. */

@@ -4,8 +4,12 @@ import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {delay,type HostOperation} from '@podjs/framework/services';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {createEffect, createMemo, createSignal, onCleanup} from 'solid-js';
-import type {AccountStatusSnapshot} from '../account/status.ts';
+import {batch,createEffect, createMemo, createSignal, onCleanup, useContext} from 'solid-js';
+import {accountStatusIdentity,refreshAccountCloudStatus,type AccountStatusChange,type AccountStatusSnapshot,type AccountCloudStatus} from '../account/status.ts';
+import {cloudAccountIdentity} from '../cloud/identity';
+import type {CloudSyncResult} from '../cloud/service';
+import {NetworkRecoveryContext,useCachedNetworkContent} from '../network/context';
+import {directNetworkWork,isNetworkRecoveryCancellation} from '../network/recovery';
 import {cloudRemediationView, cloudSyncView, type CloudRemediationControl, type CloudSyncAction, type CloudSyncTone, type CloudSyncView} from './cloud-sync-view.ts';
 import {PHONE_PAGE} from './phone-connection-layout.ts';
 import {ScrollEntries, type ScrollEntry} from './ScrollEntries.tsx';
@@ -26,9 +30,15 @@ export function CloudSyncScreen(props: {
   height: number;
   active: () => boolean;
   load: () => Promise<AccountStatusSnapshot | null>;
-  subscribe?: (listener: () => void) => () => void;
+  subscribe?: (listener: (change?:AccountStatusChange) => void) => () => void;
+  readCloud?: () => AccountCloudStatus | undefined;
   available: () => boolean;
-  sync: {readonly pending: boolean; start(): Promise<void>};
+  sync: {
+    readonly pending: boolean;
+    pendingFor?(scope?: string,generation?:number): boolean;
+    subscribe?(listener:()=>void):()=>void;
+    start(scope?:string,retry?:boolean,generation?:number):Promise<CloudSyncResult|void>;
+  };
   approval?: import('./cloud-sync-view').CloudApprovalControl;
   /** This watch approving another device of the same account (approval v2 approver). */
   approver?: {readonly state: CloudApproverState; subscribe(fn: () => void): () => void; accept(requestId: string): Promise<boolean>; confirm(match: boolean): Promise<boolean>; cancel(): Promise<boolean>};
@@ -43,21 +53,32 @@ export function CloudSyncScreen(props: {
   onError: (message: string) => void;
   ref: (value: {scroller: Scroller}) => void;
 }) {
+  const routeNetwork=useContext(NetworkRecoveryContext);
+  const network=routeNetwork??directNetworkWork;
   const [v2, setV2] = createSignal<SyncV2UiState>();
   const [v2Revision, setV2Revision] = createSignal(0);
   if (props.syncV2) onCleanup(props.syncV2.subscribe(() => setV2Revision(value => value + 1)));
+  const [status, setStatus] = createSignal<AccountStatusSnapshot | null>();
+  const bound=createMemo(()=>!!status());
   let v2Sequence = 0;
   createEffect(() => {
     v2Revision();
-    if (!props.syncV2 || !props.active()) return;
     const request = ++v2Sequence;
+    if (!props.syncV2 || !props.active() || !bound()) return;
     void props.syncV2.snapshot().then(value => { if (request === v2Sequence) setV2(value); }, () => { if (request === v2Sequence) setV2(undefined); });
   });
-  const [status, setStatus] = createSignal<AccountStatusSnapshot | null>();
   const [handoff, setHandoff] = createSignal(props.handoff?.state.phase ?? 'idle');
   if (props.handoff) onCleanup(props.handoff.subscribe(() => setHandoff(props.handoff!.state.phase)));
   const [available, setAvailable] = createSignal(props.available());
-  const [pending, setPending] = createSignal(props.sync.pending);
+  const [syncRevision,setSyncRevision]=createSignal(0);
+  const [recovering,setRecovering]=createSignal<object>();
+  const scopeOf=(snapshot:AccountStatusSnapshot|null|undefined)=>{
+    const account=accountStatusIdentity(snapshot);
+    return account?cloudAccountIdentity(account):undefined;
+  };
+  const scope=()=>scopeOf(status());
+  const pending=()=>{syncRevision();return !!recovering()||(props.sync.pendingFor?.(scope(),status()?.cloud?.accountRevision)??props.sync.pending);};
+  if(props.sync.subscribe)onCleanup(props.sync.subscribe(()=>setSyncRevision(value=>value+1)));
   const [revision, setRevision] = createSignal(0);
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [approval,setApproval]=createSignal<WatchApprovalState>(props.approval?.state??{phase:'idle',message:''});
@@ -87,28 +108,107 @@ export function CloudSyncScreen(props: {
     void pending.result.then(expire,expire);
   };
   const act=(work:Promise<unknown>|undefined)=>void work?.then(()=>setRevision(value=>value+1));
-  let sequence = 0, disposed = false;
-  if (props.subscribe) onCleanup(props.subscribe(() => { sequence++; setStatus(undefined); setLoadFailed(false); setRevision(value => value + 1); }));
-  onCleanup(() => { sequence++; disposed = true; });
-  const join = () => {
-    setPending(true);
-    void props.sync.start().then(() => { if (!disposed) { setPending(false); setRevision(value => value + 1); } });
+  let loadRevision=0,pageGeneration=0,disposed=false;
+  const usable=()=>{
+    const cloud=status()?.cloud;
+    return !!(cloud?.lastCompletedAt||cloud?.quotaBytes||cloud?.ownerChoiceRequired||v2());
   };
-  if (props.sync.pending) join();
-  createEffect(() => {
+  useCachedNetworkContent(usable);
+  let accountScope:string|undefined, accountRevision:number|undefined;
+  const invalidateAccountView=()=>{
+    ++pageGeneration;
+    setRecovering(undefined);
+    ++v2Sequence;
+    setV2(undefined);
+    setV2Revision(value=>value+1);
+    setArmed(undefined);
+    cancelDisarm();
+    routeNetwork?.refreshUsable();
+  };
+  const acceptStatus=(value:AccountStatusSnapshot|null)=>batch(()=>{
+    const nextScope=scopeOf(value),nextRevision=value?.cloud?.accountRevision;
+    if(nextScope!==accountScope||
+      nextRevision!==undefined&&accountRevision!==undefined&&nextRevision!==accountRevision){
+      accountScope=nextScope;
+      accountRevision=undefined;
+      invalidateAccountView();
+    }
+    accountRevision=nextRevision??accountRevision;
+    setStatus(value);
+  });
+  if(props.subscribe)onCleanup(props.subscribe(change=>batch(()=>{
+    if(change?.kind==='cloud'&&props.readCloud){
+      const cached=status();
+      if(props.active()&&cached&&accountStatusIdentity(cached)){
+        acceptStatus(refreshAccountCloudStatus(cached,props.readCloud()));
+        setLoadFailed(false);
+        setAvailable(props.available());
+        return;
+      }
+    }else if(change?.kind==='account'&&change.account!==undefined){
+      const nextScope=change.account?cloudAccountIdentity(change.account):undefined;
+      if(nextScope!==accountScope){
+        accountScope=nextScope;
+        accountRevision=undefined;
+        setStatus(undefined);
+        invalidateAccountView();
+      }
+    }
+    ++loadRevision;
+    setRevision(value=>value+1);
+  })));
+  onCleanup(()=>{disposed=true;++loadRevision;});
+  createEffect(()=>{
     revision();
-    if (!props.active()) { sequence++; setStatus(undefined); return; }
-    const request = ++sequence;
-    void props.load().then(value => {
-      // A later load (account change, new cloud status) supersedes this one.
-      if (request === sequence && props.active()) { setStatus(value); setLoadFailed(false); setAvailable(props.available()); }
-    }).catch(reason => {
-      if (request === sequence && props.active()) { setStatus(undefined); setLoadFailed(true); props.onError('云同步状态读取失败，请重试。'); }
+    if(!props.active()){
+      ++loadRevision;
+      ++pageGeneration;
+      setRecovering(undefined);
+      setStatus(undefined);
+      setLoadFailed(false);
+      return;
+    }
+    const request=++loadRevision;
+    void props.load().then(value=>{
+      if(request!==loadRevision||!props.active())return;
+      acceptStatus(value&&props.readCloud?refreshAccountCloudStatus(value,props.readCloud()):value);
+      setLoadFailed(false);
+      setAvailable(props.available());
+    }).catch(()=>{
+      if(request!==loadRevision||!props.active()||status())return;
+      setLoadFailed(true);
+      props.onError('云同步状态读取失败，请重试。');
     });
   });
+  const join=()=>{
+    const owner=scope(),generation=pageGeneration,accountRevision=status()?.cloud?.accountRevision;
+    let retry=false;
+    const operation={};
+    setRecovering(operation);
+    const current=()=>!disposed&&props.active()&&generation===pageGeneration&&owner===scope()&&accountRevision===status()?.cloud?.accountRevision;
+    void network.result(async()=>{
+      if(!current())return;
+      const result=await props.sync.start(owner,retry,accountRevision);
+      retry=true;
+      return current()?result:undefined;
+    },()=>!current()).catch(error=>{
+      if(current()&&!isNetworkRecoveryCancellation(error))props.onError('暂时无法完成操作，请稍后重试。');
+    }).finally(()=>{
+      if(recovering()===operation)setRecovering(undefined);
+      if(current()&&!props.readCloud)setRevision(value=>value+1);
+    });
+  };
   const requestApproval=()=>{
     if(!props.active()||!props.approval||['requesting','committing'].includes(approval().phase))return;
-    void props.approval.request().catch(()=>props.onError('暂时无法请求批准，请稍后重试。'));
+    const generation=pageGeneration,control=props.approval;
+    const current=()=>!disposed&&props.active()&&generation===pageGeneration;
+    void network.result(async()=>{
+      if(!current())return;
+      const success=await control.request();
+      if(!success&&current()&&control.state.networkFailure)return {ok:false,networkFailure:true};
+    },()=>!current()).catch(error=>{
+      if(current()&&!isNetworkRecoveryCancellation(error))props.onError('暂时无法请求批准，请稍后重试。');
+    });
   };
   const press = (action: CloudSyncAction) => {
     if (!props.active()) return;

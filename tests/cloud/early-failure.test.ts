@@ -70,3 +70,42 @@ test('writer busy preserves a manual all intent and the scheduler automatically 
  // The app's foreground event pumps the queued retry, without another press.
  scheduler.foreground(true);await settle();expect(runs).toBe(1);const timer=timers.find(t=>!t.cancelled)!;expect(timer.at).toBe(30010);busy=false;now=timer.at;timer.fn();for(let i=0;i<100&&events.length<2;i++)await Bun.sleep(1);await settle();expect(runs).toBe(2);expect(modes).toEqual(['all','all']);expect(events.at(-1).outcome).toBe('complete');expect(values.has(MANUAL_INTENT_KEY)).toBe(false);scheduler.dispose();
 });
+
+test('a sync completed before lease release failure publishes one successful outcome',async()=>{
+ const f=await fixture();
+ const service=new WatchCloudSyncService({
+  open:async()=>f.session,
+  network:async()=>f.network,
+  uuid:async()=> 'release-fault',
+  hash:crypto.sha256,
+  exclusive:async work=>{await work();throw Error('fixture lease release failure');},
+ },enabled);
+ const complete:number[]=[];
+ service.subscribe(()=>{
+  if(service.status.phase==='complete')complete.push(service.status.resultSequence!);
+ });
+ const outcome=await service.syncNowResult(true);
+ expect(outcome.ok).toBe(true);
+ expect(outcome.resultSequence).toBe(service.status.resultSequence);
+ expect(complete).toEqual([outcome.resultSequence!]);
+});
+
+test('cloud result distinguishes native transport failure from HTTP and account failures',async()=>{
+ const samples=[
+  [Object.assign(Error('timeout'),{code:'host_error',nativeTransportFailure:true}),true],
+  [Object.assign(Error('timed out'),{status:503}),false],
+  [Object.assign(Error('account rejected'),{status:401}),false],
+  [Error('timeout'),false],
+ ] as const;
+ for(const [failure,recover] of samples){
+  const f=await fixture();
+  f.session.client.bootstrap=async()=>{throw failure;};
+  const result=await f.service.syncNowResult(true);
+  expect([result.ok,result.networkFailure===true]).toEqual([false,recover]);
+  expect(result.resultSequence).toBe(f.service.status.resultSequence);
+ }
+ const offline=await fixture();
+ offline.network.validated=false;
+ expect(await offline.service.syncNowResult(true)).toMatchObject({ok:false,networkFailure:true});
+ expect(offline.calls).toHaveLength(0);
+});
