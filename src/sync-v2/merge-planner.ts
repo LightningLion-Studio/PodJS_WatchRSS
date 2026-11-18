@@ -3,9 +3,9 @@ import * as strict from './notes-strict';
 import * as noteConflicts from './note-conflict-set';
 import {canonical,compareD64,checkD64} from './protocol';
 import {mergeBook} from '../books/protocol';
-import {mergeNoteMarkdown} from '../notes/merge';
+import {mergeSyncV2NoteMarkdown} from '../notes/merge';
 const clone=<T>(v:T):T=>JSON.parse(canonical(v));
-const markdown=(base:string,local:string,remote:string)=>{const out=mergeNoteMarkdown(base,local,remote);return out===null?{conflict:true}:{markdown:out};};
+const markdown=(base:string,local:string,remote:string)=>{const out=mergeSyncV2NoteMarkdown(base,local,remote);return out===null?{conflict:true}:{markdown:out};};
 export function canMerge(input:any){
  if(input.unsupported)return {canMerge:false,reason:'unsupported_feature'};
  if(input.spaceAvailable===false)return {canMerge:false,reason:'storage_pressure'};

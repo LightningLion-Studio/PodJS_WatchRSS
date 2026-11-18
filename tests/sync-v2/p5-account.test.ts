@@ -1,7 +1,8 @@
 import {test,expect} from 'bun:test';
-import {randomBytes} from 'node:crypto';
+import {createHash,randomBytes} from 'node:crypto';
 import {p5Fixture,dirtyRollback} from './p5-fixture';
-import {canonical,parseCanonicalJson} from '../../src/sync-v2/protocol';
+import {canonical,entityKey,parseCanonicalJson} from '../../src/sync-v2/protocol';
+import {idKey,scope} from './fixture';
 import {captureChoice} from '../../src/sync-v2/state';
 const id=()=>randomBytes(16).toString('hex');
 test('P5 default closed actions preserve queue edits and pending choice',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const pending=await f.control.pendingChoice(),before=canonical(await f.projection.readState());await expect(f.make(false).chooseCloud(pending!.proof,id())).rejects.toThrow('feature_disabled');expect(canonical(await f.projection.readState())).toBe(before);expect(f.server.choiceCalls).toBe(0);}finally{f.close();}});
@@ -15,6 +16,62 @@ test('P5 smart merge publishes only the unique planner candidate and updates nat
  await dirtyRollback(f,async()=>{await f.db.execute('UPDATE memo_notes SET markdown=?,plain_text=?,updated_at=updated_at+1 WHERE note_id=?',['edited\ntext','edited text','n']);await f.scan();});
  const proof=await f.control.pendingChoice();expect(proof?.canMerge).toBe(true);await f.control.chooseMerge(proof!.proof,id());const current=await f.projection.readStableState(),body=parseCanonicalJson(f.server.objects.get(current.account!.oid)!).body;expect(body.operation.kind).toBe('resolve-merge');const note=(await f.db.query('SELECT * FROM memo_notes'))[0]!;expect(note.title).toBe('title n');expect(note.markdown).toBe('edited\ntext');expect(note.content_hash).not.toBe('h');expect(current.pendingChoice).toBeNull();
  }finally{f.close();}});
+test('P5 account merge publishes and applies both edits at a shared left boundary',async()=>{
+ const f=await p5Fixture();
+ try{
+  const save=async(markdown:string)=>{
+   const hash=createHash('sha256').update(markdown).digest('hex');
+   await f.db.execute('UPDATE memo_notes SET markdown=?,plain_text=?,content_hash=?,updated_at=updated_at+1 WHERE note_id=?',
+    [markdown,markdown.replaceAll('\n',' '),hash,'n']);
+   await f.scan();
+  };
+  await save('A\nb');
+  f.edit=()=>save('a\nb');
+  await dirtyRollback(f,()=>save('x\na\nb'));
+  const preview=await f.control.pendingChoice();
+  expect(preview?.canMerge).toBe(true);
+  await f.control.chooseMerge(preview!.proof,id());
+  const state=await f.projection.readStableState();
+  const published=parseCanonicalJson(f.server.objects.get(f.server.account.commitOid)!);
+  expect(published.body.operation.kind).toBe('resolve-merge');
+  expect((await f.projection.cloudRows(published.body.treeRoot,'',32))[0]!.state.payload.markdown).toBe('x\nA\nb');
+  expect(await f.db.query("SELECT markdown FROM memo_notes WHERE note_id='n'")).toEqual([{markdown:'x\nA\nb'}]);
+  expect(state.pendingChoice).toBeNull();
+  expect(state.hasUnsentEdits).toBe(false);
+  expect(f.server.acks).toHaveLength(1);
+ }finally{f.close();}
+});
+test('P5 account merge rejects distinct full bodies on an empty ancestor',async()=>{
+ const f=await p5Fixture();
+ try{
+  const local='本地😀\n',cloud='云端𐐀\n';
+  const save=async(markdown:string)=>{
+   const hash=createHash('sha256').update(markdown).digest('hex');
+   await f.db.execute('UPDATE memo_notes SET markdown=?,plain_text=?,content_hash=?,updated_at=updated_at+1 WHERE note_id=?',
+    [markdown,markdown.replaceAll('\n',' '),hash,'n']);
+   await f.scan();
+  };
+  await save(cloud);
+  f.edit=()=>save('');
+  await dirtyRollback(f,()=>save(local));
+  const before=await f.projection.readStableState();
+  const noteKey=entityKey(idKey,scope.repoId,'note','n');
+  expect((await f.projection.editBases(before))[noteKey]!.markdown).toBe('');
+  const preview=(await f.control.pendingChoice())!;
+  const accountOid=f.server.account.commitOid;
+  expect(preview.canMerge).toBe(false);
+  expect(preview.reason).toBe('note_conflict');
+  await expect(f.control.chooseMerge(preview.proof,id())).rejects.toThrow('merge_unavailable');
+  expect(f.server.account.commitOid).toBe(accountOid);
+  const commit=parseCanonicalJson(f.server.objects.get(accountOid)!);
+  expect((await f.projection.cloudRows(commit.body.treeRoot,'',32))[0]!.state.payload.markdown).toBe(cloud);
+  expect(await f.db.query("SELECT markdown FROM memo_notes WHERE note_id='n'")).toEqual([{markdown:local}]);
+  const after=await f.projection.readStableState();
+  expect(after.pendingChoice).not.toBeNull();
+  expect(after.hasUnsentEdits).toBe(true);
+  expect(f.server.acks).toHaveLength(0);
+ }finally{f.close();}
+});
 test('P5 cloud response loss resumes the durable original intent after controller reopen',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const p=await f.control.pendingChoice(),requestId=id();f.server.loseChoice=true;await expect(f.control.chooseCloud(p!.proof,requestId)).rejects.toThrow('choice_response_lost');expect((await f.projection.readState()).cloud.pendingCloudChoice.requestId).toBe(requestId);await f.make().resumeCloudChoice();expect(f.server.choiceCalls).toBe(1);expect((await f.projection.readStableState()).pendingChoice).toBeNull();expect(f.server.acks).toHaveLength(1);}finally{f.close();}});
 test('P5 local response loss keeps newer edits and reopens a fresh choice',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const p=await f.control.pendingChoice();f.server.losePublish=true;await expect(f.control.chooseLocal(p!.proof,id())).rejects.toThrow('synthetic_response_lost');await f.edit('new tail');await expect(f.make().resumePublication()).rejects.toThrow('choice_stale');const s=await f.projection.readStableState();expect(s.hasUnsentEdits).toBe(true);expect(s.pendingChoice).not.toBeNull();expect(s.cloud.pendingPublish).toBeNull();expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('new tail');}finally{f.close();}});
 test('P5 N07 expiry and explicit recovery restore use stable copy identity',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const p=await f.control.pendingChoice();await f.control.chooseCloud(p!.proof,id());const copies=await f.control.recoveryCopies();expect(copies).toHaveLength(1);await f.control.restoreRecovery(copies[0]!.copyId);expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('offline edit');expect((await f.projection.readStableState()).hasUnsentEdits).toBe(true);f.server.clock+=604800000;expect(await f.control.recoveryCopies()).toEqual([]);expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('offline edit');}finally{f.close();}});

@@ -5,7 +5,7 @@ import {canonical,jsonBytes as jb,bytes as utf8} from './protocol';
 import {sha256Hex} from '@podjs/framework/crypto';
 const c={canonical,jb};
 const clone=<T>(v:T):T=>JSON.parse(canonical(v));
-import {mergeNoteMarkdown} from '../notes/merge';
+import {mergeSyncV2NoteMarkdown} from '../notes/merge';
 import {segmentedClosureBudget} from './note-segments';
 import * as s from './notes-strict';
 import {feature,text,validateSet,conflictSet,mergeConflicts,openConflicts} from './note-conflict-set.ts';
@@ -77,7 +77,7 @@ export function readConflicts(state:any,context:{entityKey:string;noteId:string}
 /** An existing open incident blocks automatic merge even if current text is disjoint. */
 export function mergeNoteWithConflicts(noteId:string,base:string,local:string,remote:string,known:ConflictSet[]){
  for(const set of known){validateSet(noteId,set);if(openConflicts(set).length)return {conflict:true};}
- const out=mergeNoteMarkdown(base,local,remote);return out===null?{conflict:true}:{markdown:out};
+ const out=mergeSyncV2NoteMarkdown(base,local,remote);return out===null?{conflict:true}:{markdown:out};
 }
 /** Materialize the complete minimal-model short-note state before committing.
  * The fixed-width entityKey is a size witness only, never a publication identity.

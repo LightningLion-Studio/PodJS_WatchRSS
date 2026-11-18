@@ -5,11 +5,11 @@ import {validateRecord} from '../cloud/records';
 import {ARTICLE_REGISTER_FEATURE} from '../cloud/article-register';
 import {recordFields} from '../cloud/compatibility';
 import {validateBookShape,validateBookReading,bookIdInput,mergeBook,mergeBookReading} from '../books/protocol';
-import {mergeNoteMarkdown} from '../notes/merge';
 import {validateSet} from './note-conflict-set';
 import {KINDS,canonical,jsonBytes,text,uint,exact,type Kind} from './protocol';
 import {NOTE_TEXT_FIELDS,NOTE_TEXT_BUDGET,encodeNote,splitOrdinary} from './note-segments';
-export {mergeBook,mergeBookReading,mergeNoteMarkdown};
+export {mergeBook,mergeBookReading};
+export {mergeSyncV2NoteMarkdown as mergeNoteMarkdown} from '../notes/merge';
 const metaFields=new Set('articleId url title siteName excerpt imageUrl rssSourceUrl rssSourceTitle contentHash importedAt guid sourceUrl sourceId description siteUrl createdAt fingerprint chapterCount kind instanceId bookId articleIdHash chapterIndex noteId folderId name assetId mime originalFilename'.split(' '));
 const fields:Record<Kind,readonly string[]>={...recordFields,
  note:'noteId folderId title markdown plainText contentHash baseContentHash baseMarkdown pinned createdAt updatedAt modifiedBy deleted deletedAt'.split(' '),

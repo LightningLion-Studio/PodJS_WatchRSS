@@ -4,6 +4,8 @@ import {checkD64,nextD64,compareD64} from '@podjs/framework/sql-projection';
 import {unhex} from '@podjs/framework/crypto';
 import {entityKey,opaqueContentId,affectedSet,canonical,exact} from '../../src/sync-v2/protocol';
 import {mergeBook,mergeNoteMarkdown,toWire,fromWire,candidates} from '../../src/sync-v2/business';
+import {canMerge} from '../../src/sync-v2/merge-planner';
+import {mergeNoteWithConflicts} from '../../src/sync-v2/notes-conflict';
 import {initialState,captureChoice,checkCapture,observeAccount,legacyInputRoute} from '../../src/sync-v2/state';
 import {P1_CLOSED_GATES} from '../../src/sync-v2/gate';
 import {vector,account,err,sharedRoot,noteValue} from './fixture';
@@ -11,7 +13,24 @@ const derivation=vector('derivation');
 for(const c of derivation.cases)test('SyncV2 shared derivation '+c.input.kind+' '+c.input.logicalId,()=>expect(entityKey(unhex(derivation.idKeyHex),c.input.repoId,c.input.kind,c.input.logicalId)).toBe(c.expected));
 for(const c of derivation.opaqueCases)test('SyncV2 shared opaque '+c.input.type,()=>expect(opaqueContentId(unhex(derivation.idKeyHex),derivation.scope,c.input.type,unhex(c.input.plainHex))).toBe(c.expected));
 for(const c of vector('book-merge').cases)test('SyncV2 shared book-merge '+c.name,()=>{expect(mergeBook(c.left,c.right)).toEqual(c.expected);expect(mergeBook(c.right,c.left)).toEqual(c.expected);expect(fromWire('book',...Object.values(toWire('book',c.expected)) as [any,any])).toEqual(c.expected);});
-for(const [i,c]of vector('notes-merge').cases.entries())test('SyncV2 shared notes-merge '+i,()=>{const out=mergeNoteMarkdown(c.base,c.local,c.remote);expect(out===null?{conflict:true}:{markdown:out}).toEqual(c.expected);});
+for(const [i,c]of vector('notes-merge').cases.entries()){
+ test('SyncV2 shared notes-merge '+i,()=>{
+  const out=mergeNoteMarkdown(c.base,c.local,c.remote);
+  expect(out===null?{conflict:true}:{markdown:out}).toEqual(c.expected);
+ });
+ test('SyncV2 shared notes-merge '+i+' with conflict tracking',()=>{
+  expect(mergeNoteWithConflicts('note',c.base,c.local,c.remote,[])).toEqual(c.expected);
+ });
+ test('SyncV2 shared notes-merge '+i+' in account planner',()=>{
+  const snapshot=(markdown:string)=>({note:{identity:'note',markdown}});
+  expect(canMerge({
+   base:snapshot(c.base),local:snapshot(c.local),cloud:snapshot(c.remote),
+   ops:[{id:'note',kind:'update',complete:true,fields:['markdown']}],
+  })).toEqual(c.expected.conflict
+   ? {canMerge:false,reason:'note_conflict'}
+   : {canMerge:true,tree:snapshot(c.expected.markdown)});
+ });
+}
 const state=()=>({...initialState(),account:{...account},lastSeenAccountOid:account.oid,lastSeenAccountRevision:account.revision,lastSeen:account.generation,rollbackGeneration:account.generation,pendingChoice:{generation:account.generation,inboxKeys:['old']}});
 const f=JSON.parse(readFileSync(sharedRoot+'/review/rc6/f-results.json','utf8')).results.find((c:any)=>c.id==='F11');
 test('SyncV2 F11/Q01 hidden own key and Symbol reject with unchanged state',()=>{let rejected=0,stateRetained=0;for(const extra of ['hidden',Symbol('hidden')]){const s=state(),c:any={...captureChoice(s,account)};Object.defineProperty(c,extra,{value:'metadata',enumerable:false});Object.freeze(c);const before=canonical(s);rejected+=Number(err(()=>checkCapture(s,c,'old'))==='choice_stale');stateRetained+=Number(canonical(s)===before);}expect({rejected,stateRetained}).toEqual(f.expected);});
