@@ -1,6 +1,11 @@
 import {test,expect} from 'bun:test';
 import {WatchCloudScheduler,CLOUD_INTERVAL} from '../../src/cloud/scheduler';
 import {enabled} from './k2-crypto';
+import {PlaybackWork} from '../../src/core/playback-work';
+import {LocalTransferActivity} from '../../src/sync/local-transfer';
+import {Clock,deferred,flush} from '../helpers/ip-fixture';
+import type {ManualIntent} from '../../src/cloud/manual-handoff';
+import {CloudVisibility} from '../../src/cloud/visibility';
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 test('foreground/account/network/data bursts coalesce at five minutes; inactive pauses; manual bypasses',async()=>{
  let now=0;const calls:boolean[]=[],timers:{at:number;fn:()=>void;cancelled:boolean}[]=[];let scheduled=0,cancelled=0;
@@ -99,3 +104,226 @@ test('a new explicit request waits for the previous account without receiving it
  expect(calls).toEqual(['A','B']);
  s.dispose();
 });
+
+const wakeSources=[
+ 'phone release','playback release','foreground','network','retry deadline',
+ 'account notification','cold start','approval delivery',
+] as const;
+const queuedWork=['approval','durable grant','suspended writer'] as const;
+for(const wake of wakeSources)for(const work of queuedWork)for(const failed of [false,true]){
+ test(`wake matrix: ${wake} / ${work} / previous preparation ${failed?'failed':'succeeded'}`,async()=>{
+  const clock=new Clock();
+  const scope=JSON.stringify(['fixture','https://fixture.invalid']);
+  const grant:ManualIntent={version:2,token:'fixture_all',scope,mode:'all',epoch:null,createdAt:0};
+  const calls:{manual:boolean;mode:string;scope:string}[]=[],cleared:string[]=[];
+  let stored:ManualIntent|undefined;
+  let priorAttempt=false,prepareAttempts=0;
+  let writer:ReturnType<typeof deferred<boolean>>|undefined;
+  const playback=new PlaybackWork(),phone=new LocalTransferActivity();
+  const makeScheduler=()=>new WatchCloudScheduler({
+   now:()=>clock.now,
+   delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn).catch(()=>{});return ()=>timer.cancel();},
+   scheduleWorker:async()=>{},cancelWorker:async()=>{},
+   prepare:()=>{if(!priorAttempt)return true;prepareAttempts++;return !failed;},
+   mayHavePendingIntent:()=>!!stored,
+   async sync(requestedManual,mode,run){
+    // With successful preparation, fail the next read instead. This leaves
+    // the same work pending and tests the two distinct pre-execution exits.
+    if(priorAttempt)throw Error('fixture pre-execution read failure');
+    if(requestedManual&&!stored)return false;
+    run.bindIntent(stored);
+    calls.push({manual:!!stored||run.afterApproval,mode:stored?.mode??mode,scope});
+    if(writer)return writer.result;
+    if(stored){cleared.push(stored.token);stored=undefined;}
+    return true;
+   },
+  },enabled);
+  let scheduler=makeScheduler();
+  const offPhone=phone.subscribe(held=>scheduler.hold(held||playback.active));
+  const offPlayback=playback.subscribe(held=>scheduler.hold(held||phone.active));
+  try{
+   if(work==='suspended writer')writer=deferred<boolean>();
+   scheduler.foreground(true);await flush();
+   expect(calls).toEqual([{manual:false,mode:'recent128',scope}]);
+   calls.length=0;
+   priorAttempt=true;
+   await clock.advance(CLOUD_INTERVAL);
+   if(work==='approval')scheduler.approvalCompleted();
+   if(work==='durable grant'){
+    stored=grant;
+    await scheduler.manual('all',false,grant).catch(()=>false);
+   }
+   if(writer){
+    const release=playback.hold();
+    writer.resolve(false);writer=undefined;await flush();
+    release();
+   }
+   await flush();
+   expect(prepareAttempts).toBe(1);
+   expect(calls).toEqual([]);
+   expect(cleared).toEqual([]);
+   priorAttempt=false;
+   await clock.advance(CLOUD_INTERVAL);
+   expect(calls).toEqual([]);
+
+   switch(wake){
+    case 'phone release':phone.acquire()();break;
+    case 'playback release':playback.hold()();break;
+    case 'foreground':scheduler.foreground(false);scheduler.foreground(true);break;
+    case 'network':scheduler.trigger('network');break;
+    case 'retry deadline':
+     scheduler.deferUntil(clock.now+1000);
+     await flush();
+     expect(calls).toEqual([]);
+     await clock.advance(1000);
+     break;
+    case 'account notification':scheduler.wakePending();break;
+    case 'cold start':
+     scheduler.dispose();
+     scheduler=makeScheduler();
+     scheduler.foreground(true);
+     await scheduler.start(true);
+     break;
+    case 'approval delivery':scheduler.approvalCompleted();break;
+   }
+   await flush();
+   // Manual policy is guaranteed only by a durable grant or an approval.
+   // Restart discards the two in-memory requests while preserving the record.
+   const manual=work==='durable grant'||wake==='approval delivery'||work==='approval'&&wake!=='cold start';
+   const result={calls,cleared,pending:stored?.token??null};
+   expect(result).toEqual({
+    calls:[{manual,mode:work==='durable grant'?'all':'recent128',scope}],
+    cleared:work==='durable grant'?[grant.token]:[],pending:null,
+   });
+   console.log('wake-matrix '+JSON.stringify({wake,work,failed,...result}));
+  }finally{
+   scheduler.dispose();offPlayback();offPhone();writer?.resolve(false);
+  }
+ });
+}
+
+for(const offset of [-1,0,30000])test('a failed run cannot schedule itself again at a fixed time, retry offset='+offset,async()=>{
+ const clock=new Clock();clock.now=300000;
+ const initial=clock.now,starts:number[]=[];
+ const scheduler=new WatchCloudScheduler({
+  now:()=>clock.now,
+  delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn).catch(()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  mayHavePendingIntent:()=>true,
+  async sync(_manual,_mode,run){
+   run.bindIntent(undefined);
+   starts.push(clock.now);
+   if(starts.length<=8){
+    scheduler.deferUntil(clock.now+offset,'all');
+    scheduler.wakePending();
+   }
+   return false;
+  },
+ },enabled);
+ try{
+  scheduler.foreground(true);await flush();
+  expect(starts).toEqual([initial]);
+  const delay=offset>0?offset:CLOUD_INTERVAL;
+  await clock.advance(delay-1);
+  expect(starts).toEqual([initial]);
+  await clock.advance(1);
+  expect(starts).toEqual([initial,initial+delay]);
+ }finally{scheduler.dispose();}
+});
+
+for(const wake of ['approval delivery','restored manual grant'] as const)test(wake+' respects a future service retry deadline',async()=>{
+ const clock=new Clock(),starts:{at:number;manual:boolean}[]=[];
+ const grant:ManualIntent={version:2,token:'fixture_all',scope:'fixture',mode:'all',createdAt:0,epoch:null};
+ const scheduler=new WatchCloudScheduler({
+  now:()=>clock.now,
+  delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn).catch(()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(manual,_mode,run){
+   starts.push({at:clock.now,manual:manual||run.afterApproval});
+   run.bindIntent(manual?grant:undefined);
+   return true;
+  },
+ },enabled);
+ try{
+  scheduler.deferUntil(30000);
+  scheduler.foreground(true);
+  if(wake==='approval delivery')scheduler.approvalCompleted();
+  else await scheduler.manual(grant.mode,true,grant);
+  await clock.advance(29999);
+  expect(starts).toEqual([]);
+  await clock.advance(1);
+  expect(starts).toEqual([{at:30000,manual:true}]);
+ }finally{scheduler.dispose();}
+});
+
+const retryBoundaryWakes=[
+ 'phone release','playback release','foreground restore','screen restore',
+ 'network','library SQL','local channel','same-account notification','account switch',
+ 'cold start','approval delivery','retry timer','writer settles',
+] as const;
+for(const wake of retryBoundaryWakes)for(const offset of [-1,0,1]){
+ test(`retry boundary: ${wake} / ${offset}ms`,async()=>{
+  const clock=new Clock();clock.now=CLOUD_INTERVAL;
+  const start=clock.now,retryAt=start+offset,starts:number[]=[];
+  const firstResult=deferred<void>();
+  const visibility=new CloudVisibility('active');
+  const phone=new LocalTransferActivity(),playback=new PlaybackWork();
+  let ready=wake!=='account switch';
+  const scheduler=new WatchCloudScheduler({
+   now:()=>clock.now,
+   delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn).catch(()=>{});return ()=>timer.cancel();},
+   scheduleWorker:async()=>{},cancelWorker:async()=>{},
+   prepare:()=>ready,
+   async sync(_manual,_mode,run){
+    run.bindIntent(undefined);
+    starts.push(clock.now);
+    if(starts.length!==1)return true;
+    await firstResult.result;
+    run.publish({ok:false,retryAtMillis:retryAt});
+    scheduler.deferUntil(retryAt);
+    return false;
+   },
+  },enabled);
+  const offPhone=phone.subscribe(held=>scheduler.hold(held));
+  const offPlayback=playback.subscribe(held=>scheduler.hold(held));
+  try{
+   scheduler.foreground(true);
+   if(wake==='cold start')await scheduler.start(true);
+   if(wake==='account switch'){
+    await flush();
+    expect(starts).toEqual([]);
+    ready=true;
+    scheduler.accountChanged();
+   }
+   expect(starts).toEqual([start]);
+   switch(wake){
+    case 'phone release':phone.acquire()();break;
+    case 'playback release':playback.hold()();break;
+    case 'foreground restore':
+     scheduler.foreground(visibility.lifecycle('background'));
+     scheduler.foreground(visibility.lifecycle('active'));
+     break;
+    case 'screen restore':
+     scheduler.foreground(visibility.display({interactive:false,resumed:true}));
+     scheduler.foreground(visibility.display({interactive:true,resumed:true}));
+     break;
+    case 'network':scheduler.trigger('network');break;
+    case 'library SQL':scheduler.trigger('library');break;
+    case 'local channel':scheduler.trigger('channel');break;
+    // The baseline has no scheduler entry for these two events. Its service
+    // deadline still exercises the same time comparison in pump().
+    case 'same-account notification':scheduler.wakePending?.();break;
+    case 'approval delivery':scheduler.approvalCompleted?.();break;
+   }
+   firstResult.resolve();await flush();
+   const immediate=[...starts];
+   await clock.advance(1);
+   const result={wake,offset,immediate,starts};
+   console.log('retry-boundary '+JSON.stringify(result));
+   expect(immediate).toEqual(offset<=0?[start,start]:[start]);
+   expect(starts).toEqual([start,Math.max(start,retryAt)]);
+  }finally{
+   scheduler.dispose();offPhone();offPlayback();firstResult.resolve();
+  }
+ });
+}
