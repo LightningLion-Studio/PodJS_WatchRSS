@@ -33,6 +33,7 @@ export interface BinaryApplicationPorts {
  /** Enabled after the native book pipeline meets its release acceptance gates. */
  b2BooksEnabled?:boolean;
  bookRuntime?():Promise<boolean>;
+ bookExcluded?(kind:'bookState'|'bookReading',limit:'body'|'string'):void;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
  guardedTransaction?:import('./coordinator').BinaryPorts['guardedTransaction'];
@@ -109,7 +110,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   const work=()=>{check();owner?.workUnit();};
   const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work):undefined;
   const fileWork=this.ports.bookWork?.(work),bookFiles=fileWork?.files??this.ports.books;
-  const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work):undefined;
+  const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work,this.ports.bookExcluded):undefined;
   const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined);
   await authorize(()=>this.ports.store.exclusive(async()=>{
    await this.ports.store.collect(scope,async job=>{

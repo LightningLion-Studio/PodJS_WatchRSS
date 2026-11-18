@@ -22,7 +22,8 @@ const finalPath=(bookId:string,sha256:string)=>'books/'+bookId+'-'+sha256+'.json
 
 export class BinaryBooks {
  constructor(private readonly store:BinaryStore,private readonly books:()=>Promise<SqlBookStore|undefined>,
-  private readonly files:BinaryBookFiles,private readonly chunks:VerifiedChunkStore,private readonly work:()=>void){}
+  private readonly files:BinaryBookFiles,private readonly chunks:VerifiedChunkStore,private readonly work:()=>void,
+  private readonly excluded:(kind:'bookState'|'bookReading',limit:BookMetadataRejected['limit'])=>void=()=>{}){}
 
  validate(d:ObjectDescriptor,limits:Limits=HARD_LIMITS){return bookDescription(d,limits);}
 
@@ -86,6 +87,20 @@ export class BinaryBooks {
     return {size,sha256,chunkHashes};
    }finally{await this.files.remove(temp).catch(()=>{});}
   };
+  const checkLocal=async(kind:'bookState'|'bookReading',bytes:number,pieces:()=>AsyncIterable<string>)=>{
+   if(bytes>BOOK_METADATA_BODY_BYTES){this.excluded(kind,'body');return false;}
+   const reader=pieces()[Symbol.asyncIterator]();
+   try{
+    await this.metadataDocument(async()=>{
+     const next=await reader.next();this.work();
+     return {text:next.done?'':next.value,eof:!!next.done,invalidUtf8:false};
+    });
+    return true;
+   }catch(error){
+    if(!(error instanceof BookMetadataRejected))throw error;
+    this.excluded(kind,error.limit);return false;
+   }finally{await reader.return?.();}
+  };
   try{
    let after='';
    for(;;){
@@ -93,8 +108,9 @@ export class BinaryBooks {
      length(state_json) AS chars,length(CAST(state_json AS BLOB)) AS bytes FROM sync_books WHERE book_id>? ORDER BY book_id LIMIT 1`,[after]);
     if(!state)break;
     const bookId=after=String(state.book_id),path=target(bookId,'state'),meta={bookId};
-    const pieces=bookSqlText(this.store.db,'SELECT state_json AS value FROM sync_books WHERE book_id=?',[bookId],Number(state.chars));
-    const stateObject=bookObject('bookState',bookId,meta,[],await saveJson(path,Number(state.bytes),pieces),limits);
+    const pieces=()=>bookSqlText(this.store.db,'SELECT state_json AS value FROM sync_books WHERE book_id=?',[bookId],Number(state.chars));
+    if(!await checkLocal('bookState',Number(state.bytes),pieces))continue;
+    const stateObject=bookObject('bookState',bookId,meta,[],await saveJson(path,Number(state.bytes),pieces()),limits);
     add(stateObject,{path,offset:0});
     if(!state.deleted&&send.has('bookPackageSegment')&&send.has('bookPackageCommit')){
      const pkg=await books.package(bookId);
@@ -127,20 +143,25 @@ export class BinaryBooks {
        FROM sync_book_reading WHERE book_id=? AND chapter_index>? AND chapter_index<=? ORDER BY chapter_index LIMIT 100`,[bookId,last,state.chapter_count]);
       if(!rows.length)break;
       const read:typeof rows=[];
+      const readingLimit=Math.min(BOOK_METADATA_BODY_BYTES,limits.maxObjectBytes),db=this.store.db;
+      const rowPieces=(row:typeof rows[number])=>bookSqlText(db,'SELECT state_json AS value FROM sync_book_reading WHERE book_id=? AND chapter_index=?',
+       [bookId,row.chapter_index],Number(row.chars));
       let size=2;
       for(const row of rows){
-       const bytes=Number(row.bytes)+(read.length?1:0);
-       if(size+bytes>limits.maxObjectBytes){if(!read.length)fail('LIMIT_EXCEEDED');break;}
-       size+=bytes;read.push(row);
+       const bytes=Number(row.bytes),separator=read.length?1:0;
+       if(bytes+2>readingLimit){last=Number(row.chapter_index);this.excluded('bookReading','body');continue;}
+       if(size+bytes+separator>readingLimit)break;
+       last=Number(row.chapter_index);
+       if(!await checkLocal('bookReading',bytes,()=>rowPieces(row)))continue;
+       size+=bytes+separator;read.push(row);
       }
-      last=Number(read.at(-1)!.chapter_index);
-      const path=target(bookId,'reading:'+pageIndex),db=this.store.db;
+      if(!read.length)continue;
+      const path=target(bookId,'reading:'+pageIndex);
       const pieces=async function*(){
        yield '[';
        for(const [index,row] of read.entries()){
         if(index)yield ',';
-        yield*bookSqlText(db,'SELECT state_json AS value FROM sync_book_reading WHERE book_id=? AND chapter_index=?',
-         [bookId,row.chapter_index],Number(row.chars));
+        yield*rowPieces(row);
        }
        yield ']';
       };
@@ -287,13 +308,16 @@ export class BinaryBooks {
  }
  private async payload(d:ObjectDescriptor,path:string):Promise<unknown>{
   // Finalize has already verified the raw size and SHA-256 against the manifest.
-  if(d.size>BOOK_METADATA_BODY_BYTES)throw new BookMetadataRejected();
+  if(d.size>BOOK_METADATA_BODY_BYTES)throw new BookMetadataRejected('body');
   const reader=(await this.files.openText(path,{strictUtf8:true})).id;
   try{
-   return await new BodyJsonReader(async()=>{this.work();return this.files.readTextChunk(reader,16384);},false,true).document(bytes=>{
-    if(bytes>BOOK_METADATA_STRING_BYTES)throw new BookMetadataRejected();
-   });
+   return await this.metadataDocument(async()=>{this.work();return this.files.readTextChunk(reader,16384);});
   }finally{await this.files.closeText(reader).catch(()=>{});}
+ }
+ private metadataDocument(read:ConstructorParameters<typeof BodyJsonReader>[0]){
+  return new BodyJsonReader(read,false,true).document(bytes=>{
+   if(bytes>BOOK_METADATA_STRING_BYTES)throw new BookMetadataRejected('string');
+  });
  }
  private async verify(file:BookFileInfo){
   const actual=await this.files.hash(file.path);this.work();

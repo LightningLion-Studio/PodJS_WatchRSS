@@ -414,3 +414,33 @@ test('unregistered legacy originals keep the books domain on syncBooks',async()=
   await session.pair.close();await session.running.catch(()=>{});
  }finally{await f.dispose();}
 });
+
+test('freeze omits oversized state dependencies and reading rows and repages valid readings',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files,repository}=await attachBinaryBooks(f);
+  await f.store.initialize();
+  const bad=await sampleBook(f,files,512,'excluded book'),good=await sampleBook(f,files,512,'eligible book');
+  await repository.books!.merge({...bad.state,title:'😀'.repeat(65536)+'x'});
+  await repository.books!.merge({...good.state,chapterCount:7});
+  await f.db.execute('UPDATE sync_books SET registration_complete=1,package_path=?,package_sha256=?,package_bytes=? WHERE book_id=?',
+   [bad.path,bad.info.sha256,bad.info.size,bad.state.bookId]);
+  for(let chapter=1;chapter<=7;chapter++){
+   const field=chapter===1?256*1024+1:chapter===2?1024*1024:208*1024;
+   const row={bookId:good.state.bookId,chapterIndex:chapter,isRead:true,readingProgress:1,
+    readingPositionBytes:0,readingPositionChangedAt:27,readingPositionContentHash:'x'.repeat(field),sourceDeviceId:'watch'};
+   await f.db.execute('INSERT INTO sync_book_reading(book_id,chapter_index,state_json,is_read,progress,clock,position,hash,source) VALUES(?,?,?,?,?,?,?,?,?)',
+    [row.bookId,chapter,JSON.stringify(row),1,1,27,0,'','watch']);
+  }
+  const skipped:string[]=[],objects:ObjectDescriptor[]=[];
+  const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{},(kind,limit)=>skipped.push(kind+':'+limit));
+  await books.freeze('test','filtered',HARD_LIMITS,new Set(BOOK_KINDS),d=>objects.push(d),async()=>{});
+  expect(skipped.sort()).toEqual(['bookReading:body','bookReading:string','bookState:string']);
+  expect(objects.map(d=>d.kind)).toEqual(['bookState','bookReading','bookReading']);
+  expect(objects[0]!.businessId).toBe(good.state.bookId);
+  const pages=objects.slice(1);
+  expect(pages.map(d=>JSON.parse(d.metadataUtf8).pageIndex)).toEqual([0,1]);
+  expect(pages.every(d=>d.size<=1024*1024)).toBe(true);
+  expect(pages.every(d=>d.dependsOn[0]===objects[0]!.objectId)).toBe(true);
+ }finally{await f.dispose();}
+},15000);
