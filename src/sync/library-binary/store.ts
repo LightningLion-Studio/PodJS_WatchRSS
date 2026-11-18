@@ -5,7 +5,14 @@ import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot,requestDigest} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
 export type Statement={sql:string;params?:SqlParams};
-export interface ReceiptBoundary {check?():void;transaction?(statements:Statement[]):Promise<void>;before:Statement[];after(outcome:Outcome):Statement[]}
+export interface ReceiptBoundary {
+ check?():void;
+ transaction?(statements:Statement[]):Promise<void>;
+ json?(value:unknown):unknown;
+ sourceOrder?(value:string):unknown;
+ before:Statement[];
+ after(outcome:Outcome):Statement[];
+}
 export type JobState='PLANNING'|'READY'|'TRANSFERRING'|'APPLIED'|'COMPLETE'|'CANCELLED';
 export interface Job {scope:string;jobId:string;planDigest:string;description:BeginPayload;state:JobState;connectionId:string;epoch:number;expiresAt:number;nextPage:number;completion:Completion|null;lease:Row|null;role:'receiver'|'source'}
 const lanes=new WeakMap<SqlDatabase,Promise<unknown>>();
@@ -35,6 +42,7 @@ export class BinaryStore {
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_peaks(scope TEXT NOT NULL,job_id TEXT NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_assets(storage_key TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(storage_key,sha256))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_states(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,state_json TEXT NOT NULL,PRIMARY KEY(scope,job_id,book_id))"},
+   {sql:'CREATE TABLE IF NOT EXISTS library_binary_book_text(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,field INTEGER NOT NULL,ordinal INTEGER NOT NULL,value TEXT NOT NULL,PRIMARY KEY(scope,job_id,object_id,field,ordinal))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_files(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,ready INTEGER NOT NULL,PRIMARY KEY(scope,job_id,object_id))"},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_book_publications(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,PRIMARY KEY(scope,job_id,object_id))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_pages(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,page INTEGER NOT NULL,first_chapter INTEGER NOT NULL,last_chapter INTEGER NOT NULL,PRIMARY KEY(scope,job_id,book_id,page))"},

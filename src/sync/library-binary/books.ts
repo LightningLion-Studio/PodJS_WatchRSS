@@ -1,18 +1,21 @@
 import type {ObjectLease,VerifiedChunkStore,VerifiedObject} from '@podjs/framework/verified-chunk-store';
 import type {SqlBookStore} from '../../books/store';
 import type {BookFileInfo} from '../../books/files';
+import {ContentSha256} from '@podjs/framework/content-sha256';
+
 import {BOOK_MAX_CHAPTERS,validateBookReading,validateBookShape,type BookReading,type BookState} from '../../books/protocol';
 import {libraryRevision} from '../revision';
 import {D} from './digests';
 import {bookDescription,bookObject,BOOK_SEGMENT_BYTES,validateBookPlan} from './book-plan';
+import {BodyJsonReader} from './article-file';
+import {bookSqlText,pagedBookBoundary} from './book-metadata';
 import {importBookPackage,type BinaryBookFiles} from './book-import';
 import type {BinaryStore,Job,ReceiptBoundary} from './store';
-import {CHUNK_BYTES,HARD_LIMITS,fail,hash,strictJson,utf8,type Kind,type Limits,type ObjectDescriptor} from './wire';
+import {CHUNK_BYTES,HARD_LIMITS,fail,hash,utf8,type Kind,type Limits,type ObjectDescriptor} from './wire';
 
 export interface FrozenBookFile {path:string;offset:number}
 const sourcePath=(scope:string,id:string,bookId:string,purpose:string)=>'library-binary/spool/'+D('wrss.library-binary.v2/book-source',[scope,id,bookId,purpose])+'.bin';
 const empty={size:0,sha256:hash(new Uint8Array()),chunkHashes:[]};
-const metadataBytes=1024*1024;
 const jobKey=(job:Job)=>[job.scope,job.jobId];
 const stagingKey=(job:Job,id:string)=>D('wrss.library-binary.v2/book-shadow',[job.scope,job.jobId,id]);
 const finalPath=(bookId:string,sha256:string)=>'books/'+bookId+'-'+sha256+'.jsonl';
@@ -53,34 +56,45 @@ export class BinaryBooks {
    created.add(path);
   };
   const target=(bookId:string,purpose:string)=>sourcePath(scope,id,bookId,purpose);
-  const saveJson=async(path:string,json:string)=>{
-   const data=utf8(json);
-   if(data.length>limits.maxObjectBytes||data.length>metadataBytes)fail('LIMIT_EXCEEDED');
-   await reserve(data.length+4096);await remember(path,data.length);
+  const saveJson=async(path:string,size:number,pieces:AsyncIterable<string>)=>{
+   if(size<1||size>limits.maxObjectBytes)fail('LIMIT_EXCEEDED');
+   await reserve(size+4096);await remember(path,size);
    const temp=(await this.files.createTemp('library-binary/spool')).path;
    try{
-    const sha256=hash(data),chunkHashes:string[]=[];
-    for(let at=0;at<data.length;at+=CHUNK_BYTES){
+    const digest=new ContentSha256(),chunkHashes:string[]=[],block=new Uint8Array(CHUNK_BYTES);
+    let offset=0,length=0;
+    const append=async()=>{
      this.work();
-     const chunk=data.subarray(at,at+CHUNK_BYTES);chunkHashes.push(hash(chunk));
-     const result=await this.files.appendBytes(temp,chunk,at);
-     if(result.size!==at+chunk.length)fail('LOCAL_IO');
+     const chunk=block.subarray(0,length);digest.update(chunk);chunkHashes.push(hash(chunk));
+     const result=await this.files.appendBytes(temp,chunk,offset);
+     offset+=length;length=0;
+     if(result.size!==offset)fail('LOCAL_IO');
+    };
+    for await(const piece of pieces){
+     const data=utf8(piece);
+     if(offset+length+data.length>size)fail('SOURCE_CHANGED');
+     for(let at=0;at<data.length;){
+      const take=Math.min(CHUNK_BYTES-length,data.length-at);
+      block.set(data.subarray(at,at+take),length);length+=take;at+=take;
+      if(length===CHUNK_BYTES)await append();
+     }
     }
-    await this.files.durableCommit(temp,path,data.length,sha256);
-    return {size:data.length,sha256,chunkHashes};
+    if(length)await append();
+    if(offset!==size)fail('SOURCE_CHANGED');
+    const sha256=digest.finish();
+    await this.files.durableCommit(temp,path,size,sha256);
+    return {size,sha256,chunkHashes};
    }finally{await this.files.remove(temp).catch(()=>{});}
   };
   try{
    let after='';
    for(;;){
-    const rows=await this.store.db.query('SELECT book_id,state_json FROM sync_books WHERE book_id>? ORDER BY book_id LIMIT 1',[after]);
-    const r=rows[0];if(!r)break;
-    const bookId=after=String(r.book_id);
-    const json=String(r.state_json),state=strictJson(json,false,200000);
-    validateBookShape(state);
-    if(state.bookId!==bookId)fail('LOCAL_IO');
-    const path=target(bookId,'state'),meta={bookId};
-    const stateObject=bookObject('bookState',bookId,meta,[],await saveJson(path,json),limits);
+    const [state]=await this.store.db.query(`SELECT book_id,chapter_count,fingerprint,json_extract(state_json,'$.deleted') AS deleted,
+     length(state_json) AS chars,length(CAST(state_json AS BLOB)) AS bytes FROM sync_books WHERE book_id>? ORDER BY book_id LIMIT 1`,[after]);
+    if(!state)break;
+    const bookId=after=String(state.book_id),path=target(bookId,'state'),meta={bookId};
+    const pieces=bookSqlText(this.store.db,'SELECT state_json AS value FROM sync_books WHERE book_id=?',[bookId],Number(state.chars));
+    const stateObject=bookObject('bookState',bookId,meta,[],await saveJson(path,Number(state.bytes),pieces),limits);
     add(stateObject,{path,offset:0});
     if(!state.deleted&&send.has('bookPackageSegment')&&send.has('bookPackageCommit')){
      const pkg=await books.package(bookId);
@@ -109,12 +123,28 @@ export class BinaryBooks {
     if(send.has('bookReading')){
      let last=0,pageIndex=0;
      for(;;){
-      const read=await this.store.db.query('SELECT chapter_index,state_json FROM sync_book_reading WHERE book_id=? AND chapter_index>? AND chapter_index<=? ORDER BY chapter_index LIMIT 100',[bookId,last,state.chapterCount]);
-      if(!read.length)break;
+      const rows=await this.store.db.query(`SELECT chapter_index,length(state_json) AS chars,length(CAST(state_json AS BLOB)) AS bytes
+       FROM sync_book_reading WHERE book_id=? AND chapter_index>? AND chapter_index<=? ORDER BY chapter_index LIMIT 100`,[bookId,last,state.chapter_count]);
+      if(!rows.length)break;
+      const read:typeof rows=[];
+      let size=2;
+      for(const row of rows){
+       const bytes=Number(row.bytes)+(read.length?1:0);
+       if(size+bytes>limits.maxObjectBytes){if(!read.length)fail('LIMIT_EXCEEDED');break;}
+       size+=bytes;read.push(row);
+      }
       last=Number(read.at(-1)!.chapter_index);
-      const path=target(bookId,'reading:'+pageIndex);
-      const json='['+read.map(r=>String(r.state_json)).join(',')+']';
-      add(bookObject('bookReading',bookId+':'+pageIndex,{bookId,pageIndex},[stateObject.objectId],await saveJson(path,json),limits),{path,offset:0});
+      const path=target(bookId,'reading:'+pageIndex),db=this.store.db;
+      const pieces=async function*(){
+       yield '[';
+       for(const [index,row] of read.entries()){
+        if(index)yield ',';
+        yield*bookSqlText(db,'SELECT state_json AS value FROM sync_book_reading WHERE book_id=? AND chapter_index=?',
+         [bookId,row.chapter_index],Number(row.chars));
+       }
+       yield ']';
+      };
+      add(bookObject('bookReading',bookId+':'+pageIndex,{bookId,pageIndex},[stateObject.objectId],await saveJson(path,size,pieces()),limits),{path,offset:0});
       pageIndex++;
      }
     }
@@ -137,7 +167,7 @@ export class BinaryBooks {
   validateBookPlan(objects,limits);
   let total=0,maxSegment=0;
   for(const d of objects){
-   if((d.kind==='bookState'||d.kind==='bookReading')&&d.size>metadataBytes)fail('LIMIT_EXCEEDED');
+   if(d.size>limits.maxObjectBytes)fail('LIMIT_EXCEEDED');
    if(d.kind==='bookPackageSegment')maxSegment=Math.max(maxSegment,d.size);
    if(d.kind==='bookPackageCommit'){
     const m=bookDescription(d,limits);
@@ -159,6 +189,7 @@ export class BinaryBooks {
  async apply(job:Job,d:ObjectDescriptor,path:string,boundary:ReceiptBoundary){
   const limits=job.description.selection.limits,book=bookDescription(d,limits),key=jobKey(job);
   const id=book.metadata.bookId;
+  if(d.size>limits.maxObjectBytes)fail('LIMIT_EXCEEDED');
   if(book.kind==='bookPackageSegment'){
    const expected='library-binary/spool/'+stagingKey(job,d.objectId)+'.bin';
    if(path!==expected)fail('OBJECT_CONFLICT');
@@ -170,17 +201,18 @@ export class BinaryBooks {
   }
   const repo=await this.repo();
   if(book.kind==='bookState'){
-   const state=strictJson(await this.payload(d,path),false,200000);
+   const state=await this.payload(path);
    validateBookShape(state);
    if(state.bookId!==id)fail('BUSINESS_REJECTED');
    await repo.capture();
-   await repo.mergeBinaryState(state,boundary,{
-    sql:'INSERT INTO library_binary_book_states VALUES(?,?,?,?)',params:[...key,id,JSON.stringify(state)],
+   const {bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle}=state;
+   await repo.mergeBinaryState(state,pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),{
+    sql:'INSERT INTO library_binary_book_states VALUES(?,?,?,?)',params:[...key,id,JSON.stringify({bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle})],
    });
    return;
   }
   if(book.kind==='bookReading'){
-   const value=strictJson('{"items":'+await this.payload(d,path)+'}',false,200000).items;
+   const value=await this.payload(path);
    if(!Array.isArray(value)||!value.length||value.length>100)fail('BUSINESS_REJECTED');
    const reading:BookReading[]=[];
    for(const item of value){
@@ -195,16 +227,22 @@ export class BinaryBooks {
    const conflict=(await this.store.db.query(`SELECT 1 FROM library_binary_book_pages WHERE scope=? AND job_id=? AND book_id=?
     AND ((page<? AND last_chapter>=?) OR (page>? AND first_chapter<=?)) LIMIT 1`,[...key,id,page,first,page,last])).length;
    if(conflict)fail('BUSINESS_REJECTED');
-   await repo.mergeReadingBatch(reading,{capture:false,boundary,guards:[
+   await repo.mergeReadingBatch(reading,{capture:false,boundary:pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),guards:[
     {sql:'INSERT INTO library_binary_book_pages VALUES(?,?,?,?,?,?)',params:[...key,id,page,first,last]},
     ...reading.map(r=>({sql:'INSERT INTO library_binary_book_chapters VALUES(?,?,?,?)',params:[...key,id,r.chapterIndex]})),
    ]});
    return;
   }
   const m=book.metadata;
-  const staged=(await this.store.db.query('SELECT state_json FROM library_binary_book_states WHERE scope=? AND job_id=? AND book_id=?',[...key,id]))[0];
+  const [staged]=await this.store.db.query(`SELECT json_extract(state_json,'$.bookId') AS bookId,
+   json_extract(state_json,'$.fingerprint') AS fingerprint,json_extract(state_json,'$.chapterCount') AS chapterCount,
+   json_extract(state_json,'$.instanceId') AS instanceId,json_extract(state_json,'$.deleted') AS deleted,
+   json_extract(state_json,'$.lifecycle') AS lifecycle FROM library_binary_book_states WHERE scope=? AND job_id=? AND book_id=?`,[...key,id]);
   if(!staged)fail('JOURNAL_CORRUPT');
-  const state=JSON.parse(String(staged.state_json)) as BookState;
+  const state:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'deleted'|'instanceId'|'lifecycle'>={
+   bookId:String(staged.bookId),fingerprint:String(staged.fingerprint),chapterCount:Number(staged.chapterCount),deleted:!!staged.deleted,
+   instanceId:staged.instanceId===null?undefined:String(staged.instanceId),lifecycle:staged.lifecycle===null?undefined:JSON.parse(String(staged.lifecycle)),
+  };
   if(state.fingerprint!==m.fingerprint||state.deleted)fail('BUSINESS_REJECTED');
   const stagedKey=stagingKey(job,d.objectId),combined='books/part-b2-'+stagedKey+'.bin',published=finalPath(id,m.packageSha256);
   const info={path:combined,size:m.packageBytes,sha256:m.packageSha256};
@@ -241,23 +279,16 @@ export class BinaryBooks {
      boundary.check?.();
      if(info.path!==published)await this.files.durableCommit(info.path,published,info.size,info.sha256);
      return {...info,path:published};
-    },boundary);
+    },pagedBookBoundary(this.store.db,[...key,d.objectId],boundary));
   }finally{
    // The row and file are kept for retry after a failed apply.
    if((await this.store.object(job,d.objectId)).receipt)await this.removeArtifact(job,d.objectId,published).catch(()=>{});
   }
  }
- private async payload(d:ObjectDescriptor,path:string):Promise<string>{
-  if(d.size>metadataBytes)fail('LIMIT_EXCEEDED');
+ private async payload(path:string):Promise<unknown>{
   const reader=(await this.files.openText(path,{strictUtf8:true})).id;
-  let text='';
   try{
-   for(;;){
-    const chunk=await this.files.readTextChunk(reader,16384);this.work();
-    if(chunk.invalidUtf8||text.length+chunk.text.length>metadataBytes||!chunk.text&&!chunk.eof)fail('BUSINESS_REJECTED');
-    text+=chunk.text;
-    if(chunk.eof)return text;
-   }
+   return await new BodyJsonReader(async()=>{this.work();return this.files.readTextChunk(reader,16384);},false,true).document();
   }finally{await this.files.closeText(reader).catch(()=>{});}
  }
  private async verify(file:BookFileInfo){
@@ -299,7 +330,7 @@ export class BinaryBooks {
     await this.removeArtifact(job,id,finalPath(m.metadata.bookId,m.metadata.packageSha256));
    }else await this.removeArtifact(job,id);
   }
-  if(purge)await this.store.db.transaction(['library_binary_book_states','library_binary_book_pages','library_binary_book_chapters'].map(table=>({
+  if(purge)await this.store.db.transaction(['library_binary_book_states','library_binary_book_pages','library_binary_book_chapters','library_binary_book_text'].map(table=>({
    sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:key,
   })));
  }

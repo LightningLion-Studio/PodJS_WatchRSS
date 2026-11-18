@@ -21,7 +21,7 @@ export class BodyJsonReader {
  private input='';
  private at=0;
  private eof=false;
- constructor(private readonly read:()=>Promise<{text:string;eof:boolean;invalidUtf8:boolean}>,private readonly lineMode=false){}
+ constructor(private readonly read:()=>Promise<{text:string;eof:boolean;invalidUtf8:boolean}>,private readonly lineMode=false,private readonly strictDocument=false){}
  private async more(){
   if(this.at<this.input.length)return true;
   if(this.eof)return false;
@@ -32,7 +32,7 @@ export class BodyJsonReader {
  }
  private async peek(){return await this.more()?this.input[this.at]!:'';}
  private async next(){const char=await this.peek();if(!char)fail('BUSINESS_REJECTED');this.at++;return char;}
- private async ws(){while(await this.more()){while(this.at<this.input.length&&(this.lineMode?/^[ \t]$/:whitespace).test(this.input[this.at]!))this.at++;if(this.at<this.input.length)return;}}
+ private async ws(){const allowed=this.lineMode?/^[ \t]$/:this.strictDocument?/^[ \t\r\n]$/:whitespace;while(await this.more()){while(this.at<this.input.length&&allowed.test(this.input[this.at]!))this.at++;if(this.at<this.input.length)return;}}
  private async expect(char:string){await this.ws();if(await this.next()!==char)fail('BUSINESS_REJECTED');}
  private async literal(value:string){for(const char of value)if(await this.next()!==char)fail('BUSINESS_REJECTED');}
  private async string(sink?:TextSink){
@@ -96,6 +96,63 @@ export class BodyJsonReader {
    await this.expect(',');
   }
   this.at++;
+ }
+ async document():Promise<unknown>{
+  let nodes=0;
+  const readString=async()=>{
+   const pieces:string[]=[];
+   let tail='';
+   await this.string(async piece=>{
+    let text=tail+piece;
+    tail=/[\ud800-\udbff]$/.test(text)?text.slice(-1):'';
+    if(tail)text=text.slice(0,-1);
+    if(/[\ud800-\udfff]/u.test(text))fail('BUSINESS_REJECTED');
+    pieces.push(text);
+   });
+   if(tail)fail('BUSINESS_REJECTED');
+   return pieces.join('');
+  };
+  const value=async(depth:number):Promise<unknown>=>{
+   if(depth>16||++nodes>200000)fail('BUSINESS_REJECTED');
+   await this.ws();
+   const ch=await this.peek();
+   if(ch==='"')return readString();
+   if(ch==='t'||ch==='f'||ch==='n'){
+    await this.literal(ch==='t'?'true':ch==='f'?'false':'null');
+    return ch==='n'?null:ch==='t';
+   }
+   if(ch==='{'||ch==='['){
+    this.at++;await this.ws();
+    const object=ch==='{',end=object?'}':']',fields:Record<string,unknown>=Object.create(null),items:unknown[]=[];
+    if(await this.peek()!==end){
+     for(;;){
+      if(object){
+       const key=await readString();
+       if(Object.hasOwn(fields,key))fail('BUSINESS_REJECTED');
+       await this.expect(':');fields[key]=await value(depth+1);
+      }else items.push(await value(depth+1));
+      await this.ws();
+      if(await this.peek()===end)break;
+      await this.expect(',');await this.ws();
+     }
+    }
+    await this.expect(end);
+    return object?fields:items;
+   }
+   const pieces:string[]=[];
+   while(await this.more()){
+    const start=this.at;
+    while(this.at<this.input.length&&/[0-9eE+.-]/.test(this.input[this.at]!))this.at++;
+    pieces.push(this.input.slice(start,this.at));
+    if(this.at<this.input.length)break;
+   }
+   const raw=pieces.join('');
+   if(!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(raw)||!Number.isFinite(Number(raw)))fail('BUSINESS_REJECTED');
+   return Number(raw);
+  };
+  const result=await value(0);
+  await this.ws();if(await this.peek())fail('BUSINESS_REJECTED');
+  return result;
  }
  async line():Promise<string>{
   let line='';

@@ -63,7 +63,7 @@ function normalized(file:TextFile){
 
 /** Stream chapter body fields into files. Only the header and chapter index,
  * title and URL survive a record. The legacy length-prefixed hashes are exact. */
-export async function importBookPackage(files:BinaryBookFiles,info:BookFileInfo,state:BookState,
+export async function importBookPackage(files:BinaryBookFiles,info:BookFileInfo,state:Pick<BookState,'bookId'|'chapterCount'|'fingerprint'|'instanceId'>,
  visit:((header:BookPackageHeader,chapter:StreamedBookChapter)=>Promise<void>)|undefined,check:()=>void):Promise<void>{
  const reader=(await files.openText(info.path,{strictUtf8:true})).id;
  const json=new BodyJsonReader(async()=>{check();return files.readTextChunk(reader,16384);},true);

@@ -18,6 +18,7 @@ import {mergeBook,mergeBookReading,validateBook,validateBookReading,chapterHash,
 import {isBookUrl,bookPackageLines,parseBookChapter,type BookPackageHeader} from './package';
 import type {StreamedBookChapter} from '../sync/library-binary/book-import';
 import type {ReceiptBoundary} from '../sync/library-binary/store';
+import {sameBookJson} from '../sync/library-binary/book-metadata';
 import type {BookFiles,BookFileInfo} from './files';
 type Row=Record<string,unknown>;type Statement={sql:string;params?:SqlParams};
 const str=(v:unknown)=>String(v??''),num=(v:unknown)=>Number(v??0);
@@ -43,16 +44,38 @@ export class SqlBookStore {
 
  private lifecycleStatement(s:BookState):Statement{return {sql:'INSERT INTO sync_book_lifecycle_clock(book_id,started_at) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET started_at=excluded.started_at WHERE started_at IS NOT excluded.started_at',params:[s.bookId,s.lifecycle?.startedAt??0]};}
  private async rows(q:string,p:SqlParams=[]){return querySyncPages(this.db,q,p);}
- private async record(id:string){return (await this.db.query('SELECT * FROM sync_books WHERE book_id=?',[id]))[0];}
+ private async record(id:string){
+  const row=(await this.db.query(`SELECT book_id,fingerprint,chapter_count,package_path,package_bytes,package_sha256,registration_complete,
+   CASE WHEN length(CAST(state_json AS BLOB))<=32768 THEN state_json END AS state_json FROM sync_books WHERE book_id=?`,[id]))[0];
+  if(row&&row.state_json===null)row.state_json=await readSyncSqlText(this.db,'SELECT state_json AS value FROM sync_books WHERE book_id=?',[id]);
+  return row;
+ }
+ private async readReadingStates(rows:Row[]):Promise<BookReading[]>{
+  const states:BookReading[]=[];
+  for(const row of rows){
+   const value=row.state_json??await readSyncSqlText(this.db,'SELECT state_json AS value FROM sync_book_reading WHERE book_id=? AND chapter_index=?',[row.book_id,row.chapter_index]);
+   states.push(JSON.parse(str(value)) as BookReading);
+  }
+  return states;
+ }
  private state(row:Row){return JSON.parse(str(row.state_json)) as BookState;}
- private statement(s:BookState):Statement{return {sql:`INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json) VALUES(?,?,?,?) ON CONFLICT(book_id) DO UPDATE SET state_json=excluded.state_json WHERE state_json IS NOT excluded.state_json`,params:[s.bookId,s.fingerprint,s.chapterCount,canonical(s)]};}
- async states(){await this.capture();return (await this.rows('SELECT * FROM sync_books ORDER BY book_id')).map(r=>this.state(r));}
+ private statement(s:BookState,json:unknown=canonical(s)):Statement{return {sql:`INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json) VALUES(?,?,?,?) ON CONFLICT(book_id) DO UPDATE SET state_json=excluded.state_json WHERE state_json IS NOT excluded.state_json`,params:[s.bookId,s.fingerprint,s.chapterCount,json]};}
+ async states(){
+  await this.capture();
+  const rows=await this.rows('SELECT book_id,CASE WHEN length(CAST(state_json AS BLOB))<=32768 THEN state_json END AS state_json FROM sync_books ORDER BY book_id');
+  const states:BookState[]=[];
+  for(const row of rows){
+   if(row.state_json===null)row.state_json=(await this.record(str(row.book_id)))?.state_json;
+   states.push(this.state(row));
+  }
+  return states;
+ }
  async mappings(){return (await this.rows('SELECT m.* FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1 ORDER BY m.book_id,m.chapter_index,m.article_id')).map(r=>({bookId:str(r.book_id),chapterIndex:num(r.chapter_index),articleId:str(r.article_id),itemId:r.item_id==null?null:num(r.item_id),url:str(r.url)}));}
  async sourceUrls(includeShared=false){return new Set((await this.rows('SELECT DISTINCT m.channel_url FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1 ORDER BY m.channel_url')).map(r=>str(r.channel_url)).filter(url=>includeShared||url!=='https://watchrss.local/import-content'));}
  async chapterIds(){return new Set((await this.mappings()).map(r=>r.articleId));}
  async mapping(articleId:string,url?:string):Promise<BookMapping|undefined>{const rows=await this.rows('SELECT m.* FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE (b.registration_complete=1 OR b.package_path IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_lifecycle_clock l WHERE l.book_id=b.book_id)) AND (m.article_id=? OR (? IS NOT NULL AND m.url=?)) ORDER BY m.book_id,m.chapter_index,m.article_id',[articleId,url??null,url??null]);const exact=rows.filter(r=>r.article_id===articleId),candidates=exact.length?exact:rows;if(new Set(candidates.map(r=>str(r.book_id)+':'+num(r.chapter_index))).size!==1)return;const row=candidates[0]!;return {bookId:str(row.book_id),chapterIndex:num(row.chapter_index),articleId:str(row.article_id),itemId:row.item_id==null?null:num(row.item_id),url:str(row.url)};}
 
- async package(id:string):Promise<BookFileInfo|undefined>{const r=await this.record(id);if(!r?.package_path||!r.package_sha256||num(r.registration_complete)!==1)return;const stat=await this.ports.files.stat(str(r.package_path));if(!stat.exists||stat.size!==num(r.package_bytes))return;return {path:str(r.package_path),size:stat.size,sha256:str(r.package_sha256)};}
+ async package(id:string):Promise<BookFileInfo|undefined>{const r=(await this.db.query('SELECT package_path,package_sha256,package_bytes,registration_complete FROM sync_books WHERE book_id=?',[id]))[0];if(!r?.package_path||!r.package_sha256||num(r.registration_complete)!==1)return;const stat=await this.ports.files.stat(str(r.package_path));if(!stat.exists||stat.size!==num(r.package_bytes))return;return {path:str(r.package_path),size:stat.size,sha256:str(r.package_sha256)};}
  async manifests(){const rows=await this.states(),out=[];for(const s of rows)out.push({...s,contentAvailable:!!await this.package(s.bookId)});return out;}
  private async guarded<T>(action:(revision:number)=>Promise<T>):Promise<T>{for(let attempt=0;attempt<3;attempt++){const revision=await libraryRevision(this.db);try{return await action(revision);}catch(error){if(await libraryRevision(this.db)===revision)throw error;}}throw Error('book_changed_repeatedly');}
  async merge(remote:BookState):Promise<number>{return this.work('book-state-merge',()=>this.mergeValue(remote));}
@@ -74,14 +97,14 @@ export class SqlBookStore {
   const state=await validateBook(remote,this.ports.sha256);
   await this.guarded(async revision=>{
    const previous=await this.record(state.bookId),old=previous?this.state(previous):undefined,next=mergeBook(old,state);
-   const changed=!old||canonical(old)!==canonical(next);
+   const changed=!old||!sameBookJson(old,next);
    const replace=old&&compareLifecycleTokens(next.lifecycle,old.lifecycle)>0;
-   const writes:Statement[]=changed?[this.statement(next),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),
+   const writes:Statement[]=changed?[this.statement(next,boundary.json?.(next)),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),
     ...(replace?[{sql:'DELETE FROM sync_book_delete_members WHERE book_id=?',params:[next.bookId]},
      {sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[next.bookId]}]:[]),
     {sql:"UPDATE channels SET title=? WHERE title IS NOT ? AND url!='https://watchrss.local/import-content' AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[next.title,next.title,next.bookId]},
     {sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]:[];
-   const deletion=await this.deletionStatements(next);
+   const deletion=await this.deletionStatements(next,boundary);
    const outcome=compareLifecycleTokens(old?.lifecycle,state.lifecycle)>0?'retainedLocal':changed?'merged':'alreadyPresent';
    await this.commitBinary(boundary,[revisionGuard(revision),...boundary.before,...writes,...deletion.members,...deletion.effects,
     ...this.displayReceiptStatements(next.bookId),received,...boundary.after(outcome)]);
@@ -102,10 +125,12 @@ export class SqlBookStore {
  private async displayProjection(id:string){return this.rows(`SELECT DISTINCT CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN 'a:'||a.id ELSE 'c:'||c.id END AS key,CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN a.title ELSE c.title END AS title FROM sync_book_aliases m JOIN articles a ON a.id=m.item_id JOIN channels c ON c.id=a.channel_id WHERE m.book_id=? ORDER BY key`,[id]);}
  private async rememberDisplay(id:string){await this.guarded(async revision=>{const dirty=(await this.db.query('SELECT revision FROM sync_book_display_dirty WHERE book_id=?',[id]))[0],projection=canonical(await this.displayProjection(id));await this.db.transaction([revisionGuard(revision),{sql:'INSERT INTO sync_book_display(book_id,projection) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET projection=excluded.projection WHERE projection IS NOT excluded.projection',params:[id,projection]},...(dirty?[{sql:'DELETE FROM sync_book_display_dirty WHERE book_id=? AND revision=?',params:[id,dirty.revision]}]:[])]);});}
  private async captureDisplay(){for(const row of await this.rows('SELECT b.book_id,b.state_json,d.projection FROM sync_books b JOIN sync_book_display_dirty x ON x.book_id=b.book_id LEFT JOIN sync_book_display d ON d.book_id=b.book_id WHERE b.registration_complete=1 ORDER BY b.book_id')){const id=str(row.book_id),now=await this.displayProjection(id),previous=row.projection?JSON.parse(str(row.projection)) as Row[]:undefined;const edits=previous?now.filter(n=>previous.some(o=>o.key===n.key&&o.title!==n.title)):[];if(edits.length){const old=this.state(row),title=str(edits[edits.length-1]!.title);await this.merge({...old,title,updatedAt:Math.max((this.ports.now??Date.now)(),old.updatedAt+1),sourceDeviceId:await this.ports.deviceId()});}else await this.rememberDisplay(id);}}
- private async deletionStatements(s:BookState):Promise<{members:Statement[];effects:Statement[]}>{if(!s.deleted&&!s.deletedChapters.length)return {members:[],effects:[]};const memberStatements:Statement[]=[];for(let at=0;at<s.deletedChapters.length;at+=400){const part=s.deletedChapters.slice(at,at+400);memberStatements.push({sql:'INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) VALUES '+part.map(()=>'(?,?)').join(','),params:part.flatMap(i=>[s.bookId,i])});}
+ private async deletionStatements(s:BookState,boundary?:ReceiptBoundary):Promise<{members:Statement[];effects:Statement[]}>{if(!s.deleted&&!s.deletedChapters.length)return {members:[],effects:[]};const memberStatements:Statement[]=[];
+  if(boundary&&s.deletedChapters.length)memberStatements.push({sql:"INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) SELECT b.book_id,c.value FROM sync_books b,json_each(b.state_json,'$.deletedChapters') c WHERE b.book_id=?",params:[s.bookId]});
+  else for(let at=0;at<s.deletedChapters.length;at+=400){const part=s.deletedChapters.slice(at,at+400);memberStatements.push({sql:'INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) VALUES '+part.map(()=>'(?,?)').join(','),params:part.flatMap(i=>[s.bookId,i])});}
   const selected='m.book_id=? AND (?=1 OR EXISTS(SELECT 1 FROM sync_book_delete_members d WHERE d.book_id=m.book_id AND d.chapter_index=m.chapter_index))',params=[s.bookId,s.deleted?1:0],clock=Math.max(1,s.deletionClock,s.deletedAt),source=s.sourceDeviceId||await this.ports.deviceId();
   const statements:Statement[]=[{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
-   {sql:'INSERT INTO sync_article_deletions(article_id,url,changed_at,source_device_id,source_order) SELECT m.article_id,m.url,?,?,? FROM sync_book_aliases m WHERE '+selected+' AND m.wire_identity=1 ON CONFLICT(article_id) DO UPDATE SET changed_at=max(changed_at,excluded.changed_at),source_device_id=excluded.source_device_id,source_order=excluded.source_order',params:[clock,source,deviceOrder(source),...params]},
+   {sql:'INSERT INTO sync_article_deletions(article_id,url,changed_at,source_device_id,source_order) SELECT m.article_id,m.url,?,?,? FROM sync_book_aliases m WHERE '+selected+' AND m.wire_identity=1 ON CONFLICT(article_id) DO UPDATE SET changed_at=max(changed_at,excluded.changed_at),source_device_id=excluded.source_device_id,source_order=excluded.source_order',params:[clock,source,boundary?.sourceOrder?.(source)??deviceOrder(source),...params]},
    {sql:'DELETE FROM articles WHERE id IN(SELECT m.item_id FROM sync_book_aliases m WHERE '+selected+')',params},
    ...(s.deleted?[{sql:"INSERT INTO sync_source_states(url,source_device_id,title,description,site_url,image_url,created_at,updated_at,sort_order,is_pinned,deleted,deleted_at) SELECT c.url,?,c.title,COALESCE(c.description,''),NULL,c.image_url,c.created_at,?,-c.sort_order,c.is_pinned,1,? FROM channels c WHERE c.url!='https://watchrss.local/import-content' AND c.url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?) ON CONFLICT(url) DO UPDATE SET deleted=1,deleted_at=max(deleted_at,excluded.deleted_at),updated_at=max(updated_at,excluded.updated_at),source_device_id=excluded.source_device_id",params:[source,clock,clock,s.bookId]},
     {sql:"DELETE FROM channels WHERE url!='https://watchrss.local/import-content' AND NOT EXISTS(SELECT 1 FROM articles a WHERE a.channel_id=channels.id) AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[s.bookId]}]:[]),
@@ -188,7 +213,12 @@ export class SqlBookStore {
    });
   }
  }
- async readingStates(capture=true){if(capture)await this.captureReading();const rows=await this.rows('SELECT r.* FROM sync_book_reading r LEFT JOIN sync_books b ON b.book_id=r.book_id WHERE b.book_id IS NULL OR r.chapter_index<=b.chapter_count ORDER BY r.book_id,r.chapter_index');return rows.map(r=>JSON.parse(str(r.state_json)) as BookReading);}
+ async readingStates(capture=true){
+  if(capture)await this.captureReading();
+  const rows=await this.rows(`SELECT r.book_id,r.chapter_index,CASE WHEN length(CAST(r.state_json AS BLOB))<=32768 THEN r.state_json END AS state_json
+   FROM sync_book_reading r LEFT JOIN sync_books b ON b.book_id=r.book_id WHERE b.book_id IS NULL OR r.chapter_index<=b.chapter_count ORDER BY r.book_id,r.chapter_index`);
+  return this.readReadingStates(rows);
+ }
  async mergeReading(remote:BookReading):Promise<number>{return this.mergeReadingBatch([remote]);}
  /** One durable page; clocks are merged before projecting each affected book once. */
  async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
@@ -197,24 +227,38 @@ export class SqlBookStore {
   if(options.capture!==false)await this.captureReading();
   for(let attempt=0;attempt<3;attempt++){const revision=options.expectedRevision??await libraryRevision(this.db);try{
    if(options.expectedRevision!==undefined&&await libraryRevision(this.db)!==revision)throw Error('book_reading_capture_changed');
-   const ids=[...new Set(incoming.map(r=>r.bookId))],books=new Map((await this.rows('SELECT * FROM sync_books WHERE book_id IN('+ids.map(()=>'?').join(',')+')',ids)).map(r=>[str(r.book_id),r]));
-   const clauses=incoming.map(()=>'(book_id=? AND chapter_index=?)').join(' OR '),rows=await this.rows('SELECT state_json FROM sync_book_reading WHERE '+clauses,incoming.flatMap(r=>[r.bookId,r.chapterIndex]));
-   const before=new Map(rows.map(r=>{const state=JSON.parse(str(r.state_json)) as BookReading;return [state.bookId+':'+state.chapterIndex,state] as const;})),merged=new Map(before),affected=new Set<string>();
-   for(const remote of incoming){const book=books.get(remote.bookId);if(book&&remote.chapterIndex>num(book.chapter_count))throw Error('book_chapter_out_of_range');const key=remote.bookId+':'+remote.chapterIndex,old=merged.get(key);if(!old&&!bookInteracted(remote))continue;const next=mergeBookReading(old,remote),state=book?this.state(book):undefined;if(state&&!state.lifecycle&&(state.deleted||state.deletedChapters.includes(next.chapterIndex)))for(const p of ['favorite','watchLater'] as const)if(next[`${p}Saved`]!==undefined)next[`${p}Saved`]=false;merged.set(key,next);}
-   const statements:Statement[]=[];
-   for(const [key,next]of merged){if(canonical(next)===canonical(before.get(key)??null))continue;affected.add(next.bookId);
-    const cols=['book_id','chapter_index','state_json','is_read','progress','clock','position','hash','source',...['favorite','watchLater'].flatMap(p=>[p+'_saved',p+'_clock',p+'_order',p+'_source',p+'_source_order'])],values:(string|number|null)[]=[next.bookId,next.chapterIndex,canonical(next),next.isRead?1:0,Math.fround(next.readingProgress),next.readingPositionChangedAt,next.readingPositionBytes,next.readingPositionContentHash,next.sourceDeviceId];
-    for(const p of ['favorite','watchLater'] as const){const source=next[`${p}SourceDeviceId`]??next.sourceDeviceId;values.push(next[`${p}Saved`]===undefined?null:next[`${p}Saved`]?1:0,next[`${p}ChangedAt`]??null,next[`${p}SortOrder`]??null,next[`${p}Saved`]===undefined?null:source,next[`${p}Saved`]===undefined?null:deviceOrder(source));}
+   const boundary=options.boundary,ids=[...new Set(incoming.map(r=>r.bookId))];
+   const books=new Map((await this.rows(`SELECT book_id,chapter_count,json_extract(state_json,'$.deleted') AS deleted,
+    json_type(state_json,'$.lifecycle')='object' AS lifecycle FROM sync_books WHERE book_id IN (${ids.map(()=>'?').join(',')}) ORDER BY book_id`,ids)).map(row=>[str(row.book_id),row]));
+   const clauses=incoming.map(()=>'(book_id=? AND chapter_index=?)').join(' OR ');
+   const chapters=incoming.flatMap(r=>[r.bookId,r.chapterIndex]);
+   const rows=await this.rows(`SELECT book_id,chapter_index,CASE WHEN length(CAST(state_json AS BLOB))<=32768 THEN state_json END AS state_json
+    FROM sync_book_reading WHERE `+clauses+' ORDER BY book_id,chapter_index',chapters);
+   const deleted=new Set<string>();
+   for(const book of books.values())if(!book.lifecycle&&!book.deleted){
+    const pending=incoming.filter(r=>r.bookId===book.book_id);
+    if(pending.length)for(const row of await this.db.query(`SELECT c.value AS chapter_index FROM sync_books b,json_each(b.state_json,'$.deletedChapters') c
+     WHERE b.book_id=? AND c.value IN (${pending.map(()=>'?').join(',')})`,[book.book_id,...pending.map(r=>r.chapterIndex)]))deleted.add(str(book.book_id)+':'+num(row.chapter_index));
+   }
+   const before=new Map((await this.readReadingStates(rows)).map(state=>[state.bookId+':'+state.chapterIndex,state] as const)),merged=new Map(before);
+   for(const remote of incoming){const book=books.get(remote.bookId);if(book&&remote.chapterIndex>num(book.chapter_count))throw Error('book_chapter_out_of_range');const key=remote.bookId+':'+remote.chapterIndex,old=merged.get(key);if(!old&&!bookInteracted(remote))continue;const next=mergeBookReading(old,remote);if(book&&!book.lifecycle&&(book.deleted||deleted.has(key)))for(const p of ['favorite','watchLater'] as const)if(next[`${p}Saved`]!==undefined)next[`${p}Saved`]=false;merged.set(key,next);}
+   const statements:Statement[]=[],affected=new Map<string,number[]>();
+   for(const [key,next]of merged){
+    const previous=before.get(key);
+    if(boundary?sameBookJson(next,previous):canonical(next)===canonical(previous??null))continue;
+    const indices=affected.get(next.bookId)??[];
+    indices.push(next.chapterIndex);affected.set(next.bookId,indices);
+    const cols=['book_id','chapter_index','state_json','is_read','progress','clock','position','hash','source',...['favorite','watchLater'].flatMap(p=>[p+'_saved',p+'_clock',p+'_order',p+'_source',p+'_source_order'])],values:unknown[]=[next.bookId,next.chapterIndex,boundary?.json?.(next)??canonical(next),next.isRead?1:0,Math.fround(next.readingProgress),next.readingPositionChangedAt,next.readingPositionBytes,next.readingPositionContentHash,next.sourceDeviceId];
+    for(const p of ['favorite','watchLater'] as const){const source=next[`${p}SourceDeviceId`]??next.sourceDeviceId;values.push(next[`${p}Saved`]===undefined?null:next[`${p}Saved`]?1:0,next[`${p}ChangedAt`]??null,next[`${p}SortOrder`]??null,next[`${p}Saved`]===undefined?null:source,next[`${p}Saved`]===undefined?null:boundary?.sourceOrder?.(source)??deviceOrder(source));}
     statements.push({sql:'INSERT INTO sync_book_reading('+cols.join(',')+') VALUES('+cols.map(()=>'?').join(',')+') ON CONFLICT(book_id,chapter_index) DO UPDATE SET '+cols.slice(2).map(c=>c+'=excluded.'+c).join(',')+' WHERE state_json IS NOT excluded.state_json',params:values});
    }
-   const boundary=options.boundary;
    const guards=[...(boundary?.before??[]),...(options.guards??[])];
    if(!affected.size){
     if(boundary)await this.commitBinary(boundary,[revisionGuard(revision),...guards,...boundary.after('alreadyPresent')]);
     else if(guards.length)await this.db.transaction([revisionGuard(revision),...guards]);
     return 0;
    }if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
-   for(const id of affected)statements.push(...this.projectReadingStatements(id,[...merged].filter(([k,v])=>v.bookId===id&&canonical(v)!==canonical(before.get(k)??null)).map(([,v])=>v.chapterIndex)));
+   for(const [id,indices] of affected)statements.push(...this.projectReadingStatements(id,indices));
    if(boundary){
     await this.commitBinary(boundary,[revisionGuard(revision),...guards,...statements,...boundary.after('merged')]);
     return writes;
@@ -272,7 +316,7 @@ export class SqlBookStore {
  }
  /** Import into a job-owned shadow. No package path or chapter is readable
   * until the revision, lifecycle, chapter rows and receipt commit together. */
- async installBinaryPackage(info:BookFileInfo,incoming:BookState,stageKey:string,
+ async installBinaryPackage(info:BookFileInfo,incoming:Pick<BookState,'bookId'|'fingerprint'|'deleted'|'instanceId'|'lifecycle'>,stageKey:string,
   scan:(visit:((header:BookPackageHeader,chapter:StreamedBookChapter)=>Promise<void>)|undefined)=>Promise<void>,
   publish:()=>Promise<BookFileInfo>,boundary:ReceiptBoundary):Promise<void>{
   await this.capture();
@@ -326,24 +370,25 @@ export class SqlBookStore {
    const clock=num((await this.db.query('SELECT max(changed_at) AS clock FROM sync_article_deletions WHERE url=?',[chapter.url]))[0]?.clock);
    if(clock>(current.lifecycle?.startedAt??current.updatedAt)){deletionSet.add(chapterIndex);maxDelete=Math.max(maxDelete,clock);}
    staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    params:[...key,chapterIndex,article,wire,url,channel,single?'导入内容':current.title,chapter.title,chapter.content,chapter.html,chapter.text,deletionSet.has(chapterIndex)?1:0,old?num(old.id):null,chapter.chapterHash]});
-   urls.add(url);stagedBytes+=4*(chapter.title.length+url.length+channel.length+current.title.length)+1024;
+    params:[...key,chapterIndex,article,wire,url,channel,single?'导入内容':'',chapter.title,chapter.content,chapter.html,chapter.text,deletionSet.has(chapterIndex)?1:0,old?num(old.id):null,chapter.chapterHash]});
+   urls.add(url);stagedBytes+=4*(chapter.title.length+url.length+channel.length)+1024;
    if(staged.length>=32||stagedBytes>=262144)await flush();
   });
   await flush();
   const next=mergeBook(current,{...current,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
   boundary.check?.();
-  const published=await publish(),deletion=await this.deletionStatements(next);
+  const published=await publish(),deletion=await this.deletionStatements(next,boundary);
   boundary.check?.();
   await this.commitBinary(boundary,this.packageStatements(next,published,stageKey,revision,null,boundary.before,
-   [...deletion.members,...deletion.effects,...this.displayReceiptStatements(id),...boundary.after('merged')]));
+   [...deletion.members,...deletion.effects,...this.displayReceiptStatements(id),...boundary.after('merged')],boundary));
  }
- private packageStatements(next:BookState,published:BookFileInfo,stagedSha:string,revision:number,binding:string|null,prefix:readonly Statement[]=[],suffix:readonly Statement[]=[]):Statement[]{
+ private packageStatements(next:BookState,published:BookFileInfo,stagedSha:string,revision:number,binding:string|null,prefix:readonly Statement[]=[],suffix:readonly Statement[]=[],boundary?:ReceiptBoundary):Statement[]{
   const id=next.bookId;
   const key=[id,stagedSha],where='s.book_id=? AND s.package_sha256=?',join='FROM sync_book_stage s LEFT JOIN channels ch ON ch.url=s.channel_url LEFT JOIN articles a ON a.id=s.existing_item OR (s.existing_item IS NULL AND a.channel_id=ch.id AND a.dedup_key=s.wire_id)';
-  const ss:Statement[]=[revisionGuard(revision),...prefix,this.statement(next),{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
+  const channelTitle=boundary?"CASE WHEN s.channel_title='导入内容' THEN s.channel_title ELSE (SELECT json_extract(state_json,'$.title') FROM sync_books WHERE book_id=s.book_id) END":'s.channel_title';
+  const ss:Statement[]=[revisionGuard(revision),...prefix,this.statement(next,boundary?.json?.(next)),{sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'},
    {sql:'DELETE FROM articles WHERE id IN(SELECT m.item_id FROM sync_book_aliases m JOIN sync_book_stage s ON s.book_id=m.book_id AND s.chapter_index=m.chapter_index WHERE '+where+' AND s.deleted=1)',params:key},
-   {sql:'INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) SELECT DISTINCT s.channel_url,s.channel_title,1,-1 FROM sync_book_stage s WHERE '+where+' AND s.deleted=0',params:key},
+   {sql:'INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) SELECT DISTINCT s.channel_url,'+channelTitle+',1,-1 FROM sync_book_stage s WHERE '+where+' AND s.deleted=0',params:key},
    {sql:'INSERT OR IGNORE INTO source_preferences(channel_id,use_original_content,read_preset) SELECT DISTINCT ch.id,1,\'default\' FROM sync_book_stage s JOIN channels ch ON ch.url=s.channel_url WHERE '+where+' AND s.deleted=0',params:key},
    {sql:'INSERT OR IGNORE INTO articles(channel_id,title,description,content,link,guid,dedup_key,fetched_at) SELECT ch.id,s.title,\'\',s.content,s.url,s.wire_id,s.wire_id,1 FROM sync_book_stage s JOIN channels ch ON ch.url=s.channel_url WHERE '+where+' AND s.deleted=0 AND s.existing_item IS NULL',params:key},
    {sql:'INSERT OR IGNORE INTO article_sync_content(item_id,content_html,content_text,body_hash,body_bytes,chunk_size,chunk_hashes,content_bytes) SELECT a.id,s.html,s.text,\'\',0,0,\'[]\',0 '+join+' WHERE '+where+' AND s.deleted=0 AND a.id IS NOT NULL',params:key},
