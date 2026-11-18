@@ -1,5 +1,5 @@
 /** C-v1 digest formulas with the frozen B2 domains and field order. */
-import {hash,utf8,integer,selection,capability,snapshot,hex,text,array,exact,sorted,fail,CHUNK_BYTES,binding,type Row,type Selection,type Capability,type Snapshot,type ObjectDescriptor,type BeginPayload,type Binding,type Envelope,type AppliedReceipt,type Outcome,type Completion} from './wire';
+import {hash,utf8,integer,selection,capability,snapshot,hex,text,array,exact,sorted,fail,CHUNK_BYTES,binding,KINDS,type Row,type Selection,type Capability,type Snapshot,type ObjectDescriptor,type BeginPayload,type Binding,type Envelope,type AppliedReceipt,type Outcome,type Completion} from './wire';
 function u32(n:number):Uint8Array{integer(n,0xffffffff);const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n);return b;}
 function join(parts:readonly Uint8Array[]):Uint8Array{const all=new Uint8Array(parts.reduce((n,p)=>n+p.length,0));let at=0;for(const p of parts){all.set(p,at);at+=p.length;}return all;}
 export const lp=(s:string)=>{const b=utf8(s);return join([u32(b.length),b]);};
@@ -12,10 +12,10 @@ export function offerDigest(p:Row,watchCapabilities:Capability,watchSnapshot:Sna
 export function preparationDigest(offer:string,bindings:Binding[]):string{return D('wrss.library-binary.v2/prepare',[offer,String(bindings.length),...bindings.flatMap(b=>[b.direction,b.jobId,b.intent,selectionDigest(b.selection)])]);}
 export function objectId(o:Omit<ObjectDescriptor,'objectId'>):string{return D('wrss.library-binary.v2/object',[o.kind,'1',o.businessId,o.contentVersion,o.encoding,String(o.size),String(o.chunkBytes),o.sha256,String(o.chunkHashes.length),...o.chunkHashes,o.metadataSha256,String(o.dependsOn.length),...o.dependsOn]);}
 export function descriptor(v:unknown,limits:Selection['limits']):ObjectDescriptor{const o=exact(v,['objectId','kind','schemaVersion','businessId','contentVersion','encoding','size','sha256','chunkHashes','metadataUtf8','chunkBytes','metadataSha256','dependsOn']);
- hex(o.objectId);text(o.businessId,2048);text(o.contentVersion,256);integer(o.size,limits.maxObjectBytes);hex(o.sha256);hex(o.metadataSha256);if(o.schemaVersion!==1||!['articleBody','articleMetadata','rssSource','readerMetadata','readerResource','noteAsset'].includes(String(o.kind)))fail('UNSUPPORTED_KIND');
+ hex(o.objectId);text(o.businessId,2048);text(o.contentVersion,256);integer(o.size,limits.maxObjectBytes);hex(o.sha256);hex(o.metadataSha256);if(o.schemaVersion!==1||!KINDS.includes(String(o.kind)))fail('UNSUPPORTED_KIND');
  const hs=array(o.chunkHashes,256).map(h=>hex(h));if(hs.length!==Math.ceil(Number(o.size)/CHUNK_BYTES))fail('OBJECT_CONFLICT');
- const deps=array(o.dependsOn,16).map(h=>hex(h));sorted(deps);if(deps.includes(String(o.objectId)))fail('PLAN_CONFLICT');
- if(o.encoding!==(o.kind==='articleBody'?'article-v14':['readerResource','noteAsset'].includes(String(o.kind))?'raw':'none')||o.encoding==='none'&&Number(o.size)!==0)fail('OBJECT_CONFLICT');
+ const deps=array(o.dependsOn,o.kind==='bookPackageCommit'?33:16).map(h=>hex(h));sorted(deps);if(deps.includes(String(o.objectId)))fail('PLAN_CONFLICT');
+ if(o.encoding!==(o.kind==='articleBody'?'article-v14':['readerResource','noteAsset','bookState','bookPackageSegment','bookReading'].includes(String(o.kind))?'raw':'none')||o.encoding==='none'&&Number(o.size)!==0)fail('OBJECT_CONFLICT');
  const metadata=utf8(text(o.metadataUtf8,limits.maxMetadataBytes));strictJson(String(o.metadataUtf8),false);if(o.chunkBytes!==CHUNK_BYTES)fail('OBJECT_CONFLICT');
  if(hash(metadata)!==o.metadataSha256||Number(o.size)===0&&o.sha256!==hash(new Uint8Array()))fail('HASH_MISMATCH');
  if(objectId(o as unknown as ObjectDescriptor)!==o.objectId)fail('OBJECT_CONFLICT');return o as unknown as ObjectDescriptor;

@@ -1,5 +1,5 @@
 import {ContentSha256} from '@podjs/framework/content-sha256';
-import type {AckFrame,DataHeader,DataReader} from './codec';
+import type {AckFrame,DataHeader,DataReader,InputFileChunk} from './codec';
 import type {ReceiveWindow} from './state';
 import {CHUNK_BYTES,fail,hash,resumeError,type Limits,type ObjectDescriptor,type ResumeError} from './wire';
 
@@ -9,17 +9,20 @@ export interface ChunkWork {
  check():void;
 }
 type BufferedChunk=ChunkWork&{payload:Uint8Array};
-type VerifiedChunk=BufferedChunk&{verifiedAt:number};
+type FileChunk=ChunkWork&{file:InputFileChunk};
+type VerifiedChunk=(BufferedChunk|FileChunk)&{verifiedAt:number};
 type StagedChunk=ChunkWork&{disposition:1|2;verifiedAt:number};
 interface ReceivePorts {
  live():void;
  now():number;
  admission(object:ObjectDescriptor):ResumeError|undefined|Promise<ResumeError|undefined>;
- stage(chunk:BufferedChunk):Promise<1|2>;
+ stage(chunk:BufferedChunk|FileChunk):Promise<1|2>;
  commit(chunks:readonly StagedChunk[],check:()=>void):Promise<void>;
  ack(frame:AckFrame,started:()=>void):void;
  negative(header:DataHeader,error:ResumeError,started:()=>void):void;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};
+ dropFile?(file:InputFileChunk):Promise<void>;
+ applied?(objectId:string):boolean;
  stale():void;
  stop(error:unknown):void;
 }
@@ -63,7 +66,7 @@ export class ReceivePipeline {
   this.pending.set(header.txSeq,header);this.bytes+=header.payloadBytes;
  }
 
- readonly read:DataReader=async(header,read)=>{
+ readonly read:DataReader=async(header,read,readFile)=>{
   if(this.closed){
    // The owner verifies the epoch during a regrant barrier.
    await this.drain(header,read);
@@ -77,8 +80,18 @@ export class ReceivePipeline {
   const denied=await this.ports.admission(valid.object);
   check();
   if(denied){
-   await this.drain(header,read,valid.object.chunkHashes[header.chunkIndex]!);
+   if(valid.object.kind.startsWith('book')&&readFile)await readFile(false,valid.object.chunkHashes[header.chunkIndex]!);
+   else await this.drain(header,read,valid.object.chunkHashes[header.chunkIndex]!);
    check();this.ports.negative(header,denied,()=>this.release(header));return;
+  }
+  if(valid.object.kind.startsWith('book')){
+   if(!readFile)fail('CAPABILITY_MISMATCH');
+   const expected=this.ports.applied?.(valid.object.objectId)?valid.object.chunkHashes[header.chunkIndex]:undefined;
+   const file=await readFile(true,expected);
+   if(!file)fail('LOCAL_IO');
+   try{check();}catch(e){await this.ports.dropFile?.(file);throw e;}
+   this.staging.push({header,object:valid.object,check,file,verifiedAt:this.ports.now()});
+   this.stageNext();return;
   }
   const block=this.pool.pop();
   if(!block)fail('FLOW_CONTROL_VIOLATION');
@@ -117,15 +130,16 @@ export class ReceivePipeline {
   if(this.stageWork||this.closed)return;
   const chunk=this.staging.shift();
   if(!chunk)return;
-  const {header,object,check,payload,verifiedAt}=chunk;
+  const {header,object,check,verifiedAt}=chunk;
   this.stageWork=this.ports.stage(chunk).then(disposition=>{
    check();this.durable.push({header,object,check,disposition,verifiedAt});this.scheduleCommit();
   },e=>{
    if(this.closed)return;
    const error=resumeError(e);
    this.reject(header,error);
-  }).catch(e=>this.failed(e)).finally(()=>{
-   if(!this.closed)this.pool.push(new Uint8Array(payload.buffer));
+  }).catch(e=>this.failed(e)).finally(async()=>{
+   if('file' in chunk)await this.ports.dropFile?.(chunk.file).catch(()=>{});
+   else if(!this.closed)this.pool.push(new Uint8Array(chunk.payload.buffer));
    this.stageWork=undefined;this.stageNext();
   });
  }
@@ -166,8 +180,9 @@ export class ReceivePipeline {
  fence():Promise<unknown>{
   this.closed=true;
   const timer=this.timer;this.timer=undefined;timer?.cancel();
-  this.hashing.length=0;this.staging.length=0;this.durable.length=0;
+  const discarded=this.staging.splice(0).map(chunk=>'file' in chunk?this.ports.dropFile?.(chunk.file).catch(()=>{}):undefined);
+  this.hashing.length=0;this.durable.length=0;
   this.pending.clear();this.bytes=0;this.pool.length=0;
-  return Promise.all([this.stageWork,this.commitWork]);
+  return Promise.all([this.stageWork,this.commitWork,...discarded]);
  }
 }

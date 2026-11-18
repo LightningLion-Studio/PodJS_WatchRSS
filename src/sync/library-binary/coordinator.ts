@@ -3,15 +3,15 @@ import {BinaryConnection} from './connection';
 import {SwitchGate,checkSelectedLimits} from './routing';
 import {Preparation} from './prepare';
 import {Grant,ReceiveWindow,SendWindow,negativeReply,ControlSlots,RetryBackoff,TokenBucket,type JobBinding,type Pending} from './state';
-import type {DataReader,ByteTransport} from './codec';
+import type {DataReader,ByteTransport,SourceFileChunk} from './codec';
 import {ReceivePipeline,type ChunkWork} from './receive-pipeline';
-import {ReceiveBindings,ReceiveIndex} from './receive-index';
+import {ReceiveBindings,ReceiveIndex,bindingCapacity} from './receive-index';
 import type {BinarySourcePlan} from './assets';
 import type {RecoveryRules} from './recovery';
 import {frameBytes} from '../wire-frame-size';
 import {BinaryStore,validateGraph,type Job,type ReceiptBoundary} from './store';
 import {D,preparationDigest,selectionDigest,requestDigest,planDigest,descriptor,pageDigest,objectsRoot,receiptsRoot,completion} from './digests';
-import {ACTION,VERSION,resumeError,ResumeError,fail,exact,row,capability,binding,hex,utf8,hash,type Row,type Capability,type Selection,type Snapshot,type ObjectDescriptor,type BeginPayload,type Binding,type Envelope,type AppliedReceipt,type Completion} from './wire';
+import {ACTION,VERSION,resumeError,ResumeError,fail,exact,row,capability,binding,hex,utf8,hash,type Row,type Capability,type Selection,type Snapshot,type ObjectDescriptor,type BeginPayload,type Binding,type Envelope,type AppliedReceipt,type Completion,BOOK_KINDS} from './wire';
 
 
 export interface BinaryPorts {
@@ -24,7 +24,8 @@ export interface BinaryPorts {
  freeze(peer:Capability):Promise<{witness:Snapshot;inventory:unknown}>;
  source(witness:Snapshot,selection:Selection):Promise<BinarySourcePlan>;
  apply(job:Job,object:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>;
- publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor):Promise<VerifiedPublication>;
+ publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job:Job):Promise<VerifiedPublication>;
+ cleanupCompleted?(job:Job):Promise<void>;
  supportsRange?(p:BeginPayload):Promise<boolean>;
  applied?(kind:ObjectDescriptor['kind']):void;
  reserve(job:Job,objects:readonly ObjectDescriptor[]):Promise<void>;
@@ -82,7 +83,7 @@ export class LibraryBinaryConnection {
  private readonly sourceDescriptions=new Map<string,readonly ObjectDescriptor[]>();
  private stopped=false;
  private closeReason:unknown;private cancelling?:Promise<void>;
- constructor(private readonly ports:BinaryPorts,gate:SwitchGate,io:ByteTransport){
+ constructor(private readonly ports:BinaryPorts,gate:SwitchGate,private readonly io:ByteTransport){
   this.networkAt=ports.now();io.setNetworkProgress?.((kind,stream,epoch,sequence)=>{if(kind==='control'||kind==='data'&&stream===1&&epoch===this.receive?.job.epoch||kind==='ack'&&stream===2&&this.send?.window.acceptsAckProgress(epoch!,sequence!))this.networkAt=ports.now();});
   this.scope=D('wrss.library-binary.v2/storage',[ports.accountScope,ports.phoneDeviceId,ports.watchDeviceId]);
   this.binary=new BinaryConnection(gate,io,new Grant(ports.connectionId,1),ports.now,ports.capability.limits);
@@ -100,7 +101,7 @@ export class LibraryBinaryConnection {
   for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);
   return this.cancelling=Promise.resolve(draining).then(()=>this.ports.store.exclusive(async()=>{for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(j?.state!=='COMPLETE')await this.ports.store.db.execute('INSERT OR REPLACE INTO library_binary_cancellations VALUES(?,?,?,?)',[this.scope,b.jobId,'USER_CANCEL',this.ports.store.now()+86400000]);if(j)await this.ports.store.cancel(j);}await this.cleanupCancelledReceiver();})).finally(()=>this.close(error,true));
  }
- private async cleanupCancelledReceiver(){const receive=this.receive;if(!receive?.job.lease)return;const j=receive.job;try{await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);let released=await this.cleanupApplied(j);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);}catch{released=false;}}if(released)await this.ports.store.db.transaction([this.ports.store.guard(j,true),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}catch{/* Keep the reservation until delayed native collection succeeds. */}}
+ private async cleanupCancelledReceiver(){const receive=this.receive;if(!receive?.job.lease)return;const j=receive.job;try{await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);let released=await this.cleanupApplied(j);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);}catch{released=false;}}if(released&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))await this.ports.store.db.transaction([this.ports.store.guard(j,true),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}catch{/* Keep the reservation until delayed native collection succeeds. */}}
  async run():Promise<void>{
   try{await this.ports.store.exclusive(()=>this.ports.store.openConnection(this.ports.connectionId));this.tick();
    while(!this.stopped){const frame=await this.binary.read(this.readData);this.check();if(!frame)continue;
@@ -224,19 +225,20 @@ export class LibraryBinaryConnection {
   this.regrant={epoch,unsettled:pipeline?.busy??false,work:pipeline?.fence()??Promise.resolve()};
   this.binary.discardReceiveEpoch(epoch);
  }
- private readonly readData:DataReader=async(header,read)=>{
+ private readonly readData:DataReader=async(header,read,readFile)=>{
   const receive=this.receive;
   if(!receive||header.streamId!==1)fail('AUTH_REVOKED');
   if(this.regrant){
    if(!receive.window.granted(header.epoch)||header.epoch>this.regrant.epoch)fail('STALE_EPOCH');
    this.binary.staleAckBudget.take(this.ports.now());
+   if(readFile&&receive.job.description.selection.kinds.some(k=>k.kind.startsWith('book'))){await readFile(false);return;}
    for(let left=header.payloadBytes;left>0;){
     const size=Math.min(left,this.drainBuffer.length);await read(this.drainBuffer.subarray(0,size));left-=size;
    }
    return;
   }
   if(!this.dataReady||!receive.pipeline)fail('FLOW_CONTROL_VIOLATION');
-  await receive.pipeline.read(header,read);
+  await receive.pipeline.read(header,read,readFile);
  };
  private chunkRequest(j:Job,{header,object}:ChunkWork):Envelope{
   return {action:ACTION,version:VERSION,phase:'putChunk',type:'request',jobId:j.jobId,planDigest:j.planDigest,epoch:header.epoch,
@@ -260,6 +262,7 @@ export class LibraryBinaryConnection {
   };
   receive.pipeline=new ReceivePipeline(receive.window,j.description.selection.limits,{
    live:()=>this.check(),now:()=>performance.now(),sleep:ms=>this.ports.sleep(ms),
+   applied:id=>index.isApplied(id),dropFile:file=>this.io.dropFile?.(file)??Promise.resolve(),
    stale:()=>this.binary.staleAckBudget.take(this.ports.now()),stop:e=>{void this.close(e);},
    admission:d=>{
     this.workUnit();
@@ -275,7 +278,7 @@ export class LibraryBinaryConnection {
    // Staging is limited to the native account/connection/epoch lease.
    // The separately queued SQLite commit holds the account mutation lease.
    stage:async chunk=>{
-    const {object:d,header:f,payload}=chunk,r=this.chunkRequest(j,chunk);
+    const {object:d,header:f}=chunk,r=this.chunkRequest(j,chunk);
     const lease=j.lease as unknown as ObjectLease;
     let claimed=false;
     try{
@@ -288,7 +291,9 @@ export class LibraryBinaryConnection {
      if(d.dependsOn.some(id=>!index.isApplied(id)))fail('DEPENDENCIES_PENDING');
      claimed=!this.activeReceive.has(d.objectId);
      this.admit(j,d);
-     await this.ports.chunks.stageReceipt(lease,nativeObject(d),f.chunkIndex,payload,{id:f.requestId,digest:f.requestDigest});
+     const request={id:f.requestId,digest:f.requestDigest};
+     if('file' in chunk)await this.ports.chunks.stageFileReceipt(lease,nativeObject(d),f.chunkIndex,chunk.file,request);
+     else await this.ports.chunks.stageReceipt(lease,nativeObject(d),f.chunkIndex,chunk.payload,request);
      claimed=false; // A late fence must still retire the staged native object.
      chunk.check();requests.remember(r);this.workUnit();return 1;
     }catch(e){
@@ -349,7 +354,10 @@ export class LibraryBinaryConnection {
     try{result=await this.apply(j,r);}finally{this.applying=undefined;}
     break;
    }
-   case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p) as unknown as Row;if(await this.cleanupApplied(j))await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);this.ports.recovery?.confirm('COMPLETE','phoneToWatch:'+j.description.objectsRoot);break;
+   case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p) as unknown as Row;if(await this.cleanupApplied(j)){
+    let clean=true;
+    try{await this.ports.cleanupCompleted?.(j);}catch(e){clean=false;this.ports.diagnostic?.(e);}
+    if(clean)await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}this.ports.recovery?.confirm('COMPLETE','phoneToWatch:'+j.description.objectsRoot);break;
    case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId);if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
    default:fail();
   }
@@ -389,6 +397,8 @@ export class LibraryBinaryConnection {
  private checkSelection(b:Binding,phone:Capability){
   const watch=this.ports.capability;
   for(const k of b.selection.kinds){const w=watch.kinds.find(v=>v.kind===k.kind&&v.schemaVersion===k.schemaVersion),p=phone.kinds.find(v=>v.kind===k.kind&&v.schemaVersion===k.schemaVersion);if(!w||!p||!(b.direction==='phoneToWatch'?w.receive&&p.send:w.send&&p.receive))fail('CAPABILITY_MISMATCH');}
+  if(b.selection.kinds.some(k=>k.kind.startsWith('book'))&&
+    !BOOK_KINDS.every(kind=>b.selection.kinds.some(k=>k.kind===kind)&&[phone,watch].every(c=>c.kinds.some(k=>k.kind===kind&&k.send&&k.receive))))fail('CAPABILITY_MISMATCH');
   checkSelectedLimits(b,phone,watch);
  }
  private async begin(r:Envelope,p:BeginPayload,b:Binding){
@@ -400,9 +410,9 @@ export class LibraryBinaryConnection {
   if(old&&old.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(terminal(old??({state:'READY'} as Job))&&p.intent==='create')fail('JOB_CONFLICT');
   const source=p.phoneSnapshot;if(source.toInclusive!==0&&!await this.ports.supportsRange?.(p))fail('BUSINESS_REJECTED');
-  await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection)});
+  await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection),maxStagingBytes:Math.min(134217728,b.selection.limits.maxStagingBytes)});
   if(this.regrant?.unsettled&&lease.epoch<=this.regrant.epoch)fail('STALE_EPOCH');
-  const requests=await this.restoreReceiveBindings(lease,old);
+  const requests=await this.restoreReceiveBindings(lease,old,b.selection);
   requests.remember(r);
   const job=await this.ports.store.begin(this.scope,r,p,this.ports.connectionId,lease.epoch,lease as unknown as Row);this.begun.add(b.jobId);
   await this.ports.store.db.transaction(this.ports.store.bind(job,this.ports.phoneDeviceId,r));
@@ -429,11 +439,11 @@ export class LibraryBinaryConnection {
   }
   return {result:{disposition:old?'RESUMED':'CREATED',selectionDigest:p.selectionDigest,state:job.state,expiresAtMillis:job.expiresAt,nextManifestPage:job.nextPage,completion:job.completion},epoch:job.epoch};
  }
- private async restoreReceiveBindings(lease:ObjectLease,prior:Job|null):Promise<ReceiveBindings>{
+ private async restoreReceiveBindings(lease:ObjectLease,prior:Job|null,selection:Selection):Promise<ReceiveBindings>{
   // The new native grant fences older writers. A committed file-stage binding
   // can survive a failed business transaction and still owns its request ID.
-  const requests=new ReceiveBindings();
-  if(prior)for(const entry of await this.ports.store.receiveBindings(prior,this.ports.phoneDeviceId))requests.remember(entry);
+  const requests=new ReceiveBindings(bindingCapacity(selection));
+  if(prior)for await(const entry of this.ports.store.receiveBindings(prior,this.ports.phoneDeviceId)){requests.remember(entry);this.workUnit();}
   let after:string|undefined;
   do{
    const page=await this.ports.chunks.requestBindings(lease,after);
@@ -446,7 +456,7 @@ export class LibraryBinaryConnection {
   const {selection,objectCount}=j.description;
   if(objects.length!==objectCount||objects.length>Math.min(512,selection.limits.maxPlanObjects))fail('LIMIT_EXCEEDED');
   const bytes=objects.reduce((size,object)=>size+utf8(JSON.stringify(object)).length,0);
-  if(bytes>Math.min(262144,selection.limits.maxManifestBytes))fail('LIMIT_EXCEEDED');
+  if(bytes>Math.min(selection.kinds.some(k=>k.kind.startsWith('book'))?786432:262144,selection.limits.maxManifestBytes))fail('LIMIT_EXCEEDED');
   return new ReceiveIndex(objects,applied);
  }
  private async verifyRestored(j:Job){
@@ -464,7 +474,7 @@ export class LibraryBinaryConnection {
   if(!j.lease)return true;let released=true;
   for(const o of d?[await this.ports.store.object(j,d.objectId)]:await this.ports.store.objects(j)){
    if(!o.receipt)continue;
-   try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource'].includes(o.descriptor.kind));}catch(e){released=false;this.ports.diagnostic?.(e);}
+   try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource','bookPackageSegment'].includes(o.descriptor.kind));}catch(e){released=false;this.ports.diagnostic?.(e);}
   }return released;
  }
  private async missing(j:Job,p:Row):Promise<Row>{
@@ -494,12 +504,12 @@ export class LibraryBinaryConnection {
  private async apply(j:Job,r:Envelope):Promise<Row>{
   if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await this.ports.store.db.transaction([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
-  const final=await (this.ports.publish?this.ports.publish(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),o.descriptor):this.ports.chunks.finalize(j.lease as unknown as ObjectLease,nativeObject(o.descriptor)));this.check();
+  const final=await (this.ports.publish?this.ports.publish(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),o.descriptor,j):this.ports.chunks.finalize(j.lease as unknown as ObjectLease,nativeObject(o.descriptor)));this.check();
   await this.ports.apply(j,o.descriptor,final.path,this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check()));this.check();
   const saved=await this.ports.store.object(j,o.descriptor.objectId);if(!saved.receipt)fail('RECEIPT_CONFLICT');
   this.receive?.index?.didApply(o.descriptor.objectId);
   // Business commit is authoritative. Cleanup is repeatable and cannot revoke it.
-  try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource'].includes(o.descriptor.kind));}catch{}
+  try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource','bookPackageSegment'].includes(o.descriptor.kind));}catch{}
   this.activeReceive.delete(o.descriptor.objectId);this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);this.ports.applied?.(o.descriptor.kind);return {state:'APPLIED',receipt:saved.receipt};
  }
  private makeRequest(phase:Envelope['phase'],job:string,plan:string,epoch:number|null,payload:Row,stable=true):Envelope{const digest=requestDigest(job,plan,phase,payload),id=stable?D('wrss.library-binary.v2/source-request',[job,digest]).slice(0,32):'';return {action:ACTION,version:VERSION,phase,type:'request',jobId:job,planDigest:plan,epoch,requestId:id,requestDigest:digest,payload};}
@@ -534,8 +544,15 @@ export class LibraryBinaryConnection {
  }
  private async sendChunks(source:BinarySourcePlan,local:Job,objects:readonly {descriptor:ObjectDescriptor;missing:number[][]}[]){
   const send=this.send!,indices=this.chunks(objects,source.objects);
-  let next=indices.next();
-  for(;;){
+  let next=indices.next(),ahead=indices.next();
+  let prefetch:{slot:number;index:number;file:Promise<SourceFileChunk>}|undefined;
+  const readFile=async(d:ObjectDescriptor,index:number)=>{
+   const range=source.range?.(d,index);
+   if(!range||!this.io.prepareFile)fail('CAPABILITY_MISMATCH');
+   this.sourceReading=true;this.workUnit();
+   try{return await this.io.prepareFile(range);}finally{this.sourceReading=false;this.workUnit();}
+  };
+  try{for(;;){
    this.check();
    if(this.dataFailure){
     if(this.dataFailure instanceof ResumeError&&this.dataFailure.wire().recovery==='QUERY'&&send.window.credit.chunks){
@@ -551,10 +568,17 @@ export class LibraryBinaryConnection {
    const {slot,index}=item,d=source.objects[slot]!,length=Math.min(65536,d.size-index*65536);
    if(!send.window.canSend(length)){await this.waitData();continue;}
    if(retry&&retry.due>this.ports.now()){await this.waitData(retry.due-this.ports.now());continue;}
-   let bytes:Uint8Array;
+   let bytes:Uint8Array|SourceFileChunk;
    try{
-    bytes=await this.readSource(source,d,index);
-    if(bytes.length!==length||hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');
+    if(d.kind.startsWith('book')){
+     if(prefetch?.slot===slot&&prefetch.index===index){
+      const file=prefetch.file;prefetch=undefined;bytes=await file;
+     }else bytes=await readFile(d,index);
+     if(bytes.length!==length)fail('SOURCE_CHANGED');
+    }else{
+     bytes=await this.readSource(source,d,index);
+     if(bytes.length!==length||hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');
+    }
    }catch(e){
     this.ports.diagnostic?.(e);const error=resumeError(e);if(error.code!=='SOURCE_CHANGED')throw error;
     await this.request('cancel',local.jobId,local.planDigest,local.epoch,{reason:'SOURCE_CHANGED'});
@@ -563,13 +587,23 @@ export class LibraryBinaryConnection {
    const digest=requestDigest(local.jobId,local.planDigest,'putChunk',{objectId:d.objectId,chunkIndex:index});
    const id=D('wrss.library-binary.v2/source-request',[local.jobId,digest]).slice(0,32);
    let sent=false;
-   await this.binary.writeData(()=>{
+   try{
+    const written=this.binary.writeData(()=>{
     if(this.dataFailure)return null;
     this.check();sent=true;
     return send.window.reserve({objectSlot:slot,chunkIndex:index,requestId:id,requestDigest:digest,payload:bytes});
-   });
-   if(sent){if(retry)this.retries.shift();else next=indices.next();}
-  }
+    });
+    if(!retry&&!prefetch&&!ahead.done){
+     const following=source.objects[ahead.value.slot]!;
+     if(following.kind.startsWith('book')){
+      const file=readFile(following,ahead.value.index);void file.catch(()=>{});
+      prefetch={...ahead.value,file};
+     }
+    }
+    await written;
+   }finally{if(!sent&&!(bytes instanceof Uint8Array))await this.io.dropFile?.(bytes).catch(()=>{});}
+   if(sent){if(retry)this.retries.shift();else {next=ahead;ahead=indices.next();}}
+  }}finally{if(prefetch)await prefetch.file.then(file=>this.io.dropFile?.(file)).catch(()=>{});}
  }
  private async sendSource(b:Binding):Promise<void>{
 

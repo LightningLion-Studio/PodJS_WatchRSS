@@ -26,7 +26,7 @@ class Bytes {
 export function bytePair(){const a=new Bytes(),b=new Bytes();const close=async()=>{a.close();b.close();};const stream=(input:Bytes,output:Bytes):SyncByteStream=>({read:async max=>input.read(max),write:async bytes=>{if(output.closed)throw Error('closed');output.push(bytes);},close});return {phone:stream(a,b),watch:stream(b,a),close};}
 /** Host runtime for product TS, with real fsync files and the same SQLite DB for
  * receipts/business rows. This replaces Android service ports, never B2 logic. */
-export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
+export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fileRefs?:boolean;usableBytes?:number;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
  const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
  const nativeSql=new Database(join(root,'native.sqlite'));
  nativeSql.exec('PRAGMA synchronous=FULL; CREATE TABLE requests(scope TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(scope,id))');
@@ -35,7 +35,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const durable=async(p:string,bytes:Uint8Array)=>{await mkdir(dirname(path(p)),{recursive:true});const f=await open(path(p),'w');try{await f.writeFile(bytes);await f.sync();}finally{await f.close();}};
  const files:BinaryAssetFiles={
   list:async p=>({entries:await readdir(path(p),{withFileTypes:true}).then(es=>Promise.all(es.map(async e=>({path:p+'/'+e.name,file:e.isFile(),size:(await stat(path(p+'/'+e.name))).size})))).catch(()=>[])}),
-  stat:async p=>{try{const s=await stat(path(p));return {file:s.isFile(),size:s.size,usableBytes:2**40};}catch{return {file:false,size:0,usableBytes:2**40};}},
+  stat:async p=>{try{const s=await stat(path(p));return {file:s.isFile(),size:s.size,usableBytes:options.usableBytes??2**40};}catch{return {file:false,size:0,usableBytes:options.usableBytes??2**40};}},
   hash:async p=>{
    const input=await open(path(p),'r'),buffer=Buffer.allocUnsafe(65536),h=createHash('sha256');let size=0;
    try{
@@ -54,10 +54,11 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   commit:async(p,target,size,digest,expected)=>{const h=await files.hash(p);if(h.size!==size||h.sha256!==digest)throw Error('HASH_MISMATCH');const s=await files.stat(target);if(s.file){const old=await files.hash(target);if(old.sha256===digest)return {path:target};if(expected===null||expected!==undefined&&expected!==old.sha256)throw Error('file_target_changed');}await mkdir(dirname(path(target)),{recursive:true});await rename(path(p),path(target));return {path:target};},
   remove:async p=>{await rm(path(p),{force:true});},
  };
+ const refs=new Map<string,Uint8Array>();let readRefs=0,writeRefs=0,maxRefs=0;
  const grants=new Map<string,{connectionId:string;epoch:number;readOnly:boolean}>();let peak=0,stageCalls=0;
  const native=async<T>(method:string,a:Row,bytes?:Uint8Array):Promise<T>=>{
   await options.fault?.(method,a);
-  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,chunkReceipt:true,requestBindings:true,elapsedMillis:Math.floor(performance.now())} as T;
+  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,chunkReceipt:true,requestBindings:true,fileRefs:options.fileRefs===true,elapsedMillis:Math.floor(performance.now())} as T;
   const scope=String(a.scope),prior=grants.get(scope);if(a.operation==='collect'){await rm(path('native/'+scope),{recursive:true,force:true});grants.delete(scope);nativeSql.run('DELETE FROM requests WHERE scope=?',[scope]);return {} as T;}if(a.operation==='acquire'){const epoch=(prior?.epoch??0)+1;grants.set(scope,{connectionId:String(a.connectionId),epoch,readOnly:a.readOnly===true});return {epoch} as T;}
   if(!prior||prior.epoch!==a.epoch||prior.connectionId!==a.connectionId)throw Error('STALE_EPOCH');
   if(a.operation==='check')return {} as T;if(a.operation==='readOnly'){prior.readOnly=true;return {} as T;}
@@ -73,6 +74,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   if(method.endsWith('.release')){await rm(path(dir),{force:true,recursive:true});return {} as T;}
   if(prior.readOnly)throw Error('JOB_CANCELLED');
   if(method.endsWith('.stage')){
+   if(a.fileChunk){const ref=String((a.fileChunk as Row).reference);bytes=refs.get(ref);refs.delete(ref);}
    if(!bytes)throw Error('B2_BASE64_FORBIDDEN');
    const id=String(a.bindingId),digest=String(a.requestDigest),index=Number(a.index);
    const old=nativeSql.query<{digest:string},[string,string]>('SELECT digest FROM requests WHERE scope=? AND id=?').get(scope,id);
@@ -99,8 +101,33 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   const pair=bytePair(),operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
   const radio={status:async()=>({permission:'granted',available:true,enabled:true}),listen:()=>operation({id:'listener'}),accept:()=>operation({id:'stream',remoteName:'host',remoteAddress:'host'}),close:async()=>{}} as unknown as RfcommPorts['radio'];
   const streams={read:()=>{throw Error('B2_BASE64_FORBIDDEN');},write:()=>{throw Error('B2_BASE64_FORBIDDEN');},readBytes:(_id:string,max:number)=>operation(pair.watch.read(max,3000).then(b=>{options.readFault?.();return {eof:b===null,bytes:b??new Uint8Array()};})),writeBytes:(_id:string,b:Uint8Array)=>operation(pair.watch.write(b).then(()=>({written:b.length}))),close:async()=>pair.close()} as unknown as RfcommPorts['streams'];
-  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async r=>({success:true,action:r.action,version:1}),now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
+  if(options.fileRefs){
+   const exactRead=async(size:number)=>{
+    const out=new Uint8Array(size);for(let at=0;at<size;){const bytes=await pair.watch.read(size-at,3000);if(!bytes)throw Error('EOF');out.set(bytes,at);at+=bytes.length;}return out;
+   };
+   const save=(bytes:Uint8Array)=>{const reference=nonce();refs.set(reference,bytes);maxRefs=Math.max(maxRefs,refs.size);return {reference};};
+   streams.readFile=(_id,size,_timeout,retain,sha256)=>operation(exactRead(size).then(bytes=>{
+    readRefs++;
+    if(sha256&&hash(bytes)!==sha256)return {error:'HASH_MISMATCH'};
+    return retain?save(bytes):{};
+   }));
+   streams.prepareFile=(_id,range)=>operation(files.readBytes(range.path,range.offset,range.size).then(({bytes})=>{
+    if(bytes.length!==range.size||hash(bytes)!==range.sha256)throw Error('SOURCE_CHANGED');
+    return save(bytes);
+   }));
+   streams.writeFile=(_id,reference,header)=>operation((async()=>{
+    const bytes=refs.get(reference);refs.delete(reference);
+    if(!bytes)throw Error('SOURCE_CHANGED');
+    await pair.watch.write(header);await pair.watch.write(bytes);writeRefs++;
+    return {written:header.length+bytes.length};
+   })());
+   streams.dropFile=(_id,reference)=>operation((()=>{refs.delete(reference);})());
+  }
+  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async(r,context)=>{
+   if(options.fileRefs&&r.action==='syncBooks'&&ports.library)return (await ports.library.repository()).syncBooks(r,context.session,context.afterAppliedAck);
+   return {success:true,action:r.action,version:1};
+  },now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
  }
 
- return {root,sql,nativeSql,db,files,store,chunks,ports,service,accountScope,session,stats:()=>({stageCalls,peak}),dispose:async()=>{sql.close();nativeSql.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sql,nativeSql,db,files,store,chunks,ports,service,accountScope,session,stats:()=>({stageCalls,peak}),refStats:()=>({readRefs,writeRefs,maxRefs}),dispose:async()=>{sql.close();nativeSql.close();await rm(root,{recursive:true,force:true});}};
 }

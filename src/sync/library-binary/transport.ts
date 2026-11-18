@@ -1,12 +1,19 @@
 import type {SyncByteStream} from '../stream';
-import {decodeDataHeader,frameAllocationBytes,type ByteTransport,type DataReader} from './codec';
+import {decodeDataHeader,frameAllocationBytes,type ByteTransport,type DataReader,type SourceFileRange,type SourceFileChunk,type InputFileChunk} from './codec';
 import {fail} from './wire';
 /** One exact-frame owner after detachStream(). Reads never consume a tail owned
  * by another codec. Native idle deadlines and a 60s frame deadline are separate. */
+export interface FileStream extends SyncByteStream {
+ write(bytes:Uint8Array,timeoutMs?:number):Promise<void>;
+ prepareFile?(range:SourceFileRange):Promise<SourceFileChunk>;
+ readFile?(size:number,timeoutMs:number,retain:boolean,sha256?:string):Promise<InputFileChunk|undefined>;
+ writeFile?(header:Uint8Array,chunk:SourceFileChunk,timeoutMs:number):Promise<void>;
+ dropFile?(reference:string):Promise<void>;
+}
 export class BinaryByteTransport implements ByteTransport {
  private closed=false;private reading=false;private writing=false;
  private networkProgress?: (kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void;
- constructor(private readonly stream:SyncByteStream&{write(bytes:Uint8Array,timeoutMs?:number):Promise<void>},private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
+ constructor(private readonly stream:FileStream,private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
  setNetworkProgress(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void){this.networkProgress=listener;}
  private network(error:unknown):never{const e=error as {code?:string;message?:string};if(e?.code==='host_error'){
   if(/^(Stream operation timed out|.*[Ss]ocket.*timed out)$/.test(e.message??''))throw Error('SocketTimeout');
@@ -36,7 +43,13 @@ export class BinaryByteTransport implements ByteTransport {
       if(!target.length||target.length>left)fail();
       left-=target.length;if(activity)unit();
       await this.into(target,end,activity?unit:undefined);
-     });
+     },this.stream.readFile?async(retain,sha256)=>{
+      if(left!==payload)fail();
+      const deadline=end()-this.now();if(deadline<=0)throw Error('SocketTimeout');
+      left=0;if(retain)unit();
+      const result=await this.stream.readFile!(payload,Math.ceil(Math.min(30000,deadline)),retain,sha256).catch(e=>this.network(e));
+      this.progress?.('read',payload);return result;
+     }:undefined);
      if(left)fail();
      return null;
     }
@@ -57,6 +70,17 @@ export class BinaryByteTransport implements ByteTransport {
    }
    return frame;
   }catch(e){this.close();throw e;}finally{this.reading=false;}
+ }
+ async prepareFile(range:SourceFileRange){
+  if(this.closed||!this.stream.prepareFile)fail('CAPABILITY_MISMATCH');
+  return this.stream.prepareFile(range);
+ }
+ async dropFile(chunk:{reference:string}){await this.stream.dropFile?.(chunk.reference);}
+ async writeFile(header:Uint8Array,chunk:SourceFileChunk){
+  if(this.closed||this.writing||!this.stream.writeFile)fail('AUTH_REVOKED');
+  this.writing=true;
+  try{await this.stream.writeFile(header,chunk,60000).catch(e=>this.network(e));this.progress?.('write',header.length+chunk.length);}
+  catch(e){this.close();throw e;}finally{this.writing=false;}
  }
  async writeFrame(bytes:Uint8Array){
   if(this.closed||this.writing)fail('AUTH_REVOKED');this.writing=true;
