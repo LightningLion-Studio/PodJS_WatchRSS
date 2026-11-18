@@ -286,7 +286,7 @@ export class DouyinClient {
   async fetchFeedPage(input:{cursor?:string|null;count?:number;deferPersistence?:boolean;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>>{
     if(input.background&&this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','后台媒体请求已停止');
     if(input.background)return this.fetchFeedPageInner(input);
-    const key=JSON.stringify([this.authGeneration,input.cursor?.trim()||null,input.count??10]);
+    const key=JSON.stringify([this.authGeneration,input.cursor?.trim()||null,input.count??10,input.deferPersistence===true]);
     let pending=this.feedRequests.get(key);if(!pending){pending=this.fetchFeedPageInner(input);this.feedRequests.set(key,pending);}
     try{return await pending;}finally{if(this.feedRequests.get(key)===pending)this.feedRequests.delete(key);}
   }
@@ -375,7 +375,9 @@ export class DouyinClient {
       // A known expired/rejected CDN URL is refreshed only through feed. Detail
       // remains an explicit caller choice with its own endpoint cooldown.
       if(options.prefetch)return fail('TEMPORARILY_UNAVAILABLE','后台播放地址已过期');
-      const page=await this.fetchFeedPage({count:12});if(!page.ok)return page;
+      // Use the same bounded response and deferred snapshot as a live refill.
+      // A cold playback target should not hold the authorization lane during disk writes.
+      const page=await this.fetchFeedPage({count:12,deferPersistence:processMemoryBudgetBytes()>0});if(!page.ok)return page;
       const refreshed=page.data.items.find(value=>value.awemeId===id&&value.playUrl.trim());
       return refreshed?{ok:true,data:refreshed,source:'feed-cache'}:{...fail<DouyinItem>('TEMPORARILY_UNAVAILABLE','推荐播放地址暂不可用'),retryAfterMs:1500};
     }

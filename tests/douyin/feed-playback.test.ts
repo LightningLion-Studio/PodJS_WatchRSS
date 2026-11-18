@@ -100,6 +100,39 @@ test('pager publishes authorized feed metadata while its queued durable write is
  expect(detailCount(f)).toBe(0);
 });
 
+test('budgeted feed-only source recovery can play while the snapshot write is pending',async()=>{
+ const f=fixture();
+ f.replies.push(response({aweme_list:[wire('recover')]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ const pod=Object.getOwnPropertyDescriptor(globalThis,'pod');
+ Object.defineProperty(globalThis,'pod',{configurable:true,value:{memoryBudgetBytes:()=>128_000_000}});
+ let release!:()=>void,writeStarted!:()=>void;
+ const gate=new Promise<void>(resolve=>release=resolve);
+ const writing=new Promise<void>(resolve=>writeStarted=resolve);
+ const original=f.options.secureStorage.set;
+ f.options.secureStorage.set=async(key,value)=>{
+  if(key.startsWith('douyin.playback-item.v2.')){writeStarted();await gate;}
+  await original(key,value);
+ };
+ f.advance(1);
+ f.replies.push(response({aweme_list:[wire('recover')]}));
+ let result:Awaited<ReturnType<DouyinClient['resolvePlayback']>>|undefined;
+ const recovery=f.client.resolvePlayback(item.awemeId,{forceRefresh:true,allowDetail:false,feedItem:item}).then(value=>result=value);
+ try{
+  await writing;
+  await new Promise(resolve=>setTimeout(resolve,0));
+  expect(result).toMatchObject({ok:true,source:'feed-cache'});
+  expect(new NodeURL(f.requests.at(-1)!.url).searchParams.get('count')).toBe('5');
+  expect(detailCount(f)).toBe(0);
+ }finally{
+  release();
+  await recovery;
+  await f.client.restorePlaybackQueue();
+  if(pod)Object.defineProperty(globalThis,'pod',pod);else Reflect.deleteProperty(globalThis,'pod');
+ }
+});
+
 test('RELOAD forced detail resolution does not join an older unforced request',async()=>{
  const f=fixture();let release!:(v:HttpResponse)=>void;
  f.replies.push(new Promise<HttpResponse>(yes=>release=yes),response({aweme_detail:{...wire('same'),video:{play_addr:{url_list:['https://fixture.invalid/fresh']}}}}));
