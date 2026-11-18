@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {attachBinaryBooks,sampleBook} from '../helpers/library-binary-books';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
@@ -207,7 +208,12 @@ test('book cancellation preserves hidden segment and never publishes a readable 
  }finally{await f.dispose();}
 },10000);
 
-test('the release-default books gate keeps syncBooks available when inherited B2 kinds are enabled',async()=>{
+test('the foreground factory applies the release B2 switch to books',()=>{
+ const source=readFileSync(new URL('../../src/sync/application-host.ts',import.meta.url),'utf8');
+ expect(source).toMatch(/new BinaryApplicationService\(\{[^\n]*\bb2BooksEnabled:RELEASE_B2_ENABLED\b/);
+});
+
+test('the books gate keeps syncBooks available when opted out independently',async()=>{
  const f=await binaryRuntime({fileRefs:true});
  try{
   delete f.ports.b2BooksEnabled;
