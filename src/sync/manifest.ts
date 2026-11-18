@@ -7,16 +7,20 @@ export interface ArticleManifest {
  bodyHash:string;bodyByteCount:number;chunkSize:number;chunkHashes:readonly string[];metadataHash:string;bodyAvailable:boolean;bodySyncMode:string;
  readingProgress:number;readingPositionBytes:number;readingPositionContentHash:string;readingPositionChangedAt:number;isRead:boolean;
 }
-export function parseArticleManifest(frame:JsonObject):ArticleManifest[]{
- if(!Array.isArray(frame.articleManifest))return [];
- const out:ArticleManifest[]=[];
- for(const raw of frame.articleManifest){const v=object(raw);if(!v)continue;const articleId=trim(string(v.articleId));if(!articleId)continue;
+const projectedManifestRows=new WeakMap<JsonObject,ArticleManifest[]>();
+export function attachProjectedManifestRows(frame:JsonObject,rows:ArticleManifest[]){projectedManifestRows.set(frame,rows);}
+export function projectedManifestRowsOf(frame:JsonObject){return projectedManifestRows.get(frame);}
+export function parseArticleManifestRow(raw:unknown):ArticleManifest|undefined {
+ const v=object(raw);if(!v)return undefined;const articleId=trim(string(v.articleId));if(!articleId)return undefined;
   const rawHashes=Array.isArray(v.chunkHashes)?v.chunkHashes:[],hashes=rawHashes.map(h=>{if(typeof h!=="string"||!trim(h))throw new Error("invalid manifest chunk hash");return trim(h);});
   const progress=typeof v.readingProgress==="number"||typeof v.readingProgress==="string"?Number(v.readingProgress):0,deletedAt=optLong(v.deletedAt);
-  out.push({articleId,...(v.legacyArticleIds===undefined?{}:{legacyArticleIds:parseLegacyArticleIds(v.legacyArticleIds)}),sourceDeviceId:trim(string(v.sourceDeviceId)),contentHash:trim(string(v.contentHash)),updatedAt:optLong(v.updatedAt),independentChangedAt:optLong(v.independentChangedAt),favoriteChangedAt:optLong(v.favoriteChangedAt),watchLaterChangedAt:optLong(v.watchLaterChangedAt),deletedAt,deleted:bool(v.deleted,deletedAt>0),
+  return {articleId,...(v.legacyArticleIds===undefined?{}:{legacyArticleIds:parseLegacyArticleIds(v.legacyArticleIds)}),sourceDeviceId:trim(string(v.sourceDeviceId)),contentHash:trim(string(v.contentHash)),updatedAt:optLong(v.updatedAt),independentChangedAt:optLong(v.independentChangedAt),favoriteChangedAt:optLong(v.favoriteChangedAt),watchLaterChangedAt:optLong(v.watchLaterChangedAt),deletedAt,deleted:bool(v.deleted,deletedAt>0),
    bodyHash:trim(string(v.bodyHash)),bodyByteCount:strictInteger(v,"bodyByteCount",-1,Number.MIN_SAFE_INTEGER,Number.MAX_SAFE_INTEGER),chunkSize:strictInteger(v,"chunkSize",-1,-2147483648,2147483647),chunkHashes:hashes,metadataHash:trim(string(v.metadataHash)),bodyAvailable:bool(v.bodyAvailable,true),bodySyncMode:trim(string(v.bodySyncMode))||"full",
-   readingProgress:Number.isFinite(progress)?Math.fround(Math.max(0,Math.min(1,progress))):0,readingPositionBytes:Math.max(0,optLong(v.readingPositionBytes)),readingPositionContentHash:trim(string(v.readingPositionContentHash)),readingPositionChangedAt:Math.max(0,optLong(v.readingPositionChangedAt)),isRead:bool(v.isRead)});
- }assertUniqueArticleAliases(out);return out;
+   readingProgress:Number.isFinite(progress)?Math.fround(Math.max(0,Math.min(1,progress))):0,readingPositionBytes:Math.max(0,optLong(v.readingPositionBytes)),readingPositionContentHash:trim(string(v.readingPositionContentHash)),readingPositionChangedAt:Math.max(0,optLong(v.readingPositionChangedAt)),isRead:bool(v.isRead)};
+}
+export function parseArticleManifest(frame:JsonObject):ArticleManifest[]{
+ const out=projectedManifestRowsOf(frame)??(Array.isArray(frame.articleManifest)?frame.articleManifest.flatMap(raw=>{const row=parseArticleManifestRow(raw);return row?[row]:[];}):[]);
+ assertUniqueArticleAliases(out);return out;
 }
 function equalHashes(a:readonly string[],b:readonly string[]):boolean{return a.length===b.length&&a.every((h,i)=>h===b[i]);}
 export function canReuseLocalBody(local:ArticleManifest|undefined,remote:ArticleManifest):boolean{return !!local&&!local.deleted&&local.bodyAvailable&&remote.bodyAvailable&&!!trim(local.bodyHash)&&local.bodyHash===remote.bodyHash&&local.bodyByteCount===remote.bodyByteCount&&local.chunkSize>0&&local.chunkSize===remote.chunkSize&&local.chunkHashes.length>0&&equalHashes(local.chunkHashes,remote.chunkHashes);}

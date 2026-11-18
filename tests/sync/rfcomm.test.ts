@@ -57,10 +57,18 @@ test('B2 handoff uses the returned host handle and honors a racing close',async(
  const f=setup(),handles:string[]=[];
  f.ports.streams.claim=id=>{handles.push(id);return operation({id:'new-owner'});};
  f.ports.streams.read=id=>{handles.push(id);return operation({eof:true,dataBase64:''});};
+ const spools:unknown[][]=[];
+ f.ports.streams.spool=(id,size,timeout,idle)=>{
+  spools.push([id,size,timeout,idle]);
+  return operation({path:'fixture',size});
+ };
  const stream=new HostSyncByteStream('original',f.ports.streams);
+ expect(await stream.spool!(64,30.5,20)).toEqual({path:'fixture',size:64});
  await stream.claimBinary();
+ expect(await stream.spool!(32,10,5)).toEqual({path:'fixture',size:32});
  expect(await stream.read(1,10)).toBeNull();
  await stream.close();
+ expect(spools).toEqual([['original',64,30,20],['new-owner',32,10,5]]);
  expect(handles).toEqual(['original','new-owner']);
  expect(f.closed.has('new-owner')).toBe(true);
  let finish!:(v:{id:string})=>void;

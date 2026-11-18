@@ -7,10 +7,17 @@ import {fail} from './library-binary/wire';
 import {LibrarySyncSession,type LibrarySessionRepository,type LibrarySessionOptions,type SessionActionResult} from './session.ts';
 export const WATCH_RSS_RFCOMM_NAME='WatchRSS Bluetooth Sync';
 export const WATCH_RSS_RFCOMM_UUID='bb2f0b7d-8f2f-4a96-95b2-d2c91d58a861';
-export interface RfcommPorts {framed?:typeof framedStreams;radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'claim'|'readBytes'|'writeBytes'|'prepareFile'|'readFile'|'writeFile'|'dropFile'>>}
+export interface RfcommPorts {framed?:typeof framedStreams;radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'claim'|'spool'|'readBytes'|'writeBytes'|'prepareFile'|'readFile'|'writeFile'|'dropFile'>>}
 export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
- constructor(private id:string,private readonly ports:RfcommPorts['streams'],private readonly framed?:typeof framedStreams){}
+ readonly spool?:SyncByteStream['spool'];
+ constructor(private id:string,private readonly ports:RfcommPorts['streams'],private readonly framed?:typeof framedStreams){
+  const spool=ports.spool;
+  if(spool)this.spool=(size,timeout,idle)=>{
+   if(this.closed)throw new Error('Bluetooth stream closed');
+   return spool(this.id,size,Math.max(1,Math.floor(timeout)),idle).result;
+  };
+ }
  async openFramed(){
   if(!this.framed)return undefined;
   const id=this.id,host=this.framed;
@@ -34,8 +41,15 @@ export class HostSyncByteStream implements SyncByteStream {
   if(this.closed)fail('AUTH_REVOKED');
   this.id=id;
  }
- async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
- async write(bytes:Uint8Array,timeoutMs=120000){if(this.closed)throw new Error('Bluetooth stream closed');const result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,timeoutMs).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
+ async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes&&!this.spool?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
+ async write(bytes:Uint8Array,timeoutMs=120000){if(this.closed)throw new Error('Bluetooth stream closed');let result;
+  try{result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,timeoutMs).result;}
+  catch(error){
+   // Outbound bridge admission happens before host IO. Only that failure
+   // permits the same bytes to be sent through the small inline path.
+   if(!(error instanceof Error)||error.message!=='Byte bridge full'||(error as {code?:string}).code!=='busy')throw error;
+   result=await this.ports.write(this.id,bytes,timeoutMs).result;
+  }if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
  async prepareFile(range:SourceFileRange){
   if(this.closed||!this.ports.prepareFile)fail('AUTH_REVOKED');
   const {reference}=await this.ports.prepareFile(this.id,range).result;

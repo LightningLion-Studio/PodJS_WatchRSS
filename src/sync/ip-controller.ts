@@ -112,6 +112,7 @@ export class IpSyncController {
    // Each nonpersistent action completes a session but retains this WebSocket.
    // This owner always closes the underlying transport on cancellation/failure.
    let readDeadline:ProgressDeadline|undefined;
+   route.connection.setNativeReadStarted(()=>readDeadline?.stop());
    route.connection.setReadBytesComplete(()=>{readDeadline?.stop();if(this.waitingRoute===route)this.waitingRoute=undefined;});
    const connection={setFrameTiming:route.connection.setFrameTiming.bind(route.connection),setTransferProgress:(listener:Parameters<typeof route.connection.setTransferProgress>[0])=>route.connection.setTransferProgress(progress=>{if(this.route===route&&progress.bytes>0){this.lastIoAt=this.now();if(progress.direction==='read'){readDeadline?.progress(progress.bytes);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}}}listener?.(progress);}),readFrame:async(timeout:number)=>{
     const deadline=new ProgressDeadline(ms=>this.ports.delay(ms),Math.min(timeout,90000),20000,this.now,()=>{appLogger.w('WatchRSS_IpSync','IP receive idle deadline; closing route');void route.connection.close().catch(()=>{});});readDeadline=deadline;this.waitingRoute=route;const cancelRead=()=>deadline.cancel();this.cancelRead=cancelRead;

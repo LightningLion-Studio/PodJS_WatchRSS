@@ -2,7 +2,7 @@ import {androidJsonQuotedByteLength} from '@podjs/framework/json-string';
 import {ACTION_SYNC_LIBRARY,PROTOCOL_VERSION,MAX_FRAME_BYTES,encodeChunkData,type JsonObject} from './protocol.ts';
 import {wireFields,parseBodyRequests,type RequestedArticleBody} from './article-batches.ts';
 import {bodyForRequest,type PreparedArticle} from './article-export.ts';
-import type {ArticleManifest} from './manifest.ts';
+import {attachProjectedManifestRows,parseArticleManifest,projectedManifestRowsOf,type ArticleManifest} from './manifest.ts';
 const {object,string,bool,optLong,trim}=wireFields;
 export interface SyncCursor {localMaxSeq:number;lastRemoteSeqApplied:number;lastLocalSeqAckedByPeer:number}
 export interface ChangeSequence {fromSeqExclusive:number;toSeqInclusive:number;fullSnapshot:boolean;fallbackReason:string}
@@ -74,12 +74,16 @@ export function manifestBatchCount(frame:JsonObject):number {return Math.max(1,o
 export function combineManifestFrames(frames:readonly JsonObject[]):JsonObject {
  if(!frames.length)throw new Error('Empty manifest batches');const first=frames[0]!,count=manifestBatchCount(first);
  if(count>512||frames.length!==count)throw new Error('Incomplete manifest batches');if(count===1)return first;
+ const projected=frames.some(f=>projectedManifestRowsOf(f)!==undefined);
  const arrays:Record<string,JsonObject[]>={articleManifest:[],bodyRequests:[],rssSources:[]};
  frames.forEach((f,i)=>{if(optLong(f.manifestBatchIndex,-1)!==i||manifestBatchCount(f)!==count||string(f.phase)!=='manifest'||optLong(f.version,14)!==optLong(first.version,14)||string(f.deviceId)!==string(first.deviceId))throw new Error('Manifest batch identity/order mismatch');
-  for(const name of manifestFields)for(const item of Array.isArray(f[name])?f[name] as unknown[]:[]){const o=object(item);if(o)arrays[name]!.push(o);}
+  for(const name of manifestFields)if(name!=='articleManifest'||!projected)for(const item of Array.isArray(f[name])?f[name] as unknown[]:[]){const o=object(item);if(o)arrays[name]!.push(o);}
  });
  const combined={...first};for(const name of manifestFields)if(name in combined||arrays[name]!.length)combined[name]=arrays[name];
- delete combined.manifestBatchIndex;delete combined.manifestBatchCount;combined.manifestTotalArticles=arrays.articleManifest!.length;return combined;
+ delete combined.manifestBatchIndex;delete combined.manifestBatchCount;
+ if(projected){const rows=frames.flatMap(parseArticleManifest);attachProjectedManifestRows(combined,rows);combined.manifestTotalArticles=rows.length;}
+ else combined.manifestTotalArticles=arrays.articleManifest!.length;
+ return combined;
 }
 export function buildManifestFrames(payload:JsonObject):JsonObject[]{
  if(payload.phase!=='manifest')throw new Error('Only manifest messages can use manifest batches');const base:JsonObject={...payload,supportsManifestBatches:true};if(nativeJsonSize(base)<=MAX_FRAME_BYTES)return [base];
