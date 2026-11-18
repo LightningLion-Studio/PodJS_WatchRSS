@@ -21,7 +21,7 @@ import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems, normalizeItemsInTurns, type RecentFeed } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
 import {withoutDouyinSource} from "./playback-ingress.ts";
-import { parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
+import { douyinFeedSelection, mapProjectedDouyinFeed, parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
 import type { DouyinClientOptions, DouyinErrorCode, DouyinContent, DouyinFeedPage, DouyinHistoryEntry, DouyinInteraction, DouyinItem, DouyinResult, DouyinSavedKind, DouyinSigner } from "./types.ts";
@@ -38,6 +38,7 @@ const BUDGETED_REFILL_ITEMS=5;
 export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
+type DouyinWireBody=string|Record<string,unknown>;
 export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
 export interface DouyinPlaybackOptions {/** A reload owns a new request even if an abandoned resolution is still pending. */freshRequest?:boolean;forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
 export class DouyinClient {
@@ -57,7 +58,7 @@ export class DouyinClient {
   private cookieApplication?:{generation:number;result:Promise<DouyinResult<void>>};
   private cookieWrites:Promise<unknown>=Promise.resolve();
   private policy?:{generation:number;cookie:string;value:Douyin403Policy};
-  private readonly forbiddenRequests=new Map<string,Promise<DouyinResult<string>>>();
+  private readonly forbiddenRequests=new Map<string,Promise<DouyinResult<DouyinWireBody>>>();
   private expiry?:{generation:number;result:Promise<DouyinResult<never>>};
   private enqueueCookie<T>(work:()=>Promise<T>):Promise<T>{const next=this.cookieWrites.catch(()=>{}).then(work);this.cookieWrites=next;return next;}
   private async currentAuth(cookie:string,generation:number){return generation===this.authGeneration&&await this.readCookie()===cookie&&generation===this.authGeneration;}
@@ -169,7 +170,7 @@ export class DouyinClient {
     });
   }
   async buildPlaybackHeaders():Promise<Record<string,string>>{return {...DOUYIN_PUBLIC_MEDIA_HEADERS};}
-  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime,stage?:(value:FeedStage)=>void):Promise<DouyinResult<string>> {
+  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime,stage?:(value:FeedStage)=>void):Promise<DouyinResult<DouyinWireBody>> {
     const requestStarted=Date.now(),elapsed=(start:number)=>Math.min(600000,Math.max(0,Date.now()-start));
     stage?.('auth_queue');
     await this.cookieWrites.catch(()=>{});
@@ -183,7 +184,7 @@ export class DouyinClient {
     const policy=this.recoveryPolicy(cookie,generation);
     if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
-    const attempt=async():Promise<DouyinResult<string>|{forbidden:true}>=>{
+    const attempt=async():Promise<DouyinResult<DouyinWireBody>|{forbidden:true}>=>{
       if(background&&!background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));
       const observed:Parameters<typeof douyinRequestDiagnostic>[0]={request_queue_ms:elapsed(requestStarted),request_sign_ms:0,request_transport_ms:0,request_text_ms:0,request_status_ms:0,response_bytes:0,category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:0,error_code:'cancelled'};
       try {
@@ -205,19 +206,39 @@ export class DouyinClient {
         const transportStarted=Date.now();
         stage?.('request_io');
         const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
-          background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
-        observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,r.body.length);
+          background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{}),
+          ...(api==='feed'?{fileProjection:{selection:douyinFeedSelection,tokens:['blocked']}}:{})});
+        observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,r.fileProjection?.size??r.body.length);
         observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
         decodingResponse=true;
-        stage?.('request_decode');
-        const textStarted=Date.now();const detailBody=await decodeMediaText(r.body);observed.request_text_ms=elapsed(textStarted);
+        let body:DouyinWireBody;
+        const projection=r.fileProjection?.value;
+        const textStarted=Date.now();
+        if(projection){
+          stage?.('request_file_projection');
+          switch(projection.kind){
+            case 'object': body=JSON.parse(projection.json) as Record<string,unknown>;break;
+            case 'html': body='<html>';break;
+            case 'empty': body='';break;
+            case 'token': body=projection.index===0?'blocked':'';break;
+            default:
+              if(r.status===200){observed.error_code='decode';return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
+              body='';
+          }
+        }else{
+          stage?.('request_decode');
+          body=await decodeMediaText(r.body);
+        }
+        observed.request_text_ms=elapsed(textStarted);
         stage?.('request_status');
-        const statusStarted=Date.now();const detailStatusCode=await readDouyinStatusCode(detailBody);observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
+        const statusStarted=Date.now();
+        const detailStatusCode=typeof body==='string'?(projection?undefined:await readDouyinStatusCode(body)):typeof body.status_code==='number'?body.status_code:undefined;
+        observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
         decodingResponse=false;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(isDouyinHtmlChallenge(detailBody)){observed.challenge=true;observed.error_code='challenge';
+        if(typeof body==='string'&&isDouyinHtmlChallenge(body)){observed.challenge=true;observed.error_code='challenge';
           appLogger.w('DouyinDetail',JSON.stringify({event:'challenge',api:'detail',count:1,mode:'abogus_only'}));
           const decision=await policy?.challenge(api);
           if(!await this.currentAuth(cookie,generation)||decision?.kind==='cancelled')return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -225,9 +246,8 @@ export class DouyinClient {
         }
         if(r.status===403){observed.error_code='forbidden';appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         if(r.status!==200){observed.error_code='http';appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
-        const body=detailBody??await decodeMediaText(r.body);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(!body.trim()||body==='blocked'){observed.error_code=body==='blocked'?'blocked':'empty';
+        if(typeof body==='string'&&(!body.trim()||body==='blocked')){observed.error_code=body==='blocked'?'blocked':'empty';
           appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=${body==='blocked'?'blocked':'empty'}`);
           return this.authDecision(policy,cookie,generation,api);
         }
@@ -253,7 +273,7 @@ export class DouyinClient {
     if(!this.recoveryEnabled())return this.authDecision(policy,cookie,generation,api);
     const key=JSON.stringify([generation,method,path,params]),existing=this.forbiddenRequests.get(key);if(existing)return existing;
     if(this.forbiddenRequests.size>=4)return {...fail<string>('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:1500};
-    const pending=(async():Promise<DouyinResult<string>>=>{
+    const pending=(async():Promise<DouyinResult<DouyinWireBody>>=>{
       try{await policy.backoff(api);}catch{return fail('CANCELLED',formatDouyinError('CANCELLED'));}
       if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
       const limited=await policy.cooldown(api);if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}
@@ -324,7 +344,7 @@ export class DouyinClient {
     if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
     try{
       stage('projecting');
-      const parsed=await parseDouyinFeedAsync(r.data,stage),resolvedAtMillis=this.now();
+      const parsed=await (typeof r.data==='string'?parseDouyinFeedAsync(r.data,stage):mapProjectedDouyinFeed(r.data,stage)),resolvedAtMillis=this.now();
       stage('mapping_done');
       if(web)parsed.nextCursor=web.nextCursor(parsed);
       stage('storage_wait');
@@ -365,7 +385,7 @@ export class DouyinClient {
       if(!r.ok&&r.code==='NOT_LOGGED_IN')return r;
       if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
       if(!r.ok)return r;
-      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(!data)return fail('resolution_limit',formatDouyinError('resolution_limit'));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
+      try{const raw=r.data;if(typeof raw!=='string')return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(raw));if(!data)return fail('resolution_limit',formatDouyinError('resolution_limit'));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
       catch{return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
     })();this.detailRequests.set(key,work);
     try{return await work;}finally{if(this.detailRequests.get(key)===work)this.detailRequests.delete(key);if(this.detailCacheTokens.get(id)===cacheToken)this.detailCacheTokens.delete(id);}

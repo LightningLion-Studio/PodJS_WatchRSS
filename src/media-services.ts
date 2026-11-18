@@ -28,6 +28,7 @@ export const mediaTransport=createMediaTransport({
   return backgroundResult(op,background);
  },
  read:async(path,offset)=>(await fileChunks.readBytes(path,offset)).bytes,
+ project:(path,size,projection,background)=>backgroundResult(fileChunks.projectJson(path,size,projection.selection,projection.tokens),background),
  readPortable:async(path,offset)=>base64ToBytes((await fileChunks.read(path,offset,16*1024)).dataBase64),
  remove:path=>fileChunks.remove(path),
  base64:bytesToBase64,

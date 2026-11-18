@@ -2,7 +2,7 @@ import {readDownloadedBytes,withOwnedPrivateFile} from '@podjs/framework/private
 import {appLogger} from '../logs/app-logger.ts';
 import {MediaResponseReadError,mediaRequestFailure} from '../douyin/errors.ts';
 import type {HttpRequest,HttpResponse,HttpTransport} from '../cloud/types.ts';
-import type {DownloadResult} from '@podjs/framework/services';
+import type {DownloadResult,FileJsonProjection} from '@podjs/framework/services';
 import {videoOptEnabled} from './video-opt.ts';
 import {videoResponseBudget} from './traffic-policy.ts';
 
@@ -10,6 +10,7 @@ export interface MediaTransportPorts {
   download(args:Record<string,unknown>,background?:import('../cloud/types.ts').RequestLifetime):Promise<DownloadResult>;
   read(path:string,offset:number):Promise<Uint8Array>;
   readPortable?(path:string,offset:number):Promise<Uint8Array>;
+  project?(path:string,size:number,projection:NonNullable<HttpRequest['fileProjection']>,background?:HttpRequest['background']):Promise<FileJsonProjection>;
   remove(path:string):Promise<unknown>;
   base64(bytes:Uint8Array):string;
 }
@@ -17,6 +18,11 @@ export interface MediaTransportPorts {
 function byteBridgeBusy(error:unknown):boolean {
   const value=error as {code?:unknown;message?:unknown}|null;
   return value?.code==='busy'&&value.message==='Byte bridge full';
+}
+
+function projectionUnavailable(error:unknown):boolean {
+  const value=error as {code?:unknown;message?:unknown}|null;
+  return value?.code==='unsupported'||value?.code==='invalid_argument'&&value.message==='unsupported_method:file.projectJson';
 }
 
 /** GET/POST responses stream to private files with a bounded 8 MiB JSON read. */
@@ -31,6 +37,15 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
       if(request.background&&!request.background.isCurrent())throw Error("cancelled");
       const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:videoResponseBudget(request.url,videoOptEnabled('traffic')),
         timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})},request.background);
+      if(request.fileProjection&&ports.project){
+        if(request.background&&!request.background.isCurrent())throw Error('cancelled');
+        try {
+          const value=await ports.project(path,response.size,request.fileProjection,request.background);
+          return {status:response.status,headers:response.headers,body:new Uint8Array(0),fileProjection:{value,size:response.size}};
+        }catch(error){
+          if(!projectionUnavailable(error))throw error;
+        }
+      }
       const portable=request.background?undefined:ports.readPortable;
       let bridgePressure=false;
       let bytes:Uint8Array;
