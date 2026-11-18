@@ -25,9 +25,16 @@ export function formatDouyinError(code: DouyinErrorCode): string {
   }
 }
 
-/** Only allowlisted categories and a numeric HTTP status leave the error boundary.
- * HostServiceError.message can contain a signed URL or credential-bearing text. */
-export function mediaRequestFailure(error: unknown): { category: 'http' | 'timeout' | 'cancelled' | 'network'; status?: number } {
+export class MediaResponseReadError extends Error {
+  constructor(readonly httpStatus:number,readonly responseBytes:number,cause:unknown) {
+    super('Unable to read downloaded media response',{cause});
+  }
+}
+
+/** Only allowlisted categories and numeric response metadata leave the error
+ * boundary. HostServiceError.message can contain credential-bearing text. */
+export function mediaRequestFailure(error: unknown): { category: 'http' | 'timeout' | 'cancelled' | 'network' | 'decode'; status?: number; response?:MediaResponseReadError } {
+  if(error instanceof MediaResponseReadError)return {category:'decode',response:error};
   const value = error && typeof error === 'object' ? error as { code?: unknown; name?: unknown; message?: unknown } : {};
   const description = [value.code, value.name, value.message, typeof error === 'string' ? error : ''].map(String).join(' ');
   const status = description.match(/\bhttp_status:(\d{3})\b/);
