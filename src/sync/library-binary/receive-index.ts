@@ -8,16 +8,19 @@ type RequestBinding=Pick<Envelope,'requestId'|'requestDigest'>;
 export class ReceiveIndex {
  private readonly descriptors:readonly ObjectDescriptor[];
  private readonly applied:Set<string>;
- private readonly requests=new Map<string,string>();
- constructor(descriptors:readonly ObjectDescriptor[],applied:readonly string[],requests:readonly RequestBinding[]){
+ constructor(descriptors:readonly ObjectDescriptor[],applied:readonly string[]){
   this.descriptors=Object.freeze([...descriptors]);
   this.applied=new Set(applied);
-  for(const request of requests)this.remember(request);
  }
  at(slot:number):ObjectDescriptor|null{return this.descriptors[slot]??null;}
  slot(id:string):number{return this.descriptors.findIndex(object=>object.objectId===id);}
  isApplied(id:string):boolean{return this.applied.has(id);}
  didApply(id:string):void{this.applied.add(id);}
+}
+
+/** Request bindings shared by the DATA and CONTROL lanes for one grant. */
+export class ReceiveBindings {
+ private readonly requests=new Map<string,string>();
  hasBinding(r:RequestBinding):boolean{
   const prior=this.requests.get(r.requestId);
   if(prior!==undefined&&prior!==r.requestDigest)fail('REQUEST_CONFLICT');

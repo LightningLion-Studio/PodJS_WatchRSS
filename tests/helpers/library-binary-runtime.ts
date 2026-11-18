@@ -29,6 +29,8 @@ export function bytePair(){const a=new Bytes(),b=new Bytes();const close=async()
  * receipts/business rows. This replaces Android service ports, never B2 logic. */
 export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
  const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
+ const nativeSql=new Database(join(root,'native.sqlite'));
+ nativeSql.exec('PRAGMA synchronous=FULL; CREATE TABLE requests(scope TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(scope,id))');
  const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as Row[],execute:async(q,p=[])=>{sql.query(q).run(...p as any[]);},transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]) as any[]);})();}};
  const path=(p:string)=>{if(p.includes('..')||p.startsWith('/'))throw Error('LOCAL_IO');return join(root,p);};
  const durable=async(p:string,bytes:Uint8Array)=>{await mkdir(dirname(path(p)),{recursive:true});const f=await open(path(p),'w');try{await f.writeFile(bytes);await f.sync();}finally{await f.close();}};
@@ -46,17 +48,33 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const grants=new Map<string,{connectionId:string;epoch:number;readOnly:boolean}>();let peak=0,stageCalls=0;
  const native=async<T>(method:string,a:Row,bytes?:Uint8Array):Promise<T>=>{
   await options.fault?.(method,a);
-  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,chunkReceipt:true,elapsedMillis:Math.floor(performance.now())} as T;
-  const scope=String(a.scope),prior=grants.get(scope);if(a.operation==='collect'){await rm(path('native/'+scope),{recursive:true,force:true});grants.delete(scope);return {} as T;}if(a.operation==='acquire'){const epoch=(prior?.epoch??0)+1;grants.set(scope,{connectionId:String(a.connectionId),epoch,readOnly:a.readOnly===true});return {epoch} as T;}
+  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,chunkReceipt:true,requestBindings:true,elapsedMillis:Math.floor(performance.now())} as T;
+  const scope=String(a.scope),prior=grants.get(scope);if(a.operation==='collect'){await rm(path('native/'+scope),{recursive:true,force:true});grants.delete(scope);nativeSql.run('DELETE FROM requests WHERE scope=?',[scope]);return {} as T;}if(a.operation==='acquire'){const epoch=(prior?.epoch??0)+1;grants.set(scope,{connectionId:String(a.connectionId),epoch,readOnly:a.readOnly===true});return {epoch} as T;}
   if(!prior||prior.epoch!==a.epoch||prior.connectionId!==a.connectionId)throw Error('STALE_EPOCH');
   if(a.operation==='check')return {} as T;if(a.operation==='readOnly'){prior.readOnly=true;return {} as T;}
+  if(a.operation==='requestBindings'){
+   const entries=nativeSql.query('SELECT id,digest FROM requests WHERE scope=? AND id>? ORDER BY id LIMIT ?')
+    .all(scope,String(a.after??''),Number(a.limit));
+   return {entries} as T;
+  }
   const d=a.object as VerifiedObject;const dir='native/'+scope+'/'+d.id;
   const missing=async()=>{const ns:number[]=[];for(let i=0;i<d.chunkHashes.length;i++){try{const b=await readFile(path(dir+'/'+i));if(hash(b)!==d.chunkHashes[i])ns.push(i);}catch{ns.push(i);}}return ns;};
   const status=async()=>{const ns=await missing();return {state:ns.length===d.chunkHashes.length?'PENDING':'PARTIAL',missing:ns};};
   if(a.operation==='object'||method.endsWith('.missing'))return await status() as T;
   if(method.endsWith('.release')){await rm(path(dir),{force:true,recursive:true});return {} as T;}
   if(prior.readOnly)throw Error('JOB_CANCELLED');
-  if(method.endsWith('.stage')){if(!bytes)throw Error('B2_BASE64_FORBIDDEN');stageCalls++;peak=Math.max(peak,bytes.length);if(hash(bytes)!==d.chunkHashes[Number(a.index)])throw Error('HASH_MISMATCH');await durable(dir+'/'+a.index,bytes);if(a.receiptOnly)return {durable:true,index:a.index,bytes:bytes.length,sha256:d.chunkHashes[Number(a.index)],bindingId:a.bindingId,requestDigest:a.requestDigest} as T;return await status() as T;}
+  if(method.endsWith('.stage')){
+   if(!bytes)throw Error('B2_BASE64_FORBIDDEN');
+   const id=String(a.bindingId),digest=String(a.requestDigest),index=Number(a.index);
+   const old=nativeSql.query<{digest:string},[string,string]>('SELECT digest FROM requests WHERE scope=? AND id=?').get(scope,id);
+   if(old&&old.digest!==digest)throw Error('REQUEST_CONFLICT');
+   stageCalls++;peak=Math.max(peak,bytes.length);
+   if(hash(bytes)!==d.chunkHashes[index])throw Error('HASH_MISMATCH');
+   await durable(dir+'/'+index,bytes);
+   nativeSql.run('INSERT OR IGNORE INTO requests VALUES(?,?,?)',[scope,id,digest]);
+   if(a.receiptOnly)return {durable:true,index,bytes:bytes.length,sha256:d.chunkHashes[index],bindingId:id,requestDigest:digest} as T;
+   return await status() as T;
+  }
   if(method.endsWith('.finalize')){if((await missing()).length)throw Error('CHUNKS_MISSING');const temp=dir+'/compose';await files.writeBytes(temp,new Uint8Array());for(let i=0;i<d.chunkHashes.length;i++){const b=await readFile(path(dir+'/'+i));await files.appendBytes(temp,b,i*65536);}const target=String(a.path);try{await files.commit(temp,target,d.size,d.sha256,null);}catch(e){if(String(e).includes('file_target_changed'))throw Error('PUBLICATION_CONFLICT');throw e;}return {path:target,size:d.size,sha256:d.sha256} as T;}
   throw Error('bad native method '+method);
  };
@@ -75,5 +93,5 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async r=>({success:true,action:r.action,version:1}),now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
  }
 
- return {root,sql,db,files,store,chunks,ports,service,accountScope,session,stats:()=>({stageCalls,peak}),dispose:async()=>{sql.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sql,nativeSql,db,files,store,chunks,ports,service,accountScope,session,stats:()=>({stageCalls,peak}),dispose:async()=>{sql.close();nativeSql.close();await rm(root,{recursive:true,force:true});}};
 }

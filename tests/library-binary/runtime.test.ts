@@ -3,7 +3,7 @@ import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
 import {encodeFrame,decodeFrame} from '../../src/sync/library-binary/codec';
 import {capabilityDigest,requestDigest,preparationDigest,selectionDigest,objectId,objectsRoot,planDigest,pageDigest,receiptsRoot} from '../../src/sync/library-binary/digests';
-import {hash,utf8,type Envelope,type Row,type ObjectDescriptor,type Capability,type BeginPayload} from '../../src/sync/library-binary/wire';
+import {hash,utf8,type Envelope,type Row,type ObjectDescriptor,type Capability,type BeginPayload,type Binding} from '../../src/sync/library-binary/wire';
 import {negotiate,s2Capability} from '../../src/sync/library-binary/routing';
 import {HostServiceError} from '@podjs/framework/services';
 async function ready(f:Awaited<ReturnType<typeof binaryRuntime>>){const s=f.session(),legacy=async(r:Row)=>{await s.connection.writeFrame(r);const reply=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return reply;};const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true});await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:'b2-host'}});return {s,probe,legacy};}
@@ -148,3 +148,106 @@ test('v1 business pins the physical connection through reprobe and account confi
   }finally{await fresh.pair.close();await fresh.running.catch(()=>{});}
  }finally{await f.dispose();}
 });
+
+test('rolled-back DATA bindings survive reconnect and block conflicting control requests',async()=>{
+ const f=await binaryRuntime();
+ const phoneSnapshot={snapshotId:'phone',manifestDigest:'a'.repeat(64),fromExclusive:0,toInclusive:0};
+ const job=nonce(),zero='0'.repeat(64);
+ const payloads=Array.from({length:4},(_,i)=>new Uint8Array(65536).fill(i+1));
+ const bytes=new Uint8Array(4*65536);
+ for(const [index,payload] of payloads.entries())bytes.set(payload,index*65536);
+ const sha256=hash(bytes),metadataUtf8=JSON.stringify({storageKey:'rollback.png',sha256,size:bytes.length});
+ const d:ObjectDescriptor={objectId:'',kind:'noteAsset',schemaVersion:1,businessId:'rollback.png',contentVersion:sha256,
+  encoding:'raw',size:bytes.length,sha256,chunkBytes:65536,chunkHashes:payloads.map(hash),metadataUtf8,
+  metadataSha256:hash(utf8(metadataUtf8)),dependsOn:[]};
+ d.objectId=objectId(d);
+ type Session=Awaited<ReturnType<typeof ready>>['s'];
+ let active:Session|undefined,begin:BeginPayload|undefined,plan:string;
+ async function connect(intent:'create'|'resume'){
+  const {s,probe}=await ready(f);active=s;
+  const cap=probe.libraryBinary as unknown as Capability;
+  await s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),
+   payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});
+  expect((await s.connection.readFrame(3000)).success).toBe(true);
+  const io=new BinaryByteTransport(s.connection.detachStream());
+  const read=async()=>decodeFrame(await io.readFrame());
+  const call=async(r:Envelope)=>{
+   await io.writeFrame(encodeFrame({kind:'control',envelope:r}));
+   const reply=await read();
+   if(reply.kind!=='control')throw Error('control expected');
+   expect(reply.envelope.requestId).toBe(r.requestId);
+   return reply.envelope;
+  };
+  const offer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId:'watch',
+   phoneCapabilities:cap,phoneSnapshot,watchSnapshot:begin?.watchSnapshot??null});
+  const offered=await call(offer);
+  expect(offered.success).toBe(true);
+  const selection=negotiate(cap,cap)!,bindings:Binding[]=[{jobId:job,direction:'phoneToWatch',intent,selection}];
+  expect((await call(request('prepare',{step:'confirm',offerRequestId:offer.requestId,bindings,
+   preparationDigest:preparationDigest(String(offered.result!.offerDigest),bindings)}))).success).toBe(true);
+  begin??={intent,accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId:'watch',direction:'phoneToWatch',
+   phoneSnapshot,watchSnapshot:offered.result!.watchSnapshot as BeginPayload['watchSnapshot'],selection,
+   selectionDigest:selectionDigest(selection),objectCount:1,objectsRoot:objectsRoot([d.objectId]),pageObjectCounts:[1]};
+  plan=planDigest(begin);
+  const started=await call(request('begin',{...begin,intent},job,plan));
+  expect(started.success).toBe(true);
+  return {s,io,call,read,epoch:started.epoch!};
+ }
+ try{
+  const first=await connect('create');
+  expect((await first.call(request('manifestPage',{pageIndex:0,startIndex:0,previousPageDigest:zero,
+   pageDigest:pageDigest(plan!,0,0,[d],zero),entries:[d]},job,plan!,first.epoch))).success).toBe(true);
+  const frames=payloads.map((payload,chunkIndex)=>({kind:'data' as const,streamId:1,epoch:first.epoch,txSeq:chunkIndex+1,
+   objectSlot:0,chunkIndex,payload,requestId:nonce(),requestDigest:requestDigest(job,plan!,'putChunk',{objectId:d.objectId,chunkIndex})}));
+  const transaction=f.store.db.transaction.bind(f.store.db),commit=f.store.commitChunks.bind(f.store);
+  let failNext=false;
+  const attempts:number[]=[];
+  f.store.commitChunks=async(...args)=>{
+   attempts.push(args[2].length);
+   failNext=attempts.length===1;
+   await commit(...args);
+  };
+  f.store.db.transaction=async statements=>{
+   if(failNext){failNext=false;return transaction([...statements,{sql:'UPDATE library_binary_guard SET ok=0'}]);}
+   return transaction(statements);
+  };
+  const clock=Object.getOwnPropertyDescriptor(performance,'now'),sleep=f.ports.sleep;
+  try{
+   Object.defineProperty(performance,'now',{configurable:true,value:()=>1000});
+   f.ports.sleep=ms=>ms<=20?{result:new Promise(()=>{}),cancel:()=>{}}:sleep(ms);
+   for(const frame of frames)await first.io.writeFrame(encodeFrame(frame));
+   expect(await first.read()).toMatchObject({kind:'control',envelope:{success:false,error:{code:'LOCAL_IO',recovery:'STOP'}}});
+   await expect(first.s.running).rejects.toMatchObject({code:'LOCAL_IO',stopAutomaticRecovery:true});
+   await expect(first.io.readFrame()).rejects.toThrow('EOF');
+  }finally{
+   if(clock)Object.defineProperty(performance,'now',clock);
+   else Reflect.deleteProperty(performance,'now');
+   f.ports.sleep=sleep;
+  }
+  expect(attempts).toEqual([4]);
+  expect(f.nativeSql.query('SELECT id,digest FROM requests').all()).toHaveLength(4);
+  expect(await f.db.query('SELECT digest FROM library_binary_requests WHERE request_id IN (?,?,?,?)',
+   frames.map(frame=>frame.requestId))).toEqual([]);
+
+  const resumed=await connect('resume');
+  expect(resumed.epoch).toBe(first.epoch+1);
+  const missing={afterObjectId:null,afterChunkIndex:null,limit:16};
+  expect((await resumed.call(request('missing',missing,job,plan!,resumed.epoch))).success).toBe(true);
+  const [replay,orphan]=frames;
+  await resumed.io.writeFrame(encodeFrame({...replay!,epoch:resumed.epoch,txSeq:1}));
+  expect(await resumed.read()).toMatchObject({kind:'ack',epoch:resumed.epoch,entries:[{txSeq:1}]});
+  expect(await f.db.query('SELECT digest FROM library_binary_requests WHERE request_id=?',[replay!.requestId]))
+   .toEqual([{digest:replay!.requestDigest}]);
+
+  const conflict={...request('missing',missing,job,plan!,resumed.epoch),requestId:orphan!.requestId};
+  const rejected=await resumed.call(conflict);
+  expect(rejected).toMatchObject({success:false,requestDigest:conflict.requestDigest,
+   error:{code:'REQUEST_CONFLICT',recovery:'STOP',retryable:false}});
+  await expect(resumed.s.running).rejects.toMatchObject({code:'REQUEST_CONFLICT',stopAutomaticRecovery:true});
+  expect(await f.db.query('SELECT digest FROM library_binary_requests WHERE request_id=?',[orphan!.requestId])).toEqual([]);
+ }finally{
+  await active?.pair.close();
+  await active?.running.catch(()=>{});
+  await f.dispose();
+ }
+},10000);

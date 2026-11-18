@@ -5,7 +5,7 @@ import {Preparation} from './prepare';
 import {Grant,ReceiveWindow,SendWindow,negativeReply,ControlSlots,RetryBackoff,TokenBucket,type JobBinding,type Pending} from './state';
 import type {DataReader,ByteTransport} from './codec';
 import {ReceivePipeline,type ChunkWork} from './receive-pipeline';
-import {ReceiveIndex} from './receive-index';
+import {ReceiveBindings,ReceiveIndex} from './receive-index';
 import type {BinarySourcePlan} from './assets';
 import type {RecoveryRules} from './recovery';
 import {frameBytes} from '../wire-frame-size';
@@ -50,7 +50,7 @@ export class LibraryBinaryConnection {
  private readonly binary:BinaryConnection;
  private readonly preparation:Preparation;
  private activeReceive=new Set<string>();
- private receive?:{job:Job;binding:JobBinding;window:ReceiveWindow;index?:ReceiveIndex;pipeline?:ReceivePipeline};
+ private receive?:{job:Job;binding:JobBinding;window:ReceiveWindow;requests:ReceiveBindings;index?:ReceiveIndex;pipeline?:ReceivePipeline};
  private send?:{job:Job;window:SendWindow};
  private dataWake?:()=>void;
  private dataFailure?:unknown;
@@ -168,7 +168,13 @@ export class LibraryBinaryConnection {
      if(this.incomingHeartbeatBusy)fail('FLOW_CONTROL_VIOLATION');this.incomingHeartbeatBusy=true;
      void this.answerHeartbeat(r).catch(e=>this.close(e)).finally(()=>{this.incomingHeartbeatBusy=false;});continue;
     }
-    if(r.phase==='cancel'&&r.payload!.reason==='USER_CANCEL'){void this.cancel().catch(()=>{});continue;}
+    if(r.phase==='cancel'&&r.payload!.reason==='USER_CANCEL'){
+     const j=this.receive?.job;
+     if(j?.jobId===r.jobId&&j.planDigest===r.planDigest&&j.epoch===r.epoch){
+      try{this.checkReceiveBinding(r);}catch(e){const error=resumeError(e);await this.write(this.reply(r,null,r.epoch,error));throw error;}
+     }
+     void this.cancel().catch(()=>{});continue;
+    }
     if(this.incomingBusy)fail('FLOW_CONTROL_VIOLATION');
     if(r.phase==='cancel'||r.phase==='begin'&&this.receive?.job.jobId===r.jobId)this.fenceReceiver();
     this.incomingBusy=true;
@@ -186,6 +192,7 @@ export class LibraryBinaryConnection {
    this.check();
    const j=this.receive?.job;
    if(!j||j.jobId!==r.jobId||!this.begun.has(j.jobId)||j.connectionId!==this.ports.connectionId||j.epoch!==r.epoch||j.planDigest!==r.planDigest)fail('AUTH_REVOKED');
+   this.checkReceiveBinding(r);
    await this.write(this.reply(r,{state:j.state,nextManifestPage:j.nextPage,expiresAtMillis:j.expiresAt,completion:j.completion,items:[],next:null,done:true},j.epoch));
    if(j.lease&&!this.regrant&&!this.nativeHeartbeat&&!this.stopped){
     this.nativeHeartbeat=this.ports.chunks.check(j.lease as unknown as ObjectLease).catch(e=>{
@@ -236,7 +243,7 @@ export class LibraryBinaryConnection {
    requestId:header.requestId,requestDigest:header.requestDigest,payload:{objectId:object.objectId,chunkIndex:header.chunkIndex}};
  }
  private enableData(){
-  const receive=this.receive!,j=receive.job,index=receive.index!;
+  const receive=this.receive!,j=receive.job,index=receive.index!,requests=receive.requests;
   if(receive.pipeline&&!this.regrant)return;
   receive.window.admit();
   const peer=this.ports.phoneDeviceId;
@@ -273,17 +280,17 @@ export class LibraryBinaryConnection {
     let claimed=false;
     try{
      chunk.check();
-     if(index.hasBinding(r))this.stateBucket.take(this.ports.now());
+     if(requests.hasBinding(r))this.stateBucket.take(this.ports.now());
      this.stagingRequest=r;
      if(index.isApplied(d.objectId)){
-      await this.ports.chunks.check(lease);chunk.check();index.remember(r);return 2;
+      await this.ports.chunks.check(lease);chunk.check();requests.remember(r);return 2;
      }
      if(d.dependsOn.some(id=>!index.isApplied(id)))fail('DEPENDENCIES_PENDING');
      claimed=!this.activeReceive.has(d.objectId);
      this.admit(j,d);
      await this.ports.chunks.stageReceipt(lease,nativeObject(d),f.chunkIndex,payload,{id:f.requestId,digest:f.requestDigest});
      claimed=false; // A late fence must still retire the staged native object.
-     chunk.check();index.remember(r);this.workUnit();return 1;
+     chunk.check();requests.remember(r);this.workUnit();return 1;
     }catch(e){
      if(claimed)this.activeReceive.delete(d.objectId);
      throw e;
@@ -303,6 +310,10 @@ export class LibraryBinaryConnection {
   });
  }
  private async allTerminal(){for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(!j||!terminal(j))return false;}return true;}
+ private checkReceiveBinding(r:Envelope){
+  if(this.stagingRequest?.requestId===r.requestId&&this.stagingRequest.requestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');
+  this.receive?.requests.hasBinding(r);
+ }
  private async handle(r:Envelope,charge:()=>void):Promise<{result:Row;epoch:number|null;after?:()=>void}>{
   const p=r.payload!;
   if(r.phase==='prepare')return this.prepare(r);
@@ -314,8 +325,7 @@ export class LibraryBinaryConnection {
   if(j.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(j.role!=='receiver'&&r.phase!=='cancel')fail();
   const receive=this.receive?.job.jobId===j.jobId?this.receive:undefined;
-  if(receive&&this.stagingRequest?.requestId===r.requestId&&this.stagingRequest.requestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');
-  receive?.index?.remember(r);
+  if(receive){this.checkReceiveBinding(r);receive.requests.remember(r);}
   await this.ports.store.checkBinding(j,this.ports.phoneDeviceId,r,undefined,charge);
   if(j.state==='CANCELLED'&&!['missing','cancel'].includes(r.phase))fail('JOB_CANCELLED');
   if(j.lease)await this.ports.chunks.check(j.lease as unknown as ObjectLease);
@@ -326,7 +336,7 @@ export class LibraryBinaryConnection {
     let index:ReceiveIndex|undefined;
     result=await this.ports.store.manifest(j,r,this.ports.phoneDeviceId,p,async objects=>{
      await this.ports.reserve(j,objects);
-     index=await this.buildReceiveIndex(j,objects,[]);
+     index=this.buildReceiveIndex(j,objects,[]);
     });
     if(index)receive!.index=index;
     break;
@@ -392,6 +402,8 @@ export class LibraryBinaryConnection {
   const source=p.phoneSnapshot;if(source.toInclusive!==0&&!await this.ports.supportsRange?.(p))fail('BUSINESS_REJECTED');
   await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection)});
   if(this.regrant?.unsettled&&lease.epoch<=this.regrant.epoch)fail('STALE_EPOCH');
+  const requests=await this.restoreReceiveBindings(lease,old);
+  requests.remember(r);
   const job=await this.ports.store.begin(this.scope,r,p,this.ports.connectionId,lease.epoch,lease as unknown as Row);this.begun.add(b.jobId);
   await this.ports.store.db.transaction(this.ports.store.bind(job,this.ports.phoneDeviceId,r));
   const rows=await this.verifyRestored(job);await this.cleanupApplied(job);
@@ -400,9 +412,9 @@ export class LibraryBinaryConnection {
   const binding=this.binding(job);
   if(this.receive){
    if(job.epoch>this.receive.job.epoch)this.receive.window.regrant(job.epoch);
-   this.receive.job=job;this.receive.pipeline=undefined;this.receive.index=undefined;
+   this.receive.job=job;this.receive.requests=requests;this.receive.pipeline=undefined;this.receive.index=undefined;
   }else{
-   this.receive={job,binding,window:new ReceiveWindow(binding,new Grant(this.ports.connectionId,job.epoch),{
+   this.receive={job,binding,requests,window:new ReceiveWindow(binding,new Grant(this.ports.connectionId,job.epoch),{
     objectCount:p.objectCount,at:async slot=>this.receive?.index?.at(slot)??null,
    })};
   }
@@ -412,17 +424,30 @@ export class LibraryBinaryConnection {
     const status=await this.ports.chunks.status(job.lease as unknown as ObjectLease,nativeObject(o.descriptor));
     if(status.state!=='PENDING')this.activeReceive.add(o.descriptor.objectId);this.workUnit();
    }
-   this.receive.index=await this.buildReceiveIndex(job,objects,rows.filter(o=>o.receipt).map(o=>o.descriptor.objectId));
+   this.receive.index=this.buildReceiveIndex(job,objects,rows.filter(o=>o.receipt).map(o=>o.descriptor.objectId));
    this.enableData();
   }
   return {result:{disposition:old?'RESUMED':'CREATED',selectionDigest:p.selectionDigest,state:job.state,expiresAtMillis:job.expiresAt,nextManifestPage:job.nextPage,completion:job.completion},epoch:job.epoch};
  }
- private async buildReceiveIndex(j:Job,objects:readonly ObjectDescriptor[],applied:readonly string[]){
+ private async restoreReceiveBindings(lease:ObjectLease,prior:Job|null):Promise<ReceiveBindings>{
+  // The new native grant fences older writers. A committed file-stage binding
+  // can survive a failed business transaction and still owns its request ID.
+  const requests=new ReceiveBindings();
+  if(prior)for(const entry of await this.ports.store.receiveBindings(prior,this.ports.phoneDeviceId))requests.remember(entry);
+  let after:string|undefined;
+  do{
+   const page=await this.ports.chunks.requestBindings(lease,after);
+   for(const entry of page.entries)requests.remember({requestId:entry.id,requestDigest:entry.digest});
+   after=page.next;this.workUnit();
+  }while(after!==undefined);
+  return requests;
+ }
+ private buildReceiveIndex(j:Job,objects:readonly ObjectDescriptor[],applied:readonly string[]){
   const {selection,objectCount}=j.description;
   if(objects.length!==objectCount||objects.length>Math.min(512,selection.limits.maxPlanObjects))fail('LIMIT_EXCEEDED');
   const bytes=objects.reduce((size,object)=>size+utf8(JSON.stringify(object)).length,0);
   if(bytes>Math.min(262144,selection.limits.maxManifestBytes))fail('LIMIT_EXCEEDED');
-  return new ReceiveIndex(objects,applied,await this.ports.store.receiveBindings(j,this.ports.phoneDeviceId));
+  return new ReceiveIndex(objects,applied);
  }
  private async verifyRestored(j:Job){
   if(j.role!=='receiver'||j.state==='CANCELLED')return [];
