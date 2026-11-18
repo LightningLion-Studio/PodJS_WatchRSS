@@ -60,7 +60,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   if(published.get(id)?.uri===uri)published.delete(id);
  };
  const sameMirrors=(a:readonly string[],b:readonly string[])=>a.length===b.length&&a.every((url,i)=>url===b[i]);
- const register=(item:DouyinItem,headers:Record<string,string>,current:()=>boolean=()=>true)=>{
+ const register=(item:DouyinItem,headers:Record<string,string>,current:()=>boolean=()=>true,speculative=false)=>{
   const id=item.awemeId,prior=pending.get(id);
   const work=(async()=>{
    if(prior)await prior.catch(()=>{});
@@ -69,7 +69,18 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(!selected.playUrl)return;
    const audioUrl=douyinPlaybackAudio(selected),mirrors=douyinPlaybackMirrors(selected);
    const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort()),previous=registered.get(id);
-   if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors)&&Date.now()<previous.expires)return remember(previous.uri,selected);
+   if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&Date.now()<previous.expires){
+    if(previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors))return remember(previous.uri,selected);
+    if(speculative){
+     // Changing the preferred tier for a future prepare cannot revoke a valid
+     // capability that a current or warming player may already be reading.
+     const variant=selected.variants?.find(v=>v.playUrl===previous.playUrl);
+     if(variant&&selectPreferredDouyinVariant([variant])){
+      const existing={...selected,playUrl:previous.playUrl};
+      if(previous.audioUrl===douyinPlaybackAudio(existing)&&sameMirrors(previous.mirrors,douyinPlaybackMirrors(existing)))return remember(previous.uri,existing);
+     }
+    }
+   }
    const expires=Math.min(...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
    const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,douyinMediaNetworkDeadline([selected.playUrl,...mirrors,...(audioUrl?[audioUrl]:[])]),audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
    if(previous&&previous.uri!==uri)forget(id,previous.uri);
@@ -124,9 +135,10 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(!stocked&&douyinMediaExpiry(preserveSelectedDouyinItem(item).playUrl,Date.now())<=Date.now())continue;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
    if(!result.ok){published.delete(item.awemeId);const seeded=prepared.findIndex(value=>value.id===item.awemeId);if(seeded>=0)prepared.splice(seeded,1);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
-   const uri=stocked??await register(result.data,headers,()=>own===generation);if(own!==generation)return;if(!uri)continue;
-   if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
-   const target=targetFor(result.data,uri,!!stocked),existing=prepared.findIndex(value=>value.id===item.awemeId);
+   const uri=stocked??await register(result.data,headers,()=>own===generation,true);if(own!==generation)return;if(!uri)continue;
+   const source=sources.get(uri)??result.data;
+   if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(source.variants??[]).find(v=>v.playUrl===source.playUrl)?.bitrate??0;
+   const target=targetFor(source,uri,!!stocked),existing=prepared.findIndex(value=>value.id===item.awemeId);
    if(existing<0)prepared.push({id:item.awemeId,target});else prepared[existing]={id:item.awemeId,target};
    if(own!==generation)return;
    // Preserve still-wanted transfers while publishing newly resolved sources.

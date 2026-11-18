@@ -1,4 +1,5 @@
 import {test,expect,mock} from 'bun:test';
+import {dispatchMemoryPressure} from '@podjs/framework/memory';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
@@ -232,6 +233,31 @@ test('RVRESCAP2-04 replacing an unknown source revokes its bytes before metadata
   expect(host.sourceFor(previous)).toBeUndefined();
   expect(removed).toContain(previous);
   host.stop(owner);
+});
+
+test('memory pressure changes the next playback selection without prefetch revoking a live rendition',async()=>{
+ const previousPod=(globalThis as any).pod;
+ windows=[];registrations=[];removed=[];
+ const variants=[480,360].map(width=>({playUrl:`https://review.invalid/${width}`,width,height:width*2,bitrate:width,codec:'h264'}));
+ const item={...items[0],awemeId:'review',playUrl:variants[0]!.playUrl,variants};
+ const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,{feedItem}:any)=>({ok:true,data:feedItem})};
+ const host=createHostDouyinPreload(client as any),owner={};
+ (globalThis as any).pod={...previousPod,memoryBudgetBytes:()=>128000000};
+ try{
+  const current=await host.playback(item as any,{});
+  expect(current).toEndWith('/review-480.mp4');
+  dispatchMemoryPressure({t:'memory.pressure',level:2});
+  host.allowBluetooth(true,owner);host.start(owner,[item] as any,'review','active');await flush();
+  expect(windows.at(-1).items.map((target:any)=>target.uri)).toEqual([current]);
+  expect(removed).not.toContain(current);
+  expect(host.sourceFor(current)?.playUrl).toBe(variants[0]!.playUrl);
+  expect(await host.playback(item as any,{})).toEndWith('/review-360.mp4');
+  expect(removed).toContain(current);
+ }finally{
+  host.stop(owner);
+  dispatchMemoryPressure({t:'memory.pressure',level:0});
+  (globalThis as any).pod=previousPod;
+ }
 });
 
 test('generated late completions cannot register a superseded source',async()=>{
