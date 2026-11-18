@@ -51,7 +51,7 @@ export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVarian
   // A lower tier is optional. Keep the standard capped order as the fallback.
   const smaller=prefersLowMemoryDouyinRendition()?playable.filter(v=>{
     const resolution=normalizedDouyinResolution(v);
-    return resolution!==undefined&&resolution<=320&&(shortEdge(v)??0)<=320;
+    return resolution!==undefined&&resolution<=360&&(shortEdge(v)??0)<=360;
   }):[];
   const pool=smaller.length?smaller:playable;
   const bitrate=(v:DouyinVideoVariant)=>v.bitrate>0?v.bitrate:Infinity;

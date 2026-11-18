@@ -27,7 +27,7 @@ export const mediaTransport=createMediaTransport({
   const op=hostOperation<DownloadResult>('http.download',{...args,...(background?{background:true}:{})});
   return backgroundResult(op,background);
  },
- read:async(path,offset)=>base64ToBytes((await fileChunks.read(path,offset)).dataBase64),
+ read:async(path,offset)=>(await fileChunks.readBytes(path,offset)).bytes,
  remove:path=>fileChunks.remove(path),
  base64:bytesToBase64,
 });
