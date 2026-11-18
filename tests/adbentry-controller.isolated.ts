@@ -39,7 +39,7 @@ function fixture(opt=false,initial?:any){
 const flush=async()=>{for(let i=0;i<80;i++)await Promise.resolve();};
 test('RVADB-02: cancellation keeps the preview source closed to late success',async()=>{
  const f=fixture(),a=item('123');let release!:(v:any)=>void;let active=true;
- client.restoreFeed=async()=>({items:[a]} as any);
+ client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);
  readyOverride=()=>new Promise(resolve=>release=resolve);
  bindShellCommands({current:()=>f.stack().at(-1)!,client,navigate:f.controller.douyinNavigate,play:f.controller.douyinPlay,move:f.controller.changeDouyinVideo});
  const running=registeredHandlers['douyin.play']({index:0},{isActive:()=>active});
@@ -86,34 +86,49 @@ test('RVADB-01: a failed replay of the same aweme cannot reuse its old player',a
  await expect(registeredHandlers['douyin.play']({index:0},{isActive:()=>true})).rejects.toMatchObject({code:'unavailable'});expect(f.requests()).toBe(0);
 });
 test('RVADB-01: a state reply from a replaced source with the same aweme is stale',async()=>{
- const f=fixture(),a=item('111');client.restoreFeed=async()=>({items:[a]} as any);bind(f);
+ const f=fixture(),a=item('111');client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);bind(f);
  const running=registeredHandlers['douyin.play']({index:0},{isActive:()=>true});const outcome=running.catch((error:any)=>error);await flush();
  const entry=f.stack().at(-1)!;let complete!:(v:any)=>void;entry.player={...playing(),shellState:()=>new Promise(resolve=>complete=resolve)};
  timer(50).fire();await flush();expect(complete).toBeDefined();entry.playback={...entry.playback!};complete({state:'playing'});
  expect(await outcome).toMatchObject({code:'unavailable'});expect(f.requests()).toBe(0);
 });
 test('RVADB-02: a cancelled preview also ignores a late preparation error',async()=>{
- const f=fixture(),a=item('123');let fail!:(e:Error)=>void,active=true;client.restoreFeed=async()=>({items:[a]} as any);readyOverride=()=>new Promise((_,reject)=>fail=reject);bind(f);
+ const f=fixture(),a=item('123');let fail!:(e:Error)=>void,active=true;client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);readyOverride=()=>new Promise((_,reject)=>fail=reject);bind(f);
  const outcome=registeredHandlers['douyin.play']({index:0},{isActive:()=>active}).catch((error:any)=>error);await flush();timer(200).fire();await flush();
  const source=f.source();active=false;timer(50).fire();expect(await outcome).toMatchObject({code:'unavailable'});
  fail(Error('late synthetic failure'));await flush();expect(f.source()).toBe(source);expect(f.source().preparationError).toBeUndefined();expect(f.requests()).toBe(0);
 });
 test('a selected preview reports source failure to shell without reopening the cover',async()=>{
- const f=fixture(),a=item('123');let fail!:(error:Error)=>void;client.restoreFeed=async()=>({items:[a]} as any);readyOverride=()=>new Promise((_,reject)=>fail=reject);bind(f);
+ const f=fixture(),a=item('123');let fail!:(error:Error)=>void;client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);readyOverride=()=>new Promise((_,reject)=>fail=reject);bind(f);
  const outcome=registeredHandlers['douyin.play']({index:0},{isActive:()=>true}).catch((error:any)=>error);await flush();timer(200).fire();await flush();
  const entry=f.stack().at(-1)!;fail(Error('selected source failure'));await flush();timer(50).fire();
  expect(await outcome).toMatchObject({code:'unavailable'});expect(f.stack().at(-1)).toBe(entry);expect(f.source().preparationError).toBeDefined();expect(f.requests()).toBe(0);
 });
 test('RVADB-02: the shell wait deadline closes publication even before Binder cancellation',async()=>{
- const f=fixture(),a=item('123');let release!:(v:any)=>void;client.restoreFeed=async()=>({items:[a]} as any);readyOverride=()=>new Promise(resolve=>release=resolve);bind(f);
+ const f=fixture(),a=item('123');let release!:(v:any)=>void;client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);readyOverride=()=>new Promise(resolve=>release=resolve);bind(f);
  const outcome=registeredHandlers['douyin.play']({index:0},{isActive:()=>true}).catch((error:any)=>error);await flush();timer(200).fire();await flush();
  for(let n=0;n<200;n++){timer(50).fire();await flush();}
  expect(await outcome).toMatchObject({code:'not_ready'});const source=f.source();release({url:'podjs-media-cache://play/too-late.mp4'});await flush();
  expect(f.source()).toBe(source);expect(f.source().url).toBeUndefined();expect(f.requests()).toBe(0);
 });
 test('the request can adopt its own preview replacement and reach playing',async()=>{
- const f=fixture(),a=item('123');let release!:(v:any)=>void;client.restoreFeed=async()=>({items:[a]} as any);readyOverride=()=>new Promise(resolve=>release=resolve);bind(f);
+ const f=fixture(),a=item('123');let release!:(v:any)=>void;client.restoreFeed=async()=>({items:[a],resolved:{[a.awemeId]:Date.now()}} as any);readyOverride=()=>new Promise(resolve=>release=resolve);bind(f);
  const running=registeredHandlers['douyin.play']({index:0},{isActive:()=>true});await flush();timer(200).fire();await flush();f.stack().at(-1)!.player=playing();
  release({url:'podjs-media-cache://play/owned.mp4'});await flush();timer(50).fire();
  expect((await running).playbackState).toBe('playing');expect(f.source().url).toBe('podjs-media-cache://play/owned.mp4');expect(f.requests()).toBe(0);
+});
+test('NOPLAY shell rejects expired restored URLs and fetches a normal feed before playing',async()=>{
+ const f=fixture(),old=item('111'),fresh=item('222');let feeds=0;
+ client.restoreFeed=async()=>({items:[old],resolved:{[old.awemeId]:Date.now()-3600000}} as any);
+ client.fetchFeedPage=async()=>{feeds++;return {ok:true,data:{items:[fresh],nextCursor:null,hasMore:false}};};
+ bind(f);const running=registeredHandlers['douyin.play']({index:0},{isActive:()=>true});await flush();
+ f.stack().at(-1)!.player=playing();timer(50).fire();
+ const state=await running;expect(feeds).toBe(1);expect(f.source().awemeId).toBe('222');expect(state.targetOrdinal).toBe(1);expect(f.requests()).toBe(0);
+});
+test('NOPLAY diagnostic target ordinal survives reload and changes only on a different selection',async()=>{
+ const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ f.stack().at(-1)!.player=playing();bind(f);const state=()=>registeredHandlers['douyin.state']({},{isActive:()=>true});
+ expect((await state()).targetOrdinal).toBe(1);
+ const entry=f.stack().at(-1)!;entry.playback={...entry.playback!};expect((await state()).targetOrdinal).toBe(1);
+ entry.playback={...entry.playback!,awemeId:'222'};expect((await state()).targetOrdinal).toBe(2);
 });

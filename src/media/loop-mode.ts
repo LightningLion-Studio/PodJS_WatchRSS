@@ -52,6 +52,10 @@ export class VideoAutoAdvance {
   async ended(mode:VideoLoopMode,preview:()=>Promise<boolean>,advance:(current:()=>boolean)=>Promise<void>):Promise<void> {
     if(mode!=="next"||this.claimed)return;
     this.claimed=true;const own=this.revision,current=()=>own===this.revision;
-    if(await preview()&&current())await advance(current);
+    let available:boolean;
+    // Speculative metadata/decode must not block the normal next-page action.
+    // A resolved false still denotes a real queue tail.
+    try{available=await preview();}catch{available=true;}
+    if(available&&current())await advance(current);
   }
 }

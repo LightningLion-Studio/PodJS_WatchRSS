@@ -8,6 +8,7 @@ import type {PlaybackSource} from '../ui/VideoPlayerScreen.tsx';
 import {createShellHandlers} from './shell-commands.ts';
 
 export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient;navigate(route:DouyinRoute):Promise<void>;play(request:DouyinPlayRequest):void;move(entry:RouteEntry,direction:'next'|'previous',isCurrent?:()=>boolean):Promise<void>}) {
+ let lastTarget:string|undefined,targetOrdinal=0;
  const check=(context:ShellContext)=>{if(!context.isActive())throw new ShellCommandError('unavailable');};
  const player=()=>{const entry=port.current();if(entry.page!=='video'||entry.playback?.platform!=='douyin'||!entry.player?.shellState||!entry.player.shellPlaying)throw new ShellCommandError('not_ready');return entry.player as typeof entry.player & {shellState:NonNullable<typeof entry.player.shellState>;shellPlaying:NonNullable<typeof entry.player.shellPlaying>};};
  const wait=async(context:ShellContext,entry:RouteEntry,owned:()=>PlaybackSource|undefined,target:string,active:()=>boolean=()=>true)=>{
@@ -36,7 +37,8 @@ export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient
   open:async context=>{check(context);await port.navigate({name:'entry'});},
   play:async(target,context)=>{
    const origin=port.current(),snapshot=origin.queue?.snapshot();
-   let items=snapshot?.playlist??(await port.client.restoreFeed()).items,cursor=snapshot?.cursor,hasMore=snapshot?.hasMore;
+   const restored=snapshot?undefined:port.client.freshPlaybackSnapshot(await port.client.restoreFeed());
+   let items=snapshot?.playlist??restored!.items,cursor=snapshot?.cursor??restored?.cursor,hasMore=snapshot?.hasMore??restored?.hasMore;
    check(context);if(port.current()!==origin)throw new ShellCommandError('unavailable');
    if(target.index!==undefined&&!items[target.index]){
     const result=await port.client.fetchFeedPage({count:20});check(context);
@@ -70,7 +72,10 @@ export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient
    if(!source?.awemeId)throw new ShellCommandError('unavailable');
    await wait(context,entry,()=>source,source.awemeId);
   },
-  state:async()=>{const entry=port.current();if(entry.page!=='video'||entry.playback?.platform!=='douyin')return null;try{return await player().shellState();}catch(error){if(error instanceof ShellCommandError&&error.code==='not_ready')return {state:'preparing',positionMs:0};throw error;}},
+  state:async()=>{const entry=port.current();if(entry.page!=='video'||entry.playback?.platform!=='douyin')return null;
+   const source=entry.playback,target=source.awemeId;if(target!==lastTarget){lastTarget=target;targetOrdinal++;}
+   const ordinal=targetOrdinal;
+   try{const value=await player().shellState();if(port.current()!==entry||entry.playback!==source)throw new ShellCommandError('unavailable');return {...value,targetOrdinal:ordinal};}catch(error){if(error instanceof ShellCommandError&&error.code==='not_ready')return {state:'preparing',positionMs:0,targetOrdinal:ordinal};throw error;}},
   diagnostics:shellDiagnostics,
  },{books:(check,page)=>libraryDiagnostics.books(check,page),summary:check=>libraryDiagnostics.summary(check),last:n=>syncHistory.last(n)}));
 }

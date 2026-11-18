@@ -17,6 +17,7 @@ type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p),FocusScope:(p:Node['props'])=>element('FocusScope',p)}));
+mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(p:Node['props'])=>element('WatchProgressIndicator',p)}));
 const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:0.55)*(slot===23?21:slot===24?9:12),0)})}));
 let debugAllowed=false;
 mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
@@ -57,6 +58,7 @@ function mount(options:{storage?:Map<string,string>;cacheCount?:number;freshCach
   const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,restoreStock:options.stockGate?()=>options.stockGate!:options.stock?async()=>items:undefined,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
   return {data,client,requests,plays,routes,dispose,setActive,advance:(ms:number)=>{now+=ms;},
+    indicators:()=>nodes(root).filter(n=>n.kind==='WatchProgressIndicator'),
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
     swipe:(dy:number,vy=0)=>entryGesture.onPanEnd({dy,vy}),
     button:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full')),
@@ -408,6 +410,21 @@ test('entry slow refresh replaces the subtitle even with cached items',async()=>
  expect(f.text()).not.toContain('下拉刷新，向上进入短视频流');
  expect(f.text()).not.toContain('重试');
 });
+for(const outcome of ['success','failure','deadline','inactive','enter'] as const)test(`NOPLAY cached pull refresh shows a top ring until ${outcome}`,async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);
+ expect(f.indicators()).toHaveLength(0);
+ f.swipe(80);await requestReady(f);
+ expect(f.indicators()).toHaveLength(1);
+ expect(f.indicators()[0]!.props).toMatchObject({size:16,accessibilityLabel:'正在刷新抖音内容'});
+ f.swipe(80);await settle();expect(f.requests).toHaveLength(1);
+ if(outcome==='success')f.requests[0]!.reply.resolve(response(['fresh']));
+ else if(outcome==='failure')f.requests[0]!.reply.reject({code:'network_error'});
+ else if(outcome==='deadline')[...retryTimers].reverse().find(t=>t.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!t.cancelled)!.fire();
+ else if(outcome==='inactive')f.setActive(false);
+ else f.press();
+ for(let i=0;i<100&&f.indicators().length;i++)await settle();
+ expect(f.indicators()).toHaveLength(0);
+});
 test('entry deadline shows a timeout error and retry without loading copy',async()=>{
  const f=mount();await requestReady(f);
  retryTimers.find(t=>t.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!t.cancelled)!.fire();await settle();
@@ -520,4 +537,11 @@ test('DYENTRY review: cover and prewarm emit no video endpoint and preserve cred
   expect(plays).toHaveLength(2);expect(client.authState()).toBe('logged-in');expect(mutations).toEqual([]);
   expect(requests).toBe(0);expect(await client.fetchFeedPage({count:1,background:{isCurrent:()=>true,onCancel:()=>()=>{}}})).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE'});expect(requests).toBe(0);
  }finally{(globalThis as any).pod=before;}
+});
+for(const handedOff of [false,true])test(`NOPLAY source ownership survives cover inactivity only after player handoff=${handedOff}`,async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.press();
+ const request=f.plays[0];expect(request.isCurrent()).toBe(true);
+ if(handedOff)request.onSourcePublished?.({platform:'douyin',awemeId:'1',previewOnly:true});
+ f.setActive(false);expect(request.isCurrent()).toBe(handedOff);
+ if(handedOff){await f.client.logout();expect(request.isCurrent()).toBe(false);}
 });

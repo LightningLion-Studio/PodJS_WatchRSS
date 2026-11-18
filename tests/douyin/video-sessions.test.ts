@@ -37,6 +37,14 @@ function fakePort(decoderLimit=2){
 }
 
 describe("Douyin video sessions",()=>{
+  test('retains native loading and cached handoff diagnostics across the session adapter',async()=>{
+    const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+    await pool.prepare(source('1'),{...source('1').source,bounds}).result;
+    const diagnostics={playWhenReady:true,nativePlaybackState:2,playbackSuppressionReason:0,loading:true,frameHandoffPending:true,isBuffering:true};
+    port.state=async id=>({...sessionState(id),...diagnostics});
+    expect(await pool.state()).toMatchObject(diagnostics);
+  });
+
   test('a ready receipt that loses its pixels still authorizes one foreground adoption',async()=>{
     const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);let adoptions=0;
     (port as any).promote=async(id:string,options:{adoptPreparing?:boolean})=>{
@@ -98,6 +106,9 @@ describe("Douyin video sessions",()=>{
   test("classifies service errors for legacy degradation and releases every slot",async()=>{
     expect(shouldFallbackFromVideoSessions(new Error("video_decoder_limit"))).toBe(true);
     expect(shouldFallbackFromVideoSessions(new Error("cancelled"))).toBe(false);
+    expect(shouldFallbackFromVideoSessions({code:'invalid_argument',message:'unknown_replace_session'})).toBe(true);
+    expect(shouldFallbackFromVideoSessions({code:'invalid_argument',message:'unknown_video_session'})).toBe(true);
+    expect(shouldFallbackFromVideoSessions({code:'invalid_argument',message:'missing_url'})).toBe(false);
     const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
     await pool.prepare(source("1"),{...source("1").source,bounds}).result;
     await pool.releaseAll();
@@ -173,4 +184,18 @@ test('R09 active prepare, retained promotion and later play carry the background
  await pool.prewarm(source('2'),{...source('2').source,bounds,backgroundPlayback:true});await pool.transition(.5,'up',bounds);
  await pool.promote('up',bounds,false);await pool.play();
  expect(prepared[0].backgroundPlayback).toBe(true);expect(prepared[1].backgroundPlayback).toBeUndefined();expect(promoted[0]).toMatchObject({backgroundPlayback:true,autoplay:false});expect(played[0]).toEqual({backgroundPlayback:true});
+});
+
+
+test('unchanged repeat mode does not write into a standby session that native may have reclaimed',async()=>{
+ const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+ await pool.prepare(source('1'),{bounds,loop:false}).result;
+ await pool.prewarm(source('2'),{bounds,loop:false});
+ const before=port.calls.length;
+ await pool.setLoop(false);await pool.setLoop(false);
+ expect(port.calls.length).toBe(before);
+ await pool.setLoop(true);
+ expect(port.calls.slice(before).filter(c=>c.method==='setLoop').map(c=>c.loop)).toEqual([true,true]);
+ const after=port.calls.length;await pool.setLoop(true);expect(port.calls.length).toBe(after);
+ await pool.releaseAll();
 });

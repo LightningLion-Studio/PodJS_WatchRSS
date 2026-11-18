@@ -1062,11 +1062,11 @@ export function createMediaRouteController(
     if(entry.queue){
       const item=entry.queue.snapshot().item;
       if(!item)throw new Error('Missing Douyin playback item');
-      const queueGeneration=entry.queue.diagnostics().generation;
+      let queueGeneration=entry.queue.diagnostics().generation;
       const selected=()=>current()&&entry.queue?.snapshot().item?.awemeId===item.awemeId&&entry.queue.diagnostics().generation===queueGeneration;
       await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected)).catch(async error=>{
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item)).catch(async error=>{
         if(douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
@@ -1074,9 +1074,12 @@ export function createMediaRouteController(
       if(!resolved)return;
       next=freshVideoSource(previous,{url:resolved.item.playUrl,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
+      // This reload owns the metadata mutation. Continue guarding against later
+      // pager changes while persistence yields, using our new generation.
+      queueGeneration=entry.queue.diagnostics().generation;
       entry.queue.updateCurrentUrl(resolved.item.playUrl);
       await entry.queue.persist();
-      if(!current()||entry.queue.snapshot().item?.awemeId!==item.awemeId)return;
+      if(!selected())return;
     }else if(entry.rssDouyinRecovery){
       const resolved=await entry.rssDouyinRecovery.reload(previous,current);
       if(!resolved||!current())return;

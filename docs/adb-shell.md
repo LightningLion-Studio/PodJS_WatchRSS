@@ -46,6 +46,14 @@ request's pending source publications.
 
 State fields: `page`, `playbackState`, `position` (milliseconds), `bufferedMs`
 (buffered duration ahead), `rebufferCount`, `decoderInstances`, `pssKb`.
+Playback acceptance also exposes `durationMs`, `targetOrdinal`, `sourceGeneration`,
+`hasRenderedFirstFrame`, `completedLoops`, `firstFrameMs`, and `droppedFrames`.
+`targetOrdinal` is a process-local selection counter, stable across reloads of
+the same item; it does not reveal the item ID. `firstFrameMs` is native prepare
+to decoded frame time, or null when unavailable. It is not swipe-to-presentation
+latency; use generation-bound DYBENCH events for that measurement.
+Starting playback from a restored feed filters expired URLs before selecting an
+index; an empty fresh snapshot requests the ordinary feed rather than a detail probe.
 `decoderInstances` counts Media3 video decoder lifetimes observed by this process;
 release initiation removes a decoder from the count. It is not the codec's
 advertised maximum. `pssKb` is Android's current process PSS in KiB.

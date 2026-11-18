@@ -1,6 +1,7 @@
+import {douyinCacheUnavailable,directDouyinMediaUrl} from './cache-availability.ts';
 import {douyinPrestoreConfig} from './prestore-policy.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
-import {douyinMediaExpiry} from './media-expiry.ts';
+import {douyinMediaExpiry,douyinMediaNetworkDeadline} from './media-expiry.ts';
 import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
@@ -51,6 +52,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const stats=async()=>{const s=await mediaPrefixCache.stats().result;appLogger.i('DouyinProxy',`cache files=${s.files} bytes=${s.bytes} downloadedBytes=${s.downloadedBytes} cacheReadBytes=${s.cacheReadBytes} networkReadBytes=${s.networkReadBytes} maxBytes=${s.maxBytes}`);return s;};
  const allowed=async()=>douyinPreloadAllowed(await discovery.networkSnapshot(),bluetoothOwners.has(owner));
  const playbackLookup=async(id:string)=>stock?.playbackReady?(await stock.playbackReady(id))?.uri:stock?.lookup(id);
+ const optionalCache=async<T>(work:()=>Promise<T>):Promise<T|undefined>=>{try{return await work();}catch(error){if(!douyinCacheUnavailable(error))throw error;appLogger.w('DouyinProxy','optional cache unavailable');return undefined;}};
  const pending=new Map<string,Promise<string|undefined>>();
  const forget=(id:string,uri:string)=>{
   sources.delete(uri);
@@ -69,7 +71,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort()),previous=registered.get(id);
    if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors)&&Date.now()<previous.expires)return remember(previous.uri,selected);
    const expires=Math.min(...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
-   const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,expires,audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
+   const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,douyinMediaNetworkDeadline([selected.playUrl,...mirrors,...(audioUrl?[audioUrl]:[])]),audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
    if(previous&&previous.uri!==uri)forget(id,previous.uri);
    if(!current()){await mediaPrefixCache.remove(uri).result.catch(()=>{});return;}
    registered.delete(id);registered.set(id,{uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires});
@@ -177,28 +179,40 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   capabilities:()=>({coverCache:true,actualFrame:true,prefixBytes:true,completeVideo:true}),
   async restoreFrame(item:DouyinItem,headers:Record<string,string>){return video.restoreFrame(`douyin:${item.awemeId}`,{url:preserveSelectedDouyinItem(item).playUrl,headers,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE});},
-  async readySource(item:DouyinItem,headers?:Record<string,string>){
+  async readySource(item:DouyinItem,headers?:Record<string,string>){return optionalCache(async()=>{
    const ready=stock?.playbackReady?await stock.playbackReady(item.awemeId,headers):await stock?.ready?.(item.awemeId,headers);if(!ready)return undefined;
    const frame=ready.frame??await video.restoreFrame(`douyin:${item.awemeId}`,{url:ready.uri,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE});
    return frame.available?{item:ready.item??item,url:remember(ready.uri,ready.item??item),previewFrame:{entryId:item.awemeId,frame}}:undefined;
-  },
-  async previewFrame(item:DouyinItem){const uri=await playbackLookup(item.awemeId);if(!uri)return undefined;const frame=await video.restoreFrame(`douyin:${item.awemeId}`,{url:uri,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE});return frame.available?{entryId:item.awemeId,frame}:undefined;},
+  });},
+  async previewFrame(item:DouyinItem){return optionalCache(async()=>{const uri=await playbackLookup(item.awemeId);if(!uri)return undefined;const frame=await video.restoreFrame(`douyin:${item.awemeId}`,{url:uri,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE});return frame.available?{entryId:item.awemeId,frame}:undefined;});},
   failures:()=>results.snapshot(),
   sourceFor:(uri:string)=>sources.get(uri),
-  lookup:async(id:string):Promise<string|undefined>=>playbackLookup(id),
+  lookup:async(id:string):Promise<string|undefined>=>optionalCache(()=>playbackLookup(id)),
   async playback(item:DouyinItem,headers:Record<string,string>){
    const windowItem=()=>plan?.items.find(value=>value.awemeId===item.awemeId);
    const initial=windowItem(),current=()=>{const latest=windowItem();return latest===initial||!latest||latest.playUrl===initial?.playUrl;};
-   const local=await playbackLookup(item.awemeId);
+   const cancelled=()=>Object.assign(new Error('播放来源已更换'),{code:'CANCELLED'});
+   const local=await optionalCache(()=>playbackLookup(item.awemeId));
+   if(!current())throw cancelled();
    if(local)return remember(local,item);
    await cleanupOldFiles();
    const resolved=await client.resolvePlayback(item.awemeId,{feedItem:item,allowDetail:false});
-   if(!resolved.ok)throw Object.assign(new Error(resolved.message),{code:resolved.code,retryAfterMs:resolved.retryAfterMs});
+   if(!current())throw cancelled();
+   if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw Object.assign(new Error(resolved.message),{code:resolved.code,retryAfterMs:resolved.retryAfterMs});}
    traceDouyinVariants(resolved.data,'foreground',resolved.source==='feed-cache'?'feed-cache':'network');
-   const uri=await register(resolved.data,headers,current);
-   if(!current())throw Object.assign(new Error('播放来源已更换'),{code:'CANCELLED'});
-   if(!uri)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
-   return uri;
+   try{
+    const uri=await register(resolved.data,headers,current);
+    if(!current())throw cancelled();
+    if(!uri)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
+    return uri;
+   }catch(error){
+    if(!current())throw cancelled();
+    const urls=[resolved.data.playUrl,...(douyinPlaybackAudio(resolved.data)?[douyinPlaybackAudio(resolved.data)!]:[])],deadline=douyinMediaNetworkDeadline(urls);
+    if(douyinCacheUnavailable(error)&&urls.every(directDouyinMediaUrl)&&(deadline===undefined||Date.now()<deadline)){
+     appLogger.w('DouyinProxy','cache registration unavailable; using authorized media source');return remember(resolved.data.playUrl,resolved.data);
+    }
+    throw error;
+   }
   },
   forgetSource:forget,
   async invalidate(_id:string){sources.clear();registered.clear();await mediaPrefixCache.clear().result;},stop,stats,

@@ -11,6 +11,8 @@ export function playerFailureCode(error:unknown):FailureCode{
  if(/video_surface/.test(text))return 'surface_error';
  if(/session_limit|decoder_limit|resource_exhausted|OutOfMemory/.test(code+' '+text))return 'resource_exhausted';
  if(/playback_recovery_exhausted/.test(text))return 'recovery_exhausted';
+ const domain:Record<string,FailureCode>={NOT_LOGGED_IN:'restricted',RATE_LIMITED:'restricted',TEMPORARILY_UNAVAILABLE:'not_ready',REQUEST_FAILED:'network_error',PARSE_FAILED:'prepare_failed',UNSUPPORTED:'prepare_failed',PLAYBACK_FAILED:'video_error'};
+ if(Object.prototype.hasOwnProperty.call(domain,code))return domain[code]!;
  const allowed:FailureCode[]=['decode_error','decoder_init','format_error','surface_error','invalid_argument','permission_denied','not_ready','timeout','network_error','cdn_error','restricted','source_expired','prepare_failed','video_session_error','video_error','cache_error','storage_error','service_closed','host_error'];
  return allowed.includes(code as FailureCode)?code as FailureCode:'unknown';
 }

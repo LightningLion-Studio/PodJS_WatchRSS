@@ -2,7 +2,7 @@ import {useNetworkRecovery} from '../network/context.ts';
 import {isTransportFailure} from '../network/recovery.ts';
 import {ShellCommandError} from '@podjs/framework/shell-error';
 import {measuredLines} from '../reader/measured-text.ts';
-import {VideoReloadPolicy,videoSourceExpired} from './video-reload.ts';
+import {VideoReloadPolicy,VideoBufferedStallWait,videoSourceExpired} from './video-reload.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playbackWork} from '../core/playback-work';
 import {PlayerAnimationDiagnostics} from './player-animation-diagnostics.ts';
@@ -33,7 +33,7 @@ import { onFrame } from "@pocketjs/framework/lifecycle";
 import { hasCapability, lifecycle, onLifecycleChange, normalizedRelativeAxisStep } from "@podjs/framework/watch";
 import { video, onVideoStateChanged, onVideoAudioChanged, onVideoFirstFrame, delay, type HostOperation, type VideoPrepare, type VideoBounds, type VideoState } from "@podjs/framework/services";
 import { formatPlayerTime, systemVolumePercent, holdStepCount, guardedCrownVolume, nextScaleMode, playerPanRange, progressWidth, seekHoldStep, type CrownVolumeGuardState, type PlayerScaleMode } from "./video-player.ts";
-import { DouyinVideoSessionPool, douyinPagerDelta, douyinPagerProgress, douyinPagerSettleDuration, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
+import { DouyinVideoSessionPool, douyinPagerDelta, douyinPagerReleaseVelocity, douyinPagerProgress, douyinPagerSettleDuration, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { createHoldPress } from "./hold-press.ts";
 import { createDetailSlide, PlayerDetailArrow, PlayerDetailPanel, type PlayerDetailHandle } from "./PlayerDetailPanel.tsx";
@@ -110,13 +110,15 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const previewPath=()=>{const path=framePreviewPath(props.source.previewFrame,props.source.awemeId);return path!==badFrame()?path:undefined;};
   const recoveryDeadline=new PlaybackPrepareDeadline();
   const reloadPolicy=new VideoReloadPolicy();
+  const bufferedStall=new VideoBufferedStallWait();
+  let reloadCount=0;
   const [reconnecting,setReconnecting]=createSignal(false);
   let reloadWait:HostOperation<void>|undefined;
   let reloadTimeout:HostOperation<void>|undefined;
   let reloadResume:number|undefined;
   let freshPrepare=false,needsFreshResolution=false;
   let resumeAutoplay:boolean|undefined;
-  createEffect(()=>{if(reloadPolicy.select(props.source)){reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}});
+  createEffect(()=>{if(reloadPolicy.select(props.source)){reloadCount=0;bufferedStall.cancel();reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}});
   const cancelReload=()=>{reloadPolicy.cancel();reloadWait?.cancel();reloadWait=undefined;reloadTimeout?.cancel();reloadTimeout=undefined;setReconnecting(false);};
   onCleanup(cancelReload);
   let retiredNativeGeneration=-1;
@@ -135,7 +137,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(state()?.sourceGeneration!==undefined&&state()!.sourceGeneration!==value.sourceGeneration)return;
     if(!value.hasRenderedFirstFrame&&!value.hasCachedFirstFrame)return;
     batch(()=>{setFirstFrame(true);setState(previous=>({...previous,...value}));setSpinnerDue(false);});
-    void warmForward();
+    void warmForward().catch(()=>{});
   }));
   let playbackTrace:VideoPlaybackTrace|undefined;
   createEffect(()=>{const value=state();if(value)playbackTrace?.sample(value,props.active&&(!usingSessions()||(value as {presented?:boolean}).presented===true));});
@@ -271,8 +273,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&resumeAutoplay!==false&&(source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;preparingState=undefined;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!saveablePlayer)setMode("standard");animationDiagnostics.end('rotation','source-change');setRotation(0);setDisplayRotation(0);setPan(0);rotationStarted=0;panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;if(douyinSourceNeedsInternet(source.url??source.videoUrl))network.requestStarted();const op=media.prepare({...source,...(source.platform==='douyin'?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}:{}),...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...bounds(),visible:props.active,translateY:0},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});
     if(props.onReload||Number.isFinite(source.recoveryDeadlineMs)&&!recoveredSources.has(props.source))recoveryDeadline.arm(props.onReload?20_000:source.recoveryDeadlineMs!-Date.now(),delay,
       ()=>!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner&&!state()?.hasRenderedFirstFrame,
-      ()=>{generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});failed({code:'timeout'});});
-    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!saveablePlayer||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(saveablePlayer)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward();captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
+      ()=>{generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});failed({code:'timeout'});},source.platform==='douyin'&&props.onReload?{maxMs:120_000,read:()=>Math.max(state()?.metrics?.bytesLoaded??0,preparingState?.generation===ownGeneration?preparingState.value.metrics?.bytesLoaded??0:0)}:undefined);
+    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!saveablePlayer||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(saveablePlayer)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
   };
   const reload=async(manual:boolean,cause:unknown={code:'source_expired'})=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
@@ -294,6 +296,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(ticket.waitMs){reloadWait=delay(ticket.waitMs);await reloadWait.result;reloadWait=undefined;}
       if(!current())return;
       reloadPolicy.markRequest(ticket);
+      reloadCount++;
       resolutionTimeout=delay(20_000);reloadTimeout=resolutionTimeout;
       await Promise.race([Promise.resolve(props.onReload?.(position,current)),resolutionTimeout.result.then(()=>{throw Object.assign(new Error('Video resolution timed out'),{code:'timeout'});})]);
       resolutionTimeout.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;
@@ -447,7 +450,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return target;
     });
     adjacentResolutions.set(id,{revision,key,pending:resolve});
-    return resolve.then(target=>{if(!target&&adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);if(target&&revealPoster&&!props.source.immersive&&target.source.posterUrl)setDragPoster({url:target.source.posterUrl,direction:direction==='next'?'up':'down'});return target;});
+    return resolve.then(target=>{if(!target&&adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);if(target&&revealPoster&&!props.source.immersive&&target.source.posterUrl)setDragPoster({url:target.source.posterUrl,direction:direction==='next'?'up':'down'});return target;},error=>{if(adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);throw error;});
   };
   const warmEarly=()=>{
     if(!usingSessions()||!props.onPrepareAdjacent)return;const revision=neighborRevision;
@@ -611,7 +614,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           let neighbourPaint:HostOperation<unknown>;
           try{neighbourPaint=afterPaint();}catch{neighbourPaint=delay(100);}
           void neighbourPaint.result.then(()=>{
-            if(!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner)void warmForward();
+            if(!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner)void warmForward().catch(()=>{});
           }).catch(()=>{});
           void op.result.then(next=>{
             if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;
@@ -623,7 +626,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
             void painted.result.then(()=>{
               if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;
               virtualVolume=next.volume;observedVolume=next.volume;checkpointPosition=next.positionMs;checkpointDuration=next.durationMs;
-              void warmForward();emitCheckpoint('ready',next.positionMs,next.durationMs);captureFrame();void requestTransform();void poll(ownGeneration);
+              void warmForward().catch(()=>{});emitCheckpoint('ready',next.positionMs,next.durationMs);captureFrame();void requestTransform();void poll(ownGeneration);
             }).catch(()=>{});
           }).catch(value=>{if(!disposed&&ownGeneration===generation&&!cancelledSessionError(value))void degradeSessions(value,'promote');});
         }else{
@@ -674,7 +677,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     try{
       if(!await animateDouyinTransition(revision,direction,wantsSettle?1:0))return;
-      if(!wantsSettle){if(pendingBenchmark)await media.setBounds({...bounds(),benchmark:pendingBenchmark});pendingBenchmark=undefined;clearDrag();neighborRevision++;if(usingSessions())void warmForward();return;}
+      if(!wantsSettle){if(pendingBenchmark)await media.setBounds({...bounds(),benchmark:pendingBenchmark});pendingBenchmark=undefined;clearDrag();neighborRevision++;if(usingSessions())void warmForward().catch(()=>{});return;}
       const target=dragTarget;
       if(usingSessions()&&target&&sessionPool!.hasStandby(target.key)){
         const ownGeneration=++generation;pollTimer?.cancel();
@@ -687,7 +690,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         batch(()=>{preparedSource=promoted.source.source;publication=props.onPromoteAdjacent?.(promoted.source);setState(promoted.state);setReady(true);setFirstFrame(promoted.state.hasRenderedFirstFrame===true||promoted.state.hasCachedFirstFrame===true);setError("");setSpinnerDue(false);clearDrag();});
         forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;forwardResolved=false;
         playbackTrace?.event('exit');playbackTrace=takeVideoResolution(promoted.source.source.url??promoted.source.source.videoUrl??'',promoted.source.source.platform??'rss');playbackTrace.event('prepare');resetViewing(promoted.source.source);lastPlaybackState="";preparedSource=promoted.source.source;setState(promoted.state);setReady(true);setError("");checkpointPosition=promoted.state.positionMs;checkpointDuration=promoted.state.durationMs;virtualVolume=promoted.state.volume;observedVolume=promoted.state.volume;
-        emitCheckpoint("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;if(delta===2)sessionPool!.retainNeighbours([]);void requestTransform();void warmForward();void poll(ownGeneration);
+        emitCheckpoint("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;if(delta===2)sessionPool!.retainNeighbours([]);void requestTransform();void warmForward().catch(()=>{});void poll(ownGeneration);
         if(!await publication)throw new Error("video session queue promotion was cancelled");
         if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
       }else{
@@ -718,7 +721,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const advanceAfterEnd=()=>autoAdvance.ended(loopMode(),async()=>{
     if(!props.active||lifecycle()!=="active"||!props.onNext||!props.onPrepareAdjacent)return false;
-    return !!await warmForward();
+    const target=await warmForward();
+    return !!target||!!props.onAdjacentKey?.('next');
   },async current=>{
     if(!current()||disposed||!props.active||lifecycle()!=="active"||videoSessionOwner!==sessionOwner||dragSettling||dragDirection)return;
     beginDouyinDrag();moveDouyinDrag(-props.height);await finishDouyinDrag(-125);
@@ -741,11 +745,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     forwardTarget=undefined;clearDrag();setReady(false);setFirstFrame(false);
     untrack(releaseOwnedPlayback);return;
   }resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(usingSessions()){const value=untrack(state);if(value)emitCheckpoint("pause_or_exit",value.positionMs,value.durationMs);preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});}else if(untrack(ready)&&videoSessionOwner===sessionOwner)void media.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner||usingSessions()&&!untrack(ready)){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void media.play().then(setState).catch(failed);}});
-  const surfaceGesture = createGesture(playerGesture({ region: { node: () => detailShown() ? undefined : surface, rect: () => props.active && props.offset === 0 && !detailShown() ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
+  // Native video is composed outside the guest ink tree. Its fullscreen pager
+  // owns the active viewport even when the host hit fact names a backdrop node.
+  const surfaceGesture = createGesture(playerGesture({ region: { node: () => detailShown() || props.source.platform==='douyin'&&props.source.immersive ? undefined : surface, rect: () => props.active && props.offset === 0 && !detailShown() ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
     onDown: () => { panVelocity = 0; }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
-    onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(contact.vy,!!networkPrompt(),undefined,"network_prompt");return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now();setMotion(true); } props.onPanStateChange?.(pan(), range().range); },
+    onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(douyinPagerReleaseVelocity(contact),!!networkPrompt(),undefined,"network_prompt");return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now();setMotion(true); } props.onPanStateChange?.(pan(), range().range); },
     onCancel:()=>{if(props.source.platform==="douyin")void finishDouyinDrag(0,true);}
   },displayRotation,playerViewport));
   const horizontalPanGesture = createGesture(playerGesture({ region: { rect: () => { const r = range(); return props.active && !detailShown() && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: top(), w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,
@@ -822,14 +828,30 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let detail: PlayerDetailHandle | undefined;
   const slide = createDetailSlide(() => props.width);
   const detailShown = slide.shown;
+  createEffect(()=>{
+    const value=state(),source=props.source,own=generation;
+    const enabled=()=>!disposed&&props.active&&source.platform==='douyin'&&!!props.onReload&&ready()&&!reconnecting()&&!detailShown()&&
+      lifecycle()==='active'&&videoSessionOwner===sessionOwner&&autoplayAllowed&&!networkPrompt();
+    bufferedStall.observe(value??undefined,own,enabled(),delay,ticket=>{void(async()=>{
+      if(!bufferedStall.current(ticket)||disposed||generation!==own||props.source!==source||!enabled())return;
+      try{
+        // Recheck the real player: an omitted/coalesced push must not reload a
+        // player that has already recovered or was paused by the user.
+        const fresh=await media.state();
+        if(disposed||generation!==own||props.source!==source||!bufferedStall.current(ticket))return;
+        if(bufferedStall.matches(ticket,fresh,own,enabled()))void reload(false,{code:'not_ready'});
+        else setState(fresh);
+      }catch(value){if(!disposed&&generation===own&&props.source===source&&bufferedStall.current(ticket))failed(value,false,'state');}
+    })();});
+  });
   const canOpenDetail = () => props.active && props.offset === 0 && !error() && !networkPrompt() && !dragAxis() && !handoff();
   createEffect(() => { if (!props.active) slide.reset(); });
   props.ref?.({
-    shellState:async()=>{if(disposed||!props.active||videoSessionOwner!==sessionOwner||!ready())throw new ShellCommandError('not_ready');return media.state();},
+    shellState:async()=>{if(disposed||!props.active||videoSessionOwner!==sessionOwner||!ready())throw new ShellCommandError('not_ready');return {...await media.state(),reloadCount,loopModeIndex:loopMode()==='off'?0:loopMode()==='single'?1:2,loopModeCount:loopModes().length,gestureReady:props.active&&props.offset===0&&!detailShown(),gestureOffset:Number.isFinite(props.offset)?props.offset:0,gestureDetailShown:detailShown(),gestureLifecycleActive:lifecycle()==='active',gestureRotation:displayRotation()};},
     shellPlaying:async playing=>{if(disposed||!props.active||videoSessionOwner!==sessionOwner||!ready())throw new ShellCommandError('not_ready');const own=generation;autoplayAllowed=playing;resumeAfterLifecycle=false;const next=await(playing?media.play():media.pause());if(disposed||own!==generation||videoSessionOwner!==sessionOwner)throw new ShellCommandError('unavailable');setState(next);if(!playing)emitCheckpoint('pause_or_exit',next.positionMs,next.durationMs);},
-    invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,gestureRotation:displayRotation,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; if (props.source.platform === "douyin") return true; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
+    invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward().catch(()=>{});},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,gestureRotation:displayRotation,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; if (props.source.platform === "douyin") return true; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
     sideSwipe: { begin: () => { if (!canOpenDetail()) return false; slide.begin(); return true; }, move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
-  onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
+  onCleanup(() => { bufferedStall.cancel();recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   // Round screens: while the crown capsule shows, control rows in the (rotatable) layer move off it or leave it blank.
   const layerQuarter = () => ((Math.round(displayRotation() / 90) * 90) % 360 + 360) % 360;
   const avoidRow = (icons: RowIcon[], top: number, height: number) => createMemo(() => props.round && volumeVisible() && controlsVisible() ? avoidVolumeArc(VOLUME_ARC, icons, top, height, -layerQuarter()) : undefined);

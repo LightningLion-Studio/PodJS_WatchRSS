@@ -16,6 +16,8 @@ import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 import { platformNoticeEntry } from "../PlatformNotice.tsx";
 import { platformNotice } from "../../announcement/platform.ts";
+import {lifecycle} from '@podjs/framework/watch';
+import {WatchProgressIndicator} from '../WatchProgressIndicator.tsx';
 
 import {douyinEntryLayout,douyinEntrySubtitle,entrySubtitleLine,entryRectStyle,type DouyinEntryState} from './entry-layout.ts';
 
@@ -132,8 +134,13 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     generation++;loadTimer?.cancel();loadTimer=undefined;setBusy(false);
     cancelRetry();setError("");setOpening(true);retryPlayback=true;
     const revision=generation,current=()=>active()&&revision===generation;
+    const authorization=props.client.playbackAuthorizationVersion();
+    let handedOff=false;
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
-      isCurrent:current,
+      // The cover stops being active when its preview player opens. The exact
+      // player/queue identity then guards late source completion in the route.
+      isCurrent:()=>props.client.playbackAuthorizationVersion()===authorization&&(handedOff||current()),
+      onSourcePublished:()=>{handedOff=true;},
       onFailure:failure=>{if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
     });
     props.onNavigate({name:"player",awemeId:item.awemeId});
@@ -171,6 +178,7 @@ export function ImmersiveEntryContent(props:DouyinEntryState&{
  const subtitle=()=>douyinEntrySubtitle(props);
  const line=()=>entrySubtitleLine(subtitle(),bounds().subtitle.width,text=>getOps().measureText(text,0));
  return <View class="absolute inset-0 bg-black"><View class="absolute" style={{insetL:(props.width-233*scale())/2,insetT:(props.height-233*scale())/2,width:233,height:233,scale:scale(),originX:-0.5,originY:-0.5}}>
+  <Show when={props.busy&&!props.error&&props.auth!=='logged-out'}><View class="absolute" style={{insetL:108.5,insetT:1,width:16,height:16}}><WatchProgressIndicator size={16} strokeWidth={2} color="#ffffff" active={()=>lifecycle()==='active'} accessibilityLabel="正在刷新抖音内容"/></View></Show>
   <View class="absolute active:scale-96" style={entryRectStyle(bounds().title)} onPress={props.onInfo} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
    <Text class="absolute left-[0] top-[0] text-[21px] leading-[26] text-[#f5f5f5]">抖音</Text>
    <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:titleWidth+7-3.6,width:19.2,height:19.2}}/>

@@ -54,3 +54,16 @@ test("cancel invalidates an outstanding auto-next preview",async()=>{
   const pending=next.ended("next",()=>new Promise(r=>finish=r),async()=>{advanced=true;});
   next.cancel();finish(true);await pending;expect(advanced).toBe(false);
 });
+
+test('an optional next-preview rejection falls back to one normal automatic advance',async()=>{
+ const next=new VideoAutoAdvance();let advances=0;
+ const preview=async()=>{throw Error('optional preview unavailable');};
+ await expect(next.ended('next',preview,async current=>{expect(current()).toBe(true);advances++;})).resolves.toBeUndefined();
+ await next.ended('next',preview,async()=>{advances++;});expect(advances).toBe(1);
+});
+test('a cancelled automatic preview rejection cannot advance the replacement source',async()=>{
+ const next=new VideoAutoAdvance();let reject!:(error:unknown)=>void,advances=0;
+ const pending=next.ended('next',()=>new Promise<boolean>((_yes,no)=>{reject=no;}),async()=>{advances++;});
+ next.cancel();reject(Error('optional preview unavailable'));
+ await expect(pending).resolves.toBeUndefined();expect(advances).toBe(0);
+});

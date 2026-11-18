@@ -1,7 +1,8 @@
+import type {DouyinVideoVariant} from '../../src/douyin/types.ts';
 import {test,expect} from 'bun:test';
 import fixture from './selector-native-fixture.json';
 import watchPolicy from './bytes-selection-fixture.json';
-import {applyPreferredDouyinPlayback,selectPreferredDouyinUrl,DouyinCodecRuntimePolicy} from '../../src/douyin/playback-selector.ts';
+import {applyPreferredDouyinPlayback,selectPreferredDouyinUrl,DouyinCodecRuntimePolicy,douyinCodecRuntimePolicy,normalizedDouyinResolution} from '../../src/douyin/playback-selector.ts';
 import {parseDouyinFeed,parseDouyinDetail} from '../../src/douyin/parser.ts';
 import {normalizeItems} from '../../src/douyin/feed-store.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
@@ -31,4 +32,21 @@ test('history, favorites, saved queues and concurrent TTL refresh all retain nat
  const client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},savedStore:{list:async()=>[{item:video}] as any,state:async()=>({favorite:true,watchLater:false}),set:async()=>true,toggle:async()=>false},signer:{sign:()=>''},transport:{request:async()=>{calls++;await gate;return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({aweme_detail:{aweme_id:'saved',video:{play_addr:{url_list:['https://example.com/default']},bit_rate:[{codec_type:'h264',video_extra:{definition:'540p'},play_addr:{url_list:['https://example.com/h264-540.mp4'],width:960,height:540}}]}}}))};}}});
  expect((await client.listHistory())[0]!.item.playUrl).toBe('https://example.com/h264-540.mp4');expect((await client.listSaved())[0]!.item.playUrl).toBe('https://example.com/h264-540.mp4');expect((await client.restorePlaybackQueue()).items[0]!.playUrl).toBe('https://example.com/h264-540.mp4');
  const a=client.resolvePlayback('saved'),b=client.resolvePlayback('saved');release();const both=await Promise.all([a,b]);expect(calls).toBe(1);expect(both).toMatchObject([{ok:true,data:{playUrl:'https://example.com/h264-540.mp4'}},{ok:true,data:{playUrl:'https://example.com/h264-540.mp4'}}]);
+});
+
+
+test('cap admission rejects physical 4K despite misleading labels before watch ranking',()=>{
+ const fourK={playUrl:'four-k',codec:'h265',width:3840,height:2160,bitrate:200000,gearName:'hevc_540'} as DouyinVideoVariant;
+ const watch={playUrl:'watch',codec:'unknown',width:1024,height:576,bitrate:600000} as DouyinVideoVariant;
+ douyinCodecRuntimePolicy.confirmHevcSize(fourK,true);
+ try{
+  const admitted=(variants:DouyinVideoVariant[])=>admitDouyinItem({awemeId:'fixture',playUrl:fourK.playUrl,variants} as DouyinItem);
+  expect(admitted([fourK])).toBeUndefined();
+  expect(selectPreferredDouyinUrl(admitted([fourK,watch])!.variants)).toBe('watch');
+  expect(selectPreferredDouyinUrl(admitted([{...fourK,gearName:undefined},watch])!.variants)).toBe('watch');
+  expect(selectPreferredDouyinUrl([watch,{...watch,playUrl:'known',codec:'h264',bitrate:700000}])).toBe('watch');
+ }finally{douyinCodecRuntimePolicy.confirmHevcSize(fourK,false);}
+});
+test('resolution labels remain useful when encoded dimensions are absent',()=>{
+ expect(normalizedDouyinResolution({width:0,height:0,definition:'540p'} as DouyinVideoVariant)).toBe(540);
 });

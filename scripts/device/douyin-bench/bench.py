@@ -70,10 +70,14 @@ class Device:
             raise ValueError('sleep/wake only')
         self.call(['shell','input','keyevent',str(code)])
 
-    def swipe(self,kind):
+    def swipe(self,kind,duration_ms=None):
         if kind not in GESTURES:
             raise ValueError('only calibrated center swipe gestures')
-        self.call(['shell','input','swipe',*[str(n) for n in GESTURES[kind]]])
+        values=GESTURES[kind]
+        if duration_ms is not None:
+            if not isinstance(duration_ms,int) or not 50<=duration_ms<=3000:raise ValueError('bounded gesture duration required')
+            values=(*values[:4],duration_ms)
+        self.call(['shell','input','swipe',*[str(n) for n in values]])
 
     def dumps(self,service,*args):
         allowed = {'audio':(), 'media.audio_flinger':(), 'power':(),

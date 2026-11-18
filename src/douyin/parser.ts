@@ -1,3 +1,4 @@
+import {validatedDouyinPlaybackItem} from './playback-source.ts';
 import {traceDouyinVariants} from './playback-diagnostics.ts';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import {admitDouyinItem} from './playback-ingress.ts';
@@ -52,7 +53,9 @@ function readDouyinItem(value: unknown,origin:"feed"|"detail"="detail"): DouyinI
 function admittedPlayback(raw:DouyinItem,origin:"feed"|"detail"):DouyinItem|null {
  const admitted=admitDouyinItem(raw);
  if(!admitted)return null;
- const item=applyPreferredDouyinPlayback(admitted);
+ const valid=validatedDouyinPlaybackItem(admitted);
+ if(!valid.playUrl)return null;
+ const item=applyPreferredDouyinPlayback(valid);
  traceDouyinVariants(item,origin);
  return item;
 }

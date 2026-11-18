@@ -6,7 +6,7 @@ import {videoOptEnabled} from '../media/video-opt.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
 import {stockContentKey,stockNetworkAllowed,type DouyinStockService} from './stock.ts';
-import {douyinMediaExpiry} from './media-expiry.ts';
+import {douyinMediaExpiry,douyinMediaNetworkDeadline} from './media-expiry.ts';
 import {DOUYIN_MAX_SHORT_EDGE,douyinPlaybackAudio} from './playback-selector.ts';
 import {completeDouyinRendition,douyinPrestoreConfig,storedDouyinMetadata,restoredDouyinItem} from './prestore-policy.ts';
 
@@ -93,7 +93,7 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
      const active:NonNullable<typeof transfer>={item};
      transfer=active;
      try{
-      const {uri}=await wait(mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry,audio,DOUYIN_MAX_SHORT_EDGE));
+      const {uri}=await wait(mediaPrefixCache.register(key,item.playUrl,headers,true,[],douyinMediaNetworkDeadline([item.playUrl,...(audio?[audio]:[])]),audio,DOUYIN_MAX_SHORT_EDGE));
       active.uri=uri;
       if(!current()||active.changed)continue;
       const result=await wait(localMediaStore.prepare(key,uri,{...storedDouyinMetadata(item),stockAuthorization:authorization},true));

@@ -1,8 +1,10 @@
 import type {DouyinClient} from './client.ts';
-/** Reload the selected video by ID. A new recommendation page need not contain
- * the selected ID, so feed-only resolution cannot reconnect an expired stream. */
-export async function reloadDouyinPlayback(client:Pick<DouyinClient,'resolvePlayback'|'buildPlaybackHeaders'>,id:string,current:()=>boolean){
-  const result=await client.resolvePlayback(id,{forceRefresh:true,allowDetail:true,freshRequest:true});
+import type {DouyinItem} from './types.ts';
+/** Queue playback uses the ordinary feed contract, including on reload.
+ * If the refreshed page omits this ID, keep the target failed and retryable;
+ * never probe the separately restricted detail endpoint or replay the old URL. */
+export async function reloadDouyinPlayback(client:Pick<DouyinClient,'resolvePlayback'|'buildPlaybackHeaders'>,id:string,current:()=>boolean,feedItem:DouyinItem){
+  const result=await client.resolvePlayback(id,{forceRefresh:true,allowDetail:false,freshRequest:true,feedItem});
   if(!current())return;
   if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,...(result.networkFailure?{networkFailure:true}:{}),...(result.httpStatus?{httpStatus:result.httpStatus}:{})});
   const headers=await client.buildPlaybackHeaders();

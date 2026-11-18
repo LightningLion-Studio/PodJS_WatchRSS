@@ -1,13 +1,13 @@
 import {test,expect,mock} from 'bun:test';
-let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],oldStatsFails=false,legacyBytes=484675145;
+let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{registrations.push({key,url,headers,persistent,alternates,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{if(registrationFailure)throw registrationFailure;registrations.push({key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge:_maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
-const items=['a','b','c','d'].map(awemeId=>({awemeId,playUrl:'https://fixture/'+awemeId,durationMs:60000,variants:[]}));
+const items=['a','b','c','d'].map(awemeId=>({awemeId,description:'fixture',createdAtSeconds:0,authorId:'fixture',authorName:'fixture',likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:'https://fixture/'+awemeId,durationMs:60000,variants:[]}));
 const client={resolvePlayback:async(id:string)=>({ok:true,data:items.find(x=>x.awemeId===id)}),buildPlaybackHeaders:async()=>({Cookie:'fixture',Referer:'https://www.douyin.com/'})};
 test('production factory cleans whole files once, preserves pre-READY consent, bounds proxy window and clears on logout',async()=>{
  const host=createHostDouyinPreload(client as any),a={},b={};host.allowBluetooth(true,a);host.start(a,items as any,'a','active');await flush();
@@ -269,4 +269,64 @@ test('generated late completions cannot register a superseded source',async()=>{
   expect(host.sourceFor(next.uri)?.playUrl).toBe(safeUrl);
   host.stop(owner);
  }
+
+});
+
+test('NOPLAY a five-minute metadata TTL never becomes a native stream deadline',async()=>{
+ registrations=[];const item={...items[0],durationMs:45*60*1000,playUrl:'https://fixture/long-opaque?signature=opaque'};
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
+ const host=createHostDouyinPreload(local as any);
+ await host.playback(item as any,{});expect(registrations.at(-1).expiresAt).toBeUndefined();expect(registrations.at(-1).maxVideoShortEdge).toBe(720);host.stop();
+});
+test('NOPLAY explicit CDN expiry still bounds native requests with the existing margin',async()=>{
+ registrations=[];const unix=Math.floor(Date.now()/1000)+86400,item={...items[0],playUrl:'https://fixture/long?x-expires='+unix};
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
+ const host=createHostDouyinPreload(local as any);
+ await host.playback(item as any,{});expect(registrations.at(-1).expiresAt).toBe(unix*1000-30000);expect(registrations.at(-1).maxVideoShortEdge).toBe(720);host.stop();
+});
+
+
+test('NOPLAY local cache registration failure preserves the same authorized HTTP source',async()=>{
+ const item={...items[0],playUrl:'https://fixture/valid-source'},client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
+ for(const code of ['cache_error','media_cache_error','resource_exhausted','invalid_argument']){
+  const host=createHostDouyinPreload(client as any);registrationFailure={code};
+  try{expect(await host.playback(item as any,{})).toBe(item.playUrl);expect(host.sourceFor(item.playUrl)).toBe(item);}finally{registrationFailure=undefined;host.stop();}
+ }
+});
+test('NOPLAY cache lookup and preview failures cannot block ordinary foreground resolution',async()=>{
+ const item=items[0]!,client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
+ const host=createHostDouyinPreload(client as any,{playbackReady:async()=>{throw {code:'cache_error'};},lookup:async()=>{throw {code:'cache_error'};}} as any);
+ expect(await host.readySource(item as any)).toBeUndefined();expect(await host.previewFrame(item as any)).toBeUndefined();expect(await host.lookup(item.awemeId)).toBeUndefined();
+ expect(await host.playback(item as any,{})).toStartWith('podjs-media-cache:');host.stop();
+});
+test('NOPLAY cache fallback never replays a denied, expired or cancelled source',async()=>{
+ const item=items[0]!,client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
+ for(const code of ['permission_denied','restricted','source_expired','network_error','cancelled','media_traffic_stopped','resolution_limit']){
+  const host=createHostDouyinPreload(client as any);registrationFailure={code};
+  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code});}finally{registrationFailure=undefined;host.stop();}
+ }
+});
+
+
+test('NOPLAY direct fallback retains explicit URL deadlines and audio source validation',async()=>{
+ const video='https://fixture/video';
+ for(const item of [{...items[0],playUrl:video+'?x-expires=1000000000'},
+  {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://user:password@fixture/audio'}]},
+  {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}]){
+  const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})},host=createHostDouyinPreload(client as any);registrationFailure={code:'cache_error'};
+  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:'cache_error'});}finally{registrationFailure=undefined;host.stop();}
+ }
+});
+
+test('NOPLAY a late optional cache failure cannot publish a replaced foreground source',async()=>{
+ let rejectLookup!:(error:unknown)=>void,requests=0;
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>{requests++;return {ok:true,data:items[0]};}};
+ const stock={lookup:()=>new Promise<string|undefined>((_resolve,reject)=>{rejectLookup=reject;})};
+ const host=createHostDouyinPreload(local as any,stock as any),owner={};
+ host.start(owner,items as any,'a','entry');await flush();
+ const pending=host.playback(items[0] as any,{});await flush();
+ host.start(owner,[{...items[0],playUrl:'https://fixture/replacement'}] as any,'a','entry');
+ rejectLookup({code:'cache_error'});
+ await expect(pending).rejects.toMatchObject({code:'CANCELLED'});
+ expect(requests).toBe(0);expect(host.sourceFor(items[0].playUrl)).toBeUndefined();host.stop();
 });

@@ -3,5 +3,5 @@ import {resolve} from 'node:path';
 test('shell source ownership and cancellation regressions',async()=>{
  const child=Bun.spawn([process.execPath,'--conditions=browser','test',resolve(import.meta.dir,'adbentry-controller.isolated.ts')],{stdout:'pipe',stderr:'pipe'});
  const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
- expect(code,out+err).toBe(0);expect(out+err).toMatch(/9 pass/);
+ expect(code,out+err).toBe(0);expect(out+err).toMatch(/11 pass/);
 });

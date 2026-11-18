@@ -16,11 +16,12 @@ mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{
  // The real recognizer always supplies a full contact, including on cancel.
  // Preserve option getters while filling the older body-test shorthand.
  const handle=Object.create(options);
- for(const key of ['onDown','onMove','onUp','onCancel','onTap','onLongPress','onPanStart','onPanMove','onPanEnd'])if(options[key])handle[key]=(c?:Record<string,unknown>)=>options[key](contact(c));
+ for(const key of ['onDown','onMove','onUp','onCancel','onTap','onLongPress','onPanStart','onPanMove','onPanEnd'])if(options[key])handle[key]=(c?:Record<string,unknown>)=>options[key](contact({frames:key==='onPanEnd'?6:0,...c}));
  gestures.push(handle);return {dispose(){}};
 }}));
-mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string)=>text.length*8})}));
-mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
+mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(text:string)=>text.length*8})}));
+let occludingHit:any=null;
+mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,resolveTouchHit:()=>occludingHit,pressNode(){}}));
 const frames:Array<()=>void>=[];mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void){frames.push(fn);}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>element('Poster',props)}));
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
@@ -884,4 +885,49 @@ for(const direction of ['up','down'] as const)test(`DYSWIPE ghost guest preview 
   for(let i=1;i<=20;i++){g.onPanMove({dy:sign*i*8});await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);}
   g.onCancel();for(let i=0;i<20;i++){time+=10;ticks.splice(0).forEach(t=>t());await flush();if(i<10)expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);}
  }finally{Date.now=realNow;}
+});
+test('NOPLAY native video swipe uses the active viewport when the guest hit belongs to another scene node',async()=>{
+ const base=Bun.resolveSync('@pocketjs/framework/gesture',import.meta.dir).replace(/gesture\.ts$/,'');
+ mock.module(base+'input.ts',()=>({resolveTouchHit:()=>occludingHit}));
+ const core=await import(base+'gesture-core.ts'),touch=await import(base+'touch.ts'),clock=await import(base+'clock.ts');
+ core.resetGestures();touch.__resetTouches();clock.resetClock();gestures.length=0;initial='available';prepares=[];current=state('idle');
+ let root:any;createRoot(stop=>{stops.push(stop);root=VideoPlayerScreen({source:{platform:'douyin',awemeId:'fixture',url:'https://video/current',title:'fixture',immersive:true},width:233,height:233,active:true,offset:0,round:true});});
+ root.props.ref({id:101,parent:null});await flush();occludingHit={id:202,parent:null};let starts=0;
+ const options=gestures[0];const observed=Object.create(options);observed.onPanStart=(c:any)=>{starts++;options.onPanStart(c);};core.attachGesture(observed);
+ const pump=(y?:number)=>{clock.__advanceClock();touch.__setTouches(y===undefined?[]:[touch.__packTouch(1,116,y)]);core.__runGestures();};
+ try{pump(165);pump(140);pump(100);pump();expect(starts).toBe(1);}
+ finally{occludingHit=null;core.resetGestures();touch.__resetTouches();}
+});
+test('NOPLAY a missing replacement session falls back to legacy playback of the selected video',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();prepares=[];
+ const savedPromote=sessionPort.promote;sessionPort.promote=async()=>{throw Object.assign(new Error('unknown_replace_session'),{code:'invalid_argument'});};
+ const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+ try{
+  createRoot(stop=>{stops.push(stop);const [value,setValue]=createSignal(source('a'));return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onPrepareAdjacent:async()=>({key:'b',source:source('b')}),onSelectTarget:(_d,_n,decoded)=>{if(decoded)setValue(decoded.source as ReturnType<typeof source>);}});});
+  await flush();await flush();const gesture=gestures[0];gesture.onPanStart({dy:-12});gesture.onPanMove({dy:-116});await flush();gesture.onPanEnd({vy:-500});
+  for(let n=0;n<5;n++)await flush();expect(prepares.at(-1)?.url).toBe('managed/b');
+ }finally{sessionPort.promote=savedPromote;}
+});
+
+test('a rejected adjacent metadata promise does not poison later explicit paging intent',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});let calls=0;
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:source('a'),width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onAdjacentKey:(direction,distance=1)=>direction==='next'&&distance===1?'b':undefined,
+  onPrepareAdjacent:async(direction,distance=1)=>{if(direction!=='next'||distance!==1)return;if(++calls===1)throw Error('optional metadata unavailable');return {key:'b',source:source('b')};},
+ });});
+ for(let i=0;i<5;i++)await flush();gestures[0].onPanStart({dy:-12});gestures[0].onPanMove({dy:-80});for(let i=0;i<5;i++)await flush();
+ expect(calls).toBeGreaterThanOrEqual(2);expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).not.toContain('播放失败');
+});
+
+
+test('NOPLAY terminal-only displacement commits one page without inventing a two-page fling',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const original=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  const source=(key:string)=>({platform:'douyin' as const,immersive:true,awemeId:key,url:'managed/'+key,title:key});let selected='a';
+  createRoot(stop=>{stops.push(stop);const [value,setValue]=createSignal(source('a'));return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrepareAdjacent:async(_direction,distance=1)=>({key:distance===2?'c':'b',source:source(distance===2?'c':'b')}),onPromoteAdjacent:async target=>{selected=target.key;setValue(target.source as ReturnType<typeof source>);return true;}});});
+  await flush();const g=gestures[0];g.onPanStart({dy:-12,frames:1});g.onPanMove({dy:-100,frames:1});g.onPanEnd({vy:-6000,frames:1});await flush();
+  for(let i=0;i<20&&selected==='a';i++){time+=16;ticks.splice(0).forEach(f=>f());await flush();}
+  expect(selected).toBe('b');expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);
+ }finally{Date.now=original;}
 });

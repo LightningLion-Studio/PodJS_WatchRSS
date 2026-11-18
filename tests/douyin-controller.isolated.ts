@@ -982,4 +982,22 @@ test.skipIf(!restartDb)('RVRESCAP6-01 subprocess',async()=>{
   await f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});
   throw Error(`Recovery did not reach the ${phase} boundary`);
  }finally{database.close();}
+
+});
+test('NOPLAY reload publishes its own refreshed queue generation and preserves the selected target',async()=>{
+ const f=fixture(),a=item('111');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:'111'});
+ const entry=f.stack().at(-1)!,before=f.source();let requests=0;
+ client.resolvePlayback=async(id,options)=>{requests++;expect(id).toBe('111');expect(options).toMatchObject({forceRefresh:true,allowDetail:false,freshRequest:true});return {ok:true,data:{...a,playUrl:'https://video/refreshed'}};};
+ await f.controller.reloadVideo(entry,321,()=>true);
+ expect(requests).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:'111',url:'https://video/refreshed',resumePositionMs:321});
+});
+test('NOPLAY reload still rejects a later queue mutation during persistence',async()=>{
+ const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:'111'});
+ const entry=f.stack().at(-1)!,before=f.source();let release!:()=>void;
+ client.resolvePlayback=async()=>({ok:true,data:{...a,playUrl:'https://video/refreshed'}});
+ entry.queue!.persist=()=>new Promise<void>(resolve=>release=resolve);
+ const running=f.controller.reloadVideo(entry,321,()=>true);for(let n=0;n<80;n++)await Promise.resolve();expect(release).toBeDefined();
+ entry.queue!.refreshPrefetchItem('111',{...a,playUrl:'https://video/newer'});release();await running;
+ expect(f.source()).toBe(before);
 });

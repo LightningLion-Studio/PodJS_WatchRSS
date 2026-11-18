@@ -63,11 +63,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
 
 function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean)=>Promise<void>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
- let publish!:(v:any)=>void,firstFrames=0;
+ let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
- return {nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
+ return {diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();stateEvents.forEach(fn=>fn(current));await flush();};
@@ -227,6 +227,21 @@ test('REVIEW slow preparation reports a stalled load without publishing transien
  expect(f.images()).toHaveLength(2);expect(f.text()).toContain('网络较慢');expect(f.firstFrames()).toBe(0);
 });
 
+test('REVIEW adopted buffering result keeps productive first-frame preparation alive',async()=>{
+ const pending={...state('buffering'),sourceGeneration:1,positionMs:0,hasRenderedFirstFrame:false,playWhenReady:true,nativePlaybackState:2,loading:true,bufferedMs:0,metrics:{bytesLoaded:0}};
+ heldPrepare=Promise.resolve(pending);
+ const play=spyOn(video,'play').mockImplementation(async()=>current=pending);
+ try{
+  const f=reloadMount({platform:'douyin',immersive:true,awemeId:'pending-adoption',url:'https://fixture/pending.mp4',title:'fixture'});await flush();
+  for(let second=1;second<=30;second++){
+   current={...current,metrics:{bytesLoaded:second*50_000}};stateEvents.forEach(fn=>fn(current));await tick(1000);
+  }
+  expect(f.firstFrames()).toBe(0);expect(retries).toBe(0);expect(prepares).toHaveLength(1);
+  // The same 20-second idle limit still applies once transport stops moving.
+  await tick(19999);expect(retries).toBe(0);await tick(1);await tick(351);expect(retries).toBe(1);
+ }finally{play.mockRestore();}
+});
+
 for(const suspension of [['inactive'],['inactive','background']] as const)test(`DYENTRY same Douyin session resumes after ${suspension.join(' then ')}`,async()=>{
  sessionsCapable=true;decoderLimit=3;
  const f=reloadMount({platform:'douyin',immersive:true,awemeId:'dyentry-current',url:'file:///fixture/current.mp4',title:'fixture'});await flush();
@@ -294,4 +309,28 @@ test('NETOVERLAY direct Bluetooth media loading shows an advisory without blocki
  prepares=[];plays=0;nextError=undefined;current=state('idle');
  createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return createComponent(VideoPlayerScreen,{source:{platform:'douyin',immersive:true,url:'podjs-media-cache://fixture',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
  await flush();expect(plays).toBe(1);expect(prepares).toHaveLength(1);expect(scope.blocking).toBe(false);expect(scope.bluetooth).toBe(true);
+});
+test('NOPLAY a rendered but nonloading buffered player gets a bounded normal reload',async()=>{
+ const f=reloadMount({platform:'douyin',immersive:true,awemeId:'buffered-stall',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
+ current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+ stateEvents.forEach(fn=>fn(current));await flush();await tick(19999);expect(retries).toBe(0);
+ await tick(1);await tick(351);expect(retries).toBe(1);expect(prepares.at(-1)).toMatchObject({bypassCache:true,resumePositionMs:1});
+});
+test('NOPLAY a fresh native progress read cancels a stale buffered stall observation',async()=>{
+ reloadMount({platform:'douyin',immersive:true,awemeId:'fresh-progress',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
+ current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+ stateEvents.forEach(fn=>fn(current));await flush();
+ // The native player progresses even if an intermediate push is coalesced.
+ current={...current,state:'playing',nativePlaybackState:3,positionMs:2000};await tick(20000);await tick(351);expect(retries).toBe(0);
+});
+
+test('NOPLAY buffered-stall recovery keeps the two-attempt budget and an explicit reload counter',async()=>{
+ const f=reloadMount({platform:'douyin',immersive:true,awemeId:'bounded-stall',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
+ for(let i=0;i<3;i++){
+  current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};stateEvents.forEach(fn=>fn(current));await flush();
+  await tick(20000);await tick(701);
+  expect(retries).toBe(Math.min(i+1,2));
+  if(i<2)expect((await f.diagnostics()).reloadCount).toBe(i+1);
+ }
+ expect(f.text()).toContain('播放失败');await tick(60000);expect(retries).toBe(2);
 });

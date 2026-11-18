@@ -1,5 +1,5 @@
 import {expect,test} from 'bun:test';
-import {VideoReloadPolicy,videoSourceExpired} from '../src/ui/video-reload.ts';
+import {VideoReloadPolicy,VideoBufferedStallWait,videoSourceExpired} from '../src/ui/video-reload.ts';
 import {freshVideoSource} from '../src/media/reload-source.ts';
 import {createBiliPlaybackRetry} from '../src/playback.ts';
 import {DouyinRssRecovery} from '../src/douyin/rss-recovery.ts';
@@ -40,11 +40,14 @@ test('RSS Douyin reload force resolves each time and drops stale audio even with
  const a=await r.reload({title:'rss',url:'old',audioUrl:'old-audio'},()=>true);
  expect(a?.url).toBe('new-1');expect(a?.audioUrl).toBeUndefined();expect((await r.reload(a!,()=>true))?.url).toBe('new-2');
 });
-test('immersive reload force resolves the same ID using detail and rejects a stale completion',async()=>{
+test('immersive reload uses feed only and rejects a stale completion',async()=>{
  const {reloadDouyinPlayback}=await import('../src/douyin/reload-playback.ts');let calls=0;
- const client={resolvePlayback:async(id:string,options:any)=>{calls++;expect(id).toBe('selected');expect(options).toEqual({forceRefresh:true,allowDetail:true,freshRequest:true});return {ok:true,data:{awemeId:id,playUrl:'new-url',variants:[]}} as any;},buildPlaybackHeaders:async()=>({})};
- expect((await reloadDouyinPlayback(client,'selected',()=>true))?.item.playUrl).toBe('new-url');
- expect(await reloadDouyinPlayback(client,'selected',()=>false)).toBeUndefined();expect(calls).toBe(2);
+ const item={awemeId:'selected',playUrl:'old-url',variants:[]} as any;
+ const client={resolvePlayback:async(id:string,options:any)=>{calls++;expect(id).toBe('selected');expect(options).toEqual({forceRefresh:true,allowDetail:false,freshRequest:true,feedItem:item});return {ok:true,data:{awemeId:id,playUrl:'new-url',variants:[]}} as any;},buildPlaybackHeaders:async()=>({})};
+ expect((await reloadDouyinPlayback(client,'selected',()=>true,item))?.item.playUrl).toBe('new-url');
+ expect(await reloadDouyinPlayback(client,'selected',()=>false,item)).toBeUndefined();expect(calls).toBe(2);
+ const unavailable={...client,resolvePlayback:async()=>({ok:false,code:'TEMPORARILY_UNAVAILABLE',message:'not in refreshed feed'} as any)};
+ await expect(reloadDouyinPlayback(unavailable,'selected',()=>true,item)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
 });
 test('strict Bili reload does not join an abandoned resolution still pending at the retry boundary',async()=>{
  const initial={acceptQuality:[],acceptDescription:[],durl:[{url:'old',backupUrl:[]}]};const releases:Array<(v:any)=>void>=[];
@@ -65,4 +68,22 @@ test('REVIEW RSS refresh drops the former explicit expiry and decoder metadata',
  expect(result?.url).toBe('new');expect(result?.expiresAtMs).toBeUndefined();
  const fresh=freshVideoSource({title:'RSS',url:'old',videoMime:'video/hevc',videoWidth:1920,videoHeight:1080},result!,321);
  expect(fresh.videoMime).toBeUndefined();expect(fresh.videoWidth).toBeUndefined();expect(fresh.resumePositionMs).toBe(321);
+});
+
+
+test('buffered-stall guard respects loading, user pause, foreground and generation fences',async()=>{
+ const guard=new VideoBufferedStallWait();const jobs:Array<{fire:()=>void;cancelled:boolean}>=[];let expired:any;
+ const timer=(_ms:number)=>{let fire!:()=>void;const job={fire:()=>fire(),cancelled:false};jobs.push(job);return{result:new Promise<void>(yes=>{fire=yes;}),cancel(){job.cancelled=true;}};};
+ const s={positionMs:1,bufferedMs:4156,nativePlaybackState:2,playWhenReady:true,loading:false,hasRenderedFirstFrame:true,sourceGeneration:2};
+ for(const bad of [{...s,loading:true},{...s,playWhenReady:false},{...s,hasRenderedFirstFrame:false},{...s,bufferedMs:10},{...s,nativePlaybackState:3}])guard.observe(bad,1,true,timer,t=>{expired=t;});
+ expect(jobs).toHaveLength(0);guard.observe(s,1,false,timer,t=>{expired=t;});expect(jobs).toHaveLength(0);
+ guard.observe(s,1,true,timer,t=>{expired=t;});guard.observe({...s},1,true,timer,t=>{expired=t;});expect(jobs).toHaveLength(1);
+ jobs[0].fire();await Promise.resolve();expect(guard.matches(expired,s,1,true)).toBe(true);expect(guard.matches(expired,{...s,positionMs:500},1,true)).toBe(false);expect(guard.matches(expired,s,2,true)).toBe(false);
+ guard.cancel();expect(guard.current(expired)).toBe(false);
+});
+test('buffer progress restarts the bounded stall wait and cancels the former timer',async()=>{
+ const guard=new VideoBufferedStallWait();const jobs:Array<{fire:()=>void;cancelled:boolean}>=[];let calls=0;
+ const timer=(_ms:number)=>{let release!:()=>void;const job={fire:()=>release(),cancelled:false};jobs.push(job);return{result:new Promise<void>(yes=>{release=yes;}),cancel(){job.cancelled=true;}};};
+ const s={positionMs:1,bufferedMs:2000,nativePlaybackState:2,playWhenReady:true,loading:false,hasRenderedFirstFrame:true,sourceGeneration:2};
+ guard.observe(s,1,true,timer,()=>{calls++;});guard.observe({...s,bufferedMs:3000},1,true,timer,()=>{calls++;});expect(jobs[0].cancelled).toBe(true);jobs[0].fire();await Promise.resolve();expect(calls).toBe(0);jobs[1].fire();await Promise.resolve();expect(calls).toBe(1);guard.cancel();
 });

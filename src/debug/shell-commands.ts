@@ -2,7 +2,7 @@ import {bookFields,summaryFields,syncRecord,type LibraryDiagnosticsPort} from '.
 import {ShellCommandError,type ShellContext,type ShellHandler,type ShellDiagnostics} from '@podjs/framework/shell';
 
 export const SHELL_COMMANDS=['douyin.open','douyin.play','douyin.pause','douyin.resume','douyin.next','douyin.prev','douyin.state','diag.dump','library.books','library.summary','sync.last'] as const;
-export interface PlaybackNumbers {state:string;positionMs:number;bufferedMs?:number;metrics?:{rebufferCount?:number}}
+export interface PlaybackNumbers {state:string;reloadCount?:number;loopModeIndex?:number;loopModeCount?:number;gestureReady?:boolean;gestureOffset?:number;gestureDetailShown?:boolean;gestureLifecycleActive?:boolean;gestureRotation?:number;positionMs:number;durationMs?:number;targetOrdinal?:number;sourceGeneration?:number;hasRenderedFirstFrame?:boolean;completedLoops?:number;bufferedMs?:number;isBuffering?:boolean;hasCachedFirstFrame?:boolean;frameHandoffPending?:boolean;playWhenReady?:boolean;nativePlaybackState?:number;playbackSuppressionReason?:number;loading?:boolean;metrics?:{sourceOrdinal?:number;rebufferCount?:number;firstFrameMs?:number;droppedFrames?:number}}
 export interface ShellPlaybackPort {
  page():string;
  open(context:ShellContext):Promise<void>;
@@ -19,7 +19,7 @@ const number=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&v
 export function createShellHandlers(port:ShellPlaybackPort,library?:LibraryDiagnosticsPort):Record<string,ShellHandler> {
  const state=async()=>{
   const value=await port.state(),host=await port.diagnostics();
-  return {page:port.page(),playbackState:value?.state??'idle',position:number(value?.positionMs),bufferedMs:number(value?.bufferedMs),rebufferCount:number(value?.metrics?.rebufferCount),decoderInstances:number(host.decoderInstances),pssKb:number(host.pssKb)};
+  return {page:port.page(),playbackState:value?.state??'idle',reloadCount:number(value?.reloadCount),loopModeIndex:typeof value?.loopModeIndex==='number'?value.loopModeIndex:-1,loopModeCount:number(value?.loopModeCount),gestureReady:value?.gestureReady===true,gestureOffset:typeof value?.gestureOffset==='number'&&Number.isFinite(value.gestureOffset)?value.gestureOffset:0,gestureDetailShown:value?.gestureDetailShown===true,gestureLifecycleActive:value?.gestureLifecycleActive===true,gestureRotation:number(value?.gestureRotation),isBuffering:value?.isBuffering===true,hasCachedFirstFrame:value?.hasCachedFirstFrame===true,frameHandoffPending:value?.frameHandoffPending===true,playWhenReady:value?.playWhenReady===true,nativePlaybackState:number(value?.nativePlaybackState),playbackSuppressionReason:number(value?.playbackSuppressionReason),loading:value?.loading===true,position:number(value?.positionMs),bufferedMs:number(value?.bufferedMs),rebufferCount:number(value?.metrics?.rebufferCount),decoderInstances:number(host.decoderInstances),pssKb:number(host.pssKb),durationMs:number(value?.durationMs),targetOrdinal:number(value?.targetOrdinal),sourceGeneration:number(value?.sourceGeneration),hasRenderedFirstFrame:value?.hasRenderedFirstFrame===true,completedLoops:number(value?.completedLoops),nativeSourceOrdinal:number(value?.metrics?.sourceOrdinal),firstFrameMs:typeof value?.metrics?.firstFrameMs==='number'?number(value.metrics.firstFrameMs):null,droppedFrames:number(value?.metrics?.droppedFrames)};
  };
  return {
   'douyin.open':async(args,context)=>{noArgs(args);await port.open(context);return state();},

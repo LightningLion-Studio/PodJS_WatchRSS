@@ -12,3 +12,9 @@ test('unknown player failure cannot masquerade as a network request or auto-retr
  expect(formatPlayerFailure('resource_exhausted')).toBe('播放器资源不足，请重试');expect(formatPlayerFailure('decode_error')).toBe('视频解码失败，请重试');expect(formatPlayerFailure('unknown')).not.toContain('网络');
  expect(douyinPlaybackFailure({code:'REQUEST_FAILED'})).toEqual({code:'REQUEST_FAILED'});
 });
+
+test('Douyin result codes retain closed recovery categories without service messages',()=>{
+ for(const [code,expected] of [['NOT_LOGGED_IN','restricted'],['RATE_LIMITED','restricted'],['TEMPORARILY_UNAVAILABLE','not_ready'],['REQUEST_FAILED','network_error'],['PARSE_FAILED','prepare_failed'],['UNSUPPORTED','prepare_failed'],['PLAYBACK_FAILED','video_error']] as const){
+  const error=Object.assign(Error('PRIVATE token=SECRET'),{code});expect(playerFailureCode(error)).toBe(expected);expect(JSON.stringify(playerFailureFields(error,'recovery'))).not.toMatch(/PRIVATE|token|SECRET/);
+ }
+});
