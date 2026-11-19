@@ -274,3 +274,30 @@ test('legacy wire projection reuses body summaries after restart and rebuilds on
   expect(await f.db.query('SELECT * FROM sync_peer_state')).toEqual([]);
  }finally{f.sql.close();}
 });
+
+test('canonical wire aliases work on SQLite without JSON1 and revalidate a changed GUID',async()=>{
+ const f=await setup();
+ try{
+  const query=f.db.query;
+  f.db.query=async(sql,...args)=>{
+   if(/\bjson_each\(/i.test(sql))throw Error('no such table: json_each');
+   if(/\bjson_array\(/i.test(sql))throw Error('no such function: json_array');
+   return query(sql,...args);
+  };
+  const url='https://example.com/rss-item';
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(2,'https://feed.example/rss','Feed',1)");
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,link,guid,dedup_key,fetched_at) VALUES(2,2,'RSS',?,'old-guid','rss-key',100)",[url]);
+  await f.db.execute("INSERT INTO article_saved_states(article_id,save_type,saved,changed_at) VALUES(2,'favorite',1,100)");
+  const nativeId=await stableArticleId(url,text.parseUri,codec);
+  const make=()=>{const repo=new SqlLibrarySessionRepository(f.db,f.ports);repo.configurePeer('phone',{supportsRssCanonicalIds:true});return repo;};
+  const alias=async(guid:string)=>{
+   const expected=await codec.sha256(new TextEncoder().encode(guid));
+   const window=await make().prepareWindow('phone',0);
+   expect(window.fullArticleManifest.find(row=>row.articleId===expected)?.legacyArticleIds).toEqual([nativeId]);
+  };
+  await alias('old-guid');
+  await alias('old-guid');
+  await f.db.execute("UPDATE articles SET guid='new-guid' WHERE id=2");
+  await alias('new-guid');
+ }finally{f.sql.close();}
+});

@@ -208,7 +208,8 @@ export class LocalArticleManifestStore {
   const input=new Map<number,Row>();
   for(let at=0;at<urls.length;at+=400){
    const part=urls.slice(at,at+400);
-   const rows=await querySyncKeysetPages(this.db,`WITH wanted AS (SELECT value FROM json_each(?)), matches AS (
+   // Android 11's SQLite builds do not include JSON1.
+   const rows=await querySyncKeysetPages(this.db,`WITH wanted(value) AS (VALUES ${part.map(()=>'(?)').join(',')}), matches AS (
     SELECT a.id FROM wanted w JOIN articles a ON a.link=w.value
     UNION SELECT a.id FROM wanted w JOIN articles a ON a.guid=w.value
     UNION SELECT a.id FROM wanted w JOIN articles a ON a.dedup_key=w.value)
@@ -222,11 +223,12 @@ export class LocalArticleManifestStore {
     FROM matches JOIN articles a ON a.id=matches.id JOIN channels ch ON ch.id=a.channel_id
     LEFT JOIN sync_article_ids m ON m.item_id=a.id LEFT JOIN cloud_rss_article_ids i ON i.item_id=a.id
     LEFT JOIN sync_projection_wire_ids w ON w.item_id=a.id AND w.generation=?
-     AND w.stamp=json_array(ch.url,a.link,a.guid,a.dedup_key,m.article_id,i.article_id)
+     AND w.channel_url=ch.url AND w.link IS a.link AND w.guid IS a.guid AND w.dedup_key IS a.dedup_key
+     AND w.bound_id IS m.article_id AND w.cloud_rss_id IS i.article_id
      AND length(w.article_id)=64 AND w.article_id NOT GLOB '*[^0-9a-f]*'
      AND length(w.native_id)=64 AND w.native_id NOT GLOB '*[^0-9a-f]*'
     WHERE ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,
-    [JSON.stringify(part),generation],{key:'id'});
+    [...part,generation],{key:'id'});
    for(const row of rows)input.set(num(row.id),row);
   }
   type Alias=Pick<CloudRssIdentity,'articleId'|'nativeArticleId'|'localArticleId'>;
@@ -245,8 +247,8 @@ export class LocalArticleManifestStore {
    let cacheable=!!row.cloud_rss_id||!legacy&&!!str(row.guid).trim();
    if(!cacheable)try{canonicalRssUrl(str(row.link),false);cacheable=true;}catch{/* An opaque identity may depend on current body text. */}
    if(cacheable){
-    const stamp=JSON.stringify([row.channel_url,row.link,row.guid,row.dedup_key,row.bound_id,row.cloud_rss_id]);
-    writes.push({sql:'INSERT OR REPLACE INTO sync_projection_wire_ids VALUES(?,?,?,?,?)',params:[row.id,generation,stamp,identity.articleId,identity.nativeArticleId]});
+    writes.push({sql:'INSERT OR REPLACE INTO sync_projection_wire_ids(item_id,generation,channel_url,link,guid,dedup_key,bound_id,cloud_rss_id,article_id,native_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
+     params:[row.id,generation,row.channel_url,row.link,row.guid,row.dedup_key,row.bound_id,row.cloud_rss_id,identity.articleId,identity.nativeArticleId]});
    }
   }
   for(let at=0;at<writes.length;at+=200)await this.db.transaction([projectionGuard(generation),...writes.slice(at,at+200)]);

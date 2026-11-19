@@ -40,7 +40,10 @@ export class LibraryProjectionCache {
  async initialize(){if(this.ready)await this.ready;const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);if(cookie===this.cookie)return;this.ready=repositoryWork(this.diagnostic,'projection-install',()=>this.install()).then(async()=>{this.loaded.clear();this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);}).catch(e=>{this.ready=undefined;throw e;});await this.ready;}
  private async install(){
   await this.db.transaction([
-   {sql:'CREATE TABLE IF NOT EXISTS sync_projection_wire_ids(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,generation TEXT NOT NULL,stamp TEXT NOT NULL,article_id TEXT NOT NULL,native_id TEXT NOT NULL)'},
+   {sql:`CREATE TABLE IF NOT EXISTS sync_projection_wire_ids(
+    item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,generation TEXT NOT NULL,
+    channel_url TEXT NOT NULL,link TEXT,guid TEXT,dedup_key TEXT,bound_id TEXT,cloud_rss_id TEXT,
+    article_id TEXT NOT NULL,native_id TEXT NOT NULL)`},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_header(scope TEXT PRIMARY KEY,generation TEXT NOT NULL,revision INTEGER NOT NULL,seq INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_rows(scope TEXT NOT NULL,generation TEXT NOT NULL,article_id TEXT NOT NULL,url TEXT NOT NULL,position INTEGER NOT NULL,source_item INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(scope,generation,article_id))'},
    {sql:'CREATE INDEX IF NOT EXISTS sync_projection_url ON sync_projection_rows(scope,generation,url)'},
