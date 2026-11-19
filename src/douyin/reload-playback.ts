@@ -1,14 +1,34 @@
+import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
-/** Queue playback uses the ordinary feed contract, including on reload.
- * A timed-out native player can retry current metadata through that resolver;
- * its normal expiry and admission checks still apply.
- * If the refreshed page omits this ID, keep the target failed and retryable;
- * never probe the separately restricted detail endpoint or replay an expired URL. */
-export async function reloadDouyinPlayback(client:Pick<DouyinClient,'resolvePlayback'|'buildPlaybackHeaders'>,id:string,current:()=>boolean,feedItem:DouyinItem,retryCurrent=false){
-  const result=await client.resolvePlayback(id,{forceRefresh:!retryCurrent,allowDetail:false,freshRequest:!retryCurrent,feedItem});
+
+export type DouyinReloadMode = 'feed' | 'current' | 'detail';
+
+export async function reloadDouyinPlayback(
+  client:Pick<DouyinClient,'resolvePlayback'|'buildPlaybackHeaders'>,
+  id:string,
+  current:()=>boolean,
+  feedItem:DouyinItem,
+  mode:DouyinReloadMode='feed',
+  previousUrls:readonly string[]=[],
+){
+  if(!current())return;
+  const options=mode==='detail'
+    ?{forceRefresh:true,allowDetail:true,freshRequest:true}
+    :{forceRefresh:mode==='feed',allowDetail:false,freshRequest:mode==='feed',feedItem};
+  const result=await client.resolvePlayback(id,options);
   if(!current())return;
   if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,...(result.networkFailure?{networkFailure:true}:{}),...(result.httpStatus?{httpStatus:result.httpStatus}:{})});
+  const oldUrls=new Set([feedItem.playUrl,...douyinPlaybackMirrors(feedItem),...previousUrls]);
+  if(mode==='detail'&&(result.data.awemeId!==id||oldUrls.has(result.data.playUrl))){
+    throw Object.assign(new Error('详情未返回该视频的新播放地址'),{code:'TEMPORARILY_UNAVAILABLE'});
+  }
   const headers=await client.buildPlaybackHeaders();
-  return current()?{item:result.data,headers}:undefined;
+  if(!current())return;
+  const item=mode==='detail'?{
+    ...result.data,
+    variants:result.data.variants?.filter(variant=>!oldUrls.has(variant.playUrl))
+      .map(variant=>({...variant,playUrls:variant.playUrls?.filter(url=>!oldUrls.has(url))})),
+  }:result.data;
+  return {item,headers};
 }

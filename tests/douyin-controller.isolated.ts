@@ -20,9 +20,9 @@ let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any)=>{loginOptions=options;return {result:new Promise(resolve=>completeLogin=resolve),cancel(){}};}}));
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
-let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
+let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let adjacentPreview:((item:DouyinItem,uri:string)=>unknown)|undefined;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async(item:DouyinItem,uri:string)=>adjacentPreview?.(item,uri),sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,playbackResolved:async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>{expect(current()).toBe(true);return proxyOverride?proxyOverride(item,headers):item.playUrl;},lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -36,7 +36,7 @@ const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()))
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateStorage;publish?:(source:PlaybackSource|undefined)=>void}){
  entryTimers.length=0;optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
- preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
+ preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;adjacentPreview=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({historyStorage:options?.historyStorage,secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
  let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
@@ -387,6 +387,14 @@ test('stock playback prewarms adjacent sources with public headers and preserved
  expect(options).toEqual({actual:headers,mode:'prewarm'});
  expect(prepared?.source).toMatchObject({videoMime:'video/avc',videoWidth:360,videoHeight:640});
  expect(prepared?.attemptedUrl).toBe(variant.playUrl);
+ expect(prepared?.source.previewFrame).toBeUndefined();
+ const local='file:///fixture/adjacent.mp4';
+ localPaths.set(b.awemeId,local);
+ const preview={entryId:b.awemeId,frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/adjacent.jpg',
+  width:360,height:640,positionMs:0,capturedAt:0,capturedGeneration:1}};
+ adjacentPreview=(item,uri)=>{expect(item.awemeId).toBe(b.awemeId);expect(uri).toBe(local);return preview;};
+ const localPrepared=await f.controller.prepareDouyinAdjacent(entry,'next');
+ expect(localPrepared?.source.previewFrame).toEqual(preview);
  expect(f.requests()).toBe(0);
 });
 
@@ -1052,5 +1060,23 @@ test('NOPLAY an automatic player timeout can reprepare its still-authorized sele
  const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
  const entry=f.stack().at(-1)!,before=f.source();let calls=0;
  client.resolvePlayback=async(id,options)=>{calls++;expect(options).toMatchObject({forceRefresh:false,freshRequest:false,allowDetail:false,feedItem:a});return {ok:true,data:a};};
- await f.controller.reloadVideo(entry,321,()=>true,true);expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+ await f.controller.reloadVideo(entry,321,()=>true,'current');expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+});
+
+test('manual reload publishes fresh detail in a new managed source at the current position',async()=>{
+ const f=fixture(),a=item('111'),b=item('222');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;const url='https://video/fresh-detail';let details=0,registrations=0;
+ client.resolvePlayback=async(id,options)=>{
+  expect(id).toBe(a.awemeId);
+  expect(options).toEqual({forceRefresh:true,freshRequest:true,allowDetail:true});
+  details++;
+  return {ok:true,data:{...a,playUrl:url}};
+ };
+ proxyOverride=async resolved=>{expect(resolved.playUrl).toBe(url);registrations++;return 'podjs-media-cache://play/fresh';};
+ await f.controller.reloadVideo(entry,321,()=>true,'detail');
+ expect(details).toBe(1);expect(registrations).toBe(1);
+ expect(entry.queue!.snapshot().item?.awemeId).toBe(a.awemeId);
+ expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'podjs-media-cache://play/fresh',resumePositionMs:321,bypassCache:false});
 });

@@ -3,6 +3,7 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
+import { dispatchMemoryPressure } from '@podjs/framework/memory';
 import type { InternetStatus } from '../src/onboarding/state.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/VideoPlayerScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
@@ -32,7 +33,7 @@ let replacementPrepareGate:Promise<void>|undefined;
 const sessionCalls:any[]=[];const sessionStates=new Map<string,any>();
 const sessionValue=(id:string)=>sessionStates.get(id)??{...state("ready"),sessionId:id};
 const sessionPort={
- prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
+ prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:!options.keyframeOnly,hasCachedFirstFrame:options.keyframeOnly===true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
  play:async(id:string)=>{const v={...sessionValue(id),state:"playing"};sessionStates.set(id,v);return v;},
  retire:async(id:string)=>{const v={...sessionValue(id),state:"prewarmed",muted:true};sessionStates.set(id,v);return v;},
  pause:async(id:string)=>{const v={...sessionValue(id),state:"paused"};sessionStates.set(id,v);return v;},
@@ -41,7 +42,7 @@ const sessionPort={
  transition:async(options:any)=>{sessionCalls.push({method:"transition",...options});return {...options,composited:true};},
  release:async()=>{sessionReleases++;return {released:true};}
 };
-let sessionsCapable=false,decoderLimit=1,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
+let sessionsCapable=false,decoderLimit=1,independentKeyframes=false,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
@@ -55,9 +56,9 @@ const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,w
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
+const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;independentKeyframes=false;lifecycleState='active';});
 let deliveredNativeState:any;
 const flush=async()=>{if(current!==deliveredNativeState){deliveredNativeState=current;jankStateChanged(current);}for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
@@ -319,6 +320,20 @@ test('SWIPEFEED prewarmed handoff never prepares again while publication persist
   expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   release();await flush();
  }finally{Date.now=realNow;}
+});
+
+test('the cold immersive drag presents only the adjacent video’s verified local frame',async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];
+ const source={platform:'douyin' as const,immersive:true,awemeId:'current',url:'managed/current',title:'current'};
+ const preview={entryId:'next',frame:{available:true as const,kind:'actual_frame' as const,path:'next-frame.png',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}};
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+  source,width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},
+  onPrepareAdjacent:async()=>({key:'next',source:{...source,awemeId:'next',url:'managed/next',previewFrame:preview}})
+ });});
+ await flush();
+ const g=gestures[0];g.onPanStart({dy:-10});g.onPanMove({dy:-80});
+ expect(nodes(root).find(node=>node.kind==='Poster')?.props.filePath).toBe('next-frame.png');
+ g.onCancel?.({});await flush();
 });
 
 test('SWIPEFEED legacy settle retires outgoing before a contended route result',async()=>{
@@ -839,10 +854,10 @@ for(const useSessions of [false,true])test(`DYZOOM rotation sends destination ge
  const realNow=Date.now;let now=1000;Date.now=()=>now;
  try {
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/a.mp4',title:'a'},width:233,height:200,active:true,offset:0,round:true});});await flush();
-  for(const target of [90,180,270,360]) {
+  for(const [from,target] of [[0,90],[90,180],[180,270],[270,0]]) {
    transforms.length=0;
    const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));button!.props.onPress();await flush();
-   expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(target-90);
+   expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(from);
    for(let i=0;i<21;i++){now+=15;frames.forEach(fn=>fn());await flush();}
    expect(transforms.length).toBeGreaterThan(2);expect(transforms.every(v=>v.scaleRotationDeg===target)).toBe(true);expect(transforms.at(-1).rotationDeg).toBe(target);
   }
@@ -933,20 +948,21 @@ test('NOPLAY terminal-only displacement commits one page without inventing a two
 });
 
 const rotatedSwipes = [
- {angle:0, width:233, height:200, up:[0,-1]},
- {angle:90, width:233, height:200, up:[1,0]},
- {angle:180, width:233, height:200, up:[0,1]},
- {angle:270, width:233, height:200, up:[-1,0]},
+ {angle:0, turns:0, width:233, height:200, up:[0,-1]},
+ {angle:90, turns:1, width:233, height:200, up:[1,0]},
+ {angle:180, turns:2, width:233, height:200, up:[0,1]},
+ {angle:270, turns:3, width:233, height:200, up:[-1,0]},
+ {angle:0, turns:4, width:233, height:200, up:[0,-1]},
 ] as const;
 
-for(const useSessions of [false,true])for(const {angle,width,height,up} of rotatedSwipes)
+for(const [immersive,useSessions] of [[true,false],[true,true],[false,false]] as const)for(const {angle,turns,width,height,up} of rotatedSwipes)
 for(const direction of ['next','previous'] as const){
- test(`DYROTATE ${angle}° ${direction} keeps the rotation sessions=${useSessions}`,async()=>{
+ test(`DYROTATE ${angle}° after ${turns} turns ${direction} keeps the rotation immersive=${immersive} sessions=${useSessions}`,async()=>{
   sessionsCapable=useSessions;decoderLimit=3;initial='available';gestures.length=0;
   sessionCalls.length=0;sessionStates.clear();boundsCalls.length=0;prepares=[];
   const savedNow=Date.now;let now=1000;Date.now=()=>now;
   try{
-   const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+   const source=(id:string)=>({platform:'douyin' as const,immersive,awemeId:id,url:'managed/'+id,title:id});
    const adjacent={next:source('b'),previous:source('z')};
    let selection:string|undefined;
    let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
@@ -966,7 +982,7 @@ for(const direction of ['next','previous'] as const){
    await flush();await flush();
    const rotateButton=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children)
     .some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));
-   for(let step=0;step<angle/90;step++){
+   for(let step=0;step<turns;step++){
     rotateButton!.props.onPress();await flush();now+=300;frames.forEach(fn=>fn());await flush();
    }
    const sign=direction==='next'?1:-1;
@@ -981,6 +997,9 @@ for(const direction of ['next','previous'] as const){
    else{
     expect(dragBounds.translateX).toBeCloseTo(dx);
     expect(dragBounds.translateY).toBeCloseTo(dy);
+    expect(dragBounds.pagerOffset.x).toBeCloseTo(dx);
+    expect(dragBounds.pagerOffset.y).toBeCloseTo(dy);
+    expect(dragBounds.roundClip).toEqual({cx:width/2,cy:height/2,radius:height/2});
    }
    expect(handle.gestureRotation()).toBe(angle);
    const replacement=useSessions?sessionCalls.find(c=>c.method==='promote'):prepares.at(-1);
@@ -1024,4 +1043,143 @@ test('DYROTATE switching during a rotation tween uses its destination on both su
   expect(sessionCalls.find(c=>c.method==='promote')?.transform?.rotationDeg).toBe(90);
   now+=300;frames.forEach(fn=>fn());await flush();expect(handle.gestureRotation()).toBe(90);
  }finally{Date.now=savedNow;}
+});
+
+for(const useSessions of [false,true])for(const {angle:start,up} of rotatedSwipes.slice(0,3)){
+ test(`DYROT2 cancelled outgoing transform preserves the latest angle from ${start}° sessions=${useSessions}`,async()=>{
+  initial='available';sessionsCapable=useSessions;decoderLimit=3;gestures.length=0;sessionCalls.length=0;sessionStates.clear();
+  const savedTransform=video.setTransform,savedSessionTransform=sessionPort.setTransform,savedNow=Date.now;
+  let now=1000;Date.now=()=>now;
+  const angles:number[]=[];
+  let block=false,rejectOld!:(error:unknown)=>void;
+  const record=async(options?:any)=>{
+   if(block){block=false;await new Promise<void>((_,reject)=>{rejectOld=reject;});}
+   angles.push(options.rotationDeg);
+  };
+  video.setTransform=record;
+  sessionPort.setTransform=async(id:string,options?:any)=>{
+   if(sessionValue(id).presented)await record(options);
+   return sessionValue(id);
+  };
+  try{
+   const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+   const next=source('b');
+   let selected='a';
+   let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+   const root=createRoot(dispose=>{
+    stops.push(dispose);
+    const [activeSource,setSource]=createSignal(source('a'));
+    return VideoPlayerScreen({get source(){return activeSource();},width:233,height:233,round:true,active:true,offset:0,
+     ref:value=>{handle=value;},onNext:()=>{},onPrepareAdjacent:async()=>({key:'b',source:next}),
+     onSelectTarget:(_direction,_distance,prepared)=>{
+      selected='b';setSource((prepared?.source??next) as ReturnType<typeof source>);
+     }});
+   });
+   await flush();await flush();
+   const rotate=()=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children)
+    .some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'))!.props.onPress();
+   const settle=async()=>{now+=320;frames.forEach(fn=>fn());await flush();};
+   for(let i=0;i<start;i+=90){rotate();await settle();}
+   expect(angles.at(-1)).toBe(start);
+   block=true;rotate();await flush();
+   const swipe={dx:up[0]*100,dy:up[1]*100,vx:up[0]*500,vy:up[1]*500};
+   const gesture=gestures[0];
+   gesture.onDown();gesture.onPanStart(swipe);gesture.onPanMove(swipe);await flush();
+   gesture.onUp(swipe);gesture.onPanEnd(swipe);await flush();await flush();
+   expect(selected).toBe('b');expect(handle.gestureRotation()).toBe(start+90);
+   if(useSessions)expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);
+   rotate();await settle();
+   const latest=(start+180)%360;
+   expect(handle.gestureRotation()%360).toBe(latest);
+   rejectOld({code:'cancelled'});await flush();
+   expect(angles.at(-1)).toBe(latest);
+  }finally{
+   video.setTransform=savedTransform;sessionPort.setTransform=savedSessionTransform;Date.now=savedNow;
+  }
+ });
+}
+
+test('GEMINI scaled picture controls and playback overlays share the tween pivot',async()=>{
+ initial='available';prepares=[];current=state('idle');
+ const savedNow=Date.now;let now=1000;Date.now=()=>now;
+ try{
+  let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+   source:{platform:'douyin',url:'file:///mock.mp4',title:'mock'},
+   width:466,height:466,active:true,offset:0,round:false,ref:value=>{handle=value;},onNext:()=>{},
+   onPrepareAdjacent:async()=>undefined,
+  });});
+  await flush();
+  const findIcon=(icon:string)=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&
+   nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));
+  findIcon('loop-off')!.props.onPress();
+  current={...state('buffering'),buffered:false};await flush();
+  const contains=(node:Node,predicate:(node:Node)=>boolean)=>nodes(node.props.children).some(predicate);
+  for(let turn=0;turn<4;turn++){
+   findIcon('rotate')!.props.onPress();
+   for(const delta of [60,240]){
+    now+=delta;frames.forEach(fn=>fn());await flush();
+    const visible=nodes(root),angle=handle.gestureRotation();
+    const controls=visible.find(n=>n.props.style?.scale===2&&contains(n,c=>c.props.debugName==='VideoPlayerRotate'));
+    expect(controls?.props.style).toMatchObject({insetL:116.5,insetT:116.5,width:233,height:233,rotate:angle});
+    const overlays=visible.find(n=>n.props.style?.rotate===angle&&
+     contains(n,c=>c.kind==='Text'&&c.props.children==='单视频循环')&&
+     contains(n,c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-loading.svg'));
+    expect(overlays?.props.style).toMatchObject({rotate:angle});
+   }
+  }
+ }finally{Date.now=savedNow;}
+});
+
+test('256 MB keeps a pixel-only reverse neighbour and presents it on the first down move',async()=>{
+ const globals=globalThis as typeof globalThis & {pod?:{memoryBudgetBytes?:()=>number}};
+ const savedPod=globals.pod,savedRelease=sessionPort.release;
+ globals.pod={...savedPod,memoryBudgetBytes:()=>256_000_000};
+ sessionsCapable=true;decoderLimit=2;independentKeyframes=true;
+ sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ sessionPort.release=async (id?:string)=>{
+  if(id)sessionStates.delete(id);
+  return savedRelease();
+ };
+ try{
+  const source=(index:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(index),url:`local/${index}.mp4`,title:String(index)});
+  let selected=2;
+  createRoot(stop=>{
+   stops.push(stop);
+   const [current,setCurrent]=createSignal(source(selected));
+   const adjacent=(direction:'next'|'previous')=>selected+(direction==='next'?1:-1);
+   return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},
+    onAdjacentKey:direction=>String(adjacent(direction)),
+    onPrepareAdjacent:async direction=>({key:String(adjacent(direction)),source:source(adjacent(direction))}),
+    onSelectTarget:(_direction,_distance,target)=>{
+     expect(target?.key).toBe('1');
+     selected=1;setCurrent(target!.source as ReturnType<typeof source>);
+    },
+   });
+  });await flush();await flush();
+  const previous=()=>sessionCalls.filter(x=>x.method==='prepare'&&x.url==='local/1.mp4').at(-1);
+  expect(previous()).toMatchObject({prewarm:true,keyframeOnly:true,retainKeyframe:true});
+  expect(sessionStates.size).toBe(3);
+  expect([...sessionStates.values()].filter(s=>s.hasRenderedFirstFrame)).toHaveLength(2);
+
+  dispatchMemoryPressure({t:'memory.pressure',level:2});await flush();
+  expect(sessionStates.size).toBe(2);
+  dispatchMemoryPressure({t:'memory.pressure',level:0});await flush();
+  expect(sessionStates.size).toBe(3);
+
+  const before=sessionCalls.length;
+  const finger=gestures[0];
+  finger.onPanStart({dy:12});await flush();
+  expect(sessionCalls.slice(before).find(x=>x.method==='transition')).toMatchObject({
+   direction:'down',progress:12/233,toSessionId:previous().sessionId,
+  });
+  expect(sessionStates.get(previous().sessionId)).toMatchObject({hasCachedFirstFrame:true,hasRenderedFirstFrame:false});
+  finger.onPanMove({dy:120});finger.onPanEnd({vy:500});await flush();
+  expect(selected).toBe(1);
+  expect(sessionCalls.slice(before).find(x=>x.method==='promote')).toMatchObject({id:previous().sessionId});
+ }finally{
+  stops.pop()?.();
+  sessionPort.release=savedRelease;
+  globals.pod=savedPod;
+ }
 });

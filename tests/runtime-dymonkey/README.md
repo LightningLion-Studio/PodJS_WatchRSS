@@ -34,11 +34,17 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/panel_rotation_test.py" \
   --lib "$lib" --package "$package" > "$EVIDENCE/panel-rotation.json"
 flock "$lock" capmem 16G unshare --user --map-current-user --net \
+  python3 -B "$APP/tests/runtime-dymonkey/rotation_cycle_test.py" \
+  --lib "$lib" --package "$package" > "$EVIDENCE/rotation-cycle.json"
+flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/monkey.py" \
   --lib "$lib" --package "$package" --seed 50641 --steps 512 --out "$EVIDENCE/seed-50641.json"
 flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/monkey.py" --detail \
   --lib "$lib" --package "$package" --seed 50641 --steps 96 --out "$EVIDENCE/detail-50641.json"
+flock "$lock" capmem 16G unshare --user --map-current-user --net \
+  python3 -B "$APP/tests/runtime-dymonkey/detail_perf.py" --check \
+  --lib "$lib" --package "$package" > "$EVIDENCE/detail-perf.json"
 ```
 
 - The runner sends a fixed set of input actions. The fixture checks every
@@ -56,6 +62,10 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
   and swipes, and pressing Back during a held opening swipe. Each scenario
   checks scrolling, Back and re-entry. The saved sequence identifies the
   detail profile for replay.
+- The performance probe opens a 20,000-code-point description, checks that
+  its first scroll shows text, and measures 30 subsequent scrolls using the
+  runtime's guest and surface timings. It checks contact ownership after
+  release and verifies play/pause after Back.
 - The parent enforces a five-second progress deadline. A guest frame
   over one second also fails. On failure the JSON contains the seed,
   original steps and a replay sequence. The reducer removes chunks and
@@ -66,6 +76,7 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
   services. The guard controls are canaries. They have assertion handlers
   and omit account and network implementations.
 
+The resource gate uses 250,000 KiB (256,000,000 bytes) and at most three decoders.
 Linux process PSS, the software raster and mock decoder counts apply to
 this fixture. Android process state, real decoder occupancy, display power
 and physical watch behavior require independent device evidence.

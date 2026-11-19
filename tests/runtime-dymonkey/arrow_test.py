@@ -103,7 +103,7 @@ def check_angle(library, package, angle):
         full_turn = None
         if angle == 270:
             tween_samples.append(rotate_step(host, angle))
-            full_turn = host.state["rotation"] == 360 and arrow_points(host, 360)
+            full_turn = host.state["rotation"] == 0 and arrow_points(host, 0)
         return {"angle": angle, "positionAndDirection": visible, "tap": tap,
                 "pictureLeftSwipe": swipe, "retainedAfterPaging": retained,
                 "retainedHit": retained_hit, "rimHit": rim_hit, "staleHit": stale_hit,

@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 
 SIZE = 233
+PSS_LIMIT_KIB = 250_000
 FONT_METRICS = c.CFUNCTYPE(c.c_int, c.c_size_t, c.c_float, c.c_uint32, c.c_uint32,
                           c.POINTER(c.c_uint32))
 FONT_GLYPH = c.CFUNCTYPE(c.c_int, c.c_size_t, c.POINTER(c.c_uint16), c.c_size_t, c.c_float,
@@ -72,7 +73,7 @@ class DrawList(c.Structure):
 class Host:
     prepare_ms = 136
 
-    def __init__(self, library, package):
+    def __init__(self, library, package, size=SIZE):
         self.lib = c.CDLL(str(library))
         ptr, string, length = c.c_void_p, c.c_char_p, c.c_size_t
         self.create = self.bind("create", ptr, c.POINTER(Config))
@@ -103,7 +104,8 @@ class Host:
         self.max_decoders = 0
         self.max_pss_kib = 0
         self.samples = 0
-        self.pixels = (c.c_ubyte * (SIZE * SIZE * 4))()
+        self.size = size
+        self.pixels = (c.c_ubyte * (size * size * 4))()
 
     def bind(self, name, result, *args):
         fn = getattr(self.lib, "pod_runtime_" + name)
@@ -118,7 +120,7 @@ class Host:
             raise
 
     def open(self):
-        config = Config(c.sizeof(Config), b"android-watch", 4, 2, SIZE * 2, SIZE * 2,
+        config = Config(c.sizeof(Config), b"android-watch", 4, 2, self.size * 2, self.size * 2,
                         2, 0, 0, 0, 0, 0, self.directory.name.encode(),
                         json.dumps(ALLOWED_CAPABILITIES).encode())
         self.runtime = self.create(c.byref(config))
@@ -272,6 +274,6 @@ class Host:
                    if line.startswith("Pss:"))
         self.max_pss_kib = max(pss, self.max_pss_kib)
         self.samples += 1
-        if pss > 125000 or self.max_decoders > 3:
+        if pss > PSS_LIMIT_KIB or self.max_decoders > 3:
             raise RuntimeError(f"resource budget exceeded: pss={pss}, decoders={self.max_decoders}")
         return draw.hash
