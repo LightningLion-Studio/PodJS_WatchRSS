@@ -407,10 +407,12 @@ export function createMediaRouteController(
     });
     void pendingDouyinQueue.fillAhead(16).catch(()=>{});
     pendingDouyinPlayback = (async()=>{
+        benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'candidate_start'});
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'preview_start'});
         // A restored native cache capability already owns authorized upstream headers.
         const bundle=await douyinPreload.readySource?.(request.item);
-        const headers=bundle?{}:await douyinClient.buildPlaybackHeaders();
+        const localUrl=bundle?.url??await douyinPreload.lookup(request.item.awemeId);
+        const headers=localUrl?{}:await douyinClient.buildPlaybackHeaders();
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'headers_ready'});
         const previewFrame=bundle?.previewFrame??(!douyinPreload.readySource?await douyinPreload.previewFrame(request.item):undefined);
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'preview_ready'});
@@ -421,7 +423,7 @@ export function createMediaRouteController(
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
         previewFrame,
-        url: bundle?.url ?? await douyinPreload.lookup(request.item.awemeId) ?? await douyinPlaybackUrl(request.playback,headers),
+        url: localUrl ?? await douyinPlaybackUrl(request.playback,headers),
         ...douyinDecoderProfile(bundle?.item??request.playback),
         ...douyinDetail(request.item),
         headers,
@@ -482,7 +484,8 @@ export function createMediaRouteController(
         if(!source)return;
         benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'source_ready'});
         const warm=entryInitial;
-        if(warm&&warm.entry===origin&&warm.id===source.awemeId){await warm.pending;if(!current())return;}
+        // A completed matching prime can be reused. Speculative lookup must
+        // not block publication of the foreground source.
         if(warm&&entryInitial===warm&&warm.entry===origin&&warm.id===source.awemeId&&warm.seq===request?.entrySeq&&warm.pool&&warm.source?.url===source.url&&warm.version===douyinClient.playbackAuthorizationVersion()){
           initialPool=warm.pool;entryInitial=undefined;pendingInitialPool={origin,pool:initialPool};
         }else if(warm&&entryInitial===warm)stopDouyinEntry();
@@ -661,6 +664,10 @@ export function createMediaRouteController(
     adjacentHeaderCache.set(entry,record);
     try{return await record.value;}catch(error){if(adjacentHeaderCache.get(entry)===record)adjacentHeaderCache.delete(entry);throw error;}
   };
+  const readyPagingSource=async(item:import('../../douyin/types.ts').DouyinItem)=>{
+    const bundle=await douyinPreload.readySource?.(item);
+    if(bundle?.previewFrame.entryId===item.awemeId&&bundle.item?.awemeId===item.awemeId)return bundle;
+  };
   const prepareDouyinAdjacent = async (
     entry:RouteEntry,
     direction:"next"|"previous",
@@ -673,16 +680,18 @@ export function createMediaRouteController(
     const offset=direction==='next'?distance:-distance;
     const stillAdjacent=()=>dependencies.current()===entry&&entry.queue===queue&&queue.itemAtOffset(offset)?.awemeId===result.data.item.awemeId;
     const authorizationVersion=douyinClient.playbackAuthorizationVersion?.()??0;
-    const headers=await adjacentHeaders(entry);
-    const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
+    const bundle=await readyPagingSource(result.data.item);
+    const localUrl=bundle?.url??await douyinPreload.lookup(result.data.item.awemeId);
+    if(!stillAdjacent())return;
+    const headers=localUrl?{}:await adjacentHeaders(entry);
     if(!stillAdjacent())return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next','prewarm');
     if(!stillAdjacent())return;
-    const previewFrame=localUrl?await douyinPreload.previewFrame(result.data.item,localUrl).catch(()=>undefined):undefined;
+    const previewFrame=bundle?.previewFrame??(localUrl?await douyinPreload.previewFrame(result.data.item,localUrl).catch(()=>undefined):undefined);
     if(!stillAdjacent())return;
-    const registered=douyinPreload.sourceFor?.(url)??result.data.item;
+    const registered=bundle?.item??douyinPreload.sourceFor?.(url)??result.data.item;
     return {key:result.data.item.awemeId,attemptedUrl:localUrl?.startsWith('file:')?localUrl:registered.playUrl,authorizationVersion,queueIndex:queue.selectedIndex+offset,anchorIndex:queue.selectedIndex,source:{
-      ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
+      ...entry.playback!,startupSeq:undefined,releaseStartupPreview:undefined,recoveryDeadlineMs:undefined,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url,previewOnly:false,previewFrame,resumePositionMs:0,...douyinDetail(result.data.item),headers,
       ...douyinDecoderProfile(registered),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
@@ -710,20 +719,23 @@ export function createMediaRouteController(
     }
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
-    let selected:PlaybackSource={...old,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
+    let selected:PlaybackSource={...old,startupSeq:undefined,releaseStartupPreview:undefined,recoveryDeadlineMs:undefined,resumePositionMs:0,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
       previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
     const current=()=>dependencies.current()===entry&&entry.queue===queue&&entry.playback===selected&&queue.itemAtOffset()?.awemeId===item.awemeId;
     void (async()=>{
-      const headers=await adjacentHeaders(entry);if(!current())return;
-      const local=await douyinPreload.lookup(item.awemeId);if(!current())return;
-      void (local?video.restoreFrame(`douyin:${item.awemeId}`,{url:local,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}):douyinPreload.restoreFrame?.(item,headers))?.then(frame=>{
+      const bundle=await readyPagingSource(item);
+      const local=bundle?.url??await douyinPreload.lookup(item.awemeId);if(!current())return;
+      const headers=local?{}:await adjacentHeaders(entry);if(!current())return;
+      if(!bundle?.previewFrame)void (local?video.restoreFrame(`douyin:${item.awemeId}`,{url:local,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}):douyinPreload.restoreFrame?.(item,headers))?.then(frame=>{
         if(!current()||!frame?.available)return;
         selected={...selected,previewFrame:{entryId:item.awemeId,frame}};entry.playback=selected;dependencies.setPlayingSource(selected);
       }).catch(()=>{});
       const url=local??await douyinPlaybackUrl(item,headers,direction==='next');if(!current())return;
-      entry.playback={...selected,headers,url,previewOnly:false,preparationError:undefined};dependencies.setPlayingSource(entry.playback);
+      entry.playback={...selected,...(bundle?.item?douyinDecoderProfile(bundle.item):{}),
+        previewFrame:bundle?.previewFrame??selected.previewFrame,headers,url,previewOnly:false,preparationError:undefined};
+      dependencies.setPlayingSource(entry.playback);
       void queue.persist().catch(error=>{if(dependencies.current()===entry)if(!isNetworkRecoveryCancellation(error))dependencies.setError(String(error));});
     })().catch(error=>{
       if(!current())return;

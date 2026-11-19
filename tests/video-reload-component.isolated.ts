@@ -504,3 +504,20 @@ test('a failed fresh manual detail prepare does not fall through to the recommen
  expect(modes).toEqual(['detail']);
  expect(player.text()).toContain('重试');
 });
+
+test('PERFVIDEO repeated resource denial exhausts the finite cache-only retry budget',async()=>{
+ nextError={code:'resource_exhausted'};
+ const source={platform:'douyin',immersive:true,awemeId:'retry-budget',url:'file:///fixture.mp4',title:'fixture'};
+ const player=reloadMount(source);
+ await flush();
+ for(const ms of [1000,2000,4000,8000,8000,8000]){
+  nextError={code:'resource_exhausted'};
+  await tick(ms);
+ }
+ console.info('PERFVIDEO permanent resource denial native prepares',prepares.length);
+ expect(prepares).toHaveLength(3);
+ expect(prepares.slice(1).every(options=>options.cacheOnlyPrepare===true)).toBe(true);
+ expect(player.text()).toContain('重试');
+ expect(retries).toBe(0);
+ nextError=undefined;
+});

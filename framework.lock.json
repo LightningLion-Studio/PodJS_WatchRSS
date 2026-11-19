@@ -1,6 +1,6 @@
 {
   "path": "../../PodJS/podjs-watch",
-  "revision": "383cb6e09823af1aeaca7619d8e4a1621c40d6ea",
+  "revision": "417551461fa1eb9ca7f2eb94fac00cf3b357ea95",
   "requiresLocalChanges": false,
   "pocketjsRevision": "89cf6eeba69d59d8efc1bfa888661c9c93978f61",
   "branch": "watchrss-migration"
