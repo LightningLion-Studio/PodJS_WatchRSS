@@ -20,6 +20,7 @@ import {captureActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_
 import {startupActivityNavigation} from '../navigation/startup-navigation.ts';
 import {InformationActivity} from '../navigation/information-activity.ts';
 import {RouteActivityProvider} from './route-activity.tsx';
+import { afterPaint } from "@podjs/framework/render";
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 import {readHomeChannelSnapshot,writeHomeChannelSnapshot} from "./home-snapshot.ts";
 import {debugGate} from '../debug/host.ts';
@@ -169,7 +170,10 @@ export default function WatchRSS(props: {
   // Only the host's task-scoped Bundle can resume navigation. Durable KV
   // checkpoints and legacy last-screen records are not launch instructions.
   const activityEntries=startupActivityNavigation(activityStateHub.read(),debugGate.allowed);
+  const startupNeedsChannels=(activityEntries?.length??0)<=1||!!activityEntries?.some(entry=>entry.channelId);
   const [resumeReady, setResumeReady] = createSignal(false);
+  let startupDisposed=false;
+  onCleanup(()=>{startupDisposed=true;});
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
   const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
@@ -266,8 +270,12 @@ export default function WatchRSS(props: {
       setBackOffset(0);
     });
     motion.reset();
-    if (leaving.page === "search" && leaving.channelId)
-      void loadFeedArticles(leaving.channelId, feedVisibleCount());
+    const destination=current();
+    if (destination.page==="articles"&&destination.channelId&&
+        (leaving.page==="search"||currentQuery.channelId!==destination.channelId)) {
+      const limit=Number(routeMemory(destination).retained.feedCount)||12;
+      void loadFeedArticles(destination.channelId,limit,true);
+    }
     if (autoRemoveItem) void removeSaved(autoRemoveItem);
     else if (page() === "saved" || page() === "watch-later")
       void loadSaved(page() === "saved" ? "favorite" : "watchLater");
@@ -394,7 +402,7 @@ export default function WatchRSS(props: {
       articles().some(item => item.channelId === entry.channelId);
   };
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [loading, setLoading] = createSignal(!homeSnapshot),
+  const [loading, setLoading] = createSignal(startupNeedsChannels&&!homeSnapshot),
     [busy, setBusy] = createSignal(false),
     [homeRefreshing, setHomeRefreshing] = createSignal(false),
     [errorMessage, setError] = createSignal("");
@@ -736,20 +744,21 @@ export default function WatchRSS(props: {
   };
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
-  async function loadChannels() {idleHit(5);
-    // Keep showing the current list (e.g. the startup snapshot) while refreshing it.
-    if (!channels().length) setLoading(true);
-    setError("");
+  async function loadChannels(foregroundLoad=true) {idleHit(5);
+    // Keep the startup snapshot visible and leave a restored page's state alone.
+    if(foregroundLoad){
+      if(!channels().length)setLoading(true);
+      setError("");
+    }
     try {
       const list = await props.services.listChannels();
       traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
-      startupFirstScreen();
     } catch (e) {
-      setError(String(e));
+      if(foregroundLoad||page()==="home")setError(String(e));
     } finally {
-      setLoading(false);
+      if(foregroundLoad)setLoading(false);
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
@@ -808,8 +817,8 @@ export default function WatchRSS(props: {
   async function restoreStartupNavigation() {
     const baseline=stack();let owned=baseline;
     try {
-      await loadChannels();
-      if(stack()!==baseline)return;
+      if(startupNeedsChannels)await loadChannels();
+      if(startupDisposed||stack()!==baseline)return;
       if(activityEntries){
         const entries=await resolveActivityNavigation(activityEntries,{
           hasChannel:id=>channels().some(channel=>channel.id===id),article:id=>props.services.getArticle(id),
@@ -817,22 +826,43 @@ export default function WatchRSS(props: {
         });
         for(const entry of entries)await informationActivity.restore(entry);
         if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
-        if(stack()!==baseline)return;owned=entries;
+        if(startupDisposed||stack()!==baseline)return;
+        owned=entries;
         batch(()=>{setStack(entries);const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);if(lastReader)setArticle(lastReader.readerArticle!);});
-        const feed=[...entries].reverse().find(entry=>entry.page==='articles');
-        if(feed?.channelId)await loadFeedArticles(feed.channelId,Number(routeMemory(feed).retained.feedCount)||12,true);
-        const saved=[...entries].reverse().find(entry=>entry.page==='saved'||entry.page==='watch-later');
-        if(saved)await loadSaved(saved.page==='saved'?'favorite':'watchLater');
-        const search=entries.at(-1);
-        if(search?.page==='search'&&search.channelId){const draft=routeMemory(search).retained.query;if(typeof draft==='string')await searchChannelArticles(search.channelId,draft);}
-        if(stack()!==entries)return;
+        const destination=entries.at(-1);
+        if(destination?.page==='articles'&&destination.channelId)
+          await loadFeedArticles(destination.channelId,Number(routeMemory(destination).retained.feedCount)||12,true);
+        if(destination?.page==='saved'||destination?.page==='watch-later')
+          await loadSaved(destination.page==='saved'?'favorite':'watchLater');
+        if(destination?.page==='search'&&destination.channelId){
+          const draft=routeMemory(destination).retained.query;
+          if(typeof draft==='string')await searchChannelArticles(destination.channelId,draft);
+        }
       }
     } catch (error) {
-      if(stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
+      if(!startupDisposed&&stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
     } finally {
-      setResumeReady(true);
+      if(!startupDisposed){
+        setResumeReady(true);
+        if(!startupNeedsChannels)void loadChannels(false);
+      }
     }
   }
+  let firstScreenSignaled=false;
+  createEffect(()=>{
+    const route=current();
+    if(firstScreenSignaled||(!resumeReady()&&!(homeSnapshot&&route.page==="home")))return;
+    const ready=()=>{
+      firstScreenSignaled=true;
+      startupMark(`firstScreen.route.${route.page}`);
+      startupFirstScreen();
+    };
+    if(route.page==="home"){ready();return;}
+    const paint=afterPaint();
+    let active=true;
+    onCleanup(()=>{active=false;paint.cancel();});
+    void paint.result.catch(()=>{}).then(()=>{if(active)ready();});
+  });
   function loadMoreFeedArticles() {
     const channelId = current().channelId;
     if (
@@ -1311,7 +1341,7 @@ export default function WatchRSS(props: {
       updateFeedWhenSettled();
     });
     onCleanup(unsubscribe);
-    if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
+    if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1 });});
