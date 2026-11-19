@@ -25,7 +25,7 @@ import {appLogger} from '../logs/app-logger.ts';
 import { douyinSourceNeedsInternet, douyinNetworkFailure } from "./douyin/player-network.ts";
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import {playerGesture,rotateVector} from "./player-gestures.ts";
+import {normalizeRotation,playerGesture,rotateVector} from "./player-gestures.ts";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
@@ -53,7 +53,7 @@ const LOOP_LABELS: Record<VideoLoopMode, string> = { off: "不循环", single: "
 function PlayerButton(props: { hidden?: boolean; left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause" | "loop-off" | "loop-single" | "loop-next"; accessibilityLabel?: string; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
   let node: NodeMirror | undefined;
   createHoldPress(() => node, { enabled: () => !props.hidden && props.enabled !== false, onPress: () => props.onPress(), onHold: props.onHold && (elapsed => props.onHold?.(elapsed)) });
-  return <Show when={!props.hidden}><View ref={value => node = value} onPress={() => { if (props.enabled !== false) props.onPress(); }} focusable={props.enabled !== false} accessibilityLabel={props.accessibilityLabel} accessibilityRole={props.accessibilityLabel ? "button" : undefined} style={{ insetL: props.left, insetT: props.top, width: props.size, height: props.size, opacity: props.enabled === false ? .5 : 1 }} class="absolute items-center justify-center active:scale-96">
+  return <Show when={!props.hidden}><View ref={value => node = value} debugName={props.icon === "rotate" ? "VideoPlayerRotate" : undefined} onPress={() => { if (props.enabled !== false) props.onPress(); }} focusable={props.enabled !== false} accessibilityLabel={props.accessibilityLabel} accessibilityRole={props.accessibilityLabel ? "button" : undefined} style={{ insetL: props.left, insetT: props.top, width: props.size, height: props.size, opacity: props.enabled === false ? .5 : 1 }} class="absolute items-center justify-center active:scale-96">
     <Show when={props.icon === "fullscreen"}><Image src="../assets/icons/player-fullscreen.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "panorama"}><Image src="../assets/icons/player-panorama.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "fullscreen-exit"}><Image src="../assets/icons/player-fullscreen-exit.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rotate"}><Image src="../assets/icons/player-rotate.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rewind"}><Image src="../assets/icons/player-rewind.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "forward"}><Image src="../assets/icons/player-forward.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "play"}><Image src="../assets/icons/player-play.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "pause"}><Image src="../assets/icons/player-pause.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-off"}><Image src="../assets/icons/player-loop-off.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-single"}><Image src="../assets/icons/player-loop-single.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-next"}><Image src="../assets/icons/player-loop-next.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show>
   </View></Show>;
 }
@@ -149,7 +149,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let prepareStarted=0;
   let disposed = false, generation = 0, lastPlaybackState = "", checkpointPosition = 0, checkpointDuration = 0, pollTimer: HostOperation<void> | undefined, tapTimer: HostOperation<void> | undefined, volumeTimer: HostOperation<void> | undefined, prepareOp: HostOperation<VideoState> | undefined;
   const [motion,setMotion]=createSignal(false);
-  let surface: NodeMirror | undefined, rotationFrom = 0, rotationTo = 0, rotationStarted = 0, panningStart = 0, panVelocity = 0, panFrameAt = Date.now();
+  let surface: NodeMirror | undefined, panningStart = 0, panVelocity = 0, panFrameAt = Date.now();
+  // Only the tween keeps an unwrapped angle. Every consumer sees the same turn.
+  let rotationFrom = 0, rotationTo = 0, rotationFrameAngle = 0, rotationStarted = 0;
   let transformRunning = false, transformDirty = false, seekRunning = false, desiredSeek = 0, volumeRunning = false, volumeDirty = false, virtualVolume: number | undefined, observedVolume: number | undefined, crownGuard: CrownVolumeGuardState = { lastEventMs: Number.NEGATIVE_INFINITY };
   const top = () => props.top ?? 0, screenHeight = () => props.height + top();
   const pagerRotation = () => immersiveDouyin ? rotation() : 0;
@@ -168,7 +170,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       roundClip:base.roundClip && {...base.roundClip,cx:base.roundClip.cx-offset.x}};
   };
   const prepareTransform = () => ({scaleMode:mode(),rotationDeg:displayRotation(),scaleRotationDeg:rotation(),panX:0,panY:0});
-  const finishRotation = (reason: string) => {
+  const finishRotation = (reason = "complete") => {
     if (!rotationStarted) return;
     rotationStarted = 0;
     setDisplayRotation(rotation());
@@ -253,7 +255,44 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const nativeRange = () => playerPanRange(mode(), props.width, props.height, state()?.width ?? 0, state()?.height ?? 0, rotation());
   const range = () => { const r=nativeRange(),v=rotateVector(r.axis==='x'?1:0,r.axis==='y'?1:0,-rotation());return {axis:Math.abs(v.x)>Math.abs(v.y)?'x' as const:'y' as const,range:r.range}; };
   const playerViewport=()=>({x:0,y:top(),w:props.width,h:props.height});
-  const requestTransform = async () => { if(videoSessionOwner!==sessionOwner)return; if (transformRunning) { transformDirty = true; return; } transformRunning = true; const requestGeneration=generation; try { do { transformDirty = false; const ownGeneration = generation, r = range(), value = Math.max(-r.range, Math.min(r.range, pan())); if (value !== pan()) setPan(value); await media.setTransform({ rotationDeg: displayRotation(), scaleRotationDeg: rotation(), scaleMode: mode(), ...(() => { const p=rotateVector(r.axis==="x"?value:0,r.axis==="y"?value:0,displayRotation());return displayRotation()%360===0?(r.axis==="x"?{panX:value}:{panY:value}):{panX:p.x,panY:p.y}; })() }); if (ownGeneration === generation) props.onPanStateChange?.(value, r.range); else transformDirty = true; } while (transformDirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'transform');else failed(value,false,'transform');} } finally { transformRunning = false; } };
+  const requestTransform = async () => {
+    if (videoSessionOwner !== sessionOwner) return;
+    if (transformRunning) { transformDirty = true; return; }
+    transformRunning = true;
+    try {
+      do {
+        transformDirty = false;
+        const ownGeneration = generation;
+        try {
+          const r = range();
+          const value = Math.max(-r.range, Math.min(r.range, pan()));
+          if (value !== pan()) setPan(value);
+          const angle = displayRotation();
+          const screenPan = rotateVector(r.axis === "x" ? value : 0, r.axis === "y" ? value : 0, angle);
+          await media.setTransform({
+            rotationDeg: angle, scaleRotationDeg: rotation(), scaleMode: mode(),
+            ...(angle === 0 ? (r.axis === "x" ? {panX:value} : {panY:value}) : {panX:screenPan.x,panY:screenPan.y}),
+          });
+          if (ownGeneration !== generation) transformDirty = true;
+          else if (!disposed && videoSessionOwner === sessionOwner) props.onPanStateChange?.(value, r.range);
+        } catch (error) {
+          if (disposed || videoSessionOwner !== sessionOwner) return;
+          if (ownGeneration === generation) {
+            if (props.active) {
+              if (usingSessions()) void degradeSessions(error, 'transform');
+              else failed(error, false, 'transform');
+            }
+            return;
+          }
+          // A replaced video can cancel its transform. A newer video still
+          // needs the latest angle, even after its rotation tween has settled.
+          transformDirty = true;
+        }
+      } while (transformDirty && !disposed && videoSessionOwner === sessionOwner);
+    } finally {
+      transformRunning = false;
+    }
+  };
   // Video volume is owned by STREAM_MUSIC. Old saved start limits/private
   // zero-gain values must never re-mute a system-unmuted installation.
   const enforceStartVolume = async (next: ExtendedVideoState, _limit: number | null | undefined) => next;
@@ -444,12 +483,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
     finally { seekRunning = false; }
   };
-  const rotate = () => {
+  const rotateBy = (step: 90 | -90) => {
     if (immersiveDouyin && (dragDirection || dragSettling)) return;
-    rotationFrom = displayRotation();
-    rotationTo = rotation() + 90;
-    animationDiagnostics.begin('rotation',mode(),rotationTo);
-    setRotation(rotationTo);
+    rotationFrom = rotationStarted ? rotationFrameAngle : displayRotation();
+    rotationTo = (rotationStarted ? rotationTo : rotation()) + step;
+    rotationFrameAngle = rotationFrom;
+    const target = normalizeRotation(rotationTo);
+    animationDiagnostics.begin('rotation', mode(), target);
+    setRotation(target);
     rotationStarted = Date.now();
     setMotion(true);
     void requestTransform();
@@ -557,7 +598,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     // The recognizer retains the displayed angle sampled at touch-down. If it
     // differs from the destination, use its already-mapped progress for this drag.
-    const pointerTracksPager = !immersiveDouyin || (pagerPointerRotation ?? displayRotation()) % 360 === pagerRotation() % 360;
+    const pointerTracksPager = !immersiveDouyin || (pagerPointerRotation ?? displayRotation()) === pagerRotation();
     if(immersiveDouyin && rotationStarted){
       finishRotation('swipe');
       void requestTransform();
@@ -788,7 +829,15 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   // owns the active viewport even when the host hit fact names a backdrop node.
   const surfaceGesture = createGesture(playerGesture({ region: { node: () => detailShown() || props.source.platform==='douyin'&&props.source.immersive ? undefined : surface, rect: () => props.active && props.offset === 0 && !detailShown() ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
-    onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
+    onLongPress: contact => {
+      if (!props.active || networkPrompt()) return;
+      if (immersiveDouyin) {
+        let target = hitNode(contact.x, contact.y, contact.surface);
+        while (target && !target.onPress) target = target.parent;
+        if (target?.debugName === "VideoPlayerRotate") { rotateBy(-90); return; }
+      }
+      props.onActions?.();
+    },
     onDown: () => { panVelocity = 0; pagerPointerRotation=displayRotation(); }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
     onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(douyinPagerReleaseVelocity(contact),!!networkPrompt(),undefined,"network_prompt");return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now();setMotion(true); } props.onPanStateChange?.(pan(), range().range); },
     onCancel:()=>{if(props.source.platform==="douyin")void finishDouyinDrag(0,true);}
@@ -799,7 +848,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const spinnerVisible=()=>!props.onReload&&!error()&&!networkPrompt()&&(props.source.platform==='douyin'&&props.source.immersive?spinnerDue()&&state()?.bufferedMs===0&&state()?.networkStalled===true&&(!firstFrame()||handoff())&&(!dragAxis()||handoff()):!state()||state()?.state==='buffering'||state()?.buffered===false||state()?.isBuffering===true);
   createEffect(()=>{state();props.active;props.offset;error();networkPrompt();const now=Date.now();if(props.source.platform==='douyin'&&props.source.immersive&&props.active&&now-lastBenchmarkHeartbeat>=1000){lastBenchmarkHeartbeat=now;benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true,ringer_mode:state()!.ringerMode??'unknown',silenced:state()!.silenced===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:props.active&&props.offset===0&&lifecycle()==='active'&&!error()&&!networkPrompt()?'present':'absent',visibility_reason:!props.active?'inactive':props.offset!==0?'route_offset':lifecycle()!=='active'?'lifecycle':error()?'player_error':networkPrompt()?'network_prompt':'ready',player_state:closedPlayerState(state()?.state),has_frame:state()?.hasRenderedFirstFrame===true,offset_abs_milli:Math.min(1000000000,Math.round(Math.abs(props.offset)*1000))});} });
   createEffect(()=>{const observed=firstFrame()&&!handoff(),value=state();frameWait.observe(observed);setSpinnerDue(frameWait.visible()&&value?.bufferedMs===0&&value?.networkStalled===true);if(observed||frameWait.visible())return;const timer=delay(1000);void timer.result.then(()=>{publishPreparationBuffer();setSpinnerDue(frameWait.visible()&&state()?.bufferedMs===0&&state()?.networkStalled===true);}).catch(()=>{});onCleanup(()=>timer.cancel());});
-  createEffect(()=>{if(!props.active||!workForeground()||!(motion()||spinnerVisible()))return;onFrame(() => { const now = Date.now(); animationDiagnostics.frame(now);animationDiagnostics.end('scale'); if (panVelocity !== 0) { const elapsed = Math.min(50, Math.max(0, now - panFrameAt)), r = range(), next = Math.max(-r.range, Math.min(r.range, pan() + panVelocity * elapsed / 1000)); setPan(next); panVelocity *= Math.exp(-5 * elapsed / 1000); if (Math.abs(panVelocity) < 5 || next === -r.range || next === r.range) panVelocity = 0; panFrameAt = now; void requestTransform(); } if (spinnerVisible()) setLoadingRotation(value => (value + 6) % 360); if (!rotationStarted) {if(!panVelocity)setMotion(false);return;} const elapsed = now - rotationStarted, t = Math.min(1, elapsed / 300), eased = 1 - Math.pow(1 - t, 3); setDisplayRotation(rotationFrom + (rotationTo - rotationFrom) * eased); void requestTransform(); if (t >= 1) {rotationStarted = 0;animationDiagnostics.end('rotation');if(!panVelocity)setMotion(false);} });});
+  createEffect(()=>{if(!props.active||!workForeground()||!(motion()||spinnerVisible()))return;onFrame(() => { const now = Date.now(); animationDiagnostics.frame(now);animationDiagnostics.end('scale'); if (panVelocity !== 0) { const elapsed = Math.min(50, Math.max(0, now - panFrameAt)), r = range(), next = Math.max(-r.range, Math.min(r.range, pan() + panVelocity * elapsed / 1000)); setPan(next); panVelocity *= Math.exp(-5 * elapsed / 1000); if (Math.abs(panVelocity) < 5 || next === -r.range || next === r.range) panVelocity = 0; panFrameAt = now; void requestTransform(); } if (spinnerVisible()) setLoadingRotation(value => (value + 6) % 360); if (!rotationStarted) {if(!panVelocity)setMotion(false);return;} const elapsed = now - rotationStarted, t = Math.min(1, elapsed / 300), eased = 1 - Math.pow(1 - t, 3); if (t >= 1) { finishRotation(); if (!panVelocity) setMotion(false); } else { rotationFrameAngle = rotationFrom + (rotationTo - rotationFrom) * eased; setDisplayRotation(normalizeRotation(rotationFrameAngle)); } void requestTransform(); });});
   const showVolumeOverlay = () => {
     setVolumeVisible(true);volumeTimer?.cancel();volumeTimer=delay(900);
     void volumeTimer.result.then(()=>setVolumeVisible(false)).catch(()=>{});
@@ -900,7 +949,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     sideSwipe: { begin: () => canOpenDetail() && !detailShown() && slide.begin(), move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
   onCleanup(() => { bufferedStall.cancel();recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   // Round screens: while the crown capsule shows, control rows in the (rotatable) layer move off it or leave it blank.
-  const layerQuarter = () => ((Math.round(displayRotation() / 90) * 90) % 360 + 360) % 360;
+  const layerQuarter = () => normalizeRotation(Math.round(displayRotation() / 90) * 90);
   const avoidRow = (icons: RowIcon[], top: number, height: number) => createMemo(() => props.round && volumeVisible() && controlsVisible() ? avoidVolumeArc(VOLUME_ARC, icons, top, height, -layerQuarter()) : undefined);
   const topPair = avoidRow([{ left: 79.5, width: 24 }, { left: 129.5, width: 24 }], 16, 24);
   const topTriple = avoidRow([{ left: 57.5, width: 24 }, { left: 104.5, width: 24 }, { left: 151.5, width: 24 }], 18, 24);
@@ -946,9 +995,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     </View></Show>
     <Show when={!error() && !networkPrompt() && controlsVisible()}><View class="absolute" style={{ insetL: uiLeft(), insetT: uiTop(), width: 233, height: 233, scale: uiScale(), rotate: displayRotation(), originX: 0, originY: 0 }}>
       <View class="absolute left-[0] right-[0] top-[0] h-[62] bg-gradient-to-b from-[#000000cc] to-transparent" />
-      <Show when={loopModes().length > 1} fallback={<><PlayerButton left={69.5 + dx(topPair, 0)} hidden={hidden(topPair, 0)} top={6} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={119.5 + dx(topPair, 1)} hidden={hidden(topPair, 1)} top={6} size={44} icon="rotate" iconSize={24} onPress={rotate} /></>}>
+      <Show when={loopModes().length > 1} fallback={<><PlayerButton left={69.5 + dx(topPair, 0)} hidden={hidden(topPair, 0)} top={6} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={119.5 + dx(topPair, 1)} hidden={hidden(topPair, 1)} top={6} size={44} icon="rotate" iconSize={24} accessibilityLabel={immersiveDouyin ? "旋转画面，长按反向旋转" : undefined} onPress={() => rotateBy(90)} /></>}>
         {/* Three across: icon corners stay inside the 233 circle at this height. */}
-        <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
+        <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} accessibilityLabel={immersiveDouyin ? "旋转画面，长按反向旋转" : undefined} onPress={() => rotateBy(90)} />
       </Show>
       <Show when={Number.isFinite(state()?.durationMs)&&(state()?.durationMs??0)>0}><Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><Show when={timelineProgress()>0}><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{width:timelineProgress()}} /></Show><View class="absolute top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" style={{insetL:Math.max(0,Math.min(barWidth()-4,timelineProgress()-2))}} /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text></Show>
       <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />

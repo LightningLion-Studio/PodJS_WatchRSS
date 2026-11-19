@@ -1,7 +1,11 @@
 import type {GestureContact,GestureOptions} from '@pocketjs/framework/gesture';
 export interface PlayerViewport {x:number;y:number;w:number;h:number}
+export function normalizeRotation(degrees:number):number {
+ const turn=degrees%360;
+ return turn<0 ? turn+360 : turn||0;
+}
 export function rotateVector(x:number,y:number,degrees:number):{x:number;y:number}{
- const angle=((degrees%360)+360)%360;
+ const angle=normalizeRotation(degrees);
  if(angle===0)return{x,y};if(angle===90)return{x:-y,y:x};if(angle===180)return{x:-x,y:-y};if(angle===270)return{x:y,y:-x};
  const radians=angle*Math.PI/180,c=Math.cos(radians),s=Math.sin(radians);return{x:x*c-y*s,y:x*s+y*c};
 }

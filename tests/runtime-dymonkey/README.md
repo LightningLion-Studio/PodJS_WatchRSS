@@ -34,6 +34,9 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/panel_rotation_test.py" \
   --lib "$lib" --package "$package" > "$EVIDENCE/panel-rotation.json"
 flock "$lock" capmem 16G unshare --user --map-current-user --net \
+  python3 -B "$APP/tests/runtime-dymonkey/rotation_cycle_test.py" \
+  --lib "$lib" --package "$package" > "$EVIDENCE/rotation-cycle.json"
+flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/monkey.py" \
   --lib "$lib" --package "$package" --seed 50641 --steps 512 --out "$EVIDENCE/seed-50641.json"
 flock "$lock" capmem 16G unshare --user --map-current-user --net \
