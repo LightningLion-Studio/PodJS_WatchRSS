@@ -95,6 +95,8 @@ export class LocalArticleManifestStore {
  setEncodingGeneration(value:string){if(this.encodingGeneration===value)return;this.encodingGeneration=value;this.rowCache.clear();this.rowCacheBytes=0;this.stableIds.clear();this.stableReady=undefined;this.reusableBodies.clear();this.bodySourceIds.clear();}
  private rowSelect(){return this.encodingGeneration?ROW_SELECT.replace(' FROM articles a JOIN channels ch',', (SELECT generation FROM sync_fast_encoded_cache g WHERE g.item_id=a.id AND g.body_hash=c.body_hash) AS body_generation FROM articles a JOIN channels ch'):ROW_SELECT;}
  private bodySourceIds=new Map<string,number>();
+ private legacyCoverage=false;
+ hasLegacyCoverage(){return this.legacyCoverage;}
  private reusableBodies=new Map<number,PreparedArticle>();
  private completeReusable:((p:PreparedArticle)=>Promise<PreparedArticle>)|undefined;
  private async reusableMetadata(id:number){const p=this.reusableBodies.get(id);if(!p)return;const full=await this.completeReusable?.(p)??p;this.reusableBodies.set(id,full);return full;}
@@ -316,7 +318,7 @@ export class LocalArticleManifestStore {
   const originalDb=this.db;this.db={...originalDb,query:async(q,p,label)=>{const at=Date.now();try{return await originalDb.query(q,p,label);}finally{stats.sqlMs+=Date.now()-at;stats.sqlCalls++;budget.boundary();}},execute:(q,p,label)=>originalDb.execute(q,p,label),transaction:async ss=>{const at=Date.now();try{return await originalDb.transaction(ss);}finally{stats.sqlTransactionMs+=Date.now()-at;stats.sqlTransactionCalls++;budget.boundary();}}};
   try{
   check?.();const checkpoint=(weight=1)=>budget.checkpoint(weight);
-  if(!urls)this.bodySourceIds.clear();
+  if(!urls){this.bodySourceIds.clear();this.legacyCoverage=false;}
   const identity=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!identity)throw new Error('Initialize sync identity first');const device=str(identity.device_id);
   if(!readingPrepared)await this.prepareReadingForSnapshot(urls);
   const revision=await libraryRevision(this.db);this.preparationRevision=revision;
@@ -360,6 +362,29 @@ export class LocalArticleManifestStore {
    ...rows.filter(row=>str(row.channel_url)==='watchrss://phone-imports'||isImportedContentUrl(str(row.channel_url))).map(row=>num(row.id))]);
   const publicIdentities:CloudRssIdentity[]=[];for(const r of rows)if(neededIds.has(num(r.id))&&/^https?:\/\//i.test(str(r.channel_url))){await checkpoint();const identity=await this.cloudIdentity(r);if(identity)publicIdentities.push(identity);}const nativeCounts=new Map<string,Set<string>>();for(const r of publicIdentities){const ids=nativeCounts.get(r.url)??new Set<string>();ids.add(r.articleId);nativeCounts.set(r.url,ids);}const publicByItem=new Map(publicIdentities.map(r=>[r.itemId,r]));
   const ids=new Map<number,string>();for(const id of neededIds){await checkpoint();const row=byItem.get(id);if(row)ids.set(id,canonicalIds||(nativeCounts.get(publicByItem.get(id)?.url??'')?.size??0)>1?(publicByItem.get(num(row.id))??await this.cloudIdentity(row))?.articleId??(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))):(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))));}
+  // The URL selector is safe only when every physical contributor to an ID
+  // belongs to the same URL. Prove that from the full manifest input, before
+  // the representative and its aliases disappear into a single output row.
+  const legacyUrls=new Map<string,string>(),physicalUrls=new Set<string>();
+  let legacyCoverage=!urls&&!canonicalIds&&!readOnly&&ids.size===neededIds.size;
+  const witnessLegacyUrl=(id:string,url:string)=>{
+   if(!legacyCoverage)return;
+   const other=legacyUrls.get(id);
+   if(!url||other!==undefined&&other!==url)legacyCoverage=false;
+   else legacyUrls.set(id,url);
+  };
+  if(legacyCoverage){
+   for(const [item,id] of ids){
+    const url=str(byItem.get(item)?.link);
+    if(!url||physicalUrls.has(url)){legacyCoverage=false;break;}
+    physicalUrls.add(url);witnessLegacyUrl(id,url);
+   }
+   for(const state of persisted){
+    const url=str(state.url);witnessLegacyUrl(str(state.article_id),url);
+    if(state.item_id!=null&&str(byItem.get(num(state.item_id))?.link)!==url)legacyCoverage=false;
+   }
+   for(const deletion of syncDeletions)witnessLegacyUrl(str(deletion.article_id),str(deletion.url));
+  }
   const missingSources=new Map<string,[string,string]>();
   for(const [item,id]of ids){
    const row=byItem.get(item)!;
@@ -404,7 +429,7 @@ export class LocalArticleManifestStore {
   // Persisted clocks retain remote provenance; UI rows only seed missing state.
   for(const s of persisted){if(supersededAliases.has(str(s.article_id))&&num(s.changed_at)<(receipts.get(str(s.url))?.clock??0))continue;const id=s.item_id==null?str(s.article_id):ids.get(num(s.item_id))??str(s.article_id);states.set(id+'\0'+str(s.save_type),{articleId:id,type:str(s.save_type),url:str(s.url),saved:!!num(s.saved),changedAt:num(s.changed_at),sortOrder:num(s.sort_order),device:str(s.source_device_id),itemId:s.item_id==null?null:num(s.item_id)});}
   for(const d of syncDeletions)if(!supersededAliases.has(str(d.article_id)))put({articleId:str(d.article_id),type:'delete',url:str(d.url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device:str(d.source_device_id)});
-  for(const d of deletions){await checkpoint();const id=await this.stableId(str(d.article_url));for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url:str(d.article_url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
+  for(const d of deletions){await checkpoint();const url=str(d.article_url),id=await this.stableId(url);witnessLegacyUrl(id,url);for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url,saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
   const groups=new Map<string,Row[]>();
   for(const type of ['favorite','watchLater'])for(const s of saves){if(str(s.save_type)!==type||!num(s.saved)||!byItem.has(num(s.article_id)))continue;const id=ids.get(num(s.article_id))!,list=groups.get(id)??[];list.push(s);groups.set(id,list);}
   const out:PreparedArticle[]=[],active=new Set<string>(),usedRows=new Set<number>(),preparedRowIds=new Map<string,number>();
@@ -502,6 +527,7 @@ export class LocalArticleManifestStore {
   // second state change before the peer receives this first response.
   for(let at=0;!readOnly&&!deferBodyCache&&at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
   trace('snapshot.complete');
+  if(!urls)this.legacyCoverage=legacyCoverage;
   return out;
   }finally{try{await this.flushStableProgress();}finally{this.preparationRevision=previousPreparation;this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}}
  }
