@@ -12,6 +12,7 @@ import {benchmark,type VideoBenchmarkAction} from '@podjs/framework/benchmark';
 import {VideoFirstFrameWait} from '@podjs/framework/video-paging';
 import {DOUYIN_MAX_SHORT_EDGE,DOUYIN_RESOLUTION_LIMIT,douyinCodecRuntimePolicy} from '../douyin/playback-selector.ts';
 import {PlaybackPrepareDeadline} from '@podjs/framework/media-policy';
+import {onMemoryTrim} from '@podjs/framework/memory';
 import {playbackFailure} from '../media/playback-failure.ts';
 import {takeVideoResolution,type VideoPlaybackTrace} from '../media/video-opt.ts';
 import {framePreviewPath,frameSource,type DouyinFramePreview} from '../douyin/frame-preview.ts';
@@ -522,50 +523,57 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     return resolve.then(target=>{if(!target&&adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);if(target&&revealPoster&&!props.source.immersive&&target.source.posterUrl)setDragPoster({url:target.source.posterUrl,direction:direction==='next'?'up':'down'});return target;},error=>{if(adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);throw error;});
   };
   const warmEarly=()=>{
-    if(!usingSessions()||!props.onPrepareAdjacent)return;const revision=neighborRevision;
-    // Start nearest transport/decode as soon as the selected page is published.
-    // Keep only the immediate next page in the ordinary decode window.
-    void warmForward().catch(()=>{});
-    for(const direction of ['next']as const)for(const distance of [1]as const){
-      if(props.onAdjacentKey&&!props.onAdjacentKey(direction,distance))continue;
-      void previewAdjacent(direction,revision,false,distance).then(target=>{if(revision!==neighborRevision||!target||distance!==1)return;if(direction==='next')forwardTarget=target;else backwardTarget=target;}).catch(()=>{});
-    }
+    if(usingSessions())void warmForward().catch(()=>{});
   };
-  const prepareAdjacent=async(direction:"next"|"previous",revision:number,revealPoster=false,distance:1|2=1):Promise<DouyinPreparedSource|undefined>=>{
+  const prepareAdjacent=async(direction:"next"|"previous",revision:number,revealPoster=false,distance:1|2=1,retainKeyframe=false):Promise<DouyinPreparedSource|undefined>=>{
     if(!usingSessions()||!props.onPrepareAdjacent)return;
     const target=await previewAdjacent(direction,revision,revealPoster,distance);
-    if(!target||!usingSessions())return;
+    if(!target||revision!==neighborRevision||disposed||!usingSessions())return;
+    if(retainKeyframe&&(!props.active||lifecycle()!=="active"||!sessionPool!.canPrewarmPreviousFrame))return;
     try{
       if(target.queueIndex!==undefined&&target.anchorIndex!==undefined)sessionPool!.traceNeighbour(target.key,target.queueIndex,target.anchorIndex);
-      await sessionPool!.prewarm(target,{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false,muted:true} as VideoPrepare,direction==="next"?"next":"prev");
+      await sessionPool!.prewarm(target,{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false,muted:true,retainKeyframe},direction==="next"?"next":"prev");
       return revision===neighborRevision&&usingSessions()&&sessionPool!.hasStandby(target.key)?target:undefined;
-    }catch(value){if(revision===neighborRevision&&resolutionRejected(value)){props.onRejectAdjacent?.(target,(value as {mirrorIndex?:number})?.mirrorIndex);return;}if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await degradeSessions(value);return revision===neighborRevision&&!disposed?target:undefined;}return;}
+    }catch(value){if(retainKeyframe)return;if(revision===neighborRevision&&resolutionRejected(value)){props.onRejectAdjacent?.(target,(value as {mirrorIndex?:number})?.mirrorIndex);return;}if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await degradeSessions(value);return revision===neighborRevision&&!disposed?target:undefined;}return;}
   };
-  let neighbourhoodWarmed=-1;
-  const warmNeighbourhood=async(revision:number)=>{
-    if(!usingSessions()||!props.onPrepareAdjacent||revision!==neighborRevision||neighbourhoodWarmed===revision||disposed)return;
-    neighbourhoodWarmed=revision;
-    const order:["next"|"previous",1|2|3|4|5][]=[["next",1],["previous",1],["next",2],["previous",2],["next",3],["next",4],["next",5]];
-    await sessionPool!.warmNeighbourhood(order.map(([direction,distance])=>async()=>{
-      if(revision!==neighborRevision||disposed||!props.active||lifecycle()!=="active")return;
-      const target=await previewAdjacent(direction,revision,false,distance);
-      if(!target||revision!==neighborRevision||disposed)return;
-      return {source:target,options:{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false},direction:direction==="next"?"next" as const:"prev" as const,
-        onFailure:(error:unknown)=>{if(revision===neighborRevision&&resolutionRejected(error))props.onRejectAdjacent?.(target,(error as {mirrorIndex?:number})?.mirrorIndex);}};
-    }));
+  const warmBackward=()=>{
+    if(!usingSessions()||!sessionPool!.canPrewarmPreviousFrame||!props.onPrevious||!props.onPrepareAdjacent||
+       !props.active||lifecycle()!=="active"||backwardWarm||disposed)return;
+    const key=props.onAdjacentKey?.("previous",1);
+    if((props.onAdjacentKey&&!key) || sessionPool!.hasStandby(key??backwardTarget?.key??""))return;
+    const revision=neighborRevision;
+    const pending=prepareAdjacent("previous",revision,false,1,true).then(target=>{
+      if(revision!==neighborRevision||backwardWarm!==pending)return;
+      if(target)backwardTarget=target;
+      return target;
+    }).finally(()=>{if(backwardWarm===pending)backwardWarm=undefined;});
+    backwardWarm=pending;
+    void pending.catch(()=>{});
   };
   const warmForward=():Promise<DouyinPreparedSource|undefined>=>{
-    if(usingSessions()&&props.onAdjacentKey){const keys=([['next',1]] as const).map(([d,n])=>props.onAdjacentKey!(d,n)).filter((key):key is string=>!!key);sessionPool!.retainNeighbours(keys);}
-    // Ordinary speculation owns only next. Reverse decode starts on explicit drag intent.
+    if(usingSessions()&&props.onAdjacentKey){
+      const keys=[props.onAdjacentKey("next",1),sessionPool!.canPrewarmPreviousFrame?props.onAdjacentKey("previous",1):undefined];
+      sessionPool!.retainNeighbours(keys.filter((key):key is string=>!!key));
+    }
+    warmBackward();
     if(!props.onPrepareAdjacent)return Promise.resolve(undefined);
     if(forwardTarget&&(!usingSessions()||sessionPool!.hasStandby(forwardTarget.key)))return Promise.resolve(forwardTarget);
     if(!usingSessions()&&forwardResolved&&!forwardTarget)return Promise.resolve(undefined);
     if(forwardWarm)return forwardWarm;
     const revision=neighborRevision;
     const pending=(usingSessions()?prepareAdjacent("next",revision):previewAdjacent("next",revision)).then(target=>{if(revision!==neighborRevision)return;forwardResolved=true;if(target)forwardTarget=target;return target;}).finally(()=>{if(forwardWarm===pending)forwardWarm=undefined;});
-    forwardWarm=pending;void Promise.allSettled([pending,backwardWarm]).then(()=>warmNeighbourhood(revision)).catch(()=>{});return pending;
+    forwardWarm=pending;return pending;
   };
   let dragRevision=0,dragDirection:DouyinPagerDirection|undefined,dragTarget:DouyinPreparedSource|undefined,dragTargetPromise:Promise<DouyinPreparedSource|undefined>|undefined,dragSettling=false;
+  onCleanup(onMemoryTrim(35,level=>{
+    if(!usingSessions()||!props.active||lifecycle()!=="active"||videoSessionOwner!==sessionOwner||dragDirection||dragSettling)return;
+    if(level>=2){
+      const previous=props.onAdjacentKey?.("previous",1)??backwardTarget?.key;
+      if(previous)sessionPool!.invalidateStandby(previous);
+      backwardTarget=undefined;
+      backwardWarm=undefined;
+    }else if(ready())warmBackward();
+  }));
   type DeferredDrag={distanceY:number;velocityY:number;cancel:boolean;seq:number;action?:VideoBenchmarkAction};
   let deferredPan:DeferredDrag|undefined,drainingDeferred=false,replayingDeferred=false;
   const deferredDrags:DeferredDrag[]=[];
@@ -745,15 +753,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const followingKeys:string[]=[];
     const followingKey=props.onAdjacentKey?.(direction==='up'?'next':'previous',2);
     if(followingKey)followingKeys.push(followingKey);
-    if(wantsSettle&&delta===1&&requestedDelta===1&&usingSessions()&&sessionPool!.neighbourCapacity>=2&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)&&props.onPrepareAdjacent){
-      // The decoded outgoing item becomes the opposite neighbour. Reuse its
-      // other slot now, overlapping following-item decode with the settle.
-      void props.onPrepareAdjacent(direction==='up'?'next':'previous',2).then(async following=>{
-        if(!following||!usingSessions()||disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
-        followingKeys.push(following.key);
-        await sessionPool!.prewarm(following,{...following.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==='single',autoplay:false,muted:true},direction==='up'?'next':'prev');
-      }).catch(()=>{});
-    }
     try{
       if(!await animateDouyinTransition(revision,direction,wantsSettle?1:0))return;
       if(!wantsSettle){if(pendingBenchmark)await media.setBounds({...bounds(),benchmark:pendingBenchmark});pendingBenchmark=undefined;clearDrag();neighborRevision++;if(usingSessions())void warmForward().catch(()=>{});return;}

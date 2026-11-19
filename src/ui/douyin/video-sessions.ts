@@ -1,4 +1,5 @@
-import {VideoSessionPool} from '@podjs/framework/video-session-pool';
+import {memoryPressureLevel,processMemoryBudgetBytes} from '@podjs/framework/memory';
+import {VideoSessionPool,type VideoSessionPort} from '@podjs/framework/video-session-pool';
 import {DOUYIN_MAX_SHORT_EDGE,douyinPlaybackAudio} from '../../douyin/playback-selector.ts';
 export {videoPagerSettleDuration as douyinPagerSettleDuration} from '@podjs/framework/video-paging';
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
@@ -35,6 +36,12 @@ export function shouldFallbackFromVideoSessions(error:unknown):boolean {
 
 /** Business metadata only; retained surface ownership lives in the framework. */
 export class DouyinVideoSessionPool extends VideoSessionPool<DouyinPreparedSource> {
+  constructor(port?:VideoSessionPort,waitForBudget?:ConstructorParameters<typeof VideoSessionPool>[1]){
+    super(port,waitForBudget,processMemoryBudgetBytes()>=256_000_000);
+  }
+  get canPrewarmPreviousFrame(){
+    return this.neighbourCapacity>=2&&this.supportsIndependentKeyframes&&memoryPressureLevel()<2;
+  }
   override async diagnostics(){
     const value=await super.diagnostics();
     return value?{...value,slots:value.slots.map(slot=>({...slot,awemeId:slot.key&&/^[0-9]+$/.test(slot.key)?slot.key:undefined}))}:undefined;

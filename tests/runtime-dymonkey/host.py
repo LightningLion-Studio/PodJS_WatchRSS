@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 
 SIZE = 233
+PSS_LIMIT_KIB = 250_000
 FONT_METRICS = c.CFUNCTYPE(c.c_int, c.c_size_t, c.c_float, c.c_uint32, c.c_uint32,
                           c.POINTER(c.c_uint32))
 FONT_GLYPH = c.CFUNCTYPE(c.c_int, c.c_size_t, c.POINTER(c.c_uint16), c.c_size_t, c.c_float,
@@ -273,6 +274,6 @@ class Host:
                    if line.startswith("Pss:"))
         self.max_pss_kib = max(pss, self.max_pss_kib)
         self.samples += 1
-        if pss > 125000 or self.max_decoders > 3:
+        if pss > PSS_LIMIT_KIB or self.max_decoders > 3:
             raise RuntimeError(f"resource budget exceeded: pss={pss}, decoders={self.max_decoders}")
         return draw.hash
