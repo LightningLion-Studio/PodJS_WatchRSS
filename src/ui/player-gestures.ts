@@ -20,9 +20,8 @@ export function playerCoordinates<T extends GestureContact>(contact:T,degrees:nu
 /** Rotate the recognizer's axis BEFORE the framework arbitrates ownership.
  * Sample the same display angle used by rendering at down, and retain it until
  * release (paging can replace the source and reset its render angle mid-drag).
- * Tap hit tests stay in screen coordinates. The unrotated detail panel does not
- * use this adapter. During a tween, gate ownership and slop in picture axes,
- * rather than rounding the recognizer to a neighbouring screen axis. */
+ * Tap hit tests stay in screen coordinates. During a tween, gate ownership
+ * and slop in picture axes, rather than rounding to a neighbouring screen axis. */
 export function playerGesture(options:GestureOptions,rotation:()=>number,viewport:()=>PlayerViewport):GestureOptions {
  const contacts=new Map<number,{degrees:number;viewport:PlayerViewport;panning:boolean}>();
  let active:number|undefined,screenTravel=0,pictureTravel=0,crossTravel=0;

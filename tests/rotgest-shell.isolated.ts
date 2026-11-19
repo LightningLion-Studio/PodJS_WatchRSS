@@ -47,11 +47,10 @@ mock.module('../src/ui/routes/media.tsx',()=>({MediaRoutes(p:any){
  p.entry.player={onCrown(){return true;},gestureRotation:()=>angle,canSwipeBack:()=>!panel.shown(),sideSwipe:{begin(){if(panel.shown())return false;panel.begin();return true;},move:panel.move,end:panel.end,cancel:panel.cancel}};
  const viewport=()=>({x:0,y:0,w:233,h:233});
  createGesture(playerGesture({region:{rect:()=>p.active()&&!panel.shown()?viewport():null},axis:'y',panSlop:8,onPanStart(){},onPanEnd:c=>selected.push(c.dy<0?'next':'previous')},()=>angle,viewport));
- // The detail view lives outside the rotated player. Its two screen axes
- // compete with the production shell while canSwipeBack() is false.
- createGesture({region:{rect:()=>panel.shown()?viewport():null},axis:'y',panSlop:8,onPanStart(){},onPanEnd:c=>panelPages.push(c.dy)});
+ // The detail view uses picture axes while canSwipeBack() blocks shell navigation.
+ createGesture(playerGesture({region:{rect:()=>panel.shown()?viewport():null},axis:'y',panSlop:8,onPanStart(){},onPanEnd:c=>panelPages.push(c.dy)},()=>angle,viewport));
  let closing=false;
- createGesture({region:{rect:()=>panel.shown()?viewport():null},axis:'x',panSlop:8,onPanStart:c=>{closing=c.dx>0;if(closing){panel.begin();panel.move(c.dx);}},onPanMove:c=>{if(closing)panel.move(c.dx);},onPanEnd:c=>{if(closing)panel.end(c.vx);closing=false;}});
+ createGesture(playerGesture({region:{rect:()=>panel.shown()?viewport():null},axis:'x',panSlop:8,onPanStart:c=>{closing=c.dx>0;if(closing){panel.begin();panel.move(c.dx);}},onPanMove:c=>{if(closing)panel.move(c.dx);},onPanEnd:c=>{if(closing)panel.end(c.vx);closing=false;}},()=>angle,viewport));
  return null;
 }}));
 const {render}=await import('@pocketjs/framework');
@@ -72,12 +71,12 @@ async function swipe(dx:number,dy:number,degrees:number,resetAfterDown=false){
  await tick([[116-x/2,116-y/2]]);if(resetAfterDown)angle=0;await tick([[116,116]]);await tick([[116+x/2,116+y/2]]);await tick();await settle();
 }
 const {expect,test}=await import('bun:test');
-test(`production shell ${platform} ${initialAngle}: next, detail, screen panel and locked Back`,async()=>{
+test(`production shell ${platform} ${initialAngle}: next, rotated detail and locked Back`,async()=>{
  try{
   await settle();expect(state()).toEqual(['home','articles','video']);expect(panel).toBeDefined();
   await swipe(-110,0,angle);expect(panel.shown()).toBe(true);expect(state()).toEqual(['home','articles','video']);
-  await swipe(0,-100,0);expect(panelPages).toHaveLength(1);expect(selected).toEqual([]);expect(state()).toEqual(['home','articles','video']);
-  await swipe(140,0,0);expect(panel.shown()).toBe(false);expect(state()).toEqual(['home','articles','video']);
+  await swipe(0,-100,angle);expect(panelPages).toHaveLength(1);expect(selected).toEqual([]);expect(state()).toEqual(['home','articles','video']);
+  await swipe(140,0,angle);expect(panel.shown()).toBe(false);expect(state()).toEqual(['home','articles','video']);
   await swipe(60,-80,angle);expect(state()).toEqual(['home','articles','video']);expect(selected).toEqual(['next']);
   await swipe(0,-110,angle);expect(selected).toEqual(['next','next']);expect(state()).toEqual(['home','articles','video']);
   await swipe(70,0,angle,true);expect(state()).toEqual(platform==='douyin'?['home']:['home','articles']);

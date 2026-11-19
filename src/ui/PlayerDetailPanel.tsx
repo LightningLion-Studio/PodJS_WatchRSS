@@ -1,12 +1,13 @@
 import { batch, createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import { createGesture } from "@pocketjs/framework/gesture";
+import { createGesture, type GestureOptions } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import * as watch from "@podjs/framework/watch";
 import { RemoteImage } from "./RemoteImage.tsx";
+import { playerGesture } from "./player-gestures.ts";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
 import { ABOUT, aboutHeight, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
@@ -46,7 +47,7 @@ export function createDetailSlide(width: () => number, onSettled?: (open: boolea
 type Control = "progress" | "volume" | "speed";
 export interface PlayerDetailHandle { crown(delta: number): void }
 export interface PlayerDetailProps {
-  width: number; height: number; slide: DetailSlide;
+  width: number; height: number; slide: DetailSlide; rotation?: Accessor<number>;
   title: () => string; author: () => string | undefined; description: () => string | undefined;
   cover: () => { url: string; bucket?: "bili-preview"; portrait: boolean } | undefined;
   positionMs: () => number; durationMs: () => number; seekable: () => boolean; onSeek: (deltaMs: number) => void;
@@ -149,7 +150,10 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
 
   let root: NodeMirror | undefined;
   const toCanvas = (px: number) => px / scale();
-  const pager = createGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
+  const viewport = () => ({ x: 0, y: 0, w: props.width, h: props.height });
+  const createPanelGesture = (options: GestureOptions) =>
+    createGesture(props.rotation ? playerGesture(options, props.rotation, viewport) : options);
+  const pager = createPanelGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
     // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
     onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
@@ -158,9 +162,9 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     onPanEnd: contact => scroller.endDrag(-toCanvas(contact.vy)),
     onCancel: () => scroller.endDrag(0),
   });
-  // Left-to-right drags slide the panel back off the player; right-to-left drags are ignored.
+  // A rightward drag in picture coordinates slides the panel off the player.
   let closing = false;
-  const dismiss = createGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
+  const dismiss = createPanelGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
     onPanStart: contact => { closing = contact.dx > 0; if (closing) { props.slide.begin(); props.slide.move(contact.dx); } },
     onPanMove: contact => { if (closing) props.slide.move(contact.dx); },
     onPanEnd: contact => { if (closing) props.slide.end(contact.vx); closing = false; },

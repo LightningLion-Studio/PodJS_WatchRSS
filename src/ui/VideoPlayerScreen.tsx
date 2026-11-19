@@ -865,7 +865,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   });
   // Detail & playback-control panel: opened by the edge arrow or a right-to-left drag.
   let detail: PlayerDetailHandle | undefined;
-  const slide = createDetailSlide(() => props.width);
+  const detailViewport = createMemo(() => {
+    const width = props.width, height = screenHeight();
+    const diameter = Math.min(width, height);
+    return props.round
+      ? { x: (width - diameter) / 2, y: (height - diameter) / 2, width: diameter, height: diameter, radius: diameter / 2 }
+      : { x: 0, y: 0, width, height, radius: 0 };
+  });
+  const slide = createDetailSlide(() => detailViewport().width);
   const detailShown = slide.shown;
   createEffect(()=>{
     const value=state(),source=props.source,own=generation;
@@ -950,12 +957,19 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     <Show when={volumeVisible() && props.round && !detailShown()}><VolumeArcCapsule width={props.width} height={props.height} percent={volumePercent()} muted={state()?.muted === true} /></Show>
     <Show when={volumeVisible() && !props.round}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{volumePercent()}%</Text></View></Show>
     <Show when={(props.round || !volumeVisible()) && loopHint()}>{hint => <View class="absolute left-[52] right-[52] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-base leading-[20] text-white">{hint()}</Text></View>}</Show>
-    <Show when={detailShown()}><View class="absolute left-[0]" style={{ insetT: -top(), width: props.width, height: screenHeight() }}>
-      <PlayerDetailPanel width={props.width} height={screenHeight()} slide={slide} ref={value => detail = value}
-        title={() => props.source.title} author={() => props.source.author} description={() => props.source.description} cover={detailCover}
-        positionMs={() => state()?.positionMs ?? 0} durationMs={() => state()?.durationMs ?? 0} seekable={prepared} onSeek={delta => void seekTo(delta)}
-        volumePercent={volumePercent} muted={() => state()?.muted === true} onVolume={(steps, crown) => { if (crown) { const direction = normalizedRelativeAxisStep(steps); if (direction && props.active) crownVolume(direction); } else stepVolume(steps); }}
-        speed={() => speedSupported() ? speedTarget() : undefined} onSpeed={changeSpeed} />
+    <Show when={detailShown()}><View class="absolute overflow-hidden" style={{
+      insetL: detailViewport().x, insetT: detailViewport().y - top(), width: detailViewport().width,
+      height: detailViewport().height, radius: detailViewport().radius,
+    }}>
+      <View debugName="PlayerDetailPicture" class="absolute left-[0] top-[0]" style={{
+        width: detailViewport().width, height: detailViewport().height, rotate: displayRotation(), originX: 0, originY: 0,
+      }}>
+        <PlayerDetailPanel width={detailViewport().width} height={detailViewport().height} rotation={displayRotation} slide={slide} ref={value => detail = value}
+          title={() => props.source.title} author={() => props.source.author} description={() => props.source.description} cover={detailCover}
+          positionMs={() => state()?.positionMs ?? 0} durationMs={() => state()?.durationMs ?? 0} seekable={prepared} onSeek={delta => void seekTo(delta)}
+          volumePercent={volumePercent} muted={() => state()?.muted === true} onVolume={(steps, crown) => { if (crown) { const direction = normalizedRelativeAxisStep(steps); if (direction && props.active) crownVolume(direction); } else stepVolume(steps); }}
+          speed={() => speedSupported() ? speedTarget() : undefined} onSpeed={changeSpeed} />
+      </View>
     </View></Show>
   </View>;
 }

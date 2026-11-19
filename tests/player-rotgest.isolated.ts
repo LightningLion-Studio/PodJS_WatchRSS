@@ -95,3 +95,19 @@ for(const angle of [90,180,270])test(`review: real source replacement after down
  const g=gestures.find(g=>g.onTap&&g.onPanEnd);g.onDown(c);f.replaceSource();await flush();expect(f.handle.gestureRotation()).toBe(angle);
  g.onPanStart(c);g.onPanMove(c);g.onUp?.(c);g.onPanEnd(c);await flush();expect(f.selected).toEqual(['next']);
 });
+
+test('detail picture layer follows the video throughout an unfinished rotation',async()=>{
+ const f=mount('douyin',0);await flush();
+ f.rotateStep();f.tick(60);await flush();
+ expect(f.handle.sideSwipe.begin()).toBe(true);f.handle.sideSwipe.move(-100);
+ const layer=()=>nodes(f.tree).find(node=>node.props.debugName==='PlayerDetailPicture');
+ for(const elapsed of [0,40,70,180]){
+  if(elapsed)f.tick(elapsed);
+  await flush();
+  expect(layer()?.props.style.rotate).toBe(transforms.at(-1).rotationDeg);
+  expect(panelProps.rotation()).toBe(f.handle.gestureRotation());
+ }
+ expect(layer()?.props.style.rotate).toBe(90);
+ panelProps.slide.close();
+ expect(f.handle.gestureRotation()).toBe(90);
+});

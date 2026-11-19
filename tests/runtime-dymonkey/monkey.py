@@ -62,13 +62,13 @@ class Monkey:
             points = [(116, 167), (116, 116), (116, 66)]
             if kind == "down":
                 points.reverse()
-            h.touch_path(points if sidebar else [rotated(p, angle) for p in points])
+            h.touch_path([rotated(p, angle) for p in points])
         elif kind == "rotate" and route and h.state["arrow"] and abs(angle - quarter) < 0.01:
             h.tap(*rotated((163, 29), angle))
         elif kind == "sidebar_open" and route and h.state["arrow"]:
             h.tap(*rotated((208, 116), angle))
         elif kind == "sidebar_close" and sidebar:
-            h.touch_path([(56, 116), (116, 116), (172, 116)])
+            h.touch_path([rotated(p, angle) for p in [(56, 116), (116, 116), (172, 116)]])
         elif kind in ("crown_up", "crown_down") and route:
             h.frame(crown=10000 if kind == "crown_up" else -10000)
         elif kind == "play_pause" and route and h.state["arrow"] and abs(angle - quarter) < 0.01:
@@ -114,7 +114,7 @@ class Monkey:
         require(h.state["sidebar"], "detail did not open")
         require(h.media["state"] in ("playing", "paused", "ready") and h.media["hasRenderedFirstFrame"], "media not ready behind detail")
         before = h.sample()
-        h.touch_path([(116, 166), (116, 116), (116, 66)])
+        h.touch_path([rotated(p, h.state["rotation"]) for p in [(116, 166), (116, 116), (116, 66)]])
         h.wait(5)
         require(h.sample() != before and h.state["sidebar"], "detail did not scroll")
         h.back()
