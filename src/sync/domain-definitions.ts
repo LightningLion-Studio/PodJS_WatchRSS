@@ -72,6 +72,11 @@ export class SqlDomainDefinitions {
    desired.get('library')!.set('sync_fast_cache_manifest',"CREATE TRIGGER sync_fast_cache_manifest AFTER INSERT ON sync_projection_events WHEN NEW.kind NOT IN ('none','cacheNone','bookOnly','bookUrl','bookBodyUrl') AND (NEW.kind<>'cacheUrl' OR (SELECT seeded FROM sync_fast_definitions WHERE domain='library')=1) BEGIN UPDATE sync_fast_versions SET revision=revision+1 WHERE domain='library';END");
    desired.get('books')!.set('sync_fast_import_books',`CREATE TRIGGER sync_fast_import_books AFTER INSERT ON sync_projection_events WHEN NEW.kind='bookBodyUrl' OR NEW.kind IN ('bodyUrl','url','source','full') AND (EXISTS(SELECT 1 FROM channels c WHERE (c.url LIKE '%watchrss.local/import-epub%' OR c.url LIKE '%watchrss.local/import-txt-novel%' OR c.url LIKE '%watchrss.local/import-content%') AND (c.url=NEW.old_url OR c.url=NEW.new_url OR EXISTS(SELECT 1 FROM articles a WHERE a.channel_id=c.id AND COALESCE(a.link,a.dedup_key) IN (NEW.old_url,NEW.new_url)))) OR EXISTS(SELECT 1 FROM sync_book_aliases m WHERE m.url IN (NEW.old_url,NEW.new_url) OR m.channel_url IN (NEW.old_url,NEW.new_url))) BEGIN UPDATE sync_fast_versions SET revision=revision+1 WHERE domain='books';END`);
   }
+  if(tableMap.has('sync_projection_header')){
+   // Removing a scope drops the witness for alias and body-source changes.
+   // Retire the library root in the same transaction as the header.
+   desired.get('library')!.set('sync_fast_projection_retired',"CREATE TRIGGER sync_fast_projection_retired AFTER DELETE ON sync_projection_header BEGIN UPDATE sync_fast_versions SET revision=revision+1 WHERE domain='library';END");
+  }
   const stored=new Map((await this.db.query('SELECT * FROM sync_fast_definitions')).map(r=>[String(r.domain),r]));
   const legacyDerived=(tableMap.has('sync_projection_header')&&!!(await this.db.query('SELECT 1 FROM sync_projection_header LIMIT 1')).length)||(tableMap.has('sync_snapshot_fingerprints')&&!!(await this.db.query('SELECT 1 FROM sync_snapshot_fingerprints LIMIT 1')).length)||!!(await this.db.query('SELECT 1 FROM sync_fast_receipts LIMIT 1')).length;
   const invalidated:SyncDomain[]=[];const invalidationAt=Date.now();const statements:Statement[]=[];const next:Partial<Record<SyncDomain,DomainDefinition>>={};

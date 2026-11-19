@@ -27,6 +27,7 @@ function readLight(value:unknown):CachedProjection{
  const manifest=manifestTuple.decode(value[4]) as unknown as PreparedArticle['manifest'];
  return {article:{articleId:manifest.articleId,url:value[1],rssSourceUrl:value[2],independentSaved:!!(value[3]&1),favoriteSaved:!!(value[3]&2),watchLaterSaved:!!(value[3]&4),contentHtml:null,contentText:''} as PreparedArticle['article'],manifest,encodedBody:null,...(value[5]!==null?{syntheticBytes:value[5]}:{})};
 }
+export const PROJECTION_EVENT_RETENTION=8192;
 let serial=0;
 const activeProjection=(condition:string)=>`EXISTS(SELECT 1 FROM sync_projection_rows p JOIN sync_projection_header h ON p.scope=h.scope AND p.generation=h.generation WHERE ${condition})`;
 const activeAliasProjection=(article:string)=>activeProjection(`p.scope LIKE ':canonical%' AND p.url IN (${article}.link,${article}.guid,${article}.dedup_key)`);
@@ -217,6 +218,8 @@ export class LibraryProjectionCache {
  });}
  async publish(scope:string,revision:number,articles:readonly PreparedArticle[],bindings:ReadonlyMap<string,number>,previous?:ProjectionPlan,urls?:readonly string[],observedSeq?:number,definitionGeneration?:string,legacyCoverage=false){
   await this.initialize();const guards=definitionGeneration?[projectionGuard(definitionGeneration)]:[];let generation=Date.now().toString(36)+'-'+(++serial);const seq=observedSeq??await this.sequence();
+  const header=()=>({sql:`INSERT INTO sync_projection_header(scope,generation,revision,seq) VALUES(?,?,?,?)
+   ON CONFLICT(scope) DO UPDATE SET generation=excluded.generation,revision=excluded.revision,seq=excluded.seq`,params:[scope,generation,revision,seq]});
   const dirty=urls?new Set(urls):undefined,write=dirty?articles.filter(p=>dirty.has(p.article.url)):articles;
   const positionBase=previous&&urls?Number((await this.db.query('SELECT COALESCE(MAX(position),-1)+1 AS next FROM sync_projection_rows WHERE scope=? AND generation=?',[scope,previous.generation]))[0]!.next):0;
   const rowStatements=(p:PreparedArticle,i:number)=>[{sql:'INSERT INTO sync_projection_rows(scope,generation,article_id,url,position,source_item,json) VALUES(?,?,?,?,?,?,?)',params:[scope,generation,p.article.articleId,p.article.url,positionBase+i,bindings.get(p.article.articleId)??0,JSON.stringify(packedProjection(p,bindings.get(p.article.articleId)??0))]},{sql:'INSERT INTO sync_projection_light VALUES(?,?,?,?)',params:[scope,generation,p.article.articleId,JSON.stringify(lightProjection(p,bindings.get(p.article.articleId)??0))]}];
@@ -226,16 +229,17 @@ export class LibraryProjectionCache {
   const incremental=!!previous&&!!urls&&write.length<=900;
   if(incremental){
    generation=previous!.generation;
-   await this.db.transaction([...guards,revisionGuard(revision),...(urls!.length?[{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation=? AND url IN ('+urls!.map(()=>'?').join(',')+')',params:[scope,generation,...urls!]}]:[]),...write.flatMap(rowStatements),{sql:'INSERT OR REPLACE INTO sync_projection_header VALUES(?,?,?,?)',params:[scope,generation,revision,seq]}]);
+   await this.db.transaction([...guards,revisionGuard(revision),...(urls!.length?[{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation=? AND url IN ('+urls!.map(()=>'?').join(',')+')',params:[scope,generation,...urls!]}]:[]),...write.flatMap(rowStatements),header()]);
   }else{
   if(previous&&urls){const clause=urls.length?' AND url NOT IN ('+urls.map(()=>'?').join(',')+')':'';await this.db.transaction([...guards,revisionGuard(revision),{sql:'INSERT INTO sync_projection_rows(scope,generation,article_id,url,position,source_item,json) SELECT scope,?,article_id,url,position,source_item,json FROM sync_projection_rows WHERE scope=? AND generation=?'+clause,params:[generation,scope,previous.generation,...urls]},{sql:'INSERT INTO sync_projection_light SELECT l.scope,?,l.article_id,l.json FROM sync_projection_light l JOIN sync_projection_rows p ON p.scope=l.scope AND p.generation=? AND p.article_id=l.article_id WHERE l.scope=? AND l.generation=?',params:[generation,generation,scope,previous.generation]}]);}
   for(let at=0;at<write.length;at+=100){
    await this.db.transaction([...guards,revisionGuard(revision),...write.slice(at,at+100).flatMap((p,i)=>rowStatements(p,at+i))]);
   }
-  await this.db.transaction([...guards,revisionGuard(revision),{sql:'INSERT OR REPLACE INTO sync_projection_header VALUES(?,?,?,?)',params:[scope,generation,revision,seq]},{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation!=?',params:[scope,generation]},
+  await this.db.transaction([...guards,revisionGuard(revision),header(),{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation!=?',params:[scope,generation]},
    ...(legacyCoverage?[{sql:'INSERT OR REPLACE INTO sync_projection_legacy_coverage VALUES(?,?)',params:[scope,generation]}]:[])]);
   }
-  await this.db.transaction([...guards,{sql:'DELETE FROM sync_projection_rows WHERE scope IN (SELECT scope FROM sync_projection_header WHERE seq<?)',params:[Math.max(0,seq-8192)]},{sql:'DELETE FROM sync_projection_header WHERE seq<?',params:[Math.max(0,seq-8192)]},{sql:'DELETE FROM sync_projection_events WHERE seq<=(SELECT MIN(seq) FROM sync_projection_header)'}]);
+  const cutoff=Math.max(0,seq-PROJECTION_EVENT_RETENTION);
+  await this.db.transaction([...guards,{sql:'DELETE FROM sync_projection_rows WHERE scope IN (SELECT scope FROM sync_projection_header WHERE seq<?)',params:[cutoff]},{sql:'DELETE FROM sync_projection_header WHERE seq<?',params:[cutoff]},{sql:'DELETE FROM sync_projection_events WHERE seq<=(SELECT MIN(seq) FROM sync_projection_header)'}]);
   for(const key of this.loaded.keys())if(key.startsWith(scope+'\0'))this.loaded.delete(key);
   this.loaded.set(scope+'\0'+[generation,revision,seq].join(':'),articles.map(p=>{const ref=this.lazy.get(p);if(ref)this.lazy.set(p,{...ref,scope,generation});return {prepared:(ref||!bindings.get(p.article.articleId)&&p.encodedBody?p:{article:{...p.article,contentHtml:null,contentText:''},manifest:p.manifest,encodedBody:null}),sourceItem:bindings.get(p.article.articleId)??0};}));
  }

@@ -17,7 +17,7 @@ import type {RecordDocument} from '../cloud/records';
 import {FullSyncPerf} from './full-sync-perf';
 import {ManifestContention,LibrarySnapshotBusyError} from './manifest-contention';
 import {SqlDomainDefinitions,projectionGuard} from './domain-definitions';
-import {LibraryProjectionCache} from './projection-cache';
+import {LibraryProjectionCache,PROJECTION_EVENT_RETENTION} from './projection-cache';
 import type {AfterReadingAck} from '../books/reading-delta';
 import type {BookState,BookReading} from '../books/protocol';
 import {SqlBookStore} from '../books/store';
@@ -63,6 +63,7 @@ export interface SqlLibraryRepositoryPorts {
  now?:()=>number;
 }
 let snapshotScope=0;
+const libraryProjectionScope=(canonical:boolean,books:boolean)=>(canonical?':canonical':'')+(books?':books-v1':'');
 /** One shared instance serializes session operations. UI writes remain concurrent
  * and are detected by revision guards before advertising a sequence boundary. */
 export class SqlLibraryCloudRepository implements LibrarySessionRepository {
@@ -195,7 +196,7 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
     }
     if(!cached||cached.revision!==revision||cached.canonical!==canonical||cached.bookMode!==bookMode){
      const articles=await this.local.snapshot(true,canonical,bookMode,check);trace('repository.articles');this.report({stage:'manifest.inventory',canonical:canonical?1:0,inventory:JSON.stringify(libraryInventory(articles.map(a=>({...a.article,deleted:a.manifest.deleted}))))});const sourceRows=preparedSources??await this.sources.export(id),bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
-     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),(canonical?':canonical':'')+(bookMode?':books-v1':''),undefined,await this.needsProjectionSeed());trace('repository.fingerprints');
+     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),libraryProjectionScope(canonical,bookMode),undefined,await this.needsProjectionSeed());trace('repository.fingerprints');
      if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
      cached={canonical,bookMode,revision,projectionSeq:0,articles,sources,manifests:articles.map(a=>a.manifest)};this.snapshotCache=cached;
     }
@@ -224,7 +225,7 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
    try{
     let cached=this.snapshotCache;
     if(!cached||cached.revision!==revision||cached.projectionSeq!==projectionSeq||cached.canonical!==canonical||cached.bookMode!==bookMode){
-     const scope=(canonical?':canonical':'')+(bookMode?':books-v1':'');
+     const scope=libraryProjectionScope(canonical,bookMode);
      let plan=await this.perf.time("snapshot.projection.plan",()=>this.projection.plan(scope,revision,bookMode));
      if(bookMode&&(!plan||plan.urls?.some(isImportedContentUrl))){await this.books?.registerLocal([],check);revision=await libraryRevision(this.db);plan=await this.projection.plan(scope,revision,bookMode);}
      if(!plan||plan.urls!==undefined)await this.perf.time("snapshot.reading",()=>this.local.prepareReadingForSnapshot(plan?.readingUrls??plan?.urls));
@@ -287,7 +288,16 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
  }
  async canSkipLibrary(peer:string){
   await this.prepareFastProjection();if(await this.changedIdentityMode(peer)||await this.sequence.fastPathRequiresFull(peer))return false;
-  return !!(await this.db.query('SELECT peer FROM sync_fast_library_baseline WHERE peer=? AND generation=?',[peer,this.projectionGeneration]))[0];
+  const scope=libraryProjectionScope(!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer));
+  // The selected scope must still cover the retained event journal. The
+  // domain root witnesses relevant changes after that projection was built.
+  return !!(await this.db.query(`WITH latest(seq) AS (SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'),0))
+   SELECT 1 FROM sync_fast_library_baseline b
+   JOIN sync_fast_definitions d ON d.domain='library' AND d.generation=b.generation AND d.seeded=1
+   JOIN sync_projection_header h ON h.scope=? JOIN latest
+   WHERE b.peer=? AND b.generation=? AND h.seq BETWEEN max(0,latest.seq-?) AND latest.seq
+   AND h.revision<=(SELECT revision FROM sync_library_revision WHERE id=1)
+   AND (h.seq=latest.seq OR h.seq+1>=COALESCE((SELECT MIN(seq) FROM sync_projection_events),latest.seq+1))`,[scope,peer,this.projectionGeneration,PROJECTION_EVENT_RETENTION]))[0];
  }
  domainDefinitions(){return this.definitions;}
  deviceId(){return this.identity();}

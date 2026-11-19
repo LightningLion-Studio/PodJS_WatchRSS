@@ -9,6 +9,7 @@ export const DOMAIN_FAST_PATH_PROFILE='rss-canonical-books-reading-v1:merge:doma
 export interface DomainExternalState {scope:string;roots:Partial<Record<SyncDomain,string>>;revalidate?():Promise<DomainExternalState>}
 export interface DomainVectorProvider {open(peer:string,profile:string):Promise<AckedStateVector>}
 let windowSerial=0;
+const libraryGap='(SELECT revision FROM sync_library_revision WHERE id=1)-(SELECT real_events FROM sync_projection_totals WHERE id=1)';
 export class SqlDomainVectorStore implements DomainVectorProvider {
  private definitions:SqlDomainDefinitions;
  constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly external:()=>Promise<DomainExternalState>,private readonly options:{now?:()=>number;canSkipLibrary?:(peer:string)=>Promise<boolean>;encoders?:Record<SyncDomain,number>;definitions?:SqlDomainDefinitions}={}){this.definitions=options.definitions??new SqlDomainDefinitions(db,codec,options.encoders??DOMAIN_ENCODERS);}
@@ -32,9 +33,10 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
   const initial=await this.external(),scope=initial.scope;if(!/^[0-9a-f]{64}$/.test(scope))throw Error('invalid_domain_scope');
   const composites=new Map<string,string>();
   let first=true,versions:ProjectionVersions={},frozenEpochs:Record<string,string>|undefined;
+  let libraryWitness:{revision:number;gap:number;generation:string}|undefined;
   const roots=async():Promise<StateRoots>=>{
    const current=first?initial:initial.revalidate?await initial.revalidate():await this.external();first=false;
-   const defs=await this.definitions.ensure();versions=Object.fromEntries(SYNC_DOMAINS.map(d=>[d,{encoder:defs[d].encoder,schema:defs[d].schema,definition:defs[d].definition}]));
+   const defs=await this.definitions.ensure();versions=Object.fromEntries(SYNC_DOMAINS.map(d=>[d,{encoder:defs[d].encoder,schema:defs[d].schema,definition:defs[d].definition}]));libraryWitness=undefined;
    if(current.scope!==scope)return {};
    const epochs=Object.fromEntries(SYNC_DOMAINS.map(d=>[d,defs[d].epoch]));frozenEpochs??=epochs;
    const rows=await this.db.query("SELECT v.domain,v.revision,r.root,r.revision cached_revision FROM sync_fast_versions v JOIN sync_fast_definitions d ON d.domain=v.domain LEFT JOIN sync_fast_roots r ON r.domain=v.domain AND r.scope=?||':'||d.generation",[scope]),out:StateRoots={};
@@ -43,8 +45,10 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
     let root=Number(row.cached_revision)===revision&&/^[0-9a-f]{64}$/.test(String(row.root))?String(row.root):undefined;
     if(!root){root=await this.versionRoot(d,def,scope,revision);await this.db.execute('INSERT OR REPLACE INTO sync_fast_roots(scope,domain,revision,root) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain=? AND generation=?)',[scope+':'+def.generation,d,revision,root,d,def.generation]);}
     if(d==='library'){
-     const gap=(await this.db.query('SELECT (SELECT revision FROM sync_library_revision WHERE id=1)-(SELECT real_events FROM sync_projection_totals WHERE id=1) gap'))[0]?.gap;
-     if(gap===undefined)continue;const key=JSON.stringify(['watchrss.ble.library-witness.v2',root,Number(gap)]);root=composites.get(key)??await hashJavaText(key,this.codec);composites.set(key,root);
+     const gap=(await this.db.query(`SELECT ${libraryGap} AS gap`))[0]?.gap;
+     if(gap==null)continue;
+     libraryWitness={revision,gap:Number(gap),generation:def.generation};
+     const key=JSON.stringify(['watchrss.ble.library-witness.v2',root,Number(gap)]);root=composites.get(key)??await hashJavaText(key,this.codec);composites.set(key,root);
     }
     if(['books','reader','notes','account'].includes(d)){
      const extra=current.roots[d];if(!extra||!/^[0-9a-f]{64}$/.test(extra))continue;
@@ -67,6 +71,14 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
     // a removed credential, and warm rounds never move verified_at forward.
     sql:'UPDATE sync_fast_receipts SET local_root=local_root WHERE peer=? AND scope=? AND profile=? AND domain=? AND local_root=? AND remote_root=? AND verified_at>0 AND verified_at<=? AND verified_at>?',params:[peer,scope,profile,d,r.localRoot,r.remoteRoot,time,time-PHONE_SAFETY_CHECK_MS]
    }));
-  },()=>nonce+'-'+(++windowSerial),{versions:()=>versions,allowSkip:async d=>d!=='library'||!!await this.options.canSkipLibrary?.(peer)});
+  },()=>nonce+'-'+(++windowSerial),{versions:()=>versions,allowSkip:async d=>{
+   if(d!=='library')return true;
+   const witness=libraryWitness;
+   if(!witness||!await this.options.canSkipLibrary?.(peer))return false;
+   // A scope can be evicted and republished between reading roots and checking
+   // the peer's projection. Confirm that the receipt still matches this root.
+   return !!(await this.db.query(`SELECT 1 FROM sync_fast_versions v JOIN sync_fast_definitions d USING(domain)
+    WHERE v.domain='library' AND v.revision=? AND d.generation=? AND (${libraryGap})=?`,[witness.revision,witness.generation,witness.gap]))[0];
+  }});
  }
 }
