@@ -33,9 +33,16 @@ export class BookSyncActions {
   }
   requireThat(request.phase==='body'&&typeof request.packageSha256==='string'&&hex.test(request.packageSha256)&&typeof request.fingerprint==='string'&&hex.test(request.fingerprint)&&integer(request.byteCount,1,BOOK_MAX_PACKAGE_BYTES)&&integer(request.chunkCount,1)&&request.chunkCount===Math.ceil(Number(request.byteCount)/BOOK_CHUNK_SIZE)&&integer(request.chunkIndex,0,Number(request.chunkCount)-1)&&typeof request.dataBase64==='string'&&request.dataBase64.length<=87384);
   const row=(await this.db.query('SELECT fingerprint FROM sync_books WHERE book_id=?',[id as string]))[0];requireThat(row?.fingerprint===request.fingerprint);const data=base64ToBytes(request.dataBase64 as string),expected=Math.min(BOOK_CHUNK_SIZE,Number(request.byteCount)-Number(request.chunkIndex)*BOOK_CHUNK_SIZE);requireThat(data.length===expected&&bytesToBase64(data)===request.dataBase64);
-  const committed=await this.store.package(id as string);if(committed&&committed.sha256===request.packageSha256&&committed.size===request.byteCount){const old=await this.store.ports.files.read(committed.path,Number(request.chunkIndex)*BOOK_CHUNK_SIZE,expected);requireThat(old.bytes.length===data.length&&old.bytes.every((v,i)=>v===data[i]));return {...base,received:true,complete:true,applied:0};}
+  const key=[id as string,request.packageSha256 as string] as const,index=Number(request.chunkIndex);
+  const committed=await this.store.package(key[0]);
+  if(committed&&committed.sha256===key[1]&&committed.size===request.byteCount){
+   const old=await this.store.ports.files.read(committed.path,index*BOOK_CHUNK_SIZE,expected);
+   requireThat(old.bytes.length===data.length&&old.bytes.every((v,i)=>v===data[i]));
+   const parts=await querySyncPages(this.db,'SELECT path FROM sync_book_parts WHERE book_id=? AND package_sha256=? ORDER BY chunk_index',key);
+   await this.discard(key,parts,true);
+   return {...base,received:true,complete:true,applied:0};
+  }
   await this.preparePartReceipts();
-  const key=[id,request.packageSha256],index=Number(request.chunkIndex);
   const matches=(part:Record<string,unknown>)=>part.fingerprint===request.fingerprint&&Number(part.byte_count)===request.byteCount&&Number(part.chunk_count)===request.chunkCount;
   const staged=(await this.db.query(`SELECT r.fingerprint,r.byte_count,r.chunk_count,r.received,p.path
    FROM sync_book_part_receipts r LEFT JOIN sync_book_parts p
@@ -59,7 +66,13 @@ export class BookSyncActions {
   const parts=await querySyncPages(this.db,'SELECT * FROM sync_book_parts WHERE book_id=? AND package_sha256=? ORDER BY chunk_index',key);
   requireThat(parts.length===request.chunkCount&&parts.every((r,i)=>Number(r.chunk_index)===i&&matches(r)));
   const info=await this.store.ports.files.combine(parts.map(r=>String(r.path)),BOOK_MAX_PACKAGE_BYTES);
-  try{requireThat(info.size===request.byteCount&&info.sha256===request.packageSha256);const applied=await this.store.installPackage(info,id as string);await this.discard(id as string,request.packageSha256 as string,parts);return {...base,received:true,complete:true,applied};}catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(id as string,request.packageSha256 as string,parts);throw error;}finally{await this.store.ports.files.remove(info.path);}
+  try{
+   let applied:number;
+   try{requireThat(info.size===request.byteCount&&info.sha256===key[1]);applied=await this.store.installPackage(info,key[0]);}
+   catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false);throw error;}
+   await this.discard(key,parts,true);
+   return {...base,received:true,complete:true,applied};
+  }finally{await this.store.ports.files.remove(info.path);}
  }
  private preparePartReceipts(){
   return this.partsReady??=(async()=>{
@@ -67,5 +80,13 @@ export class BookSyncActions {
    await this.db.transaction(BOOK_PART_RECEIPT_SCHEMA.map(sql=>({sql})));
   })().catch(error=>{this.partsReady=undefined;throw error;});
  }
- private async discard(id:string,hash:string,rows:Record<string,unknown>[]){await this.db.transaction([{sql:'DELETE FROM sync_book_parts WHERE book_id=? AND package_sha256=?',params:[id,hash]}]);for(const r of rows)await this.store.ports.files.remove(String(r.path));}
+ private async discard(key:readonly [string,string],rows:Record<string,unknown>[],published:boolean){
+  if(!rows.length)return;
+  const remove=async()=>{for(const row of rows)await this.store.ports.files.remove(String(row.path));};
+  // A published package can replay cleanup after interruption. Keep the
+  // durable paths until every staged file has been removed.
+  if(published)await remove();
+  await this.db.transaction([{sql:'DELETE FROM sync_book_parts WHERE book_id=? AND package_sha256=?',params:key}]);
+  if(!published)await remove();
+ }
 }

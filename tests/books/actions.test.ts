@@ -30,3 +30,26 @@ test('v1 receipts backfill old parts and reject conflicting package dimensions b
   expect(await f.db.query('SELECT * FROM sync_book_part_receipts')).toEqual([]);
  }finally{f.sql.close();}
 });
+
+test('replay of a published v1 package resumes interrupted part and receipt cleanup',async()=>{
+ const f=await setup();
+ try{
+  await f.store.merge(f.state);
+  const count=f.body(0).chunkCount;
+  for(let i=0;i<count-1;i++)await f.action.apply(f.body(i));
+  const staged=await f.db.query('SELECT path FROM sync_book_parts ORDER BY chunk_index');
+  const firstPath=String(staged[0]?.path),remove=f.files.remove;
+  f.files.remove=async path=>{if(path===firstPath)throw Error('interrupted part cleanup');await remove(path);};
+  await expect(f.action.apply(f.body(count-1))).rejects.toThrow('interrupted part cleanup');
+  expect((await f.store.package(f.state.bookId))?.sha256).toBe(f.info.sha256);
+  const pending=await f.db.query('SELECT path FROM sync_book_parts');
+  expect(pending).toHaveLength(count);
+  expect(await f.db.query('SELECT received FROM sync_book_part_receipts')).toEqual([{received:count}]);
+  f.files.remove=remove;
+  const reopened=new BookSyncActions(f.db,f.store);
+  expect(await reopened.apply(f.body(0))).toMatchObject({received:true,complete:true,applied:0});
+  expect(await f.db.query('SELECT * FROM sync_book_parts')).toEqual([]);
+  expect(await f.db.query('SELECT * FROM sync_book_part_receipts')).toEqual([]);
+  for(const row of pending)expect(f.data.has(String(row.path))).toBe(false);
+ }finally{f.sql.close();}
+});
