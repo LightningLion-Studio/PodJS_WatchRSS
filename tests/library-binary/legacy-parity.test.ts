@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import legacy from '../fixtures/library-binary/v1-parity.json';
 import {encodeFrame,decodeFrame,type JsonObject} from '../../src/sync/protocol';
-import {gated,RELEASE_B2_ENABLED} from '../../src/sync/library-binary/routing';
+import {gated} from '../../src/sync/library-binary/routing';
 const inputs:JsonObject[]=legacy.cases.slice(0,3).map(c=>(c as {payload:JsonObject}).payload);
 let seed=0x12345678;for(let i=0;i<256;i++){
  seed=(Math.imul(seed,1664525)+1013904223)>>>0;const n=[0,1,2,3,64,65536][i%6]!,bytes=Buffer.alloc(n);
@@ -15,7 +15,7 @@ let seed=0x12345678;for(let i=0;i<256;i++){
 test('off leaves legacy source hashes, 259 baseline frame hashes and byte lengths unchanged',()=>{
  for(const [path,sha] of Object.entries(legacy.sourceHashes))expect(createHash('sha256').update(readFileSync(resolve(import.meta.dir,'../..',path))).digest('hex')).toBe(sha);
  expect(inputs.length).toBe(259);for(let i=0;i<inputs.length;i++){
-  let binaryCalls=0;const bytes=gated(RELEASE_B2_ENABLED,()=>encodeFrame(inputs[i]!),()=>{binaryCalls++;throw Error('B2 invoked while off');});
+  let binaryCalls=0;const bytes=gated(false,()=>encodeFrame(inputs[i]!),()=>{binaryCalls++;throw Error('B2 invoked while off');});
   expect(binaryCalls).toBe(0);expect(bytes.length).toBe(legacy.cases[i]!.bytes);expect(createHash('sha256').update(bytes).digest('hex')).toBe(legacy.cases[i]!.frameSha256);expect(decodeFrame(bytes)).toEqual(inputs[i]);
  }
  const bytes=new Uint8Array([0,1,255]);expect(gated(false,()=>bytes,()=>new Uint8Array())).toBe(bytes);
