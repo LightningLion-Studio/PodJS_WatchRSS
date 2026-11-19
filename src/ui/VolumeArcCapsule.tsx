@@ -1,7 +1,7 @@
 import { Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { StrokeArc } from "@podjs/framework/stroke-arc";
-import { volumeArcExtent, volumeArcFill, volumeArcLayout } from "./volume-arc.ts";
+import { volumeArcExtent, volumeArcFill, volumeArcLayout, volumeArcStyle } from "./volume-arc.ts";
 
 /** Shared 233-unit canvas; callers scale it to the screen like the player controls. */
 export const VOLUME_ARC = volumeArcLayout(233);
@@ -22,11 +22,14 @@ export function volumeArcLeftEdge(width: number, height: number, y0: number, y1:
 /** Round-screen crown volume feedback: a capsule along the top-right edge, next to the crown. */
 export function VolumeArcCapsule(props: { width: number; height: number; percent: number; muted?: boolean }) {
   const place = () => canvasPlacement(props.width, props.height);
-  const fill = () => volumeArcFill(L, props.percent);
+  const fill = () => {
+    const level = volumeArcFill(L, props.percent);
+    return level && volumeArcStyle(L, L.tickRadius, L.tickWidth, level.fromDeg, level.toDeg);
+  };
   return <View debugName="VolumeArcCapsule" accessibilityLabel={`音量 ${props.percent}%`} class="absolute" style={{ insetL: place().left, insetT: place().top, width: 233, height: 233, scale: place().scale, originX: 0, originY: 0 }}>
     <Image accessibilityHidden src="../assets/icons/volume-capsule.svg" class="absolute" style={{insetL: 155, insetT: 18, width: 70, height: 80}}/>
     <Show when={fill()}>{level => <StrokeArc cx={L.cx} cy={L.cy} radius={L.tickRadius} strokeWidth={L.tickWidth}
-      start={level().fromDeg + 90} sweep={level().toDeg - level().fromDeg} color={0xff6026ff} scale={place().scale}/>}</Show>
+      start={level().arcStart} sweep={level().arcSweep} color={0xff6026ff} scale={place().scale}/>}</Show>
     <Show when={props.muted || props.percent <= 0} fallback={<Image src="../assets/icons/speech-volume-overlay.svg" class="absolute" style={{ insetL: L.icon.x - ICON / 2, insetT: L.icon.y - ICON / 2, width: ICON, height: ICON, rotate: L.icon.rotate }} />}>
       <Image src="../assets/icons/speech-volume-off-overlay.svg" class="absolute" style={{ insetL: L.icon.x - ICON / 2, insetT: L.icon.y - ICON / 2, width: ICON, height: ICON, rotate: L.icon.rotate }} />
     </Show>
