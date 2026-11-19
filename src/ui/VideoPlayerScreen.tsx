@@ -97,7 +97,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   // Retain the saved preference for activity snapshot compatibility; it no longer gates playback.
   const [allowBluetooth] = restoredSignal('saved','player-bluetooth',false,booleanState,immersiveDouyin);
   const [networkFailure, setNetworkFailure] = createSignal(false);
-  const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;direction:DouyinPagerDirection}|null>(null),[dragAxis,setDragAxis]=createSignal<DouyinPagerDirection|undefined>(),[handoff,setHandoff]=createSignal(false),[firstFrame,setFirstFrame]=createSignal(false),[nativeDrag,setNativeDrag]=createSignal(false),[spinnerDue,setSpinnerDue]=createSignal(false);
+  const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;filePath?:string;direction:DouyinPagerDirection}|null>(null),[dragAxis,setDragAxis]=createSignal<DouyinPagerDirection|undefined>(),[handoff,setHandoff]=createSignal(false),[firstFrame,setFirstFrame]=createSignal(false),[nativeDrag,setNativeDrag]=createSignal(false),[spinnerDue,setSpinnerDue]=createSignal(false);
   let benchmarkSeq=0,benchmarkGeneration=1,lastBenchmarkHeartbeat=0;
   let pendingBenchmark:VideoBenchmarkAction|undefined,pendingBenchmarkSource:PlaybackSource|undefined;
   const frameWait=new VideoFirstFrameWait(Date.now,1000);frameWait.reset();
@@ -596,6 +596,12 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     await fallbackSessions();
   };
   const adjacentResolutions=new Map<string,{revision:number;key:string|undefined;pending:Promise<DouyinPreparedSource|undefined>}>();
+  const showDragPreview=(target:DouyinPreparedSource|undefined,direction:DouyinPagerDirection,poster?:string)=>{
+    const source=target?.source;
+    const filePath=framePreviewPath(source?.previewFrame,target?.key);
+    const url=props.source.immersive?'':source?.posterUrl??poster??'';
+    setDragPoster(filePath||url?{filePath,url,direction}:null);
+  };
   const previewAdjacent=(direction:"next"|"previous",revision:number,revealPoster=false,distance:1|2|3|4|5=1):Promise<DouyinPreparedSource|undefined>=>{
     if(!props.onPrepareAdjacent)return Promise.resolve(undefined);
     const id=direction+distance,key=props.onAdjacentKey?.(direction,distance),known=adjacentResolutions.get(id);
@@ -604,7 +610,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return target;
     });
     adjacentResolutions.set(id,{revision,key,pending:resolve});
-    return resolve.then(target=>{if(!target&&adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);if(target&&revealPoster&&!props.source.immersive&&target.source.posterUrl)setDragPoster({url:target.source.posterUrl,direction:direction==='next'?'up':'down'});return target;},error=>{if(adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);throw error;});
+    const forget=()=>{if(adjacentResolutions.get(id)?.pending===resolve)adjacentResolutions.delete(id);};
+    return resolve.then(target=>{
+      if(!target)forget();
+      const pagerDirection=direction==="next"?"up":"down";
+      if(target&&revealPoster&&!nativeDrag()&&dragDirection===pagerDirection)showDragPreview(target,pagerDirection);
+      return target;
+    },error=>{forget();throw error;});
   };
   const warmEarly=()=>{
     if(usingSessions())void warmForward().catch(()=>{});
@@ -667,14 +679,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     sessionPool!.transition(progress,direction,restingBounds(),action,pagerRotation());
   const ensureDragTarget=(direction:DouyinPagerDirection,revision:number)=>{
     const queueDirection:"next"|"previous"=direction==="up"?"next":"previous";
-    const poster=props.onAdjacentPoster?.(queueDirection);if(poster&&!props.source.immersive)setDragPoster({url:poster,direction});
+    const candidate=direction==="up"?forwardTarget:backwardTarget;
+    const showColdPreview=()=>showDragPreview(candidate,direction,props.onAdjacentPoster?.(queueDirection));
     if(!usingSessions()){
+      showColdPreview();
       if(direction==='up'&&forwardTarget){dragTarget=forwardTarget;return Promise.resolve(forwardTarget);}
       return Promise.resolve(undefined);
     }
-    const candidate=direction==="up"?forwardTarget:backwardTarget;
     const existing=sessionPool?.sourceFor(props.onAdjacentKey?.(queueDirection))??sessionPool?.preparingSourceFor(props.onAdjacentKey?.(queueDirection))??(candidate&&sessionPool?.hasStandby(candidate.key)?candidate:undefined);
     if(existing&&sessionPool!.selectStandby(existing.key,true)){dragTarget=existing;setNativeDrag(true);setDragPoster(null);return Promise.resolve(existing);}
+    showColdPreview();
     const ownNeighbor=neighborRevision;
     const pending=(direction==="up"?forwardWarm:backwardWarm)??prepareAdjacent(queueDirection,ownNeighbor,true);
     return pending.then(target=>{
@@ -1054,6 +1068,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   // Guest previews do not share the native page matrix. During paging,
   // rotation or nonstandard scale, render only native decoded pixels.
   const guestPreviewVisible=()=>!dragAxis()&&!handoff()&&mode()==="standard"&&displayRotation()%360===0;
+  const showDragPoster=()=>!nativeDrag()&&mode()==="standard"&&displayRotation()%360===0&&dragPoster();
   const dragPosterOffset=()=>{const poster=dragPoster();if(!poster)return 0;const remaining=(1-dragProgress())*props.height;return poster.direction==="up"?remaining:-remaining;};
   let benchmarkSpinner=false,spinnerBenchmark:VideoBenchmarkAction|undefined;
   createEffect(()=>{
@@ -1070,7 +1085,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(visible){coverWasVisible=true;coverGeneration=generation;}
     else if(coverWasVisible){coverWasVisible=false;const checkpoint=renderCheckpoint({sampleAlpha:true});appLogger.i('DouyinTiming',`coverRemoved prepareMs=${Date.now()-prepareStarted} generation=${coverGeneration} reason=${error()?'error':firstFrame()?'first-frame':'ready'} checkpoint=${checkpoint??0}`);}
   });
-  return <View ref={value => surface = value} class="absolute left-[0] right-[0]" style={{ insetT: top(), height: props.height }}><Show when={guestPreviewVisible()&&props.source.platform==="douyin"&&(props.source.immersive||previewPath())&&!handoff()&&!firstFrame()&&(previewPath()||!props.source.immersive&&props.source.posterUrl)}><RemoteImage url={props.source.posterUrl??""} filePath={previewPath()} onError={()=>{const path=previewPath();if(path)setBadFrame(path);}} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></Show><Show when={guestPreviewVisible()&&dragPoster()}>{poster=><View class="absolute inset-0" style={{translateY:dragPosterOffset()}}><RemoteImage url={poster().url} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></View>}</Show>
+  return <View ref={value => surface = value} class="absolute left-[0] right-[0]" style={{ insetT: top(), height: props.height }}><Show when={guestPreviewVisible()&&props.source.platform==="douyin"&&(props.source.immersive||previewPath())&&!handoff()&&!firstFrame()&&(previewPath()||!props.source.immersive&&props.source.posterUrl)}><RemoteImage url={props.source.posterUrl??""} filePath={previewPath()} onError={()=>{const path=previewPath();if(path)setBadFrame(path);}} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></Show><Show when={showDragPoster()}>{poster=><View class="absolute inset-0" style={{translateY:dragPosterOffset()}}><RemoteImage url={poster().url} filePath={poster().filePath} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></View>}</Show>
     <View class="absolute inset-0" style={{ rotate: displayRotation() }}>
       <Show when={!!props.onReload} fallback={<Show when={(props.source.platform==="douyin"&&props.source.immersive?spinnerDue()&&state()?.bufferedMs===0&&state()?.networkStalled===true&&(!firstFrame()||handoff())&&(!dragAxis()||handoff()):(!state()||buffering())) && !error() && !networkPrompt()}><View class="absolute w-[40] h-[40] rounded-[20] bg-[#00000099] items-center justify-center" style={{ insetL: (props.width - 40) / 2, insetT: (props.height - 40) / 2 }}><Image src="../assets/icons/player-loading.svg" class="w-[28] h-[28]" style={{ rotate: loadingRotation() }} /></View></Show>}><PlayerLoadingIndicator width={props.width} height={props.height} visible={props.active&&lifecycle()==='active'&&props.offset===0&&!detailShown()&&!error()&&!networkPrompt()&&(reconnecting()||!ready()||buffering()||handoff())} phase={reconnecting()?'reconnecting':props.source.previewOnly?'fetching':buffering()?'buffering':'preparing'}/></Show>
       <Show when={props.active && error() && !networkPrompt()}><View class="absolute rounded-[24] bg-[#000000cc]" style={{insetL:(props.width-errorWidth())/2,insetT:(props.height-errorHeight())/2,width:errorWidth(),height:errorHeight()}}>

@@ -1,6 +1,6 @@
 import { batch, createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import { createGesture, type GestureOptions } from "@pocketjs/framework/gesture";
+import { createGesture, type GestureContact, type GestureOptions } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
@@ -10,14 +10,15 @@ import { RemoteImage } from "./RemoteImage.tsx";
 import { playerGesture } from "./player-gestures.ts";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type DetailMeta, type InfoLayout, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220;
 /** Crown scroll distance per degree, in canvas units. */
 const CROWN_PX = 4;
-/** Height of the top and bottom fades over the scrolling column, in canvas units. */
-const EDGE_FADE = 28;
+const PAN_SLOP = 8;
+const EMPTY_INFO: InfoLayout = { title: [], description: [], descriptionMore: false };
+const detailSummaries = new WeakMap<DetailSlide, { meta: DetailMeta; layout: InfoLayout }>();
 const ABOUT_LINES_PER_FRAME = 2;
 const OVERSCAN = 8;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
@@ -108,17 +109,26 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   const scale = () => Math.min(props.width, props.height) / CANVAS;
   const left = () => (props.width - CANVAS) / 2, top = () => (props.height - CANVAS) / 2;
   const cover = createMemo(() => props.cover(), undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
+  const measure = (text: string, slot: number) => getOps().measureText(text, slot);
+  const [layoutAllowed, allowLayout] = createSignal(false);
+  onFrame(() => allowLayout(true), () => !layoutAllowed() && props.slide.x() === 0);
   const info = createMemo(() => {
     const value = cover();
-    return infoLayout({ title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait }, (text, slot) => getOps().measureText(text, slot));
+    const meta = { title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait };
+    const cached = detailSummaries.get(props.slide);
+    if (cached && (Object.keys(meta) as (keyof DetailMeta)[]).every(key => meta[key] === cached.meta[key])) return cached.layout;
+    if (!layoutAllowed()) return EMPTY_INFO;
+    const layout = infoLayout(meta, measure);
+    detailSummaries.set(props.slide, { meta, layout });
+    return layout;
   });
-  const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
   const fullDescription = createMemo(() => info().descriptionMore ? description() : "");
   const [about, setAbout] = createSignal<string[]>([]);
   const [aboutCount, setAboutCount] = createSignal(0);
   let aboutJob: Generator<string> | undefined;
-  const controls = createMemo<Control[]>(() => ["progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
+  const hasSpeed = createMemo(() => props.speed() !== undefined);
+  const controls = createMemo<Control[]>(() => hasSpeed() ? ["progress", "volume", "speed"] : ["progress", "volume"]);
   const column = createMemo(() => columnLayout(aboutCount(), controls().length));
   const aboutTop = INFO_HEIGHT + ABOUT.caption + ABOUT.captionGap;
   const [selected, setSelected] = createSignal<Control>();
@@ -131,7 +141,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     aboutJob = text ? aboutLineIterator(text, measure) : undefined;
     batch(() => { setAbout([]); setAboutCount(0); });
   });
-  const needsAboutLines = () => !!aboutJob && !selected() &&
+  const needsAboutLines = () => !!aboutJob && props.slide.x() === 0 && !selected() &&
     aboutTop + aboutCount() * ABOUT.lineHeight < scroller.offset() + CANVAS * 2;
   onFrame(() => {
     const iterator = aboutJob;
@@ -174,64 +184,72 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   } });
 
   let root: NodeMirror | undefined;
-  let scrolling: number | undefined;
+  let drag: { id: number; kind: 'scroll' | 'dismiss' } | undefined;
+  let eligiblePan = false;
   const toCanvas = (px: number) => px / scale();
   const viewport = () => ({ x: 0, y: 0, w: props.width, h: props.height });
-  const createPanelGesture = (options: GestureOptions) =>
-    createGesture(props.rotation ? playerGesture(options, props.rotation, viewport) : options);
-  const pager = createPanelGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
-    // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
-    onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
-    onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
-    onPanStart: contact => {
-      if (scrolling !== undefined) return;
-      scrolling = contact.id;
-      setSelected();
-      scroller.beginDrag();
+  const panKind = (contact: GestureContact) => {
+    if (contact.dx > PAN_SLOP && contact.dx > Math.abs(contact.dy) * 1.25) return 'dismiss';
+    if (Math.abs(contact.dy) > PAN_SLOP) return 'scroll';
+  };
+  const gesture: GestureOptions = {
+    region: { node: () => root }, axis: 'any',
+    get panSlop() { return eligiblePan ? PAN_SLOP : Infinity; },
+    onDown: () => {
+      eligiblePan = false;
+      if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop();
     },
-    onPanMove: contact => { if (scrolling === contact.id) scroller.drag(-toCanvas(contact.fdy)); },
+    onMove: contact => { eligiblePan = drag === undefined && panKind(contact) !== undefined; },
+    // playerGesture preserves screen coordinates for taps. Native hit testing
+    // already applies the render transform for both the panel and its steppers.
+    onTap: contact => {
+      const hit = hitNode(contact.x, contact.y, contact.surface);
+      let pressable = hit;
+      while (pressable && !pressable.onPress) pressable = pressable.parent;
+      if (hit && pressable) pressNode(hit); else setSelected();
+    },
+    onPanStart: contact => {
+      const kind = panKind(contact);
+      if (drag || !kind) return;
+      if (kind === 'dismiss') {
+        if (!props.slide.begin()) return;
+      } else {
+        setSelected();
+        scroller.beginDrag();
+      }
+      drag = { id: contact.id, kind };
+    },
+    onPanMove: contact => {
+      if (drag?.id !== contact.id) return;
+      if (drag.kind === 'dismiss') props.slide.move(contact.dx);
+      else scroller.drag(-toCanvas(contact.fdy));
+    },
     onPanEnd: contact => {
-      if (scrolling !== contact.id) return;
-      scrolling = undefined;
-      scroller.endDrag(-toCanvas(contact.vy));
+      if (drag?.id !== contact.id) return;
+      const { kind } = drag;
+      drag = undefined;
+      if (kind === 'dismiss') props.slide.end(contact.vx);
+      else scroller.endDrag(-toCanvas(contact.vy));
     },
     onCancel: contact => {
-      if (scrolling !== contact.id) return;
-      scrolling = undefined;
-      scroller.endDrag(0);
+      if (drag?.id !== contact.id) return;
+      const { kind } = drag;
+      drag = undefined;
+      if (kind === 'dismiss') props.slide.cancel();
+      else scroller.endDrag(0);
     },
-  });
-  // A rightward drag in picture coordinates slides the panel off the player.
-  let closing: number | undefined;
-  const dismiss = createPanelGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
-    onPanStart: contact => {
-      if (contact.dx <= 0 || !props.slide.begin()) return;
-      closing = contact.id;
-      props.slide.move(contact.dx);
-    },
-    onPanMove: contact => { if (closing === contact.id) props.slide.move(contact.dx); },
-    onPanEnd: contact => {
-      if (closing !== contact.id) return;
-      closing = undefined;
-      props.slide.end(contact.vx);
-    },
-    onCancel: contact => {
-      if (closing !== contact.id) return;
-      closing = undefined;
-      props.slide.cancel();
-    },
-  });
+  };
+  const pager = createGesture(props.rotation ? playerGesture(gesture, props.rotation, viewport) : gesture);
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
   onCleanup(() => {
     aboutJob = undefined;
-    scrolling = closing = undefined;
+    if (drag?.kind === 'dismiss') props.slide.cancel();
+    drag = undefined;
     scroller.stop();
     pager.dispose();
-    dismiss.dispose();
     removeBack?.();
   });
-
 
   const InfoPage = () => <>
     <Show when={info().cover && cover()}>{cover => <View class="absolute overflow-hidden bg-[#1c1c1c]" style={{ ...box(info().cover!), radius: cover().portrait ? INFO.portraitCover.radius : INFO.cover.radius }}>
@@ -313,9 +331,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
           <View debugName={`PlayerDetailControl-${kind}`} class="absolute left-[0]" style={{ insetT: column().controls + index() * CONTROL.height, width: CANVAS, height: CONTROL.height }}>{control$(kind)}</View>
         </Show>}</For>
       </View>
-      {/* Content leaving the round screen fades out instead of being cut by its edge. */}
-      <View class="absolute left-[0] top-[0] bg-gradient-to-b from-[#000000] to-transparent" style={{ width: CANVAS, height: EDGE_FADE }} />
-      <View class="absolute left-[0] bg-gradient-to-b from-transparent to-[#000000]" style={{ insetT: CANVAS - EDGE_FADE, width: CANVAS, height: EDGE_FADE }} />
+
     </View>
   </View>;
 }

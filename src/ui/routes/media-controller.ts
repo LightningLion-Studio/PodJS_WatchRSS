@@ -667,10 +667,12 @@ export function createMediaRouteController(
     if(!stillAdjacent())return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next','prewarm');
     if(!stillAdjacent())return;
+    const previewFrame=localUrl?await douyinPreload.previewFrame(result.data.item,localUrl).catch(()=>undefined):undefined;
+    if(!stillAdjacent())return;
     const registered=douyinPreload.sourceFor?.(url)??result.data.item;
     return {key:result.data.item.awemeId,attemptedUrl:localUrl?.startsWith('file:')?localUrl:registered.playUrl,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
-      url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,...douyinDetail(result.data.item),headers,
+      url,previewOnly:false,previewFrame,resumePositionMs:0,...douyinDetail(result.data.item),headers,
       ...douyinDecoderProfile(registered),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};

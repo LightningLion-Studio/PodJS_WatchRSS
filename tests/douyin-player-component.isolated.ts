@@ -322,6 +322,20 @@ test('SWIPEFEED prewarmed handoff never prepares again while publication persist
  }finally{Date.now=realNow;}
 });
 
+test('the cold immersive drag presents only the adjacent video’s verified local frame',async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];
+ const source={platform:'douyin' as const,immersive:true,awemeId:'current',url:'managed/current',title:'current'};
+ const preview={entryId:'next',frame:{available:true as const,kind:'actual_frame' as const,path:'next-frame.png',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}};
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+  source,width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},
+  onPrepareAdjacent:async()=>({key:'next',source:{...source,awemeId:'next',url:'managed/next',previewFrame:preview}})
+ });});
+ await flush();
+ const g=gestures[0];g.onPanStart({dy:-10});g.onPanMove({dy:-80});
+ expect(nodes(root).find(node=>node.kind==='Poster')?.props.filePath).toBe('next-frame.png');
+ g.onCancel?.({});await flush();
+});
+
 test('SWIPEFEED legacy settle retires outgoing before a contended route result',async()=>{
  initial='available';gestures.length=0;ticks=[];pauses=0;legacyStops=0;
  const realNow=Date.now;let time=1000;Date.now=()=>time;

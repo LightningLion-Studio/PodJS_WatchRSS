@@ -90,7 +90,15 @@ export function infoLayout(meta: DetailMeta, measure: (text: string, slot: numbe
   const title = textPrefix(text.title, INFO_TEXT_LIMIT);
   const description = textPrefix(text.description, INFO_TEXT_LIMIT);
   const maxTitle = description ? 2 : 3, maxDescription = title ? 3 : 5;
-  const measureSlot = (slot: number): TextMeasurer => text => measure(text, slot);
+  const widths = new Map<string, number>();
+  const measureSlot = (slot: number): TextMeasurer => value => {
+    const key = `${slot}:${value}`;
+    const known = widths.get(key);
+    if (known !== undefined) return known;
+    const width = measure(value, slot);
+    widths.set(key, width);
+    return width;
+  };
   const plan = (titleLines: number, descriptionLines: number) => {
     const blocks: Block[] = [];
     const cover = meta.portraitCover ? INFO.portraitCover : INFO.cover;
@@ -110,7 +118,7 @@ export function infoLayout(meta: DetailMeta, measure: (text: string, slot: numbe
       } else if (block.kind === "author") {
         const width = Math.min(INFO.author.maxWidth, chordWidth(y, y + INFO.author.lineHeight));
         const label = measuredLines(author, width - INFO.author.icon - INFO.author.iconGap, measureSlot(INFO.author.slot), 1)[0] ?? "";
-        const textWidth = Math.ceil(Math.min(width - INFO.author.icon - INFO.author.iconGap, measure(label, INFO.author.slot)));
+        const textWidth = Math.ceil(Math.min(width - INFO.author.icon - INFO.author.iconGap, measureSlot(INFO.author.slot)(label)));
         const row = centred(INFO.author.icon + INFO.author.iconGap + textWidth, y, INFO.author.lineHeight);
         layout.author = { rect: row, label, icon: { x: row.x, y: y + (INFO.author.lineHeight - INFO.author.icon) / 2, width: INFO.author.icon, height: INFO.author.icon }, text: { x: row.x + INFO.author.icon + INFO.author.iconGap, y, width: textWidth, height: INFO.author.lineHeight } };
       } else {
