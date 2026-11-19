@@ -283,6 +283,39 @@ test('the pressured proxy window keeps the current and immediate neighbouring so
  }
 });
 
+test('critical memory pressure trims speculative feed caches and preserves the current source',async()=>{
+ const previousPod=(globalThis as any).pod,previousLegacyBytes=legacyBytes;
+ (globalThis as any).pod={...previousPod,memoryBudgetBytes:()=>128000000};
+ windows=[];registrations=[];removed=[];legacyBytes=0;
+ let suspended=0;
+ const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,{feedItem}:any)=>({ok:true,data:feedItem})};
+ const stock={lookup:async()=>undefined,suspend:()=>{suspended++;}};
+ const host=createHostDouyinPreload(client as any,stock as any),owner={};
+ const current='podjs-media-cache://play/a.mp4',next='podjs-media-cache://play/b.mp4';
+ try{
+  host.allowBluetooth(true,owner);host.start(owner,items as any,'a','active');await flush();
+  expect(windows.at(-1).items).toHaveLength(4);
+  expect(host.sourceFor(next)?.awemeId).toBe('b');
+  dispatchMemoryPressure({t:'memory.pressure',level:3});await flush();
+  expect(windows.at(-1).items.map((target:any)=>target.uri)).toEqual([current]);
+  expect(windows.at(-1).items[0].prefetchBytes).toBe(0);
+  expect(suspended).toBe(1);
+  expect(host.sourceFor(next)).toBeUndefined();
+  expect(host.sourceFor(current)?.awemeId).toBe('a');
+  expect(await host.playback(items[0] as any,{})).toBe(current);
+  expect(removed).toEqual([]);
+  const count=windows.length;
+  dispatchMemoryPressure({t:'memory.pressure',level:3});await flush();
+  expect(windows).toHaveLength(count);
+  dispatchMemoryPressure({t:'memory.pressure',level:0});
+  host.start(owner,items as any,'b','active');await flush();
+  expect(windows.at(-1).items[0].uri).toBe(next);
+ }finally{
+  host.stop(owner);dispatchMemoryPressure({t:'memory.pressure',level:0});
+  (globalThis as any).pod=previousPod;legacyBytes=previousLegacyBytes;
+ }
+});
+
 test('generated late completions cannot register a superseded source',async()=>{
  let seed=0x04f9a11;
  const random=(max:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (seed>>>8)%max;};

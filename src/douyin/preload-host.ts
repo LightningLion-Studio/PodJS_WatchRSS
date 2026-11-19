@@ -5,7 +5,7 @@ import {douyinMediaExpiry,douyinMediaNetworkDeadline} from './media-expiry.ts';
 import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
-import {memoryPressureLevel,processMemoryBudgetBytes} from '@podjs/framework/memory';
+import {memoryPressureLevel,onMemoryTrim,processMemoryBudgetBytes} from '@podjs/framework/memory';
 import {video} from '@podjs/framework/services';
 import {DouyinPrefetchResults,type PrefetchFailure,type PrefetchBinding} from './prefetch-results.ts';
 import type {MediaPrefetchResult} from '@podjs/framework/media-prefix-cache';
@@ -33,6 +33,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  type Target={uri:string;prefetchBytes:number;captureBytes:number;itemToken:string;generation:number;preStore?:boolean};
  const published=new Map<string,Target>();
  let trafficStoppedUntil=0;let generation=0,lastAllowed:boolean|undefined,unsubscribe:(()=>void)|undefined,networkGeneration=0;
+ let unsubscribeMemory:(()=>void)|undefined,trimmedGeneration=-1;
  let saved:PrefetchFailure[]=[];try{const value=kv.get<unknown>('watchrss.douyin.prefetch-failures');if(Array.isArray(value))saved=value;}catch{}
  const results=new DouyinPrefetchResults(Date.now,saved);let resultOff:(()=>void)|undefined,token=0;
  const foreground=(id:string)=>plan?.hooks?.isForeground(id)??(plan?.mode==='active'&&plan.anchor===id);
@@ -183,8 +184,22 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    currentPlan.items=currentPlan.items.filter(item=>item.awemeId!==binding.id);await run(++generation);
   }
  };
+ const trimMemory=(level:number)=>{
+  if(level<3||!plan||trimmedGeneration===generation)return;
+  const anchor=plan.mode==='active'?plan.anchor:undefined;
+  const current=anchor===undefined?undefined:published.get(anchor);
+  trimmedGeneration=++generation;results.begin();published.clear();
+  for(const [uri,item] of sources)if(item.awemeId!==anchor)sources.delete(uri);
+  for(const key of registered.keys())if(key!==anchor)registered.delete(key);
+  if(anchor!==undefined&&current)published.set(anchor,current);
+  stock?.suspend?.();
+  // Keep the current registration and its native reader. Reclaim speculative
+  // work and guest metadata without deleting offline stock or changing consent.
+  void mediaPrefixCache.window(current?[current]:[]).result.catch(()=>{});
+ };
  const stop=(expected?:unknown)=>{
   if(expected!==undefined){bluetoothOwners.delete(expected);if(expected!==owner)return;}else bluetoothOwners.clear();
+  unsubscribeMemory?.();unsubscribeMemory=undefined;
   stock?.suspend?.();sources.clear();registered.clear();published.clear();results.begin();resultOff?.();resultOff=undefined;generation++;networkGeneration++;lastAllowed=undefined;ownerHeaders=undefined;owner=undefined;plan=undefined;unsubscribe?.();unsubscribe=undefined;
   void mediaPrefixCache.window([]).result.catch(()=>{});
  };
@@ -244,6 +259,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry',hooks?:DouyinPrefetchHooks){
    if(next!==owner){published.clear();client.resetPrefetchFailures?.();results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};
+   unsubscribeMemory??=onMemoryTrim(30,trimMemory);
    resultOff??=mediaPrefixCache.onResult?.(event=>{void consume(event).catch(()=>appLogger.w('DouyinProxy','prefetch result handling failed'));});
    unsubscribe??=onNetworkChange(networkChanged,networkChanged);void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));
   },
