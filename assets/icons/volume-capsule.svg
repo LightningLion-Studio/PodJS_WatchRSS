@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="155 18 70 80">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="128 0 128 128">
   <!-- Round-capped strokes in volumeArcLayout(233) coordinates. -->
   <rect x="155" y="18" width="70" height="80" fill="#fff"/><rect x="155" y="18" width="70" height="80" fill="hole"/>
   <path fill="#ffffff73" d="M179.9684 22.4042 C199.2787 35.4292 214.1141 54.0799 222.4614 75.8252 C225.3312 83.3015 221.597 91.6886 214.1208 94.5585 C206.6446 97.4283 198.2574 93.6941 195.3875 86.2179 C189.1731 70.0286 178.1282 56.1433 163.7518 46.4463 C157.1128 41.9682 155.361 32.956 159.8391 26.317 C164.3171 19.6779 173.3294 17.9261 179.9684 22.4042 Z"/>

@@ -27,7 +27,9 @@ export function VolumeArcCapsule(props: { width: number; height: number; percent
     return level && volumeArcStyle(L, L.tickRadius, L.tickWidth, level.fromDeg, level.toDeg);
   };
   return <View debugName="VolumeArcCapsule" accessibilityLabel={`音量 ${props.percent}%`} class="absolute" style={{ insetL: place().left, insetT: place().top, width: 233, height: 233, scale: place().scale, originX: 0, originY: 0 }}>
-    <Image accessibilityHidden src="../assets/icons/volume-capsule.svg" class="absolute" style={{insetL: 155, insetT: 18, width: 70, height: 80}}/>
+    <View class="absolute overflow-hidden" style={{insetL: 155, insetT: 18, width: 70, height: 80}}>
+      <Image accessibilityHidden src="../assets/icons/volume-capsule.svg" class="absolute" style={{insetL: -27, insetT: -18, width: 128, height: 128}}/>
+    </View>
     <Show when={fill()}>{level => <StrokeArc cx={L.cx} cy={L.cy} radius={L.tickRadius} strokeWidth={L.tickWidth}
       start={level().arcStart} sweep={level().arcSweep} color={0xff6026ff} scale={place().scale}/>}</Show>
     <Show when={props.muted || props.percent <= 0} fallback={<Image src="../assets/icons/speech-volume-overlay.svg" class="absolute" style={{ insetL: L.icon.x - ICON / 2, insetT: L.icon.y - ICON / 2, width: ICON, height: ICON, rotate: L.icon.rotate }} />}>

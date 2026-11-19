@@ -25,6 +25,8 @@ test("baked volume artwork matches the round-capped outline and keeps physical e
   const [left, top, width, height] = box as [number, number, number, number];
   const layout = volumeArcLayout(233);
   const {width: w, height: h, rgba} = bakeSvg(svg, 2);
+  // One texel per physical watch pixel also lets a 1× receiver average exactly four texels.
+  expect([w, h]).toEqual([width * 2, height * 2]);
   const r = layout.radius, half = layout.thickness / 2, levels = new Set<number>();
   const cap = (deg: number) => [r * Math.cos(deg * Math.PI / 180), r * Math.sin(deg * Math.PI / 180)] as const;
   const start = cap(layout.startDeg), end = cap(layout.endDeg);
