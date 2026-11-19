@@ -45,3 +45,40 @@ test('real paged rows consume prepared adjacent textures without reraster or reu
  }finally{dispose();cache.close();for(const r of requests)r.resolve({path:'late',width:256,height:64,carets:[]});await settle();}
  expect(freed.sort()).toEqual([900,901]);expect(systemTextResourceCounts()).toEqual({active:0,queued:0,cached:0});
 });
+
+test('page options select one page and never bridge unloaded chapter placeholders',()=>{
+ const pages: (ReturnType<typeof page>&{loading?:number})[]=[page('前一页'),page('当前页'),page('下一页')];
+ const preset=defaultReaderPreset();
+ const blocks=[{type:'text' as const,style:'body' as const,text:'正文'}];
+ const options=(index:number,direction:1|-1)=>adjacentPageTextOptions(pages,index,blocks,14,preset,()=>({}),environment,direction).map(line=>line.text);
+ expect(options(1,1)).toEqual(['下一页']);
+ expect(options(1,-1)).toEqual(['前一页']);
+ expect(options(2,1)).toEqual([]);
+ pages[2]={...pages[2]!,lines:[],loading:1};
+ expect(options(1,1)).toEqual([]);
+});
+
+test('book line highlights follow source, font geometry and reused page slots',()=>{
+ const original=page('四字分页');
+ const [current,setCurrent]=createSignal(original);
+ const [highlight,setHighlight]=createSignal({articleId:'book',useOriginalContent:false,segmentIndex:0,start:1,end:3,sourceStart:1,sourceEnd:3,isFallback:false,isTitle:false,contentBlockIndex:0});
+ let dispose=()=>{};
+ const tree=createRoot(stop=>{dispose=stop;return createComponent(ReaderBookPage,{
+  get page(){return current();},get highlight(){return highlight();},width:233,height:233,round:true,active:true,
+  header:[],footer:[],blocks:[],fontSize:14,environment:{...environment,rasterSupported:false},onTap(){},onMedia(){},
+ });});
+ function find(value:any):Node|undefined {
+  if(typeof value==='function')return find(value());
+  if(Array.isArray(value))return value.map(find).find(Boolean);
+  if(!value?.props)return;
+  return value.props.debugName==='SpeechBodyHighlight'?value:find(value.children);
+ }
+ try{
+  expect(find(tree)?.props.style).toMatchObject({insetL:7,width:14});
+  const line=original.lines[0]!;
+  setCurrent({...original,lines:[{...line,row:{...line.row,scale:2,blockIndex:1}}]});
+  expect(find(tree)).toBeUndefined();
+  setHighlight({...highlight(),contentBlockIndex:1,sourceStart:2,sourceEnd:3});
+  expect(find(tree)?.props.style).toMatchObject({insetL:28,width:14});
+ }finally{dispose();}
+});

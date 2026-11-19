@@ -3,13 +3,19 @@ import {plugin} from 'bun';
 import {createRequire} from 'node:module';
 import * as solid from 'solid-js';
 const {createComponent,createMemo,createRoot,createSignal,createRenderEffect,mergeProps,onCleanup}=solid;
+const perfText=process.env.READER_ENTRY_CASE==='perf-text';
 // File-linked SDK and app use the same Solid owner graph, as the production compiler does.
 mock.module(Bun.resolveSync('solid-js',Bun.resolveSync('@podjs/framework/windowed-list',import.meta.dir)),()=>solid);
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'note-production-solid',setup(builder){builder.onLoad({filter:/\.tsx$/},async({path})=>({loader:'js',contents:transformSync(await Bun.file(path).text(),{filename:path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code}));}});
 type Node={kind:string;props:any};let nextNode=1;
 const element=(kind:string)=>(props:any)=>{props.ref?.({id:nextNode++});const children='children' in props?createMemo(()=>props.children):undefined;return {kind,props:children?mergeProps(props,{get children(){return children();}}):props};};
-mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect,...Object.fromEntries(['createElement','insertNode','insert','setProp'].map(name=>[name,()=>{throw Error('unexpected component renderer call: '+name);}]))}));
+mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect,...perfText?{
+ createElement:(kind:string)=>({id:nextNode++,kind,props:{},children:[]}),
+ insertNode:(p:any,c:any)=>p.children.push(c),
+ insert:(p:any,read:()=>unknown)=>createRenderEffect(()=>{p.props.children=read();}),
+ setProp:(n:any,k:string,v:unknown)=>n.props[k]=v,
+}:Object.fromEntries(['createElement','insertNode','insert','setProp'].map(name=>[name,()=>{throw Error('unexpected component renderer call: '+name);}]))}));
 mock.module('@pocketjs/framework/components',()=>({View:element('View'),Text:element('Text'),Image:element('Image')}));
 const frames=new Set<()=>void>(),demands=new Map<()=>void,()=>boolean>(),gestures=new Set<unknown>();
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(cb:()=>void,needsFrame=()=>true)=>{frames.add(cb);demands.set(cb,needsFrame);onCleanup(()=>{frames.delete(cb);demands.delete(cb);});}}));
@@ -18,7 +24,7 @@ const {createScrollerWith}=await import(new URL('./kinetics-core.ts','file://'+B
 mock.module('@pocketjs/framework/kinetics',()=>({createScroller:(options:any)=>createScrollerWith(createSignal,options),bindDpadScroll(){}}));
 mock.module('@pocketjs/framework/input',()=>({pressNode(){},hitNode(){},dispatchAccessibilityAction(){}}));
 const images:unknown[][]=[];
-let measureCalls=0;const hostOps={measureText:(s:string)=>{measureCalls++;return s.length*7;},setImage:(id:number,handle:number)=>images.push([id,handle]),freeTexture:(handle:number)=>images.push(['free',handle])};
+let measureCalls=0;const hostOps={measureText:(s:string)=>{measureCalls++;return s.length*7;},setImage:(id:number,handle:number)=>images.push([id,handle]),freeTexture:(handle:number)=>{textureTexts.delete(handle);images.push(['free',handle]);}};
 for(const path of new Set([Bun.resolveSync('@pocketjs/framework/host',import.meta.dir),Bun.resolveSync('@pocketjs/framework/host',Bun.resolveSync('@podjs/framework/image',import.meta.dir))])){const real=await import(path);real.installHost({ops:hostOps,kind:'injected',target:'test',strict:true});mock.module(path,()=>({...real,getOps:()=>hostOps}));}
 mock.module('../src/ui/reader-fonts.ts',()=>({useReaderFonts:()=>()=>undefined}));
 mock.module('../src/ui/NoteInlineEditor.tsx',()=>({NoteInlineEditor:element('Editor')}));
@@ -31,13 +37,19 @@ mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({info(){},wa
 const mode=process.env.READER_ENTRY_CASE??'saved';
 const requests:any[]=[],events:any[]=[],calls:any[]=[],storage=new Map<string,string>();
 const pending=new Map<number,ReturnType<typeof setTimeout>>();
+const textureTexts=new Map<number,string>(),rasterTexts=new Map<string,string>();
+let nextTexture=1;
 (globalThis as any).pod={
  takeEvents:()=>events.length?JSON.stringify(events.splice(0)):undefined,
  emit:(json:string)=>{const req=JSON.parse(json);calls.push(req);if(req.t==='service.request')requests.push(req);if(req.t==='service.cancel'){
    const queued=requests.findIndex(request=>request.id===req.id);if(queued>=0)requests.splice(queued,1);
    const timer=pending.get(req.id);if(timer){clearTimeout(timer);pending.delete(req.id);}
  }},
- capabilities:()=>JSON.stringify(mode==='portable'?['runtime.timer','data.kv']:['runtime.timer','data.kv','text.layout']),
+ capabilities:()=>JSON.stringify(perfText?['runtime.timer','data.kv','text.raster']:mode==='portable'?['runtime.timer','data.kv']:['runtime.timer','data.kv','text.layout']),
+ ...(perfText?{
+  memoryBudgetBytes:()=>256*1024*1024,
+  uploadTextureFile:(path:string)=>{const value=nextTexture++;textureTexts.set(value,rasterTexts.get(path)!);return value;},
+ }:{}),
  displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),
  fontMetrics:()=>JSON.stringify({cellHeight:26,baseline:20}),
  kvGet:(key:string)=>storage.get(key),kvSet:(key:string,value:string)=>{storage.set(key,value);return 0;},kvDelete:(key:string)=>{storage.delete(key);return 0;},kvKeys:()=>JSON.stringify([...storage.keys()]),
@@ -67,6 +79,11 @@ async function pump(){for(let i=0;i<8;i++)await Promise.resolve();for(const req 
  else if(req.method==='text.layoutBatch'){
   ms=10;value={results:req.args.paragraphs.map(paragraph)};
   for(const args of req.args.paragraphs){const block=blocks.find(b=>b.text===args.text)!;native.set(block,paragraph(args).lines.map((l:any,index:number)=>({start:l.start,end:l.end,visibleEnd:l.visibleEnd,height:20,baseline:15,paragraph:{...args,lineIndex:index}})));}
+ }else if(perfText&&req.method==='text.raster'){
+  ms=34;
+  const path='texture-'+req.id;rasterTexts.set(path,req.args.text);
+  const extent=(n:number)=>2**Math.ceil(Math.log2(n));
+  value={path,width:extent(req.args.widthPx),height:extent(req.args.heightPx),carets:Array.from({length:req.args.text.length+1},(_,i)=>i*10)};
  }else throw Error('Unexpected fixture request '+req.method);
  pending.set(req.id,setTimeout(()=>{pending.delete(req.id);events.push({t:'service.result',id:req.id,ok:true,value});__pumpPodEvents();},ms));
  }__pumpPodEvents();await new Promise(resolve=>setTimeout(resolve,2));}
@@ -105,7 +122,7 @@ if(mode==='imported-window')test('a 128 MiB import only creates UI entries for t
   expect(scrolled).toBeLessThan(96);expect(blockSnapshots).not.toHaveBeenCalled();expect(errors).toEqual([]);
  }finally{dispose?.();blockSnapshots.mockRestore();await file?.close();}
 });
-if(mode!=='imported-window')test(`default ReaderBody slices entry, preserves saved geometry and cancels late work: ${mode}`,async()=>{
+if(!perfText&&mode!=='imported-window')test(`default ReaderBody slices entry, preserves saved geometry and cancels late work: ${mode}`,async()=>{
  let dispose!:()=>void,handle:any;
  // No progressStore, clock, scheduler or yield injection. KV is the IO boundary.
  const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,footer:mode==='prefix'?[{height:40,render:()=>createComponent(element('Text') as any,{children:'END-OF-DOCUMENT'})}]:undefined,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>{handle=v;}});});
@@ -165,7 +182,7 @@ if(mode!=='imported-window')test(`default ReaderBody slices entry, preserves sav
 
 // This case crosses two cold entries and the production 1500ms quiet warm-up.
 // The budget bounds the integration test; first-input timing has separate assertions.
-if(!mode.startsWith('windowed')&&mode!=='imported-window')test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
+if(!perfText&&!mode.startsWith('windowed')&&mode!=='imported-window')test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
  const props={articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v)};
  let dispose!:()=>void,handle:any;
  const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{...props,ref:v=>handle=v});});
@@ -457,3 +474,56 @@ if(mode==='saved')test('automatic book paging sleeps through an unloaded final c
    await completeDelay(takeDelay(5000));expect(visible(root)).not.toBe(first);
  }finally{dispose();await pump();}
 });
+
+if(perfText)test('book turn presents all target lines within 120 ms after the same reading dwell',async()=>{
+ const {paginateBook}=await import('../src/reader/pagination.ts');
+ const {systemTextResourceCounts}=await import('@podjs/framework/text');
+ const content=Array.from({length:12},(_,i)=>({type:'text' as const,style:'body' as const,text:`章节 ${i} `+'长篇阅读排版样张'.repeat(12)}));
+ const options={width:233,height:233,round:true,fontSize:14,preset,measure:hostOps.measureText,header:[48]};
+ const pages=paginateBook(content,options);
+ const targetLines=pages[1]!.lines.flatMap(line=>line.row.kind==='text'?[line.row.text]:[]);
+ expect(targetLines.length).toBeGreaterThanOrEqual(7);
+ let dispose!:()=>void,handle:any;
+ try{
+  createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{
+   articleId:'perf-text',text:content.map(b=>b.text).join('\n'),blocks:content,preset,width:233,height:233,top:0,
+   pageMode:true,fontSize:14,lineHeight:24,active:true,autoStart:false,speed:1,
+   header:[{height:48,render:()=>createComponent(element('Text') as any,{children:'章节首页'})}],
+   onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>handle=v,
+  });});
+  await until(()=>handle.ready()&&[...gestures].some((g:any)=>g.onTap));
+  const dwell=performance.now()+105;
+  while(performance.now()<dwell)await pump();
+  const presented=new Map<number,string>();
+  const readDeliveries=()=>{
+   for(const [node,id] of images){
+    if(typeof node!=='number'||typeof id!=='number')continue;
+    if(id===-1)presented.delete(node);
+    else if(textureTexts.has(id))presented.set(node,textureTexts.get(id)!);
+   }
+   images.length=0;
+  };
+  readDeliveries();
+  const preparedAtTurn=[...textureTexts.values()].filter(value=>targetLines.includes(value)).length;
+  const start=performance.now();
+  ([...gestures].find((g:any)=>g.onTap) as any).onTap({x:215,y:110});
+  await until(()=>{
+   readDeliveries();
+   const expected=[...targetLines];
+   for(const text of presented.values()){const index=expected.indexOf(text);if(index!==-1)expected.splice(index,1);}
+   return expected.length===0;
+  });
+  const latency=performance.now()-start;
+  const pssKiB=Number(/Pss:\s+(\d+)/.exec(await Bun.file('/proc/self/smaps_rollup').text())?.[1]);
+  const peakRssKiB=Number(/VmHWM:\s+(\d+)/.exec(await Bun.file('/proc/self/status').text())?.[1]);
+  console.log(JSON.stringify({pageLines:targetLines.length,dwellMs:105,hostRasterMs:34,preparedAtTurn,turnMs:latency,pssKiB,peakRssKiB}));
+  expect(peakRssKiB).toBeLessThanOrEqual(256*1024);
+  expect(latency).toBeLessThanOrEqual(120);
+  events.push({t:'memory.pressure',level:1});__pumpPodEvents();
+  await until(()=>systemTextResourceCounts().active===0&&systemTextResourceCounts().queued===0);
+  const before=calls.filter(c=>c.method==='text.raster').length;
+  for(let n=0;n<65;n++)await pump();
+  expect(calls.filter(c=>c.method==='text.raster')).toHaveLength(before);
+ }finally{dispose?.();await pump();}
+ expect(errors).toEqual([]);
+},10000);

@@ -10,7 +10,8 @@ import {displayPower} from "@podjs/framework/services";
 import {lifecycle} from "@podjs/framework/watch";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {createWindowValue} from "@podjs/framework/windowed-list";
-import {createSystemTextCache,prefetchSystemTextLines} from "@podjs/framework/text";
+import {createSystemTextCache,createSystemTextPrefetch} from "@podjs/framework/text";
+import {createFontGeometryRevision} from "@podjs/framework/font-geometry";
 import {adjacentPageTextOptions} from '../reader/page-text-prefetch.ts';
 import {prepareTextLayout} from "@podjs/framework/text";
 import {readerRowKey} from "../reader/content-layout.ts";
@@ -81,10 +82,11 @@ function ReaderBodyImpl(props:{
   ref:(handle:ReaderBodyHandle)=>void;
 }) {
   const textCache=createSystemTextCache();
+  const fontGeometry=createFontGeometryRevision([0,1,2,3,7,8,10,33,34,35,36,37]);
   const textEnvironment=createMemo(()=>{
     // Re-read host facts when the reader configuration changes.
     props.width;props.fontSize;props.preset;
-    return createReaderTextEnvironment();
+    return Object.assign(createReaderTextEnvironment(),{revision:fontGeometry()});
   });
   const normalizedTextLength=createMemo(()=>props.text.replace(/\r\n?/g,"\n").length);
   const fonts=useReaderFonts();const backgrounds=useReaderBackgrounds();
@@ -211,10 +213,22 @@ function ReaderBodyImpl(props:{
   const layout=createMemo(()=>{importedRevision();return imported?.layout()??windowed()?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
 
   const [pageAnchor,setPageAnchor]=createSignal<PageAnchor>();
+  const [pageDirection,setPageDirection]=createSignal<1|-1>(1);
+  const [memoryPressure,setMemoryPressure]=createSignal(memoryPressureLevel());
+  const [pageForeground,setPageForeground]=createSignal(lifecycle()==="active");
   const round=()=>getDisplayMetrics().shape==='round';
   const paginateCached=createBookPaginator((text,slot)=>getOps().measureText(text,slot));
-  onCleanup(onMemoryTrim(5,level=>{const document=windowed();if(document)document.trimMemory(documentAnchorAt(document.layout(),scroller.offset(),headerHeight()),level);if(level>0){layoutContent.trimMemory();paginateCached.trimMemory();}}));
-  const bookPages=createMemo(()=>props.pageMode?paginateCached(blocks(),{width:props.width,height:props.height,ratios:ratios(),round:round(),fontSize:props.fontSize,preset:props.preset,header:props.header?.map(entry=>entry.height),footer:props.footer?.map(entry=>entry.height),unloaded:imported?index=>imported.text(index)===undefined:undefined}):[]);
+  onCleanup(onMemoryTrim(5,level=>{setMemoryPressure(level);const document=windowed();if(document)document.trimMemory(documentAnchorAt(document.layout(),scroller.offset(),headerHeight()),level);if(level>0){layoutContent.trimMemory();paginateCached.trimMemory();}}));
+  let previousFontGeometry=fontGeometry(),previousBookFonts=fonts();
+  const bookPages=createMemo(()=>{
+    if(!props.pageMode)return [];
+    const revision=fontGeometry(),resolver=fonts();
+    if(revision!==previousFontGeometry||resolver!==previousBookFonts){
+      paginateCached.trimMemory();
+      previousFontGeometry=revision;previousBookFonts=resolver;
+    }
+    return paginateCached(blocks(),{width:props.width,height:props.height,ratios:ratios(),round:round(),fontSize:props.fontSize,preset:props.preset,header:props.header?.map(entry=>entry.height),footer:props.footer?.map(entry=>entry.height),unloaded:imported?index=>imported.text(index)===undefined:undefined});
+  });
   const bookPageIndex=createMemo(()=>bookPageForAnchor(bookPages(),pageAnchor()??{section:'header',character:0,blockIndex:0,sourceStart:0,sectionOffset:0}));
   const bookPage=()=>bookPages()[bookPageIndex()];
   let lastBookAnchor:PageAnchor|undefined;
@@ -252,16 +266,10 @@ function ReaderBodyImpl(props:{
   createEffect(()=>{void syncAwake();});
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
-  createEffect(()=>{
-    if(!props.pageMode||!props.active||!restored()||lifecycle()!=="active")return;
-    const options=adjacentPageTextOptions(bookPages(),bookPageIndex(),blocks(),props.fontSize,props.preset,fonts(),textEnvironment());
-    if(!options.length)return;
-    // Let the current page submit first. Foreground text also keeps a host slot.
-    let current=true,release=()=>{};
-    const cancel=schedule(120,()=>{if(current)release=prefetchSystemTextLines(options,textCache);});
-    // New visible owners can promote a pending entry before its old prefetch lease ends.
-    onCleanup(()=>{current=false;cancel();void Promise.resolve().then(release);});
-  });
+  createSystemTextPrefetch(()=>{
+    if(!props.pageMode||!props.active||!restored()||!pageForeground()||memoryPressure()>0)return;
+    return adjacentPageTextOptions(bookPages(),bookPageIndex(),blocks(),props.fontSize,props.preset,fonts(),textEnvironment(),pageDirection());
+  },textCache);
   const currentProgress=()=>{
     if(importedReadFailed)return;
     if(!restored()||disposed)return;
@@ -351,7 +359,7 @@ function ReaderBodyImpl(props:{
     const next=Math.max(0,Math.min(bookPages().length-1,bookPageIndex()+direction));
     if(next===bookPageIndex())return false;
     if(manual)manualScroll();
-    pageTurnAt=Date.now();setPageAnchor(bookPages()[next]!.anchor);
+    pageTurnAt=Date.now();batch(()=>{setPageDirection(direction<0?-1:1);setPageAnchor(bookPages()[next]!.anchor);});
     // Persist source anchors after paint, without walking/positioning the continuous document on input.
     if(persist)lastSave=0;
     return true;
@@ -425,7 +433,7 @@ function ReaderBodyImpl(props:{
     const ready=restored(),active=props.active,moving=scrolling(),automatic=playing(),width=props.width,height=props.height,size=props.fontSize,preset=props.preset;
     lastManualScroll(); // A new input cancels speculative preparation.
     // Only article readers expose a switch from continuous to paged reading.
-    if(!ready||!active||moving||automatic||props.pageMode!==false||windowed()||imported&&imported.handle.chunkCount>1||memoryPressureLevel()>0)return;
+    if(!ready||!active||moving||automatic||props.pageMode!==false||windowed()||imported&&imported.handle.chunkCount>1||memoryPressure()>0)return;
     const source=blocks();
     if(source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>8192)return;
     const task=delay(1500);let preparation:ReturnType<typeof paginateCached.prepare>|undefined;
@@ -567,7 +575,7 @@ function ReaderBodyImpl(props:{
   });
   const removeLifecycle=__onHostEvent(event=>{
     if(event.t!=="lifecycle")return;
-    foreground=event.state==="active";lastFrame=0;resetPageClock();controller.setBackground(!foreground||!props.active);
+    foreground=event.state==="active";setPageForeground(foreground);lastFrame=0;resetPageClock();controller.setBackground(!foreground||!props.active);
     void syncAwake();
     if(!foreground)void save();
   });
@@ -584,7 +592,7 @@ function ReaderBodyImpl(props:{
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
     <Show when={props.pageMode} fallback={<>
     <ScrollEntries onOffsetChange={()=>saveAfterMovement(Date.now())} retainRows={0} minRows={Math.ceil((props.height+160)/Math.max(1,props.fontSize*(props.preset?.body.lineHeightEm??1.35)))+4} recycleKey={entry=>(entry.data as ReaderRow|undefined)?.kind==="text"?"reader-text":undefined} entryEquals={(a,b)=>!!a.data&&!!b.data&&a.key===b.key&&a.top===b.top&&a.height===b.height&&a.data===b.data&&a.onPress===b.onPress} onManualScroll={manualScroll} onScrollStateChange={moving=>{setScrolling(moving);props.onMoving?.(moving);if(moving&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX-(props.touchOrigin?.left??0),contact.startY-(props.touchOrigin?.top??0)-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={footerReady()?props.footer??[]:[]} indexedEntries={indexedEntries()}/>
-    </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage cache={textCache} page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onImageSize={(index,width,height)=>untrack(()=>{const block=blocks()[index];if(!block||block.type==="text")return;const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(block,ratios()[index])!==ratio)setRatios({...ratios(),[index]:ratio});})} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
+    </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage cache={textCache} page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} highlight={props.highlight} highlightColor={props.highlightColor} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onImageSize={(index,width,height)=>untrack(()=>{const block=blocks()[index];if(!block||block.type==="text")return;const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(block,ratios()[index])!==ratio)setRatios({...ratios(),[index]:ratio});})} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
 
     <View class="absolute h-[18] items-center justify-center" style={{insetL:(props.width-Math.min(160,props.width-24))/2,width:Math.min(160,props.width-24),...(props.pageMode?{insetT:props.height/2-9}:{insetB:0}),opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;
