@@ -25,7 +25,7 @@ test('crown scrolls continuously until a pill is selected, and deselect or pan r
  f.find('PlayerDetail-progress-value').props.onPress();f.tick();const centred=f.offset();f.handle.crown(4000);f.tick();expect(f.seeks).toEqual([1000]);expect(f.offset()).toBe(centred);
  f.find('PlayerDetail-progress-value').props.onPress();f.handle.crown(5000);f.tick();expect(f.offset()).toBeGreaterThan(centred);
  f.find('PlayerDetail-volume-value').props.onPress();f.tick();f.handle.crown(1000);expect(f.volumes).toEqual([[1,true]]);
- const pager=gestures.find(g=>g.axis==='y');pager.onPanStart({dy:-10});pager.onPanMove({fdy:-30});pager.onPanEnd({vy:0});f.tick();f.handle.crown(5000);expect(f.volumes).toEqual([[1,true]]);
+ const pager=gestures.find(g=>g.axis==='y');pager.onPanStart({id:1,dy:-10});pager.onPanMove({id:1,fdy:-30});pager.onPanEnd({id:1,vy:0});f.tick();f.handle.crown(5000);expect(f.volumes).toEqual([[1,true]]);
  f.find('PlayerDetail-speed-value').props.onPress();f.handle.crown(12000);expect(f.speeds).toEqual([1.25]);
 });
 test('cancelled dismiss stays open and system back restores the player',()=>{
@@ -85,6 +85,21 @@ test('losing speed support mid-centring never leaves the offset past the new end
  expect(f.offset()).toBeLessThanOrEqual(281.5);
 });
 test('a tap during the edge spring still returns the column to its range',()=>{
- const f=mount(),pager=gestures.find(g=>g.axis==='y');pager.onPanStart({});pager.onPanMove({fdy:100});pager.onPanEnd({vy:0});expect(f.offset()).toBeLessThan(0);
+ const f=mount(),pager=gestures.find(g=>g.axis==='y');pager.onPanStart({id:1});pager.onPanMove({id:1,fdy:100});pager.onPanEnd({id:1,vy:0});expect(f.offset()).toBeLessThan(0);
  pager.onDown();pager.onTap({x:116,y:116});f.tick();expect(f.offset()).toBeGreaterThanOrEqual(0);expect(frames.some(e=>e.needs())).toBe(false);
+});
+test('another contact cannot move or end the active scroll',()=>{
+ const f=mount(),pager=gestures.find(g=>g.axis==='y');
+ pager.onPanStart({id:1});
+ pager.onPanMove({id:1,fdy:-36});
+ pager.onPanStart({id:2});
+ pager.onPanMove({id:2,fdy:-60});
+ pager.onPanEnd({id:2,vy:-2000});
+ pager.onCancel({id:2});
+ expect(f.offset()).toBe(36);
+ pager.onPanMove({id:1,fdy:-24});
+ pager.onPanEnd({id:1,vy:0});
+ f.tick();
+ expect(f.offset()).toBe(60);
+ expect(frames.some(e=>e.needs())).toBe(false);
 });

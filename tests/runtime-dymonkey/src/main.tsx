@@ -1,6 +1,6 @@
 import { mount } from "@pocketjs/framework/solid";
 import { Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import { attachGesture } from "@pocketjs/framework/gesture";
+import { attachGesture, gestureResourceCounts } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
@@ -18,6 +18,7 @@ const caption = "清晨六点，从江边出发，沿着旧城墙一路骑到山
 const coldDescription = Array.from({ length: 3600 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join("");
 // Yi letters form one word under the line breaker's generic letter rule.
 const coldWord = Array.from({ length: 1100 }, (_, i) => String.fromCodePoint(0xa000 + i)).join("").repeat(4);
+const profileDescription = Array.from({ length: 480 }, (_, i) => `${i + 1} ${caption}`).join(" ");
 const descriptions = [caption, caption.repeat(2), caption.repeat(3), caption.repeat(4),
   caption.repeat(5), caption.repeat(6), coldWord, coldDescription];
 const feed: PlaybackSource[] = Array.from({ length: 8 }, (_, index) => ({
@@ -38,7 +39,12 @@ function App() {
   const [entered, setEntered] = createSignal(true);
   const [index, setIndex] = createSignal(0);
   const [sourceRevision, refreshSource] = createSignal(0);
-  const source = createMemo(() => { sourceRevision(); return { ...feed[index()]! }; });
+  const [profiling, setProfiling] = createSignal(false);
+  const source = createMemo(() => {
+    sourceRevision();
+    const item = feed[index()]!;
+    return profiling() && index() === 0 ? { ...item, description: profileDescription } : { ...item };
+  });
   let root: NodeMirror | undefined;
   let player: VideoPlayerHandle | undefined;
   let side: VideoPlayerHandle["sideSwipe"] | undefined;
@@ -84,6 +90,8 @@ function App() {
       now += 17;
     } else if (op === "enter" && !entered()) {
       setEntered(true);
+    } else if (op === "profile" && !profiling()) {
+      setProfiling(true);
     } else {
       fail(String(op));
     }
@@ -101,7 +109,9 @@ function App() {
     const column = find(root, n => n.debugName === "PlayerDetailColumn");
     emit({ t: "dymonkey.state", entered: entered(), index: index(), now,
       rotation: player?.gestureRotation(), sidebar: player ? !player.canSwipeBack() : false,
-      arrow: !!find(root, n => n.debugName === "PlayerDetailArrow"), panel: !!column });
+      arrow: !!find(root, n => n.debugName === "PlayerDetailArrow"), panel: !!column,
+      ...(profiling() ? { gestures: gestureResourceCounts(),
+        detailLines: column?.children.filter(n => n.debugName === "PlayerDetailAboutLine").length ?? 0 } : {}) });
   });
 
   return <View ref={node => { root = node; }} class="absolute inset-0 bg-[#193041]">
