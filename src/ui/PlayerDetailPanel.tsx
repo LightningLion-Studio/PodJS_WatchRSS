@@ -57,15 +57,16 @@ export interface PlayerDetailProps {
 }
 
 /** Inward-pointing tab at the player's right edge; opens the detail panel. Canvas coordinates. */
-export function PlayerDetailArrow(props: { left: number; top: number; scale: number; onOpen: () => void }) {
-  const t = ENTRY_ARROW;
-  // The pressable hit area is the parent, so taps on the tab or icon walk up to it.
-  return <View debugName="PlayerDetailArrow" class="absolute" style={{ insetL: props.left, insetT: props.top, width: CANVAS, height: CANVAS, scale: props.scale, originX: 0, originY: 0 }}>
-    <View accessibilityLabel="详情与播放控制" accessibilityRole="button" focusable onPress={props.onOpen} class="absolute bg-[#00000002]" style={{ insetL: t.hit.x, insetT: t.hit.y, width: t.hit.width, height: t.hit.height }}>
-      <View class="absolute rounded-[8] bg-[#000000a6]" style={{ insetL: t.tab.x - t.hit.x, insetT: t.tab.y - t.hit.y, width: t.tab.width, height: t.tab.height }}>
+export function PlayerDetailArrow(props: { left: number; top: number; scale: number; rotation: number; round: boolean; onOpen: () => void }) {
+  const { tab, icon } = ENTRY_ARROW;
+  const hit = () => props.round ? ENTRY_ARROW.roundHit : ENTRY_ARROW.hit;
+  // Rotate the parent of both the ink and the pressable hit area about the picture centre.
+  return <View debugName="PlayerDetailArrow" class="absolute" style={{ insetL: props.left, insetT: props.top, width: CANVAS, height: CANVAS, scale: props.scale, rotate: props.rotation, originX: 0, originY: 0 }}>
+    <View accessibilityLabel="详情与播放控制" accessibilityRole="button" focusable onPress={props.onOpen} class="absolute bg-[#00000002]" style={box(hit())}>
+      <View class="absolute rounded-[8] bg-[#000000a6]" style={{ insetL: tab.x - hit().x, insetT: tab.y - hit().y, width: tab.width, height: tab.height }}>
         <View class="absolute inset-0 rounded-[8] bg-[#ffffff26]" />
       </View>
-      <Image src="../assets/icons/player-detail-open.svg" class="absolute" style={{ insetL: t.icon.x - t.hit.x, insetT: t.icon.y - t.hit.y, width: t.icon.width, height: t.icon.height }} />
+      <Image src="../assets/icons/player-detail-open.svg" class="absolute" style={{ insetL: icon.x - hit().x, insetT: icon.y - hit().y, width: icon.width, height: icon.height }} />
     </View>
   </View>;
 }

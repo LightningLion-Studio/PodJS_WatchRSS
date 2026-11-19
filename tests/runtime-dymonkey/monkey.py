@@ -66,7 +66,7 @@ class Monkey:
         elif kind == "rotate" and route and h.state["arrow"] and abs(angle - quarter) < 0.01:
             h.tap(*rotated((163, 29), angle))
         elif kind == "sidebar_open" and route and h.state["arrow"]:
-            h.tap(208, 116)
+            h.tap(*rotated((208, 116), angle))
         elif kind == "sidebar_close" and sidebar:
             h.touch_path([(56, 116), (116, 116), (172, 116)])
         elif kind in ("crown_up", "crown_down") and route:
@@ -93,13 +93,7 @@ class Monkey:
         h.wait(delay)
 
     def toggle_play(self, angle):
-        if round(angle) % 360 == 270:
-            # The unrotated detail tab covers the centre of this rotated
-            # button. A double tap in the blank centre also toggles playback.
-            self.host.tap(116, 116)
-            self.host.tap(116, 116)
-        else:
-            self.host.tap(*rotated((116, 205), angle))
+        self.host.tap(*rotated((116, 205), angle))
 
     def probe(self):
         h = self.host
@@ -115,7 +109,7 @@ class Monkey:
             h.tap(116, 116)
             h.wait(20)
         require(h.state["arrow"], "detail arrow unavailable")
-        h.tap(208, 116)
+        h.tap(*rotated((208, 116), h.state["rotation"]))
         h.wait(15)
         require(h.state["sidebar"], "detail did not open")
         require(h.media["state"] in ("playing", "paused", "ready") and h.media["hasRenderedFirstFrame"], "media not ready behind detail")

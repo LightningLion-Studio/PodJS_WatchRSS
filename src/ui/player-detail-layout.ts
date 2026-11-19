@@ -189,8 +189,15 @@ export const controlCentreOffset = (layout: { controls: number; max: number }, i
 
 // ---- entry arrow ---------------------------------------------------------------------------
 
-/** The inward-pointing tab at the right edge of the player, and its larger touch target. */
-export const ENTRY_ARROW = { tab: { x: 207, y: 96.5, width: 16, height: 40 }, icon: { x: 205, y: 106.5, width: 20, height: 20 }, hit: { x: 189, y: 84.5, width: 40, height: 64 } } as const;
+const entryHit = { x: 189, y: 84.5, width: 40, height: 64 };
+const roundHitWidth = C + chordWidth(entryHit.y, entryHit.y + entryHit.height) / 2 - entryHit.x;
+/** The inward-pointing tab and its touch target, in picture coordinates. */
+export const ENTRY_ARROW = {
+  tab: { x: 207, y: 96.5, width: 16, height: 40 },
+  icon: { x: 205, y: 106.5, width: 20, height: 20 },
+  hit: entryHit,
+  roundHit: { ...entryHit, width: Math.min(entryHit.width, roundHitWidth) },
+} as const;
 
 // ---- value steps ---------------------------------------------------------------------------
 

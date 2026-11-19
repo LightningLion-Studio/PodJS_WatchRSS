@@ -90,6 +90,16 @@ describe("player detail layout stays inside the round screen", () => {
     expect(insideCanvasCircle(ENTRY_ARROW.tab)).toBe(true);
     expect(insideCanvasCircle(ENTRY_ARROW.icon)).toBe(true);
   });
+  test("the round touch target contains the tab and icon with all corners inside the circle", () => {
+    const { roundHit: hit, tab, icon } = ENTRY_ARROW;
+    expect(insideCanvasCircle(hit)).toBe(true);
+    for (const rect of [tab, icon]) {
+      expect(rect.x).toBeGreaterThanOrEqual(hit.x);
+      expect(rect.y).toBeGreaterThanOrEqual(hit.y);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(hit.x + hit.width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(hit.y + hit.height);
+    }
+  });
   test("the entry arrow does not touch the crown volume capsule", () => {
     const tab = ENTRY_ARROW.tab;
     for (const p of volumeArcOutline(volumeArcLayout(CANVAS)))
