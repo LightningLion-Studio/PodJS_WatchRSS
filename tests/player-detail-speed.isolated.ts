@@ -36,7 +36,7 @@ port.seek=async(positionMs:number)=>{const reply={...value(),positionMs},wait=se
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
 let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;prepared=0;actual=.5;writes.length=0;speeds.length=0;polls.length=0;speedGate=undefined;volumeGate=undefined;seekGate=undefined;gestures.length=0;});
-function mount(width=233,height=233){let handle:any,setSource:any;const tree=createRoot(stop=>{dispose=stop;const [source,set]=createSignal({url:'file:///a.mp4',title:'a',startVolumeLimit:0,digitalCrownVolume:true,volumeGuard:true});setSource=set;return VideoPlayerScreen({get source(){return source();},width,height,offset:0,round:true,active:true,ref:v=>handle=v});});function visit(v:any):void{if(typeof v==='function'){visit(v());return;}if(Array.isArray(v)){v.forEach(visit);return;}if(v?.props)visit(v.props.children);}const open=()=>{handle.sideSwipe.begin();handle.sideSwipe.move(-100);visit(tree);};return{open,handle,visit:()=>visit(tree),replace:()=>setSource({url:`file:///${prepared+1}.mp4`,title:'new',startVolumeLimit:0,digitalCrownVolume:true})};}
+function mount(width=233,height=233){let handle:any,setSource:any;const tree=createRoot(stop=>{dispose=stop;const [source,set]=createSignal({url:'file:///a.mp4',title:'a',startVolumeLimit:0,digitalCrownVolume:true,volumeGuard:true});setSource=set;return VideoPlayerScreen({get source(){return source();},width,height,offset:0,round:true,active:true,ref:v=>handle=v});});function visit(v:any):void{if(typeof v==='function'){visit(v());return;}if(Array.isArray(v)){v.forEach(visit);return;}if(v?.props)visit(v.props.children);}const open=()=>{handle.sideSwipe.begin();handle.sideSwipe.move(-100);visit(tree);};return{open,handle,tree,visit:()=>visit(tree),replace:()=>setSource({url:`file:///${prepared+1}.mp4`,title:'new',startVolumeLimit:0,digitalCrownVolume:true})};}
 
 test('speed follows successive source replacements with the same native generation',async()=>{
  const f=mount();await flush();f.open();panelProps.onSpeed(1.5);await flush();
@@ -81,7 +81,16 @@ test('stable playback consumes pushed progress without guest polling or frame ca
 });
 
 test('preparation snapshots keep the visible loading animation until prepare settles',async()=>{
- let release!:()=>void;prepareGate=new Promise<void>(resolve=>release=resolve);mount();await flush();expect(frames).toHaveLength(1);
- stateChanged({...value(),state:'ready',hasRenderedFirstFrame:false});await flush();expect(frames).toHaveLength(1);
- release();await flush();expect(frames).toHaveLength(0);
+ function showsLoading(tree:unknown):boolean {
+   if(typeof tree==='function')return showsLoading(tree());
+   if(Array.isArray(tree))return tree.some(showsLoading);
+   if(!tree||typeof tree!=='object'||!('props' in tree))return false;
+   const props=tree.props as {src?:string;class?:string;children?:unknown};
+   if(props.src==='../assets/icons/player-loading.svg')return props.class?.includes('animate-spin')===true;
+   return showsLoading(props.children);
+ }
+ let release!:()=>void;prepareGate=new Promise<void>(resolve=>release=resolve);
+ const {tree}=mount();await flush();expect(showsLoading(tree)).toBe(true);
+ stateChanged({...value(),state:'ready',hasRenderedFirstFrame:false});await flush();expect(showsLoading(tree)).toBe(true);
+ release();await flush();expect(showsLoading(tree)).toBe(false);expect(frames).toHaveLength(0);
 });

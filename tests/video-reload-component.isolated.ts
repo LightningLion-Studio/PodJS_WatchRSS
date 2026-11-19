@@ -1,5 +1,9 @@
 import { afterEach, afterAll, expect, mock, test, spyOn } from 'bun:test';
 import { plugin } from 'bun';
+import pocketConfig from '../src/pocket.config.ts';
+import {parseClassLiteral} from '../node_modules/@pocketjs/framework/framework/compiler/tailwind.ts';
+import {registerAnimationTheme,bakedTimelines} from '../node_modules/@pocketjs/framework/framework/compiler/animation.ts';
+import {ENUMS,f32Bits,PROP} from '../node_modules/@pocketjs/framework/contracts/spec/spec.ts';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps, onCleanup } from 'solid-js';
 import type { InternetStatus } from '../src/onboarding/state.ts';
@@ -139,12 +143,30 @@ test('RELOAD background cancels a pending resolver and no late prepare occurs',a
  expect(prepares).toHaveLength(1);expect(f.images()).toHaveLength(0);
 });
 
-test('RELOAD spinner makes a uniform 900ms turn and owns no visible frames after suspension',async()=>{
+test('RELOAD spinner uses a native linear 900ms turn and stops requesting frames when hidden',async()=>{
  const f=reloadMount({platform:'bili',previewOnly:true,title:'fetching'});await flush();
- const rotation=()=>f.images().find(n=>n.props.src.includes('arc'))!.props.style.rotate;
- fakeNow+=225;frames.filter(fn=>frameNeeds.get(fn)?.()).forEach(fn=>fn());expect(rotation()).toBe(90);
- fakeNow+=675;frames.filter(fn=>frameNeeds.get(fn)?.()).forEach(fn=>fn());expect(rotation()).toBe(0);
- lifecycleTo('background');await flush();expect(frames.filter(fn=>frameNeeds.get(fn)?.())).toHaveLength(0);
+ const arc=f.images().find(n=>n.props.src.includes('arc'))!;
+ registerAnimationTheme(pocketConfig.theme);
+ try {
+   const animation=parseClassLiteral(arc.props.class)?.animation;
+   expect(animation?.anims).toHaveLength(1);
+   expect(bakedTimelines()[animation!.anims[0]!]).toMatchObject({
+     periodFrames:54,iterations:0,delayFrames:0,
+     tracks:[{prop:PROP.rotate,segments:[{t0:0,t1:54,from:f32Bits(0),to:f32Bits(360),easing:ENUMS.Easing.Linear}]}],
+   });
+ } finally {registerAnimationTheme(undefined);}
+ expect(frames.filter(fn=>frameNeeds.get(fn)?.())).toHaveLength(0);
+ lifecycleTo('background');await flush();expect(f.images()).toHaveLength(0);
+});
+test('RELOAD a visible loading phase change retains the rotating image and its native timeline',async()=>{
+ const {PlayerLoadingIndicator}=await import('../src/ui/PlayerLoadingIndicator.tsx');
+ const [phase,setPhase]=createSignal<'fetching'|'preparing'|'buffering'>('fetching');
+ const root=createRoot(stop=>{stops.push(stop);return PlayerLoadingIndicator({visible:true,get phase(){return phase();},width:233,height:233});});
+ const arc=()=>nodes(root).find(n=>n.props.src?.includes('video-loading-arc'))!;
+ const mounted=arc();
+ setPhase('preparing');expect(arc()).toBe(mounted);
+ setPhase('buffering');expect(arc()).toBe(mounted);
+ expect(arc().props.class).toContain('animate-spin');expect(frames).toHaveLength(0);
 });
 test('RELOAD a background-playing expired stream uses the current native position',async()=>{
  const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture',backgroundPlayback:true});await flush();

@@ -1,0 +1,1 @@
+../../../src/pocket.config.ts
