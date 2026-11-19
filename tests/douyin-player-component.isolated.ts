@@ -3,6 +3,7 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
+import { dispatchMemoryPressure } from '@podjs/framework/memory';
 import type { InternetStatus } from '../src/onboarding/state.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/VideoPlayerScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
@@ -36,7 +37,7 @@ let replacementPrepareGate:Promise<void>|undefined;
 const sessionCalls:any[]=[];const sessionStates=new Map<string,any>();
 const sessionValue=(id:string)=>sessionStates.get(id)??{...state("ready"),sessionId:id};
 const sessionPort={
- prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
+ prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:!options.keyframeOnly,hasCachedFirstFrame:options.keyframeOnly===true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
  play:async(id:string)=>{const v={...sessionValue(id),state:"playing"};sessionStates.set(id,v);return v;},
  retire:async(id:string)=>{const v={...sessionValue(id),state:"prewarmed",muted:true};sessionStates.set(id,v);return v;},
  pause:async(id:string)=>{const v={...sessionValue(id),state:"paused"};sessionStates.set(id,v);return v;},
@@ -45,7 +46,7 @@ const sessionPort={
  transition:async(options:any)=>{sessionCalls.push({method:"transition",...options});return {...options,composited:true};},
  release:async()=>{sessionReleases++;return {released:true};}
 };
-let sessionsCapable=false,decoderLimit=1,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
+let sessionsCapable=false,decoderLimit=1,independentKeyframes=false,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
@@ -59,9 +60,9 @@ const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,w
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
+const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;independentKeyframes=false;lifecycleState='active';});
 let deliveredNativeState:any;
 const flush=async()=>{if(current!==deliveredNativeState){deliveredNativeState=current;jankStateChanged(current);}for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
@@ -323,6 +324,20 @@ test('SWIPEFEED prewarmed handoff never prepares again while publication persist
   expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   release();await flush();
  }finally{Date.now=realNow;}
+});
+
+test('the cold immersive drag presents only the adjacent video’s verified local frame',async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];
+ const source={platform:'douyin' as const,immersive:true,awemeId:'current',url:'managed/current',title:'current'};
+ const preview={entryId:'next',frame:{available:true as const,kind:'actual_frame' as const,path:'next-frame.png',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}};
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+  source,width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},
+  onPrepareAdjacent:async()=>({key:'next',source:{...source,awemeId:'next',url:'managed/next',previewFrame:preview}})
+ });});
+ await flush();
+ const g=gestures[0];g.onPanStart({dy:-10});g.onPanMove({dy:-80});
+ expect(nodes(root).find(node=>node.kind==='Poster')?.props.filePath).toBe('next-frame.png');
+ g.onCancel?.({});await flush();
 });
 
 test('SWIPEFEED legacy settle retires outgoing before a contended route result',async()=>{
@@ -1146,4 +1161,57 @@ test('playback control layout reuses unchanged time label widths across native s
   expect(elapsed!.props.style.width).toBe(56);expect(duration!.props.style.width).toBe(56);
   expect(timeWidthReads).toBe(4);
  }finally{trackTimeWidths=false;}
+});
+
+test('256 MB keeps a pixel-only reverse neighbour and presents it on the first down move',async()=>{
+ const globals=globalThis as typeof globalThis & {pod?:{memoryBudgetBytes?:()=>number}};
+ const savedPod=globals.pod,savedRelease=sessionPort.release;
+ globals.pod={...savedPod,memoryBudgetBytes:()=>256_000_000};
+ sessionsCapable=true;decoderLimit=2;independentKeyframes=true;
+ sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ sessionPort.release=async (id?:string)=>{
+  if(id)sessionStates.delete(id);
+  return savedRelease();
+ };
+ try{
+  const source=(index:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(index),url:`local/${index}.mp4`,title:String(index)});
+  let selected=2;
+  createRoot(stop=>{
+   stops.push(stop);
+   const [current,setCurrent]=createSignal(source(selected));
+   const adjacent=(direction:'next'|'previous')=>selected+(direction==='next'?1:-1);
+   return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},
+    onAdjacentKey:direction=>String(adjacent(direction)),
+    onPrepareAdjacent:async direction=>({key:String(adjacent(direction)),source:source(adjacent(direction))}),
+    onSelectTarget:(_direction,_distance,target)=>{
+     expect(target?.key).toBe('1');
+     selected=1;setCurrent(target!.source as ReturnType<typeof source>);
+    },
+   });
+  });await flush();await flush();
+  const previous=()=>sessionCalls.filter(x=>x.method==='prepare'&&x.url==='local/1.mp4').at(-1);
+  expect(previous()).toMatchObject({prewarm:true,keyframeOnly:true,retainKeyframe:true});
+  expect(sessionStates.size).toBe(3);
+  expect([...sessionStates.values()].filter(s=>s.hasRenderedFirstFrame)).toHaveLength(2);
+
+  dispatchMemoryPressure({t:'memory.pressure',level:2});await flush();
+  expect(sessionStates.size).toBe(2);
+  dispatchMemoryPressure({t:'memory.pressure',level:0});await flush();
+  expect(sessionStates.size).toBe(3);
+
+  const before=sessionCalls.length;
+  const finger=gestures[0];
+  finger.onPanStart({dy:12});await flush();
+  expect(sessionCalls.slice(before).find(x=>x.method==='transition')).toMatchObject({
+   direction:'down',progress:12/233,toSessionId:previous().sessionId,
+  });
+  expect(sessionStates.get(previous().sessionId)).toMatchObject({hasCachedFirstFrame:true,hasRenderedFirstFrame:false});
+  finger.onPanMove({dy:120});finger.onPanEnd({vy:500});await flush();
+  expect(selected).toBe(1);
+  expect(sessionCalls.slice(before).find(x=>x.method==='promote')).toMatchObject({id:previous().sessionId});
+ }finally{
+  stops.pop()?.();
+  sessionPort.release=savedRelease;
+  globals.pod=savedPod;
+ }
 });

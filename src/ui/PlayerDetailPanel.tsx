@@ -1,6 +1,6 @@
 import { batch, createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import { createGesture, type GestureOptions } from "@pocketjs/framework/gesture";
+import { createGesture, type GestureContact, type GestureOptions } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
@@ -10,15 +10,17 @@ import { RemoteImage } from "./RemoteImage.tsx";
 import { playerGesture } from "./player-gestures.ts";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutHeight, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type DetailMeta, type InfoLayout, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220;
 /** Crown scroll distance per degree, in canvas units. */
 const CROWN_PX = 4;
-/** Height of the top and bottom fades over the scrolling column, in canvas units. */
-const EDGE_FADE = 28;
+const PAN_SLOP = 8;
+const EMPTY_INFO: InfoLayout = { title: [], description: [], descriptionMore: false };
+const detailSummaries = new WeakMap<DetailSlide, { meta: DetailMeta; layout: InfoLayout }>();
 const ABOUT_LINES_PER_FRAME = 2;
+const OVERSCAN = 8;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
@@ -107,47 +109,51 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   const scale = () => Math.min(props.width, props.height) / CANVAS;
   const left = () => (props.width - CANVAS) / 2, top = () => (props.height - CANVAS) / 2;
   const cover = createMemo(() => props.cover(), undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
+  const measure = (text: string, slot: number) => getOps().measureText(text, slot);
+  const [layoutAllowed, allowLayout] = createSignal(false);
+  onFrame(() => allowLayout(true), () => !layoutAllowed() && props.slide.x() === 0);
   const info = createMemo(() => {
     const value = cover();
-    return infoLayout({ title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait }, (text, slot) => getOps().measureText(text, slot));
+    const meta = { title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait };
+    const cached = detailSummaries.get(props.slide);
+    if (cached && (Object.keys(meta) as (keyof DetailMeta)[]).every(key => meta[key] === cached.meta[key])) return cached.layout;
+    if (!layoutAllowed()) return EMPTY_INFO;
+    const layout = infoLayout(meta, measure);
+    detailSummaries.set(props.slide, { meta, layout });
+    return layout;
   });
-  const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
   const fullDescription = createMemo(() => info().descriptionMore ? description() : "");
   const [about, setAbout] = createSignal<string[]>([]);
-  let aboutJob: { iterator: Generator<string>; lines: string[] } | undefined;
-  const controls = createMemo<Control[]>(() => ["progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
-  const column = createMemo(() => columnLayout(about().length, controls().length));
+  const [aboutCount, setAboutCount] = createSignal(0);
+  let aboutJob: Generator<string> | undefined;
+  const hasSpeed = createMemo(() => props.speed() !== undefined);
+  const controls = createMemo<Control[]>(() => hasSpeed() ? ["progress", "volume", "speed"] : ["progress", "volume"]);
+  const column = createMemo(() => columnLayout(aboutCount(), controls().length));
+  const aboutTop = INFO_HEIGHT + ABOUT.caption + ABOUT.captionGap;
   const [selected, setSelected] = createSignal<Control>();
   const scroller = createScroller({ max: () => column().max, extent: () => CANVAS });
-  onFrame(() => scroller.step(), () => scroller.state() !== "idle");
-  // Font measurement may rasterize cold system glyphs synchronously. Keep the
-  // entry frame and input responsive while wrapping the optional full text.
+  onFrame(() => scroller.step(), () => scroller.state() !== "idle" && scroller.state() !== "tracking");
+  // Wrap one viewport ahead. Publish lines as they are ready so the first
+  // scroll can read them without waiting for the end of the description.
   createEffect(() => {
     const text = fullDescription();
-    setAbout([]);
-    aboutJob = text ? { iterator: aboutLineIterator(text, measure), lines: [] } : undefined;
+    aboutJob = text ? aboutLineIterator(text, measure) : undefined;
+    batch(() => { setAbout([]); setAboutCount(0); });
   });
+  const needsAboutLines = () => !!aboutJob && props.slide.x() === 0 && !selected() &&
+    aboutTop + aboutCount() * ABOUT.lineHeight < scroller.offset() + CANVAS * 2;
   onFrame(() => {
-    const job = aboutJob;
-    if (!job) return;
+    const iterator = aboutJob;
+    if (!iterator || !needsAboutLines()) return;
+    const lines = about();
     for (let i = 0; i < ABOUT_LINES_PER_FRAME; i++) {
-      const next = job.iterator.next();
-      if (!next.done) {
-        job.lines.push(next.value);
-        continue;
-      }
-      aboutJob = undefined;
-      batch(() => {
-        setAbout(job.lines);
-        // Keep an in-use control row in place when the text is inserted above it.
-        if (selected() || Math.max(scroller.offset(), scroller.intent()) >= INFO_HEIGHT - CANVAS / 2) {
-          scroller.rebase(aboutHeight(job.lines.length));
-        }
-      });
-      return;
+      const next = iterator.next();
+      if (next.done) { aboutJob = undefined; break; }
+      lines.push(next.value);
     }
-  }, () => !!aboutJob);
+    setAboutCount(lines.length);
+  }, needsAboutLines);
 
   createEffect(() => { description(); untrack(() => { scroller.scrollTo(0, { immediate: true }); setSelected(); }); });
   // Capabilities may disappear while a source is being replaced: drop a vanished
@@ -178,43 +184,72 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   } });
 
   let root: NodeMirror | undefined;
+  let drag: { id: number; kind: 'scroll' | 'dismiss' } | undefined;
+  let eligiblePan = false;
   const toCanvas = (px: number) => px / scale();
   const viewport = () => ({ x: 0, y: 0, w: props.width, h: props.height });
-  const createPanelGesture = (options: GestureOptions) =>
-    createGesture(props.rotation ? playerGesture(options, props.rotation, viewport) : options);
-  const pager = createPanelGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
-    // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
-    onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
-    onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
-    onPanStart: () => { setSelected(); scroller.beginDrag(); },
-    onPanMove: contact => scroller.drag(-toCanvas(contact.fdy)),
-    onPanEnd: contact => scroller.endDrag(-toCanvas(contact.vy)),
-    onCancel: () => scroller.endDrag(0),
-  });
-  // A rightward drag in picture coordinates slides the panel off the player.
-  let closing: number | undefined;
-  const dismiss = createPanelGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
-    onPanStart: contact => {
-      if (contact.dx <= 0 || !props.slide.begin()) return;
-      closing = contact.id;
-      props.slide.move(contact.dx);
+  const panKind = (contact: GestureContact) => {
+    if (contact.dx > PAN_SLOP && contact.dx > Math.abs(contact.dy) * 1.25) return 'dismiss';
+    if (Math.abs(contact.dy) > PAN_SLOP) return 'scroll';
+  };
+  const gesture: GestureOptions = {
+    region: { node: () => root }, axis: 'any',
+    get panSlop() { return eligiblePan ? PAN_SLOP : Infinity; },
+    onDown: () => {
+      eligiblePan = false;
+      if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop();
     },
-    onPanMove: contact => { if (closing === contact.id) props.slide.move(contact.dx); },
+    onMove: contact => { eligiblePan = drag === undefined && panKind(contact) !== undefined; },
+    // playerGesture preserves screen coordinates for taps. Native hit testing
+    // already applies the render transform for both the panel and its steppers.
+    onTap: contact => {
+      const hit = hitNode(contact.x, contact.y, contact.surface);
+      let pressable = hit;
+      while (pressable && !pressable.onPress) pressable = pressable.parent;
+      if (hit && pressable) pressNode(hit); else setSelected();
+    },
+    onPanStart: contact => {
+      const kind = panKind(contact);
+      if (drag || !kind) return;
+      if (kind === 'dismiss') {
+        if (!props.slide.begin()) return;
+      } else {
+        setSelected();
+        scroller.beginDrag();
+      }
+      drag = { id: contact.id, kind };
+    },
+    onPanMove: contact => {
+      if (drag?.id !== contact.id) return;
+      if (drag.kind === 'dismiss') props.slide.move(contact.dx);
+      else scroller.drag(-toCanvas(contact.fdy));
+    },
     onPanEnd: contact => {
-      if (closing !== contact.id) return;
-      closing = undefined;
-      props.slide.end(contact.vx);
+      if (drag?.id !== contact.id) return;
+      const { kind } = drag;
+      drag = undefined;
+      if (kind === 'dismiss') props.slide.end(contact.vx);
+      else scroller.endDrag(-toCanvas(contact.vy));
     },
     onCancel: contact => {
-      if (closing !== contact.id) return;
-      closing = undefined;
-      props.slide.cancel();
+      if (drag?.id !== contact.id) return;
+      const { kind } = drag;
+      drag = undefined;
+      if (kind === 'dismiss') props.slide.cancel();
+      else scroller.endDrag(0);
     },
-  });
+  };
+  const pager = createGesture(props.rotation ? playerGesture(gesture, props.rotation, viewport) : gesture);
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
-  onCleanup(() => { closing = undefined; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
-
+  onCleanup(() => {
+    aboutJob = undefined;
+    if (drag?.kind === 'dismiss') props.slide.cancel();
+    drag = undefined;
+    scroller.stop();
+    pager.dispose();
+    removeBack?.();
+  });
 
   const InfoPage = () => <>
     <Show when={info().cover && cover()}>{cover => <View class="absolute overflow-hidden bg-[#1c1c1c]" style={{ ...box(info().cover!), radius: cover().portrait ? INFO.portraitCover.radius : INFO.cover.radius }}>
@@ -268,28 +303,35 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
       fraction={() => speedFraction(props.speed() ?? 1)}
       step={(direction, elapsed) => props.onSpeed(stepSpeed(props.speed() ?? 1, direction * (elapsed === undefined ? 1 : holdStepCount(elapsed))))} />;
   };
-  // Only sections that intersect the viewport mount; long descriptions mount line by line.
-  const visible = (y: number, height: number) => y + height > scroller.offset() - 8 && y < scroller.offset() + CANVAS + 8;
-  const aboutTop = () => column().about + ABOUT.caption + ABOUT.captionGap;
+  const visible = (y: number, height: number) => y + height > scroller.offset() - OVERSCAN && y < scroller.offset() + CANVAS + OVERSCAN;
+  // Keep one reactive range instead of a visibility subscription per line.
+  const aboutRange = createMemo(() => {
+    const top = scroller.offset() - aboutTop;
+    const start = Math.max(0, Math.min(aboutCount(), Math.floor((top - OVERSCAN) / ABOUT.lineHeight)));
+    const end = Math.max(start, Math.min(aboutCount(), Math.ceil((top + CANVAS + OVERSCAN) / ABOUT.lineHeight)));
+    return { start, end };
+  }, undefined, { equals: (a, b) => a.start === b.start && a.end === b.end });
+  const visibleAbout = createMemo(() => {
+    const { start, end } = aboutRange();
+    return Array.from({ length: end - start }, (_, i) => start + i);
+  });
   const aboutLeft = (CANVAS - ABOUT.width) / 2;
 
   return <View ref={value => root = value} debugName="PlayerDetailPanel" class="absolute left-[0] top-[0] bg-[#000000]" style={{ width: props.width, height: props.height, translateX: props.slide.x() }}>
     <View class="absolute overflow-hidden" style={{ insetL: left(), insetT: top(), width: CANVAS, height: CANVAS, scale: scale(), originX: 0, originY: 0 }}>
       <View debugName="PlayerDetailColumn" class="absolute left-[0] top-[0]" style={{ width: CANVAS, height: column().height, translateY: -scroller.offset() }}>
         <Show when={visible(0, INFO_HEIGHT)}><View debugName="PlayerDetailInfo" class="absolute left-[0] top-[0]" style={{ width: CANVAS, height: INFO_HEIGHT }}><InfoPage /></View></Show>
-        <Show when={about().length && visible(column().about, ABOUT.caption)}>
+        <Show when={aboutCount() && visible(column().about, ABOUT.caption)}>
           <Text class="absolute text-xs leading-[16] text-[#ff6026] text-center" style={{ insetL: aboutLeft, insetT: column().about, width: ABOUT.width, height: ABOUT.caption }}>简介</Text>
         </Show>
-        <For each={about()}>{(line, index) => <Show when={visible(aboutTop() + index() * ABOUT.lineHeight, ABOUT.lineHeight)}>
-          <Text debugName="PlayerDetailAboutLine" class="absolute text-sm leading-[20] text-[#d0d0d0]" style={{ insetL: aboutLeft, insetT: aboutTop() + index() * ABOUT.lineHeight, width: ABOUT.width, height: ABOUT.lineHeight }}>{line}</Text>
-        </Show>}</For>
+        <For each={visibleAbout()}>{index =>
+          <Text debugName="PlayerDetailAboutLine" class="absolute text-sm leading-[20] text-[#d0d0d0]" style={{ insetL: aboutLeft, insetT: aboutTop + index * ABOUT.lineHeight, width: ABOUT.width, height: ABOUT.lineHeight }}>{about()[index]}</Text>
+        }</For>
         <For each={controls()}>{(kind, index) => <Show when={visible(column().controls + index() * CONTROL.height, CONTROL.height)}>
           <View debugName={`PlayerDetailControl-${kind}`} class="absolute left-[0]" style={{ insetT: column().controls + index() * CONTROL.height, width: CANVAS, height: CONTROL.height }}>{control$(kind)}</View>
         </Show>}</For>
       </View>
-      {/* Content leaving the round screen fades out instead of being cut by its edge. */}
-      <View class="absolute left-[0] top-[0] bg-gradient-to-b from-[#000000] to-transparent" style={{ width: CANVAS, height: EDGE_FADE }} />
-      <View class="absolute left-[0] bg-gradient-to-b from-transparent to-[#000000]" style={{ insetT: CANVAS - EDGE_FADE, width: CANVAS, height: EDGE_FADE }} />
+
     </View>
   </View>;
 }

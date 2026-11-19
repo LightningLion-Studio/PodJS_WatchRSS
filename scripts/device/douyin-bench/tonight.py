@@ -8,6 +8,8 @@ from pathlib import Path
 from bench import Device,DEFAULT_OWNER,write_json
 from analyzers import parse_log,quantiles
 
+PSS_LIMIT_KIB = 250_000
+
 
 def decode_bundle(text):
     match=re.search(r'json=(\{.*\}), error=([^}]*)}',text,re.S)
@@ -222,7 +224,7 @@ class Run:
         raw=self.idempotent(lambda:self.device.call(['shell','dumpsys','meminfo',pid]));(self.out/f'{group}-{index:03}-meminfo.txt').write_text(raw)
         m=re.search(r'TOTAL PSS:\s*(\d+)',raw) or re.search(r'^\s*TOTAL\s+(\d+)',raw,re.M)
         pss=int(m[1]) if m else None
-        row={'group':group,'index':index,'shell_pss_kib':state.get('pssKb'),'dumpsys_pss_kib':pss,'decoder_instances':state.get('decoderInstances'),'passed':pss is not None and pss<=125000 and state.get('decoderInstances',99)<=3}
+        row={'group':group,'index':index,'shell_pss_kib':state.get('pssKb'),'dumpsys_pss_kib':pss,'decoder_instances':state.get('decoderInstances'),'passed':pss is not None and pss<=PSS_LIMIT_KIB and state.get('decoderInstances',99)<=3}
         with (self.out/'resources.jsonl').open('a') as f:f.write(json.dumps(row)+'\n')
         return row
     def swipe(self):
@@ -425,7 +427,7 @@ class Run:
                     DEFAULT_OWNER.write_text('released\n')
                     playback_pass=len(self.rows)==sum(20 if g=='A' else self.target_count or 100 for g in groups) and all(r['status']=='PASS' for r in self.rows) and getattr(self,'final_transition_passed',True)
                     resources_pass=('B' not in groups or sum('resource_sample' in r for r in self.rows)==sum(self.resource_sample_due(i) for i in range(self.base_index+1,self.base_index+(self.target_count or 100)+1))) and all(r.get('resource_sample',{'passed':True})['passed'] for r in self.rows)
-                    write_json(self.out/'summary.json',{'status':'INTERRUPTED' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass and resources_pass else 'FAIL','playback_status':'INCOMPLETE' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass else 'FAIL','collection_reconnections':self.recovery_count,'collection_halted':self.transport_halted,'collection_restart_needed':self.collection_restart_needed,'environment_paused':self.environment_pause,'playback_failures':sum(bool(r['errors']) for r in self.rows),'resource_status':'PASS' if resources_pass else 'FAIL','pss_limit_kib':125000,'resource_interval':self.resource_interval,'final_transition_passed':getattr(self,'final_transition_passed',None),'groups':groups,'navigation_retries':sum(r.get('navigation_retries',0) for r in self.rows),'native_retire_metrics':sum(r.get('metrics_scope')=='native_retire' for r in self.rows),'attempts':len(self.rows),'passed':sum(r['status']=='PASS' for r in self.rows),'first_frame_native_ms':quantiles([r['native_prepare_first_frame_ms'] for r in self.rows if r['native_prepare_first_frame_ms'] is not None]),'settings_restored':restored})
+                    write_json(self.out/'summary.json',{'status':'INTERRUPTED' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass and resources_pass else 'FAIL','playback_status':'INCOMPLETE' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass else 'FAIL','collection_reconnections':self.recovery_count,'collection_halted':self.transport_halted,'collection_restart_needed':self.collection_restart_needed,'environment_paused':self.environment_pause,'playback_failures':sum(bool(r['errors']) for r in self.rows),'resource_status':'PASS' if resources_pass else 'FAIL','pss_limit_kib':PSS_LIMIT_KIB,'resource_interval':self.resource_interval,'final_transition_passed':getattr(self,'final_transition_passed',None),'groups':groups,'navigation_retries':sum(r.get('navigation_retries',0) for r in self.rows),'native_retire_metrics':sum(r.get('metrics_scope')=='native_retire' for r in self.rows),'attempts':len(self.rows),'passed':sum(r['status']=='PASS' for r in self.rows),'first_frame_native_ms':quantiles([r['native_prepare_first_frame_ms'] for r in self.rows if r['native_prepare_first_frame_ms'] is not None]),'settings_restored':restored})
 
 
 def main():

@@ -49,11 +49,22 @@ export function detailText(meta: Pick<DetailMeta, "title" | "description">): { t
   return { title, description };
 }
 
+const INFO_TEXT_LIMIT = 400;
+function textPrefix(text: string, points: number): string {
+  if (text.length <= points) return text;
+  let end = 0;
+  for (const char of text) {
+    if (points-- === 0) return text.slice(0, end);
+    end += char.length;
+  }
+  return text;
+}
+
 /** Wrap with one width per line (each line follows the circle) and an ellipsis on the last line. */
 export function flowLines(text: string, widths: readonly number[], measure: TextMeasurer): string[] {
   const lines: string[] = [];
   // Long descriptions only ever show a few lines; never lay out the whole body.
-  let rest = Array.from(text).slice(0, 400).join("").trim();
+  let rest = textPrefix(text, INFO_TEXT_LIMIT).trim();
   for (let i = 0; i < widths.length && rest; i++) {
     const width = Math.max(1, widths[i]!), last = i === widths.length - 1;
     const line = (last ? measuredLines(rest, width, measure, 1) : layoutUiText(rest, { width, measure, maxLines: 1 }))[0] ?? "";
@@ -75,9 +86,19 @@ const lineRects = (y: number, count: number, lineHeight: number, maxWidth: numbe
  * first, then title lines; missing fields leave no gap.
  */
 export function infoLayout(meta: DetailMeta, measure: (text: string, slot: number) => number): InfoLayout {
-  const { title, description } = detailText(meta), author = clean(meta.author);
+  const text = detailText(meta), author = clean(meta.author);
+  const title = textPrefix(text.title, INFO_TEXT_LIMIT);
+  const description = textPrefix(text.description, INFO_TEXT_LIMIT);
   const maxTitle = description ? 2 : 3, maxDescription = title ? 3 : 5;
-  const measureSlot = (slot: number): TextMeasurer => text => measure(text, slot);
+  const widths = new Map<string, number>();
+  const measureSlot = (slot: number): TextMeasurer => value => {
+    const key = `${slot}:${value}`;
+    const known = widths.get(key);
+    if (known !== undefined) return known;
+    const width = measure(value, slot);
+    widths.set(key, width);
+    return width;
+  };
   const plan = (titleLines: number, descriptionLines: number) => {
     const blocks: Block[] = [];
     const cover = meta.portraitCover ? INFO.portraitCover : INFO.cover;
@@ -97,7 +118,7 @@ export function infoLayout(meta: DetailMeta, measure: (text: string, slot: numbe
       } else if (block.kind === "author") {
         const width = Math.min(INFO.author.maxWidth, chordWidth(y, y + INFO.author.lineHeight));
         const label = measuredLines(author, width - INFO.author.icon - INFO.author.iconGap, measureSlot(INFO.author.slot), 1)[0] ?? "";
-        const textWidth = Math.ceil(Math.min(width - INFO.author.icon - INFO.author.iconGap, measure(label, INFO.author.slot)));
+        const textWidth = Math.ceil(Math.min(width - INFO.author.icon - INFO.author.iconGap, measureSlot(INFO.author.slot)(label)));
         const row = centred(INFO.author.icon + INFO.author.iconGap + textWidth, y, INFO.author.lineHeight);
         layout.author = { rect: row, label, icon: { x: row.x, y: y + (INFO.author.lineHeight - INFO.author.icon) / 2, width: INFO.author.icon, height: INFO.author.icon }, text: { x: row.x + INFO.author.icon + INFO.author.iconGap, y, width: textWidth, height: INFO.author.lineHeight } };
       } else {
@@ -106,7 +127,7 @@ export function infoLayout(meta: DetailMeta, measure: (text: string, slot: numbe
       }
       y += block.height + gapAfter(block.kind);
     }
-    layout.descriptionMore = !!description && (!layout.description.length || layout.description.at(-1)!.text.endsWith("…"));
+    layout.descriptionMore = !!description && (description !== text.description || !layout.description.length || layout.description.at(-1)!.text.endsWith("…"));
     return { layout, fits: height <= INFO.bottom - INFO.top && infoRects(layout).every(r => insideCanvasCircle(r)) };
   };
   // Measure how many lines each text needs at its widest, then shrink until the stack fits.
@@ -137,7 +158,8 @@ export const ABOUT = { slot: 1, size: 14, lineHeight: 20, width: 184, caption: 1
 export const ABOUT_MAX_CHARS = 20_000;
 /** Every line of the description at the column width. Bounded so a pathological body stays cheap. */
 export function* aboutLineIterator(text: string, measure: (text: string, slot: number) => number): Generator<string> {
-  const chars = Array.from(clean(text)), body = chars.length > ABOUT_MAX_CHARS ? chars.slice(0, ABOUT_MAX_CHARS).join("") + "…" : chars.join("");
+  const normalized = clean(text), prefix = textPrefix(normalized, ABOUT_MAX_CHARS);
+  const body = prefix === normalized ? prefix : prefix + "…";
   if (body) yield* layoutUiTextLines(body, { width: ABOUT.width, measure: value => measure(value, ABOUT.slot) });
 }
 export const aboutHeight = (lines: number) => lines ? ABOUT.caption + ABOUT.captionGap + lines * ABOUT.lineHeight + ABOUT.gap : 0;

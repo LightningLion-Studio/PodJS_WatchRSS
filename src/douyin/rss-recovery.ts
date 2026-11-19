@@ -12,10 +12,12 @@ export class DouyinRssRecovery {
   private running=false;
   private attempted=false;
   constructor(private client:Pick<DouyinClient,"resolvePlayback"|"buildPlaybackHeaders">,private awemeId:string,private initial?:DouyinItem) {}
-  async reload(source:PlaybackSource,isCurrent:()=>boolean):Promise<PlaybackSource|undefined>{
+  async reload(source:PlaybackSource,isCurrent:()=>boolean,requireNewUrl=false):Promise<PlaybackSource|undefined>{
+    if(!isCurrent())return;
     const result=await this.client.resolvePlayback(this.awemeId,{forceRefresh:true,freshRequest:true});
     if(!isCurrent())return;
     if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code});
+    if(requireNewUrl&&(result.data.awemeId!==this.awemeId||result.data.playUrl===source.url||result.data.playUrl===source.videoUrl))throw Object.assign(new Error('详情未返回该视频的新播放地址'),{code:'TEMPORARILY_UNAVAILABLE'});
     const headers=await this.client.buildPlaybackHeaders();
     if(!isCurrent())return;
     return {...source,expiresAtMs:undefined,videoMime:undefined,videoWidth:undefined,videoHeight:undefined,...douyinDecoderProfile(result.data),url:result.data.playUrl,videoUrl:undefined,audioUrl:douyinPlaybackAudio(result.data),headers};
