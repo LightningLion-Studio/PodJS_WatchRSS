@@ -64,7 +64,7 @@ export interface SqlLibraryRepositoryPorts {
 let snapshotScope=0;
 /** One shared instance serializes session operations. UI writes remain concurrent
  * and are detected by revision guards before advertising a sequence boundary. */
-export class SqlLibrarySessionRepository implements LibrarySessionRepository {
+export class SqlLibraryCloudRepository implements LibrarySessionRepository {
  /** Read-only C export: no RSS merge, cursor repair, reading migration or cache
   * publication. Each body's exact encoding is checked and discarded after its
   * bounded descriptor is captured; source reads later revalidate the version. */
@@ -114,7 +114,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private tail:Promise<unknown>=Promise.resolve();
  private readonly registerProjectionIds=new Map<string,string>();
  private peerCanonical=new Map<string,boolean>();private peerBooks=new Map<string,boolean>();
- readonly books:SqlBookStore|undefined;private bookActions:BookSyncActions|undefined;
+ readonly books:SqlBookStore|undefined;
  private readonly projection:LibraryProjectionCache;
  private cloudMemo?:Promise<MemoRepository>;
  private cloudProgress?:((unit:string)=>Promise<void>);
@@ -124,10 +124,10 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private work<T>(stage:string,run:()=>Promise<T>){return repositoryWork(f=>this.report(f),stage,run,this.ports.now);}
  private readonly definitions:SqlDomainDefinitions;private projectionGeneration?:string;
  private snapshotCache:{canonical:boolean;bookMode:boolean;revision:number;projectionSeq:number;articles:readonly PreparedArticle[];sources:readonly SyncedSource[]}|undefined;
- constructor(private readonly db:SqlDatabase,private readonly ports:SqlLibraryRepositoryPorts){
+ constructor(protected readonly db:SqlDatabase,private readonly ports:SqlLibraryRepositoryPorts){
   this.perf=new FullSyncPerf(ports.diagnostic);this.db=db=this.perf.database(db);this.ports=ports={...ports,codec:this.perf.codec(ports.codec)};
   this.projection=new LibraryProjectionCache(db,()=>ports.text.yieldTurn?.()??db.query('SELECT 1'),f=>this.report(f));this.definitions=new SqlDomainDefinitions(db,ports.codec,undefined,undefined,f=>this.report(f));
-  if(ports.bookFiles){this.books=new SqlBookStore(db,{sha256:ports.codec.sha256,files:ports.bookFiles,text:ports.files,stableId:url=>stableArticleId(url,ports.text.parseUri,ports.codec),deviceId:()=>this.identity(),warn:code=>this.report({stage:code}),diagnostic:fields=>this.report(fields),profile:(stage,ms)=>this.perf.add(stage,ms)});this.bookActions=new BookSyncActions(db,this.books);}
+  if(ports.bookFiles)this.books=new SqlBookStore(db,{sha256:ports.codec.sha256,files:ports.bookFiles,text:ports.files,stableId:url=>stableArticleId(url,ports.text.parseUri,ports.codec),deviceId:()=>this.identity(),warn:code=>this.report({stage:code}),diagnostic:fields=>this.report(fields),profile:(stage,ms)=>this.perf.add(stage,ms)});
   this.echo=new PeerEchoStore(db,ports.codec);this.now=ports.now??Date.now;this.local=new LocalArticleManifestStore(db,ports.codec,ports.text,ports.files,ports.migrateReading,ports.migrateReadingMany,f=>this.report(f),ports.reencodeStoredBodies);
   this.receiver=new SyncArticleReceiver(db,ports.codec,ports.files,ports.migrateReading,this.now,(a,target)=>this.local.resolveIncomingBody(a,target),()=>this.projectionGeneration,(stage,ms)=>this.perf.add(stage,ms));
   this.deletion=new SyncArticleDeletionStore(db,ports.codec,(a,target)=>this.local.resolveIncomingBody(a,target),itemIds=>ports.cleanupRemovedContent({itemIds,channels:[]}));this.sources=new SqlSourceSyncStore(db,ports.uri,this.now,removed=>ports.cleanupRemovedContent({itemIds:removed.itemIds,channels:[removed.channel]}));this.sequence=new SqlLibrarySequenceStore(db,this.now);
@@ -163,9 +163,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    this.report({stage:'repository.snapshot.retry',attempt,canonical:canonical?1:0,reason,revision,observedRevision:await libraryRevision(this.db),projectionSeq:sequence,observedProjectionSeq:await this.projection.sequence(),events:JSON.stringify(counts)});
   }catch{/* Diagnostics must not hide storage errors or change retry decisions. */}
  }
- private run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
+ protected run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
- private async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
+ protected async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
  private async legacySnapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
   await playbackWork.wait(check);
   idleHit(49);return this.work('legacySnapshot',async()=>{
@@ -288,7 +288,6 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  }
  domainDefinitions(){return this.definitions;}
  deviceId(){return this.identity();}
- syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined);});}
  configurePeer(peer:string,capabilities:{supportsRssCanonicalIds?:boolean;supportsBookSyncV1?:boolean}){this.peerCanonical.set(peer,capabilities.supportsRssCanonicalIds===true);this.peerBooks.set(peer,!!this.books&&capabilities.supportsBookSyncV1===true);}
  private async changedIdentityMode(peer:string){const previous=(await this.db.query('SELECT rss_canonical,book_sync FROM sync_peer_features WHERE peer_device_id=?',[peer]))[0];return previous?!!Number(previous.rss_canonical)!==!!this.peerCanonical.get(peer)||!!Number(previous.book_sync)!==!!this.peerBooks.get(peer):!!this.peerCanonical.get(peer)||!!this.peerBooks.get(peer);}
  /** The manifest window captures its own upper bound after source merge. Never
@@ -587,4 +586,15 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    await this.db.transaction(statements);await this.ports.cleanupRemovedContent({itemIds,channels});
   }finally{await this.db.execute('DELETE FROM sync_snapshot_retained WHERE scope=?',[scope]);}
  });}
+}
+
+/** The foreground session also serves the v1 book wire protocol. Headless
+ * cloud workers use the same book store without linking its wire handlers. */
+export class SqlLibrarySessionRepository extends SqlLibraryCloudRepository {
+ private readonly bookActions?:BookSyncActions;
+ constructor(db:SqlDatabase,ports:SqlLibraryRepositoryPorts){
+  super(db,ports);
+  if(this.books)this.bookActions=new BookSyncActions(this.db,this.books);
+ }
+ syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined);});}
 }
