@@ -1,4 +1,5 @@
 import type { ReaderPreset } from "../../reader/preset.ts";
+import type {DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show, createRenderEffect, onCleanup } from "solid-js";
 import { entryDisclosure } from "../entry-disclosure.ts";
@@ -65,7 +66,7 @@ interface MediaRoutesProps {
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
-  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean,retryCurrent?:boolean)=>Promise<void>;
+  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean,mode?:DouyinReloadMode)=>Promise<void>;
   rejectDouyinAdjacent:(entry:RouteEntry,id:string,uri?:string,remote?:string,mirrorIndex?:number)=>boolean;
   recoverDouyinVideo: (entry: RouteEntry, manual?: boolean, positionMs?:number, error?:unknown) => Promise<void>;
   recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean,positionMs?:number,error?:unknown) => Promise<void>;
@@ -222,7 +223,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
                   ? (position,error) => void props.entry.retryPlayback!(position,{error}).catch(error => props.setError(String(error)))
                   : undefined
           }
-          onReload={(position,current,retryCurrent)=>props.reloadVideo(props.entry,position,current,retryCurrent)}
+          onReload={(position,current,mode)=>props.reloadVideo(props.entry,position,current,mode)}
           onRetry={
             props.entry.retryPlayback
               ? position => props.entry.retryPlayback!(position, {manual:true})

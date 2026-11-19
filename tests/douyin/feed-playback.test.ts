@@ -1,6 +1,7 @@
 import {expect,test} from 'bun:test';
 import {URL as NodeURL} from 'node:url';
 import {DouyinClient} from '../../src/douyin/client.ts';
+import {reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
 import {utf8Encode} from '../../src/cloud/types.ts';
@@ -23,6 +24,39 @@ test('feed opens player and resolves both neighbours with zero detail requests',
  expect(await f.client.resolvePlayback('a',{prefetch:true})).toMatchObject({ok:true,source:'feed-cache'});
  expect(await f.client.resolvePlayback('c',{prefetch:true})).toMatchObject({ok:true,source:'feed-cache'});
  expect(detailCount(f)).toBe(0);expect(f.requests).toHaveLength(1);
+});
+test('manual retry resolves the selected aweme through detail despite fresh feed metadata',async()=>{
+ const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ const fresh=wire('selected');fresh.video.bit_rate[0]!.play_addr.url_list=['https://fixture.invalid/fresh'];
+ f.replies.push(response({aweme_detail:fresh}));
+ expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).toMatchObject({item:{awemeId:'selected',playUrl:'https://fixture.invalid/fresh'}});
+ const retries=f.requests.slice(1).map(request=>new NodeURL(request.url));
+ expect(retries.map(url=>[url.pathname,url.searchParams.get('aweme_id')])).toEqual([['/aweme/v1/web/aweme/detail/','selected']]);
+});
+test('manual detail retry refuses the previous playback URL, its mirror and a mismatched aweme',async()=>{
+ const f=fixture(),original=wire('selected'),oldMirror='https://fixture.invalid/old-mirror';
+ original.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
+ f.replies.push(response({aweme_list:[original]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
+ f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}));
+ for(let i=0;i<3;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+ expect(detailCount(f)).toBe(3);expect(f.requests).toHaveLength(4);
+});
+test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
+ const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ f.replies.push(response({},403),response({},403));
+ await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'RATE_LIMITED'});
+ const before=f.requests.length;
+ const restarted=new DouyinClient(f.options);
+ await expect(reloadDouyinPlayback(restarted,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'RATE_LIMITED'});
+ expect(f.requests).toHaveLength(before);expect(detailCount(f)).toBe(before-1);
+ expect(f.values.get('douyin.cookie')).toBe('fixture');
 });
 test('detail 403 cooldown survives restart and feed success without blocking feed playback',async()=>{
  const f=fixture();f.replies.push(response({},403),response({},403));expect(await f.client.resolvePlayback('missing',{prefetch:true})).toMatchObject({code:'RATE_LIMITED'});

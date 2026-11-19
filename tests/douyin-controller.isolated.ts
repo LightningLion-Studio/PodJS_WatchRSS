@@ -22,7 +22,7 @@ let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,playbackResolved:async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>{expect(current()).toBe(true);return proxyOverride?proxyOverride(item,headers):item.playUrl;},lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -1052,5 +1052,23 @@ test('NOPLAY an automatic player timeout can reprepare its still-authorized sele
  const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
  const entry=f.stack().at(-1)!,before=f.source();let calls=0;
  client.resolvePlayback=async(id,options)=>{calls++;expect(options).toMatchObject({forceRefresh:false,freshRequest:false,allowDetail:false,feedItem:a});return {ok:true,data:a};};
- await f.controller.reloadVideo(entry,321,()=>true,true);expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+ await f.controller.reloadVideo(entry,321,()=>true,'current');expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+});
+
+test('manual reload publishes fresh detail in a new managed source at the current position',async()=>{
+ const f=fixture(),a=item('111'),b=item('222');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;const url='https://video/fresh-detail';let details=0,registrations=0;
+ client.resolvePlayback=async(id,options)=>{
+  expect(id).toBe(a.awemeId);
+  expect(options).toEqual({forceRefresh:true,freshRequest:true,allowDetail:true});
+  details++;
+  return {ok:true,data:{...a,playUrl:url}};
+ };
+ proxyOverride=async resolved=>{expect(resolved.playUrl).toBe(url);registrations++;return 'podjs-media-cache://play/fresh';};
+ await f.controller.reloadVideo(entry,321,()=>true,'detail');
+ expect(details).toBe(1);expect(registrations).toBe(1);
+ expect(entry.queue!.snapshot().item?.awemeId).toBe(a.awemeId);
+ expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'podjs-media-cache://play/fresh',resumePositionMs:321,bypassCache:false});
 });

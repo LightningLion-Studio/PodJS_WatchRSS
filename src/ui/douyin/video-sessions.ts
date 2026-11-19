@@ -39,6 +39,7 @@ export class DouyinVideoSessionPool extends VideoSessionPool<DouyinPreparedSourc
   constructor(port?:VideoSessionPort,waitForBudget?:ConstructorParameters<typeof VideoSessionPool>[1]){
     super(port,waitForBudget,processMemoryBudgetBytes()>=256_000_000);
   }
+  protected override readonly cacheOnlyAdmissionRetry=true;
   get canPrewarmPreviousFrame(){
     return this.neighbourCapacity>=2&&this.supportsIndependentKeyframes&&memoryPressureLevel()<2;
   }

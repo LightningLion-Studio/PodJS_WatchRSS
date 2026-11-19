@@ -61,11 +61,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,retryCurrent?:boolean)=>Promise<void>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:string)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean,retryCurrent?:boolean)=>{retries++;if(resolver)await resolver(p,current,retryCurrent);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:string)=>{retries++;if(resolver)await resolver(p,current,mode);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
  return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
@@ -361,7 +361,7 @@ test('NOPLAY only an automatic unexpired Douyin timeout may retry the current so
  for(const [expiry,reuse]of [[4102444800,true],[1000000000,false]]as const){
   nextError={code:'timeout'};let f:ReturnType<typeof reloadMount>;const flags:unknown[]=[];
   f=reloadMount({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/current?x-expires='+expiry,title:'fixture'},async(position,current,retryCurrent)=>{flags.push(retryCurrent);if(current())f.publish({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/valid',title:'fixture',resumePositionMs:position});});
-  await flush();await tick(351);expect(flags).toEqual([reuse]);
+  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'feed']);
  }
 });
 
@@ -456,4 +456,51 @@ test('session decoder admission recovery keeps the session backend and same sour
   expect(prepares).toHaveLength(0);
   expect(retries).toBe(0);
  }finally{sessionPort.prepare=original;}
+});
+
+test('manual Douyin retry selects detail resolution',async()=>{
+ nextError={code:'restricted'};
+ const source={platform:'douyin',immersive:true,awemeId:'manual',url:'https://fixture.invalid/old',title:'fixture'};
+ const modes:unknown[]=[];
+ const player=reloadMount(source,async(_position,_current,mode)=>{modes.push(mode);throw {code:'RATE_LIMITED'};});
+ await flush();player.retry();await flush();
+ expect(modes).toEqual(['detail']);
+});
+test('manual local resource retry keeps the selected source and requests cache-only native preparation',async()=>{
+ for(const cause of [{code:'video_decoder_limit'},{name:'ByteAdmissionDenied'},{code:'resource_exhausted'}]){
+  nextError=cause;
+  const source={platform:'douyin',immersive:true,awemeId:'manual-resource',url:'podjs-media-cache://play/fixture',title:'fixture',bypassCache:true};
+  let adjacent=0;const player=reloadMount(source,undefined,async()=>{adjacent++;return undefined;});
+  await flush();expect(player.text()).toContain('播放器资源不足');
+  player.retry();await flush();
+  expect(prepares).toHaveLength(2);
+  expect(prepares[1]).toMatchObject({url:source.url,cacheOnlyPrepare:true,bypassCache:false});
+  expect(retries).toBe(0);
+  await tick(1000);expect(prepares).toHaveLength(2);expect(adjacent).toBe(0);
+ }
+});
+
+test('resource cache miss stays on the same video without scheduling a feed or detail request',async()=>{
+ nextError={code:'video_retry_cache_miss'};
+ const source={platform:'douyin',immersive:true,awemeId:'cache-miss',url:'https://fixture.invalid/clip',title:'fixture'};
+ const player=reloadMount(source);
+ await flush();expect(player.text()).toContain('当前视频缓存不足');
+ await tick(20_000);expect(retries).toBe(0);expect(prepares).toHaveLength(1);
+ nextError={code:'video_retry_cache_miss'};
+ player.retry();await flush();
+ expect(prepares[1]).toMatchObject({url:source.url,cacheOnlyPrepare:true,bypassCache:false});
+ expect(retries).toBe(0);expect(player.text()).toContain('当前视频缓存不足');
+});
+test('a failed fresh manual detail prepare does not fall through to the recommendation feed',async()=>{
+ nextError={code:'restricted'};
+ const source={platform:'douyin',immersive:true,awemeId:'manual-failed',url:'https://fixture.invalid/old',title:'fixture'};
+ const modes:unknown[]=[];
+ const player=reloadMount(source,async(_position,current,mode)=>{
+  modes.push(mode);
+  nextError={code:'source_expired'};
+  if(current())player.publish({...source,url:'https://fixture.invalid/fresh'});
+ });
+ await flush();player.retry();await flush();await tick(3000);
+ expect(modes).toEqual(['detail']);
+ expect(player.text()).toContain('重试');
 });

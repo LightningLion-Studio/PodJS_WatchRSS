@@ -1,7 +1,7 @@
 import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
-import {reloadDouyinPlayback} from '../../douyin/reload-playback.ts';
+import {reloadDouyinPlayback,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
@@ -196,7 +196,7 @@ export function createMediaRouteController(
           posterUrl: douyinItem?.coverUrl ?? (article.imageUrl || article.enclosureImageUrl || undefined),
           author: douyinItem?.authorName || article.channelTitle || undefined,
           description: (douyinItem?.description || article.excerpt)?.trim() || undefined,
-          platform: "rss",
+          platform: "rss",awemeId:douyin?.awemeId,
           backgroundPlayback: preferences.continuePlaybackInBackground,
           ...playbackPreferences(),
         },
@@ -1057,7 +1057,7 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,retryCurrent=false)=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed')=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
@@ -1068,15 +1068,25 @@ export function createMediaRouteController(
       if(!item)throw new Error('Missing Douyin playback item');
       const queue=entry.queue;let queueGeneration=queue.playbackGeneration();
       const selected=()=>current()&&entry.queue===queue&&queue.snapshot().item?.awemeId===item.awemeId&&queue.playbackGeneration()===queueGeneration;
-      await douyinPreload.invalidate(item.awemeId);
+      const previousItem=mode==='detail'&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
+      const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
+      if(mode!=='detail')await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,retryCurrent)).catch(async error=>{
-        if(douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls)).catch(async error=>{
+        if(mode==='detail'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
       });
-      if(!resolved)return;
-      next=freshVideoSource(previous,{url:resolved.item.playUrl,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
+      if(!resolved||!selected())return;
+      let url=resolved.item.playUrl;
+      if(mode==='detail'){
+        await douyinPreload.invalidate(item.awemeId);
+        if(!selected())return;
+        url=await douyinPreload.playbackResolved(resolved.item,resolved.headers,selected);
+        if(!selected())return;
+      }
+      next=freshVideoSource(previous,{url,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
+      if(mode==='detail')next.bypassCache=false;
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       // This reload owns the metadata mutation. Continue guarding against later
       // pager changes while persistence yields, using our new generation.
@@ -1085,7 +1095,7 @@ export function createMediaRouteController(
       await entry.queue.persist();
       if(!selected())return;
     }else if(entry.rssDouyinRecovery){
-      const resolved=await entry.rssDouyinRecovery.reload(previous,current);
+      const resolved=await entry.rssDouyinRecovery.reload(previous,current,mode==='detail');
       if(!resolved||!current())return;
       next=freshVideoSource(previous,resolved,positionMs);
     }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);

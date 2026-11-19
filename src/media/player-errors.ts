@@ -1,9 +1,9 @@
 import type {BenchmarkFields,FailureCode,FailureStage} from '@podjs/framework/benchmark';
 
 export function videoResourceUnavailable(error:unknown):boolean {
- const value=error as {code?:unknown;message?:unknown}|undefined;
- return ['decoder_admission_deferred','resource_exhausted','decoder_limit','video_decoder_limit'].includes(String(value?.code??''))||
-   value?.message==='video_decoder_limit'||value?.message==='video_memory_budget_deferred';
+ const value=error as {code?:unknown;message?:unknown;name?:unknown}|undefined;
+ return ['decoder_admission_deferred','resource_exhausted','decoder_limit','video_decoder_limit','ByteAdmissionDenied'].includes(String(value?.code??''))||
+   value?.name==='ByteAdmissionDenied'||value?.message==='ByteAdmissionDenied'||value?.message==='video_decoder_limit'||value?.message==='video_memory_budget_deferred';
 }
 
 /** Inspect messages only inside this boundary; output is a fixed enum, never text. */
