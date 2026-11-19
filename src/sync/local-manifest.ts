@@ -209,10 +209,7 @@ export class LocalArticleManifestStore {
   for(let at=0;at<urls.length;at+=400){
    const part=urls.slice(at,at+400);
    // Android 11's SQLite builds do not include JSON1.
-   const rows=await querySyncKeysetPages(this.db,`WITH wanted(value) AS (VALUES ${part.map(()=>'(?)').join(',')}), matches AS (
-    SELECT a.id FROM wanted w JOIN articles a ON a.link=w.value
-    UNION SELECT a.id FROM wanted w JOIN articles a ON a.guid=w.value
-    UNION SELECT a.id FROM wanted w JOIN articles a ON a.dedup_key=w.value)
+   const rows=await querySyncKeysetPages(this.db,`WITH wanted(value) AS (VALUES ${part.map(()=>'(?)').join(',')})
     SELECT a.id,m.article_id AS bound_id,w.article_id AS cached_article_id,w.native_id AS cached_native_id,
      CASE WHEN w.item_id IS NULL THEN a.title END AS title,
      CASE WHEN w.item_id IS NULL THEN a.link END AS link,
@@ -220,15 +217,16 @@ export class LocalArticleManifestStore {
      CASE WHEN w.item_id IS NULL THEN a.dedup_key END AS dedup_key,
      CASE WHEN w.item_id IS NULL THEN ch.url END AS channel_url,
      CASE WHEN w.item_id IS NULL THEN i.article_id END AS cloud_rss_id
-    FROM matches JOIN articles a ON a.id=matches.id JOIN channels ch ON ch.id=a.channel_id
+    FROM articles a JOIN channels ch ON ch.id=a.channel_id
     LEFT JOIN sync_article_ids m ON m.item_id=a.id LEFT JOIN cloud_rss_article_ids i ON i.item_id=a.id
     LEFT JOIN sync_projection_wire_ids w ON w.item_id=a.id AND w.generation=?
      AND w.channel_url=ch.url AND w.link IS a.link AND w.guid IS a.guid AND w.dedup_key IS a.dedup_key
      AND w.bound_id IS m.article_id AND w.cloud_rss_id IS i.article_id
      AND length(w.article_id)=64 AND w.article_id NOT GLOB '*[^0-9a-f]*'
      AND length(w.native_id)=64 AND w.native_id NOT GLOB '*[^0-9a-f]*'
-    WHERE ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,
-    [...part,generation],{key:'id'});
+    WHERE ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>?
+    AND (a.link IN wanted OR a.guid IN wanted OR a.dedup_key IN wanted) ORDER BY a.id`,
+    [...part,generation],{key:'id',pageSize:part.length+1});
    for(const row of rows)input.set(num(row.id),row);
   }
   type Alias=Pick<CloudRssIdentity,'articleId'|'nativeArticleId'|'localArticleId'>;
