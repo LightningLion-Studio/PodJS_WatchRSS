@@ -4,6 +4,8 @@ import {afterEach, expect, mock, test} from 'bun:test';
 import {createComponent, createMemo, onCleanup} from 'solid-js';
 import * as solidRuntime from 'solid-js';
 for(const base of [Bun.resolveSync('@podjs/framework/watch',import.meta.dir),Bun.resolveSync('@pocketjs/framework',import.meta.dir)])mock.module(Bun.resolveSync('solid-js',base),()=>solidRuntime);
+import {createIndexedWindowSource} from '@podjs/framework/windowed-list';
+import type {PositionedScrollEntry,ScrollEntry} from '../src/ui/ScrollEntries.tsx';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'platform-disclosure-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
@@ -43,7 +45,15 @@ mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(input:any)=>{
  const list={input,scrolls:[] as number[],disposed:false};lists.push(list);
  const scroller={offset:()=>0,stop(){},scrollBy:(delta:number)=>list.scrolls.push(delta)};
  input.ref?.({scroller});onCleanup(()=>{list.disposed=true;});
- const children=createMemo(()=>input.entries.map((entry:any)=>entry.render()));
+ const children=createMemo(()=>{
+  const header:ScrollEntry[]=input.entries;
+  if(!input.indexedEntries)return header.map(entry=>entry.render(()=>entry));
+  const source=createIndexedWindowSource<PositionedScrollEntry,unknown>(input.indexedEntries,header,input.footerEntries);
+  return Array.from({length:source.length},(_,index)=>{
+   const row=source.at(index)!;
+   return row.render(()=>row);
+  });
+ });
  return createComponent(View,{get children(){return children();}});
 }}));
 const media:{platform:string;input:any;disposed:boolean}[]=[];
@@ -176,11 +186,12 @@ test('an offline RSS refresh keeps the cached Home channels selectable and shows
 for(const hasCache of [true,false])test(`offline single-channel pull refresh ${hasCache?'keeps cached articles usable':'can block an empty feed'}`,async()=>{
  const cached={id:'cached-rss',title:'Cached RSS',url:'https://cached.invalid/rss'};
  const article={id:'cached-article',channelId:cached.id,title:'Article from local cache',content:'<p>Local content</p>'};
- const refreshed:(string|undefined)[]=[];
+ const refreshed:(string|undefined)[]=[],opened:string[]=[];
  kv.set(INITIAL_DISCLOSURE_KEY,'true');
  const offlineServices=new Proxy(services,{get(target,key,receiver){
   if(key==='listChannels')return async()=>[cached];
   if(key==='listArticles')return async(query:{channelId?:string})=>query.channelId===cached.id&&hasCache?[article]:[];
+  if(key==='getArticle')return async(id:string)=>{opened.push(id);return hasCache&&id===article.id?article:null;};
   if(key==='refresh')return async(id?:string)=>{
    refreshed.push(id);
    throw Object.assign(new Error('Channel refresh offline'),{code:'network_error'});
@@ -203,4 +214,13 @@ for(const hasCache of [true,false])test(`offline single-channel pull refresh ${h
   refreshIndicator:text().includes('正在刷新中...'),
   localError:text().includes('Channel refresh offline'),
  }).toEqual({overlay:!hasCache,refreshIndicator:!hasCache,localError:hasCache});
+ if(hasCache){
+  let card=connected().find(node=>texts.get(node.id)?.startsWith('Article'));
+  while(card&&!card.onPress)card=card.parent;
+  expect(card,'cached article title has a pressable card').toBeDefined();
+  pressNode(card);
+  await settle();
+  expect(opened).toEqual([article.id]);
+  expect(state().at(-1)).toBe('reader');
+ }
 });
