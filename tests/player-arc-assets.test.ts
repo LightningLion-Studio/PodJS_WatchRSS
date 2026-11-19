@@ -13,9 +13,29 @@ test("rotated player artwork and the volume capsule use linear filtering", () =>
 });
 
 test("linear sampling at transparent spinner edges retains the stroke color", () => {
-  for (const name of ["video-loading-arc.svg", "video-loading-ring.svg"]) {
+  for (const [name, color] of [["video-loading-arc.svg", 255], ["video-loading-ring.svg", 255], ["player-loading.svg", 119]] as const) {
     const {rgba} = bakeSvg(icon(name), 2);
-    expect([...rgba.slice(0, 4)]).toEqual([255, 255, 255, 0]);
+    expect([...rgba.slice(0, 4)]).toEqual([color, color, color, 0]);
+  }
+});
+
+test("the spinning textures keep their ink inside the central half at both raster densities", () => {
+  const images = JSON.parse(readFileSync(new URL("../src/images.json", import.meta.url), "utf8"));
+  for (const name of ["video-loading-arc.svg", "player-loading.svg"]) {
+    expect(images["../assets/icons/" + name].psm).toBe(2);
+    for (const density of [1, 2]) {
+      const {width, height, rgba} = bakeSvg(icon(name), density);
+      expect([width, height]).toEqual([64 * density, 64 * density]);
+      let inkPixels = 0;
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        if (!rgba[4 * (y * width + x) + 3]) continue;
+        if (Math.hypot(x + .5 - width / 2, y + .5 - height / 2) > width / 4 + .71) {
+          throw Error("rotating artwork extends outside its visible circle");
+        }
+        inkPixels++;
+      }
+      expect(inkPixels).toBeGreaterThan(100 * density * density);
+    }
   }
 });
 

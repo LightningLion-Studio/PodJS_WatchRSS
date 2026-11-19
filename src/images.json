@@ -1,12 +1,14 @@
 {
   "../assets/icons/player-loading.svg": {
-    "linear": true
+    "linear": true,
+    "psm": 2
   },
   "../assets/icons/video-loading-ring.svg": {
     "linear": true
   },
   "../assets/icons/video-loading-arc.svg": {
-    "linear": true
+    "linear": true,
+    "psm": 2
   },
   "../assets/icons/volume-capsule.svg": {
     "linear": true

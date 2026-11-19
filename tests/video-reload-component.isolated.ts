@@ -164,6 +164,9 @@ test('RELOAD a visible loading phase change retains the rotating image and its n
  const root=createRoot(stop=>{stops.push(stop);return PlayerLoadingIndicator({visible:true,get phase(){return phase();},width:233,height:233});});
  const arc=()=>nodes(root).find(n=>n.props.src?.includes('video-loading-arc'))!;
  const mounted=arc();
+ const clip=nodes(root).find(n=>n.props.class?.includes('overflow-hidden')&&nodes(n.props.children).includes(mounted));
+ expect(clip?.props.style).toMatchObject({width:22,height:22});
+ expect(mounted.props.style).toMatchObject({insetL:-11,insetT:-11,width:44,height:44});
  setPhase('preparing');expect(arc()).toBe(mounted);
  setPhase('buffering');expect(arc()).toBe(mounted);
  expect(arc().props.class).toContain('animate-spin');expect(frames).toHaveLength(0);
