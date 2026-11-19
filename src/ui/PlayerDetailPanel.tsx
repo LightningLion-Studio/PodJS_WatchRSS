@@ -105,7 +105,7 @@ const box = (r: Rect) => ({ insetL: r.x, insetT: r.y, width: r.width, height: r.
 
 export function PlayerDetailPanel(props: PlayerDetailProps) {
   const scale = () => Math.min(props.width, props.height) / CANVAS;
-  const left = () => (props.width - CANVAS * scale()) / 2, top = () => (props.height - CANVAS * scale()) / 2;
+  const left = () => (props.width - CANVAS) / 2, top = () => (props.height - CANVAS) / 2;
   const cover = createMemo(() => props.cover(), undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
   const info = createMemo(() => {
     const value = cover();

@@ -96,11 +96,40 @@ def check_angle(library, bundle, angle, reference):
                                      for point in CORNERS)}, reference
 
 
+def check_large_viewport(library, bundle, angle):
+    with ArrowHost(library, bundle, size=466) as host:
+        def point(x, y, turn=angle):
+            return tuple(coordinate * 2 for coordinate in rotated((x, y), turn))
+
+        host.wait()
+        for current in range(0, angle, 90):
+            host.tap(*point(163, 29, current))
+            host.wait()
+        assert host.state["rotation"] == angle, f"rotate button missed at {angle}°"
+        host.tap(*point(208, 116))
+        host.wait()
+        assert host.state["panel"], f"scaled arrow missed at {angle}°"
+        host.frame(crown=41000)
+        host.wait()
+        host.tap(*point(198, 119))
+        host.wait()
+        assert host.media["positionMs"] == 4000, f"scaled stepper missed at {angle}°"
+        host.touch_path([point(x, 116) for x in (61, 116, 171)])
+        host.wait()
+        assert not host.state["panel"] and host.state["rotation"] == angle
+        return {"angle": angle, "size": host.size, "arrowHit": True,
+                "seekMs": host.media["positionMs"], "swipeBack": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lib", required=True, type=Path)
     parser.add_argument("--package", required=True, type=Path)
+    parser.add_argument("--large-viewport", action="store_true")
     args = parser.parse_args()
+    if args.large_viewport:
+        print(json.dumps([check_large_viewport(args.lib, args.package, angle) for angle in ANGLES], indent=2))
+        return 0
     results, reference = [], None
     for angle in ANGLES:
         result, reference = check_angle(args.lib, args.package, angle, reference)

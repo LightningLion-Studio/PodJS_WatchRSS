@@ -940,14 +940,14 @@ const rotatedSwipes = [
  {angle:0, turns:4, width:233, height:200, up:[0,-1]},
 ] as const;
 
-for(const useSessions of [false,true])for(const {angle,turns,width,height,up} of rotatedSwipes)
+for(const [immersive,useSessions] of [[true,false],[true,true],[false,false]] as const)for(const {angle,turns,width,height,up} of rotatedSwipes)
 for(const direction of ['next','previous'] as const){
- test(`DYROTATE ${angle}° after ${turns} turns ${direction} keeps the rotation sessions=${useSessions}`,async()=>{
+ test(`DYROTATE ${angle}° after ${turns} turns ${direction} keeps the rotation immersive=${immersive} sessions=${useSessions}`,async()=>{
   sessionsCapable=useSessions;decoderLimit=3;initial='available';gestures.length=0;
   sessionCalls.length=0;sessionStates.clear();boundsCalls.length=0;prepares=[];
   const savedNow=Date.now;let now=1000;Date.now=()=>now;
   try{
-   const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+   const source=(id:string)=>({platform:'douyin' as const,immersive,awemeId:id,url:'managed/'+id,title:id});
    const adjacent={next:source('b'),previous:source('z')};
    let selection:string|undefined;
    let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
@@ -982,6 +982,9 @@ for(const direction of ['next','previous'] as const){
    else{
     expect(dragBounds.translateX).toBeCloseTo(dx);
     expect(dragBounds.translateY).toBeCloseTo(dy);
+    expect(dragBounds.pagerOffset.x).toBeCloseTo(dx);
+    expect(dragBounds.pagerOffset.y).toBeCloseTo(dy);
+    expect(dragBounds.roundClip).toEqual({cx:width/2,cy:height/2,radius:height/2});
    }
    expect(handle.gestureRotation()).toBe(angle);
    const replacement=useSessions?sessionCalls.find(c=>c.method==='promote'):prepares.at(-1);
@@ -1080,3 +1083,35 @@ for(const useSessions of [false,true])for(const {angle:start,up} of rotatedSwipe
   }
  });
 }
+
+test('GEMINI scaled picture controls and playback overlays share the tween pivot',async()=>{
+ initial='available';prepares=[];current=state('idle');
+ const savedNow=Date.now;let now=1000;Date.now=()=>now;
+ try{
+  let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+   source:{platform:'douyin',url:'file:///mock.mp4',title:'mock'},
+   width:466,height:466,active:true,offset:0,round:false,ref:value=>{handle=value;},onNext:()=>{},
+   onPrepareAdjacent:async()=>undefined,
+  });});
+  await flush();
+  const findIcon=(icon:string)=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&
+   nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));
+  findIcon('loop-off')!.props.onPress();
+  current={...state('buffering'),buffered:false};await flush();
+  const contains=(node:Node,predicate:(node:Node)=>boolean)=>nodes(node.props.children).some(predicate);
+  for(let turn=0;turn<4;turn++){
+   findIcon('rotate')!.props.onPress();
+   for(const delta of [60,240]){
+    now+=delta;frames.forEach(fn=>fn());await flush();
+    const visible=nodes(root),angle=handle.gestureRotation();
+    const controls=visible.find(n=>n.props.style?.scale===2&&contains(n,c=>c.props.debugName==='VideoPlayerRotate'));
+    expect(controls?.props.style).toMatchObject({insetL:116.5,insetT:116.5,width:233,height:233,rotate:angle});
+    const overlays=visible.find(n=>n.props.style?.rotate===angle&&
+     contains(n,c=>c.kind==='Text'&&c.props.children==='单视频循环')&&
+     contains(n,c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-loading.svg'));
+    expect(overlays?.props.style).toMatchObject({rotate:angle});
+   }
+  }
+ }finally{Date.now=savedNow;}
+});

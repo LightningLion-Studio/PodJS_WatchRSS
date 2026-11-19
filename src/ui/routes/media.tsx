@@ -37,6 +37,7 @@ interface MediaRoutesProps {
   height: number;
   round: boolean;
   backOffset: () => number;
+  backTranslation?: () => {x:number;y:number};
   services: AppServices;
   channels: () => Channel[];
   playingSource: () => PlaybackSource | undefined;
@@ -195,6 +196,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           }
           active={props.active()}
           offset={props.active() ? props.backOffset() : 0}
+          offsetVector={props.active() ? props.backTranslation?.() : undefined}
           round={props.round}
           onProgress={(position, duration) => {
             // A preview prefix must not overwrite full-video resume/history state.

@@ -10,7 +10,7 @@ import { playerGesture } from "../../../src/ui/player-gestures.ts";
 import { VideoPlayerScreen, type PlaybackSource, type VideoPlayerHandle } from "../../../src/ui/VideoPlayerScreen.tsx";
 
 const { logicalWidth: width, logicalHeight: height } = getDisplayMetrics();
-if (width !== 233 || height !== 233) throw Error("DYMONKEY requires a 233-unit viewport");
+if (width !== height || (width !== 233 && width !== 466)) throw Error("DYMONKEY requires a 233- or 466-unit square viewport");
 const { pod } = globalThis as unknown as { pod: { emit(message: string): void } };
 const emit = (value: Record<string, unknown>) => pod.emit(JSON.stringify(value));
 
