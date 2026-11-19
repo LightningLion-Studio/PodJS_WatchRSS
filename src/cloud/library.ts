@@ -1,3 +1,4 @@
+import {rangedLines} from '@podjs/framework/work-window';
 import {NOTE_IMAGE_LIMIT,NOTE_ARCHIVE_LIMIT} from '../notes/cloud-assets';
 import {encodeNoteCloudState,exportNoteMarkdown,noteMarkdownPath,decodeNoteCloudState,NOTES_STATE_OBJECT,NOTES_ASSETS_OBJECT} from '../notes/cloud-state';
 import type {MemoNote} from '../notes/types';
@@ -20,7 +21,7 @@ import type {JsonObject} from '../sync/protocol';
 import {utf8Encode,utf8Decode,type RssInventory} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 import {writeWrss,readWrss,indexWrss,readWrssEntry,openWrssRange,type WrssRangeReader} from './wrss';
-import type {LogicalObject,CloudObject} from './codec';
+import type {LogicalObject,CloudObject,RestoredFile} from './codec';
 import {rssSourceKey,rssArticleId,legacyWebArticleId,tryRssArticleId,isLocalOnlyRssSource,canonicalRssUrl} from './rss-identity';
 import {hasArticleRegisters} from './article-register';
 import {knownRecordValue} from './compatibility';
@@ -60,6 +61,7 @@ export class WatchCloudLibraryAdapter {
  private async checkReadingRevision(){const revision=await this.repository.cloudReadingRevision?.();if(revision!==undefined&&revision!==this.readingRevision){this.matchedReading.clear();this.readingRevision=revision;}}
  private async mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check:()=>void=()=>this.guard.require(),work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){this.guard.require();let result=0;if(remote==='cloud-records'&&articles.some(legacyBookReadingArticle)&&this.repository.mergeCloudLegacyBookReading){const fast=await this.repository.mergeCloudLegacyBookReading(articles,check);result+=fast.changed;articles=fast.remaining;this.matchedReading.clear();this.readingRevision=undefined;if(!sources.length&&!articles.length)return result;}await this.checkReadingRevision();if(remote==='cloud-records'&&!sources.length&&articles.length&&articles.every(a=>a.rssSourceUrl&&!privateCloudBody(a)&&!a.deleted&&!a.contentText&&!a.contentHtml)&&this.repository.mergeCloudPublicMetadata){const fast=await this.repository.mergeCloudPublicMetadata(articles,check,work);result+=fast.changed;articles=fast.remaining;}if(sources.length||articles.length)result+=await this.repository.mergeCloud(sources,articles,remote,check);this.readingRevision=await this.repository.cloudReadingRevision?.();return result;}
  private overlay:PrivateOverlayReadSet;
+ get supportsBookFileRestore(){return !!this.repository.receiveCloudBookFile;}
  constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){this.crypto={...crypto,sha256:memoizeSmallDigest(bytes=>crypto.sha256(bytes),{beforeUse:()=>this.guard.require()})};this.overlay=new PrivateOverlayReadSet(this.crypto);}
  /** A local projection may omit fields held only by an authenticated record.
   * Resolve that one basis on demand; never turn default clocks into an edit. */
@@ -272,7 +274,7 @@ export class WatchCloudLibraryAdapter {
  private restoreArticles?:Map<string,ExportedArticle>;
  private restoreMetadataAfter=0;private restoreMetadataEnded=false;
  private restoreReaderIndex=new Map<string,ExportedArticle[]>();private restoreReaderTail?:IterableIterator<ExportedArticle>;private restoreReaderPending:ExportedArticle[]=[];private restoreReaderPendingAt=0;private restoreReaderSeen=new Set<string>();
- async restorePayloads(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudObject[]=[],options?:{checkpoint:RestoreApplyCheckpoint;onBookApplied?:(bookId:string)=>void|Promise<void>;skipReading?:boolean;archiveReader?:WrssRangeReader;inflate?:(b:Uint8Array,max:number)=>Promise<Uint8Array>}){
+ async restorePayloads(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudObject[]=[],options?:{checkpoint:RestoreApplyCheckpoint;onBookApplied?:(bookId:string)=>void|Promise<void>;skipReading?:boolean;archiveReader?:WrssRangeReader;bookFile?:{name:string;open:()=>Promise<RestoredFile>};inflate?:(b:Uint8Array,max:number)=>Promise<Uint8Array>}){
   this.guard.require();
   let noteChanged=0;
   const state=payload.get(NOTES_STATE_OBJECT),assets=payload.get(NOTES_ASSETS_OBJECT);
@@ -300,7 +302,9 @@ export class WatchCloudLibraryAdapter {
   }
   if([...payload.keys()].every(name=>name===NOTES_STATE_OBJECT||name===NOTES_ASSETS_OBJECT))return {changed:noteChanged,pending:0,abandoned:0,warnings:[]};
   const decoded:{sources:SyncedSource[];articles:ExportedArticle[]}[]=[],warnings:string[]=[];let pending=0,abandoned=0;
-  let bookChanged=0;const bookBodies:{descriptor:Record<string,any>;bytes?:Uint8Array;loadBytes?:()=>Promise<Uint8Array|undefined>}[]=[];for(const o of descriptors)if(o.privateBook)bookBodies.push({descriptor:o.privateBook,bytes:payload.get(o.name)});
+  let bookChanged=0;
+  const bookBodies:{descriptor:Record<string,any>;bytes?:Uint8Array;loadBytes?:()=>Promise<Uint8Array|undefined>;open?:()=>Promise<RestoredFile>}[]=[];
+  for(const o of descriptors)if(o.privateBook)bookBodies.push({descriptor:o.privateBook,bytes:payload.get(o.name),open:options?.bookFile?.name===o.name?options.bookFile.open:undefined});
   const currentArticles=options?(this.restoreArticles??=new Map<string,ExportedArticle>()):new Map<string,ExportedArticle>();
   if(!this.repository.cloudRestoreMetadata&&!currentArticles.size)for(const a of (await this.repository.cloudSnapshot(false,()=>this.guard.require())).stateArticles)currentArticles.set(a.articleId,a);
   const loadCurrent=async(rows:readonly {articleId?:string;url?:string}[])=>{if(!this.repository.cloudRestoreMetadata)return;const all=rows.filter(a=>typeof a?.articleId==='string'&&!currentArticles.has(a.articleId));if(!all.length)return;for(let at=0;at<all.length;at+=50){const missing=all.slice(at,at+50);let after=0;for(;;){await options?.checkpoint.check();const page=await this.repository.cloudRestoreMetadata({ids:missing.map(a=>a.articleId!),urls:missing.flatMap(a=>a.url?[a.url]:[]),after,limit:100},()=>this.guard.require());for(const a of page.articles){currentArticles.set(a.articleId,a);for(const alias of a.cloudLegacyArticleIds??[])if(!currentArticles.has(alias))currentArticles.set(alias,a);}if(page.next===undefined)break;after=page.next;}}};
@@ -384,7 +388,45 @@ export class WatchCloudLibraryAdapter {
    readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});
   }
   for(const [name,body]of payload)if(name.startsWith('reader/')&&!seen.has(name)){const a=await findReader(name,true);if(a)readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});else lost();}
-  for(const body of bookBodies){const d=body.descriptor;let bytes=body.bytes;await options?.checkpoint.check();if(options?.checkpoint.has('book:'+d?.bookId))continue;if(d?.bookId&&!this.overlay.allow('book',d.bookId,remote,overlays.some(e=>e.kind==='book'&&e.id===d.bookId)?d.packagePath:undefined))continue;if(!d||!/^([a-f0-9]{64})$/.test(d.bookId)||d.packagePath!=='books/'+d.bookId+'.jsonl'||!Number.isSafeInteger(d.chapterCount)||d.chapterCount<1){lost();continue;}if(!bytes&&body.loadBytes)bytes=await body.loadBytes();if(!bytes){retry();continue;}if(!this.repository.receiveCloudBook){retry();continue;}try{const header=parseBookHeader(utf8Decode(bytes.subarray(0,bytes.indexOf(10))));if(header.chapterCount!==d.chapterCount||header.instanceId!==d.instanceId)throw Error('book_count_mismatch');await validateBook({bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind,...(d.instanceId===undefined?{}:{instanceId:d.instanceId}),...(d.lifecycle===undefined?{}:{lifecycle:d.lifecycle})},this.crypto.sha256);if(d.lifecycle&&this.repository.mergeCloudBooks)bookChanged+=await this.repository.mergeCloudBooks([{bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:d.lifecycle.startedAt,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind,...(d.instanceId===undefined?{}:{instanceId:d.instanceId}),lifecycle:d.lifecycle}],[]);const applied=await this.repository.receiveCloudBook(d.bookId,bytes,options?.checkpoint);bookChanged+=applied;await options?.onBookApplied?.(d.bookId);await options?.checkpoint.commit('book:'+d.bookId);}catch(error){rethrowSnapshotDeferred(error);await options?.checkpoint.check();if(/book_sync_invalid|fingerprint|identity|directory|count_mismatch|invalid_book|JSON|SyntaxError/.test(String(error)))lost();else retry();}}
+  for(const body of bookBodies){
+   const d=body.descriptor,cp=options?.checkpoint;
+   await cp?.check();
+   if(cp?.has('book:'+d?.bookId))continue;
+   if(d?.bookId&&!this.overlay.allow('book',d.bookId,remote,overlays.some(e=>e.kind==='book'&&e.id===d.bookId)?d.packagePath:undefined))continue;
+   if(!d||!/^[a-f0-9]{64}$/.test(d.bookId)||d.packagePath!=='books/'+d.bookId+'.jsonl'||!Number.isSafeInteger(d.chapterCount)||d.chapterCount<1){lost();continue;}
+   const open=body.open;
+   const bytes=body.bytes??await body.loadBytes?.();
+   if(open? !cp||!this.repository.receiveCloudBookFile : !bytes||!this.repository.receiveCloudBook){retry();continue;}
+   let file:RestoredFile|undefined;
+   try{
+    file=await open?.();
+    let headerText:string;
+    if(file){
+     const source=file;
+     const lines=rangedLines(async(offset,max)=>({size:source.size,bytes:await source.read(offset,max)}),source.size);
+     const first=await lines.next();
+     await lines.return(undefined);
+     if(first.done)throw Error('book_package_invalid');
+     headerText=first.value.text;
+    }else{
+     headerText=utf8Decode(bytes!.subarray(0,bytes!.indexOf(10)));
+    }
+    const header=parseBookHeader(headerText);
+    if(header.chapterCount!==d.chapterCount||header.instanceId!==d.instanceId)throw Error('book_count_mismatch');
+    const state=await validateBook({bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,
+     deleted:false,deletedAt:0,updatedAt:d.lifecycle?.startedAt??0,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind,
+     ...(d.instanceId===undefined?{}:{instanceId:d.instanceId}),...(d.lifecycle===undefined?{}:{lifecycle:d.lifecycle})},this.crypto.sha256);
+    if(d.lifecycle&&this.repository.mergeCloudBooks)bookChanged+=await this.repository.mergeCloudBooks([state],[]);
+    bookChanged+=file?await this.repository.receiveCloudBookFile!(d.bookId,file,cp!):await this.repository.receiveCloudBook!(d.bookId,bytes!,cp);
+    await options?.onBookApplied?.(d.bookId);
+    await cp?.commit('book:'+d.bookId);
+   }catch(error){
+    rethrowSnapshotDeferred(error);
+    await cp?.check();
+    if(/book_sync_invalid|fingerprint|identity|directory|count_mismatch|invalid_book|JSON|SyntaxError/.test(String(error)))lost();
+    else retry();
+   }finally{await file?.close();}
+  }
   if(readers.length)decoded.push({sources:[],articles:readers});let changed=bookChanged+noteChanged;for(const value of decoded){changed+=await this.mergeCloud(value.sources,value.articles,remote,()=>this.guard.require());remember(value.articles);}if(!options?.skipReading)changed+=await this.applyReadingStates();return {changed,pending,abandoned,warnings};
  }
  async mergeInventory(inventory:RssInventory,options?:{checkpoint:RestoreApplyCheckpoint;skipReading?:boolean}){

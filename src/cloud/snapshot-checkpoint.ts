@@ -129,6 +129,35 @@ export class SnapshotRestoreCheckpoint {
   if(contentHash&&await this.hash(bytes)!==contentHash)throw Error('cloud_snapshot_projection_integrity');
   await this.writeBlob(token,utf8Encode(cpuJsonStringify(index)));await this.commit('decoded:'+token,length);return bytes;
  });}
+ get supportsFileProjection(){return this.codec.batchedRestoreFiles;}
+ async openFile(token:string,length:number,digest?:string){
+  return this.readBatch(async()=>{
+   await this.current();
+   const index=await this.index(token);
+   if(!this.has('decoded:'+token)||!index||index.provisional||index.length!==length||
+      length>64*1024*1024||index.parts.some(id=>!Object.prototype.hasOwnProperty.call(this.value.projections,id)))throw Error('cloud_snapshot_projection_missing');
+   const key=await this.accountKey();
+   if(!key)throw Error('missing_key_version');
+   try{
+    const file=await this.codec.openRestoreFile(key,await this.partPaths(index,0,index.parts.length),length);
+    try{
+     await this.current();
+     if(file.size!==length||digest&&file.sha256!==digest)throw Error('cloud_snapshot_projection_integrity');
+     return file;
+    }catch(error){await file.close();throw error;}
+   }catch(error){
+    const match=/sealed_part_invalid_([0-9]+)/.exec(String(error));
+    if(match){
+     const id=index.parts[Number(match[1])];
+     if(id){await this.forgetProjection(id);await this.invalidate('decoded:'+token);}
+    }
+    throw error;
+   }
+  });
+ }
+ private partPaths(index:ProjectionIndex,first:number,end:number){
+  return Promise.all(index.parts.slice(first,end).map(async(id,i)=>({path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:index.lengths[first+i]})));
+ }
  private async openParts(index:ProjectionIndex):Promise<Uint8Array>{
   const key=await this.accountKey();if(!key)throw Error('missing_key_version');
   // The host bounds one open to 64 MiB. Large objects use the same native path
@@ -136,7 +165,7 @@ export class SnapshotRestoreCheckpoint {
   let output:Uint8Array|undefined,at=0;
   for(let first=0;first<index.parts.length;){let end=first,bytes=0;while(end<index.parts.length&&bytes+index.lengths[end]<=64*1024*1024){bytes+=index.lengths[end++];}
    if(end===first)throw Error('cloud_snapshot_checkpoint_invalid');await this.current();
-   try{const part=await this.codec.openRestoreParts(key,await Promise.all(index.parts.slice(first,end).map(async(id,i)=>({path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:index.lengths[first+i]}))),bytes);if(part.length!==bytes)throw Error('cloud_snapshot_projection_missing');if(first===0&&end===index.parts.length)return part;(output??=new Uint8Array(index.length)).set(part,at);at+=part.length;}
+   try{const part=await this.codec.openRestoreParts(key,await this.partPaths(index,first,end),bytes);if(part.length!==bytes)throw Error('cloud_snapshot_projection_missing');if(first===0&&end===index.parts.length)return part;(output??=new Uint8Array(index.length)).set(part,at);at+=part.length;}
    catch(error){await this.current();const match=/sealed_part_invalid_([0-9]+)/.exec(String(error));if(match){const i=first+Number(match[1]);if(i<end)await this.forgetProjection(index.parts[i]);}throw error;}
    first=end;
   }

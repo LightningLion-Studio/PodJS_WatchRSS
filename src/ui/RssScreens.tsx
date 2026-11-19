@@ -1,15 +1,17 @@
-import {feedCardLayout} from './feed-card-layout.ts';
 import {DeleteConfirmDialog} from "./DeleteConfirmDialog.tsx";
 import {isDeletableLocalContentChannel} from "../core/imported-content.ts";
 import {shareActionEnabled} from "../sharing/policy.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { measuredLines, watchTitleLines } from "../reader/measured-text.ts";
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
-import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { ScrollEntries, type ScrollEntry, type IndexedScrollEntries } from "./ScrollEntries.tsx";
 import { SwipeCard } from "./SwipeCard.tsx";
+import {createFeedCardLayouts, type FeedCardGeometry} from "./feed-card-layout.ts";
+import {createFontGeometryRevision} from "@podjs/framework/font-geometry";
+import {onMemoryTrim} from "@podjs/framework/memory";
 import type { Article } from "./service.ts";
 
 const measureFor=(size:number)=>(text:string)=>getOps().measureText(text,size===21?23:size===14?1:size===9?19:size===12?0:20);
@@ -38,7 +40,8 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
   let lastAutoLoadCount=-1;
   function requestVisible(first:number,last:number) {
     if(!props.originalEnabled||!props.onOriginalContents)return;
-    const ids=props.items.slice(Math.max(0,first-1),Math.max(0,last)).filter(a=>!requested.has(a.id)).map(a=>a.id);
+    const start=entries().length;
+    const ids=props.items.slice(Math.max(0,first-start),Math.max(0,last+1-start)).filter(a=>!requested.has(a.id)).map(a=>a.id);
     if(!ids.length)return;ids.forEach(id=>requested.add(id));props.onOriginalContents(ids);
   }
   // Native FeedHeader formats "$title ⓘ" when the title opens channel info.
@@ -46,28 +49,54 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
   const INFO_ADVANCE=18.5,INFO_BOX=19.2;
   // watchTitleLines drops spaces in CJK titles, so the hint is measured as its own unit ("ⓘ" = space + icon).
   const titleMeasure=(text:string)=>text.endsWith("ⓘ")?measureFor(21)(text.slice(0,-1).trimEnd())+INFO_ADVANCE:measureFor(21)(text);
-  const header=createMemo(()=>watchTitleLines(props.onInfo?`${props.title}ⓘ`:props.title,props.width-36,titleMeasure,150,190,props.onInfo?"ⓘ":undefined,2));
+  const fontRevision=createFontGeometryRevision([1,19,23]);
+  const header=createMemo(()=>{fontRevision();return watchTitleLines(props.onInfo?`${props.title}ⓘ`:props.title,props.width-36,titleMeasure,150,190,props.onInfo?"ⓘ":undefined,2);});
   const headerText=(line:string)=>line.endsWith("ⓘ")?line.slice(0,-1).trimEnd():line;
-  const cachedRows=new WeakMap<Article,{layout:ReturnType<typeof feedCardLayout>;imageUrl:Article['imageUrl'];entry:ScrollEntry}>();
-  const rowEntries=createMemo(()=>props.items.map(a=>{
-      const layout=feedCardLayout(a,props.width,measureFor),cached=cachedRows.get(a);
-      if(cached?.layout===layout&&cached.imageUrl===a.imageUrl)return cached.entry;
-      const {image,padding,title,summary,cardHeight,top,firstIndent}=layout;
-      const entry:ScrollEntry={height:cardHeight,render:()=> <SwipeCard onOpen={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onOpen(a);}} onActions={()=>props.onActions(a)} onFavorite={()=>{setOpenSwipeId(null);props.onFavorite(a);}} onWatchLater={()=>{setOpenSwipeId(null);props.onWatchLater(a);}} open={openSwipeId()===a.id} swipeEnabled={(props.active??true)&&!scrolling()} onStartSwipe={()=>{if(openSwipeId()!==a.id)setOpenSwipeId(null);}} onOpenSwipe={()=>setOpenSwipeId(a.id)} onCloseSwipe={()=>{if(openSwipeId()===a.id)setOpenSwipeId(null);}}>
-        {image && <RemoteImage url={a.imageUrl!} width={props.width-36} height={cardHeight} fit="cover" class="absolute left-[0] top-[0]"/>}
-        {image && <View class="absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]"/>}
-        {!a.read && <View class="absolute w-[7] h-[7] rounded-full bg-[#ff6026]" style={{insetL:padding,insetT:top+6}}/>}
-        <For each={title}>{(line,index)=><Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{insetL:padding+(index()===0?firstIndent:0),insetR:padding,insetT:top+index()*18}}>{line}</Text>}</For>
-        <Text class={image?"absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]":"absolute text-[9px] leading-[9.9] text-[#b6b6b6b3]"} style={{insetL:padding,insetR:padding,insetT:top+2+title.length*18}}>{summary.join("\n")}</Text>
-      </SwipeCard>};
-      cachedRows.set(a,{layout,imageUrl:a.imageUrl,entry});return entry;
-    }));
   const entries=createMemo<ScrollEntry[]>(()=>[
     {height:18+header().length*27+16,render:()=> <View onPress={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onInfo?.();}} focusable={!!props.onInfo} class="absolute inset-0 items-center"><For each={header()}>{(line,index)=>{const text=headerText(line),icon=line.endsWith("ⓘ"),width=()=>measureFor(21)(text)+(icon?INFO_ADVANCE:0),left=()=>(props.width-36-width())/2;
         return icon?<><Text class="absolute top-[0] text-[21px] leading-[27] text-[#f5f5f5]" style={{insetL:left(),insetT:9.5+index()*27}}>{text}</Text><Image src="../assets/icons/info-hint.svg" class="absolute w-[18.6] h-[18.6]" style={{insetL:left()+measureFor(21)(text)-0.6,insetT:9.5+index()*27+4.65}}/></>
           :<Text class="absolute left-[0] right-[0] text-[21px] leading-[27] text-center text-[#f5f5f5]" style={{insetT:9.5+index()*27}}>{text}</Text>;}}</For><Text class="absolute left-[0] right-[0] text-[9px] leading-[12] text-center text-[#b6b6b6]" style={{insetT:11+header().length*27}}>{props.refreshing?"正在刷新中...":"下拉刷新"}</Text></View>},
     ...(props.leading??[]),
-    ...rowEntries(),
+  ]);
+  type ArticleRowData = {article: Article; geometry: FeedCardGeometry; imageUrl: Article["imageUrl"]};
+  const articleGeometry=createFeedCardLayouts(measureFor);
+  const articleGap=8;
+  const articleScope={};
+  onCleanup(onMemoryTrim(4,level=>{if(level>0)articleGeometry.clear();}));
+  const articles=createMemo<IndexedScrollEntries>(previous=>{
+    const width=props.width-36, font=fontRevision();
+    const unreadIndent=articleGeometry.unreadIndent();
+    const indices=new Map<string,number>();
+    let top=0;
+    const rows=props.items.map((article,index)=>{
+      const geometry=articleGeometry.get(article,width,font,unreadIndent);
+      const previousRow=previous?.entries[index];
+      const previousData=previousRow?.data as ArticleRowData|undefined;
+      const sameData=previousData?.article===article && previousData.geometry===geometry && previousData.imageUrl===article.imageUrl;
+      const row=sameData && previousRow?.top===top ? previousRow : {
+        key:article.id, data:sameData ? previousData : {article,geometry,imageUrl:article.imageUrl},
+        top, height:geometry.height, render:renderArticle,
+      };
+      indices.set(article.id,index);
+      top+=geometry.height+articleGap;
+      return row;
+    });
+    articleGeometry.retain(indices);
+    return {entries:rows,indices,scope:articleScope,trailingGap:articleGap};
+  });
+  function renderArticle(current?:()=>ScrollEntry){
+    const data=()=>current!().data as ArticleRowData;
+    const article=()=>data().article, geometry=()=>data().geometry, id=()=>article().id;
+    const image=()=>data().imageUrl;
+    return <SwipeCard onOpen={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onOpen(article());}} onActions={()=>props.onActions(article())} onFavorite={()=>{setOpenSwipeId(null);props.onFavorite(article());}} onWatchLater={()=>{setOpenSwipeId(null);props.onWatchLater(article());}} open={openSwipeId()===id()} swipeEnabled={(props.active??true)&&!scrolling()} onStartSwipe={()=>{if(openSwipeId()!==id())setOpenSwipeId(null);}} onOpenSwipe={()=>setOpenSwipeId(id())} onCloseSwipe={()=>{if(openSwipeId()===id())setOpenSwipeId(null);}}>
+      <Show when={image()}>{url=><RemoteImage url={url()} width={props.width-36} height={geometry().height} fit="cover" class="absolute left-[0] top-[0]"/>}</Show>
+      <Show when={image()}><View class="absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]"/></Show>
+      <Show when={!article().read}><View class="absolute w-[7] h-[7] rounded-full bg-[#ff6026]" style={{insetL:geometry().padding,insetT:geometry().top+6}}/></Show>
+      <For each={geometry().title}>{(line,index)=><Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{insetL:geometry().padding+(index()===0?geometry().firstIndent:0),insetR:geometry().padding,insetT:geometry().top+index()*18}}>{line}</Text>}</For>
+      <Text class={image()?"absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]":"absolute text-[9px] leading-[9.9] text-[#b6b6b6b3]"} style={{insetL:geometry().padding,insetR:geometry().padding,insetT:geometry().top+2+geometry().title.length*18}}>{geometry().summary}</Text>
+    </SwipeCard>;
+  }
+  const footer=createMemo<ScrollEntry[]>(()=>[
     ...(!props.items.length?props.empty??[{height:48,render:()=> <Text class="text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
     ...(props.items.length?[{height:52,render:()=> {
       const label=props.loadingMore?"加载中...":props.canNext?"加载更多":"没有更多";
@@ -81,7 +110,7 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
       </View>;
     }}]:[])
   ]);
-  return <ScrollEntries height={props.height} entries={entries()} verticalPadding={12} gap={8} inputActive={()=>props.active??true} settleKey={props.originalEnabled} onSettledRange={(first,last)=>{
+  return <ScrollEntries height={props.height} entries={entries()} indexedEntries={articles()} footerEntries={footer()} verticalPadding={12} gap={articleGap} inputActive={()=>props.active??true} settleKey={props.originalEnabled} onSettledRange={(first,last)=>{
     requestVisible(first,last);
     if(props.canNext&&!props.loadingMore&&last>=props.items.length+(props.leading?.length??0)&&lastAutoLoadCount!==props.items.length){lastAutoLoadCount=props.items.length;props.onNext();}
   }} onScrollStateChange={value=>{setScrolling(value);if(value)setOpenSwipeId(null);props.onOriginalPaused?.(value);}} onRefresh={props.onRefresh} ref={props.ref}/>;

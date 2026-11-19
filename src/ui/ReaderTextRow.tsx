@@ -11,7 +11,7 @@ import { requiresReaderSystemText, readerTextLineOptions } from "../reader/syste
 
 type TextRow = ReaderRow & { kind: "text" };
 
-export type ReaderTextEnvironment=Pick<TextEnvironment,"pixelScale"|"rasterSupported"|"fontMetrics">;
+export type ReaderTextEnvironment=Pick<TextEnvironment,"pixelScale"|"rasterSupported"|"fontMetrics">&{revision?:number};
 export const createReaderTextEnvironment=createTextEnvironment;
 
 /** The shared reader text primitive used by article, full-preview and selector rows. */
@@ -32,7 +32,7 @@ export function ReaderTextRow(props: {
   onCarets?: (positions: readonly number[] | undefined,row:TextRow) => void;
 }) {
   const row = createMemo(() => props.textAlign === undefined ? props.row : ({ ...props.row, textAlign: props.textAlign }));
-  const environment = createMemo(() => props.environment ?? createReaderTextEnvironment());
+  const environment = createMemo<ReaderTextEnvironment>(() => props.environment ?? createReaderTextEnvironment());
   const pixelScale = () => environment().pixelScale;
   const style = createMemo(() => props.preset
     ? (props.style === "body" ? props.preset.body : resolvedReaderStyle(props.preset, props.style))
@@ -51,7 +51,7 @@ export function ReaderTextRow(props: {
     textAlign: props.textAlign ?? props.row.textAlign ?? 0,
   }}>{props.row.text}</Text>;
   const raster = createMemo(() => requiresReaderSystemText(props.row.text, props.preset, props.style) && environment().rasterSupported);
-  const options = createMemo(() => raster() ? readerTextLineOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, environment().fontMetrics(props.row.fontSlot), props.fonts, props.profile,props.rasterHeightExtraPx??0) : undefined);
+  const options = createMemo(() => raster() ? readerTextLineOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, environment().fontMetrics(props.row.fontSlot), props.fonts, props.profile,props.rasterHeightExtraPx??0,environment().revision) : undefined);
   const textWidth = () => Math.min(props.width, getOps().measureText(props.row.text, props.row.fontSlot) * props.row.scale);
   const left = () => (props.textAlign ?? props.row.textAlign) === 1 ? (props.width - textWidth()) / 2 : 0;
   const baseline = () => props.row.nativeBaseline ?? props.row.lineHeight * .8;

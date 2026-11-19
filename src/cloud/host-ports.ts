@@ -66,15 +66,26 @@ async function transcode(input:Uint8Array,method:string,maximum:number){
   finally{await fileChunks.remove(result.path).catch(()=>{});}
  },method==='file.gunzip'?7:6);
 }
+const openSealedFile:NonNullable<SnapshotCrypto['openSealedPartsFile']>=async(key,parts,length)=>{
+ const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{plaintext:true,keyBase64:b64(key),parts,length});
+ if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(result.path))throw Error('cloud_snapshot_projection_missing');
+ const close=async()=>{await fileChunks.remove(result.path).catch(()=>{});};
+ if(result.size!==length||!/^[a-f0-9]{64}$/.test(result.sha256)){await close();throw Error('cloud_snapshot_projection_missing');}
+ return {...result,close,read:async(offset,maxBytes)=>{
+  const part=await fileChunks.read(result.path,offset,maxBytes),output=bytes(part.dataBase64);
+  if(part.offset!==offset||part.size!==length||output.length!==Math.min(maxBytes,length-offset))throw Error('cloud_snapshot_projection_missing');
+  return output;
+ }};
+};
 const crypto:SnapshotCrypto={
  localPlaintext:true,
  atCallsite:next=>createCloudHostPorts(rawRequest,guard,next).crypto,
  gunzipSealedParts:(key,parts,length,outputPrefix,aadPrefix,maxOutputBytes,offset,receipt,allowShortOutput)=>sealedGzip(<T>(method:string,args:Record<string,unknown>)=>method==='crypto.closeSealedGzip'?request<T>(method,args):operation<T>(method,args),{plaintext:true,keyBase64:b64(key),parts,length,outputPrefix,aadPrefix,maxOutputBytes,...(allowShortOutput?{allowShortOutput:true}:{})},offset,receipt),
+ openSealedPartsFile:openSealedFile,
  openSealedParts:async(key,parts,length)=>{
-  const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{plaintext:true,keyBase64:b64(key),parts,length});
-  if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(result.path))throw Error('cloud_snapshot_projection_missing');
-  try{const output=await files.read(result.path);if(!output||output.length!==length||result.size!==length||await outputDigest(output,result.path)!==result.sha256)throw Error('cloud_snapshot_projection_missing');return output;}
-  finally{await fileChunks.remove(result.path).catch(()=>{});}
+  const result=await openSealedFile(key,parts,length);
+  try{const output=await files.read(result.path);if(!output||output.length!==length||await outputDigest(output,result.path)!==result.sha256)throw Error('cloud_snapshot_projection_missing');return output;}
+  finally{await result.close();}
  },
  contiguousOutputLimit:64*1024*1024,
  yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),

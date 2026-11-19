@@ -1145,3 +1145,52 @@ test('idle release video requests no guest frames and debug playback still sees 
   } finally {debugAllowed=false;}
  }
 });
+
+test('PERFVIDEO foreground publishes while an optional entry probe is still blocked',async()=>{
+ const f=fixture(false,()=>({prime:()=>{throw Error('unexpected prime');},releaseAll:async()=>{}})),a=item('slow-prime');
+ await f.controller.douyinNavigate({name:'entry'});
+ let release!:()=>void,calls=0,lookups=0,now=0,publishedAt:number|undefined;
+ readyOverride=()=>++calls===1?new Promise(resolve=>release=()=>resolve(undefined)):Promise.resolve(undefined);
+ lookupOverride=async()=>{lookups++;return undefined;};
+ const warm=f.controller.primeDouyinEntry(f.stack().at(-1)!,{},[a],null,41);
+ client.buildPlaybackHeaders=async()=>({});
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,entrySeq:41,onSourcePublished:()=>{publishedAt=now;}});
+ const opening=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ for(let i=0;i<80;i++)await Promise.resolve();
+ const publishedBeforeRelease=publishedAt;
+ now=1500;release();await warm;await opening;
+ console.info('PERFVIDEO entry source publication fixture ms',publishedAt);
+ expect(publishedBeforeRelease).toBe(0);
+ expect(f.source().url).toBe(a.playUrl);
+ expect(lookups).toBe(1);
+ expect(f.requests()).toBe(0);
+});
+
+test('PERFVIDEO reverse paging uses a verified bundle while the redundant preview read is blocked',async()=>{
+ const f=fixture(),a=item('reverse-a'),b=item('reverse-b');
+ const url='file:///mock/a.mp4';
+ a.variants=[{codec:'h264',format:'dash',width:480,height:854,bitrate:800000,playUrl:a.playUrl,audioUrl:'https://media.invalid/audio'}];
+ const localMovie={...a,playUrl:url,variants:[{codec:'h264',width:360,height:640,bitrate:300000,playUrl:url}]};
+ f.controller.douyinPlay({item:b,playback:b,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:b.awemeId});
+ const entry=f.stack().at(-1)!;
+ const frame={available:true,kind:'actual_frame',path:'video-frames/reverse.jpg',width:320,height:180};
+ readyOverride=async()=>({item:localMovie,url,previewFrame:{entryId:a.awemeId,frame}});
+ localPaths.set(a.awemeId,url);
+ let release:undefined|((value:unknown)=>void),now=0,preparedAt:number|undefined;
+ adjacentPreview=()=>new Promise(resolve=>release=resolve);
+ const warming=f.controller.prepareDouyinAdjacent(entry,'previous').then(result=>{preparedAt=now;return result;});
+ for(let n=0;n<80;n++)await Promise.resolve();
+ const before=preparedAt;now=600;release?.({entryId:a.awemeId,frame});
+ const prepared=await warming;
+ console.info('PERFVIDEO reverse prepared fixture ms',preparedAt);
+ expect(before).toBe(0);
+ const expected={url,previewFrame:{entryId:a.awemeId,frame},videoWidth:360,videoHeight:640};
+ expect(prepared?.source).toMatchObject(expected);
+ expect(prepared?.source.audioUrl).toBeUndefined();
+ f.controller.selectDouyinTarget(entry,'previous');
+ for(let n=0;n<80;n++)await Promise.resolve();
+ expect(f.source()).toMatchObject(expected);
+ expect(f.source().audioUrl).toBeUndefined();
+ expect(f.requests()).toBe(0);
+});

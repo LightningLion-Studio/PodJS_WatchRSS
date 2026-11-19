@@ -1238,7 +1238,9 @@ test('duplicate first frames make one functional capture, with a new exit frame 
  current=state('buffering');
  let finish!:(s:any)=>void;heldPrepare=new Promise(resolve=>finish=resolve);
  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true});});
- await flush();finish(current={...state('playing'),sourceGeneration:5});await flush();
+ const cached={...state('playing'),sourceGeneration:5,hasCachedFirstFrame:true};
+ await flush();finish(cached);await flush();jankStateChanged(current=cached);await flush();expect(captured).toBe(0);
+ jankStateChanged(current={...cached,hasCachedFirstFrame:false});await flush();expect(captured).toBe(1);
  jankStateChanged({...state('buffering'),sourceGeneration:5,hasRenderedFirstFrame:false});
  jankStateChanged({...state('playing'),sourceGeneration:5});await flush();
  expect(captured).toBe(1);
@@ -1256,4 +1258,43 @@ test('compact progress updates full checkpoint position while stale sessions and
  compactTick({sourceGeneration:6,positionMs:7000,durationMs:10000,bufferedMs:200,networkStalled:false});
  compactTick({sourceGeneration:8,sessionId:'other',positionMs:8900,durationMs:10000,bufferedMs:200,networkStalled:false});
  stops.pop()!();expect(checkpoints.at(-1)).toBe(4200);expect(prepares.at(-1).compactProgress).toBe(true);
+});
+
+test('PERFVIDEO cached preview disappears when selected playback fails',async()=>{
+ initial='available';
+ heldPrepare=Promise.reject({code:'decode_error'});
+ const source={platform:'douyin' as const,immersive:true,awemeId:'failed-preview',url:'local/fixture',title:'fixture',
+  previewFrame:{entryId:'failed-preview',frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/fixture.jpg',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}}};
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true});});
+ await flush();
+ const visible=nodes(root);
+ expect(visible.some(n=>n.kind==='Text'&&n.props.children==='重试')).toBe(true);
+ const previewCount=visible.filter(n=>n.kind==='Poster').length;
+ console.info('PERFVIDEO preview count over failure',previewCount);
+ expect(previewCount).toBe(0);
+});
+
+test('PERFVIDEO reports the real frame for its native generation after cached pixels',async()=>{
+ const globals=globalThis as typeof globalThis & {pod?:{benchmark?:(line:string)=>number}};
+ const saved=globals.pod,rows:any[]=[];
+ globals.pod={...saved,benchmark:line=>{rows.push(JSON.parse(line));return 17;}};
+ try{
+  initial='available';captured=0;current={...state('buffering'),hasRenderedFirstFrame:false,sourceGeneration:71};
+  heldPrepare=new Promise(()=>{});
+  let presented=0;
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'actual-frame',startupSeq:17,url:'file:///mock.mp4',title:'mock'},width:233,height:233,active:true,offset:0,round:true,onFirstFrame:()=>presented++});});
+  await flush();
+  const emit=(frame:Record<string,unknown>)=>{for(const listener of frameEvents)listener({...current,...frame});};
+  const live=()=>rows.filter(row=>row.startup_stage==='playback_frame_adopted');
+  emit({hasCachedFirstFrame:true,presented:true});await flush();
+  expect(presented).toBe(1);expect(live()).toHaveLength(0);
+  emit({sourceGeneration:70,hasRenderedFirstFrame:true});await flush();expect(live()).toHaveLength(0);
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:true});await flush();expect(live()).toHaveLength(0);expect(captured).toBe(0);
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:false});await flush();
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:false});await flush();
+  console.info('PERFVIDEO actual-frame receipts',live().length);
+  expect(live()).toHaveLength(1);expect(captured).toBe(1);
+  expect(live()[0]).toMatchObject({seq:17,source_generation:71});
+  expect(presented).toBe(1);
+ }finally{globals.pod=saved;}
 });

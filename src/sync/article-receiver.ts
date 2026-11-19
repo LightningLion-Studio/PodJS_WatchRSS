@@ -23,6 +23,9 @@ export interface IncomingArticle {
 import type {FileCheckpoint} from '@podjs/framework/work-window';
 export interface ArticleReceiveFiles {
  storeText(key:string,text:string,checkpoint?:FileCheckpoint):Promise<string>;
+ /** File bytes are durable immediately. The private SQL page owns directory sync. */
+ storeStagedText?(key:string,text:string,checkpoint:FileCheckpoint):Promise<string>;
+ syncStagedText?():Promise<void>;
  hydrate(text:string):Promise<string>;
 }
 /** Verified immutable text references, produced before the business transaction. */

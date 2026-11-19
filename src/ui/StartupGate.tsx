@@ -101,8 +101,8 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- // The host retains the native splash; hold it for the first screen's data, but never
- // longer than 1.5s: a resumed non-home route may not load the channel list at all.
+ // Wait for the content destination while keeping the native splash bounded
+ // when the startup data or host paint acknowledgement is slow.
  const [contentReady,setContentReady]=createSignal(false);
  void afterFirstScreen(1500).then(()=>{startupMark('splash.contentReady');setContentReady(true);});
  createEffect(()=>{if(fatal()||(session()&&(destination()!=='content'||contentReady())))void splash.release(splashOwner).catch(()=>{});});

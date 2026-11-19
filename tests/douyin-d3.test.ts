@@ -67,14 +67,15 @@ test('long RSS sessions keep every item selectable while older codec and mirror 
 });
 
 test('existing RSS rows are not measured again when another page arrives; width and content invalidate layout',async()=>{
- const {feedCardLayout}=await import('../src/ui/feed-card-layout.ts');
+ const {createFeedCardLayouts}=await import('../src/ui/feed-card-layout.ts');
  const first={id:'1',title:'retained title',content:'',read:true,excerpt:'summary'};
  let calls=0;const measure=(_slot:number)=>(text:string)=>{calls++;return 8*text.length;};
- const before=feedCardLayout(first,233,measure);expect(calls).toBeGreaterThan(0);
- feedCardLayout({...first,id:'2'},233,measure);calls=0;
- expect(feedCardLayout(first,233,measure)).toBe(before);expect(calls).toBe(0);
- expect(feedCardLayout(first,240,measure)).not.toBe(before);expect(calls).toBeGreaterThan(0);
- first.title='a new title';calls=0;feedCardLayout(first,240,measure);expect(calls).toBeGreaterThan(0);
+ const layout=createFeedCardLayouts(measure);
+ const before=layout.get(first,197,0,15);expect(calls).toBeGreaterThan(0);
+ layout.get({...first,id:'2'},197,0,15);calls=0;
+ expect(layout.get(first,197,0,15)).toBe(before);expect(calls).toBe(0);
+ expect(layout.get(first,204,0,15)).not.toBe(before);expect(calls).toBeGreaterThan(0);
+ first.title='a new title';calls=0;layout.get(first,204,0,15);expect(calls).toBeGreaterThan(0);
 });
 
 test('RSS SQLite archive batches a page, isolates retained lists and clears retired or stale rows',async()=>{

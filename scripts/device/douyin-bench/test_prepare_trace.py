@@ -14,6 +14,22 @@ class PrepareTrace(unittest.TestCase):
             original = 'prepare_stage=network_open' if bad.startswith('prepare_stage') else 'network_bytes=0'
             self.assertIsNone(parse_log(line.replace(original, bad)))
 
+    def test_new_video_stages_keep_guest_attempt_and_native_generation(self):
+        stages = {
+            'prepare_stage': ['cache_first_byte', 'codec_admission_wait', 'codec_admission_denied',
+                              'codec_factory', 'codec_factory_failed', 'admission_deferred',
+                              'admission_retry', 'admission_exhausted'],
+            'startup_stage': ['candidate_start', 'candidate_ready', 'playback_frame_adopted'],
+            'swap_stage': ['live_frame_latched'],
+        }
+        for code, values in stages.items():
+            for stage in values:
+                line = (f'1793632000.001 42 43 I DYBENCH: code={code} seq=123 mono_ms=1000 '
+                        f'{code}={stage} generation=9 source_generation=12')
+                row = parse_log(line)
+                self.assertIsNotNone(row, line)
+                self.assertEqual((stage, 9, 12), (row[code], row['generation'], row['source_generation']))
+
     def test_three_paces_use_one_device_script_and_safe_endpoints(self):
         for pace in (200, 500, 1000, 2000, 3000):
             body = script(50, pace)

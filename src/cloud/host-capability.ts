@@ -8,7 +8,7 @@ const methods=new Set([
  'content.crypto.v2.encrypt','content.crypto.v2.decrypt','content.crypto.v2.gunzip','content.crypto.hash','content.crypto.hmacSha256','content.crypto.hkdfSha256','content.crypto.random','content.crypto.aesGcmDecrypt','content.crypto.gzip',
  'crypto.random','crypto.hash','crypto.hmacSha256','crypto.verifyP256','crypto.ecdhPublicKey','crypto.ecdhUnwrap','crypto.hkdfSha256',
  'crypto.gunzipSealedParts','crypto.closeSealedGzip','crypto.openSealedParts','crypto.aesGcmEncrypt','crypto.aesGcmDecrypt','crypto.largeAesGcmEncrypt','crypto.largeAesGcmDecrypt','crypto.gzip','crypto.gunzip',
- 'log.append','http.download','uri.parse','file.list','file.createTemp','file.read','file.write','file.stat','file.hash','file.commit','file.publishBytes','file.compose','file.delete',
+ 'log.append','http.download','uri.parse','file.list','file.createTemp','file.read','file.write','file.stat','file.hash','file.commit','file.publishBytes','file.publishUtf8','file.syncDirectory','file.compose','file.delete',
  'file.gzip','file.gunzip','file.htmlText','file.openText','file.readTextChunk','file.closeText',
 ]);
 export const cloudDiagnosticHostMethod=(value:unknown):string|undefined=>typeof value==='string'&&methods.has(value)?value:undefined;
