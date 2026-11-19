@@ -1,6 +1,6 @@
 import type {HttpExportMode} from '../remote-input/exports.ts';
 import {httpExportSource} from '../remote-input/export-runtime.ts';
-import {tcp,byteStreams} from '@podjs/framework/services';
+import {tcp,byteStreams,delay} from '@podjs/framework/services';
 import {createSignal,createMemo,createEffect,onCleanup,Show} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
 import {onFrame} from '@pocketjs/framework/lifecycle';
@@ -11,6 +11,29 @@ import {QRCode} from './QRCode.tsx';
 import {DownloadPhoneAppDialog} from './DownloadPhoneAppDialog.tsx';
 import {watchUiLines} from './text-layout.ts';
 
+/** Both pairing pages wait three seconds before their one-second color transition. */
+export function useInputQrTransition(active:()=>boolean){
+ const [progress,setProgress]=createSignal(0);
+ const starts=Date.now()+3000;
+ let animating=false;
+ const advance=()=>{
+  const next=Math.min(1,Math.max(0,(Date.now()-starts)/1000));
+  setProgress(next);
+  animating=next<1;
+ };
+ createEffect(()=>{
+  if(!active())return;
+  let live=true;
+  const remaining=starts-Date.now();
+  const timer=remaining>0?delay(remaining):undefined;
+  if(timer)void timer.result.then(()=>{if(live)advance();},()=>{});
+  else advance();
+  onCleanup(()=>{live=false;animating=false;timer?.cancel();});
+ });
+ onFrame(()=>{if(animating)advance();},()=>animating);
+ return progress;
+}
+
 export function RemoteInputQr(props:{value:string;onError?:(message:string)=>void}){
  return <View class="relative w-[120] h-[120] bg-black"><View class="absolute left-[6] top-[6] w-[108] h-[108]"><QRCode value={props.value} size={108} nativeWatch onError={props.onError}/></View></View>;
 }
@@ -19,8 +42,7 @@ export function RemoteInputScreen(props:{exportMode?:HttpExportMode;width:number
  const [synced,setSynced]=createSignal(false);
  const title=()=>props.exportMode==='favorite'?'同步收藏':props.exportMode==='watchLater'?'同步稍后再看':props.exportMode==='bili'?'同步B站观看记录':'从手机输入';
  const [failure,setFailure]=createSignal('');const [download,setDownload]=createSignal(false);
- const [transition,setTransition]=createSignal(0);const opened=Date.now();
- onFrame(()=>{const next=Math.max(0,Math.min(1,(Date.now()-opened-3000)/1000));if(next!==transition())setTransition(next);});
+ const transition=useInputQrTransition(props.active);
  // The listener belongs to this visible page, including its pending reads and accept.
  createEffect(()=>{if(!props.active())return;let alive=true;setEndpoint(undefined);setFailure('');setSynced(false);const server=new RemoteInputServer(url=>{if(alive)props.onUrl(url);},error=>{if(alive)setFailure(String(error));},{tcp,streams:byteStreams},'0.0.0.0',undefined,props.exportMode?{mode:props.exportMode,source:httpExportSource,onComplete:()=>{if(alive)setSynced(true);}}:undefined);void server.ready.then(value=>{if(alive)setEndpoint(value);},error=>{if(alive)setFailure(String(error));});onCleanup(()=>{alive=false;void server.dispose();});});
  const closeDownload=()=>{if(!download())return false;setDownload(false);return true;};props.ref?.({onRootBack:closeDownload});

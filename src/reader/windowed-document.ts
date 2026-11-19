@@ -74,8 +74,10 @@ export class WindowedReaderDocument {
  }
  private groupFor(anchor:ContentAnchor&{section?:'header'|'footer'}):number {
   if(anchor.section==='header')return 0;if(anchor.section==='footer')return this.groups.length-1;
-  if(anchor.mediaIndex!==undefined){const found=this.groups.findIndex(group=>group.parts.some(part=>part.blockIndex===anchor.mediaIndex));if(found>=0)return found;}
-  let index=0;for(let i=1;i<this.groups.length&&this.groups[i]!.character<=anchor.character;i++)index=i;return index;
+  if(anchor.mediaIndex!==undefined){const first=this.ranges.get(anchor.mediaIndex)?.[0];if(first)return first.group;}
+  let low=0,high=this.groups.length;
+  while(low<high){const mid=(low+high)>>>1;if(this.groups[mid]!.character<=anchor.character)low=mid+1;else high=mid;}
+  return Math.max(0,low-1);
  }
  private groupForSource(blockIndex:number,offset:number):number{const ranges=this.ranges.get(blockIndex);if(!ranges?.length)return -1;let low=0,high=ranges.length;while(low<high){const mid=(low+high)>>>1;if(ranges[mid]!.start<=offset)low=mid+1;else high=mid;}return ranges[Math.max(0,low-1)]!.group;}
  ensureSource(blockIndex:number,offset:number){return this.ensure(this.groupForSource(blockIndex,offset));}

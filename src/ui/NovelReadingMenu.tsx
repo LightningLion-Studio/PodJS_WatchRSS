@@ -1,7 +1,8 @@
-import {createEffect,createSignal,Show,untrack} from 'solid-js';
+import {createEffect,createSignal,onCleanup,Show,untrack} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
 import {onFrame} from '@pocketjs/framework/lifecycle';
-import {novelMenuAppearance} from '../reader/novel.ts';
+import {delay} from '@podjs/framework/services';
+import {NOVEL_MENU_SHOW_MS,NOVEL_MENU_DIM_MS,novelMenuAppearance} from '../reader/novel.ts';
 import {readerColor} from '../reader/content-layout.ts';
 import {readerChrome} from '../reader/chrome.ts';
 import type {ReaderPreset} from '../reader/preset.ts';
@@ -21,13 +22,30 @@ export function NovelReadingMenu(props:{width:number;height:number;active:boolea
  const chrome=()=>readerChrome(props.preset);
  const [idleFor,setIdleFor]=createSignal(0);
  const [progress,setProgress]=createSignal(0);
- let idleSince=Date.now();
  let lastExpanded=false;
  let animating=false;
  let from=0,to=0,startedAt=0,duration=0;
- let lastIdleUpdate=0;
  let pendingAction:(()=>void)|undefined;
- createEffect(()=>{props.moving;props.expanded;props.active;idleSince=Date.now();setIdleFor(0);});
+ createEffect(()=>{
+  const idle=props.active&&!props.moving&&!props.expanded;
+  setIdleFor(0);
+  if(!idle)return;
+  const started=Date.now();
+  let live=true,timer:ReturnType<typeof delay>;
+  const update=async()=>{
+   for(const threshold of [NOVEL_MENU_SHOW_MS,NOVEL_MENU_DIM_MS]){
+    const remaining=threshold-(Date.now()-started);
+    if(remaining>0){
+     timer=delay(remaining);
+     try{await timer.result;}catch{return;}
+    }
+    if(!live)return;
+    setIdleFor(threshold);
+   }
+  };
+  onCleanup(()=>{live=false;timer?.cancel();});
+  void update();
+ });
  createEffect(()=>{
   const expanded=props.expanded;
   if(expanded===lastExpanded)return;
@@ -36,9 +54,8 @@ export function NovelReadingMenu(props:{width:number;height:number;active:boolea
   if(expanded)pendingAction=undefined;
  });
  onFrame(()=>{
-  const now=Date.now();
   if(animating){
-   const elapsed=now-startedAt;
+   const elapsed=Date.now()-startedAt;
    const next=novelMenuAnimatedProgress(from,to,elapsed,duration);
    setProgress(next);
    if(elapsed>=duration){
@@ -46,8 +63,7 @@ export function NovelReadingMenu(props:{width:number;height:number;active:boolea
     if(to===0){const action=pendingAction;pendingAction=undefined;action?.();}
    }
   }
-  if(props.active&&!props.moving&&!props.expanded&&progress()===0&&now-lastIdleUpdate>=40){lastIdleUpdate=now;setIdleFor(now-idleSince);}
- });
+ },()=>animating);
  const appearance=()=>novelMenuAppearance(idleFor(),props.moving);
  const choose=(mode:boolean)=>{
   if(!props.expanded||pendingAction)return;

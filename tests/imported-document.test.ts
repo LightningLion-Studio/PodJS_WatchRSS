@@ -1,6 +1,7 @@
 import {expect,test} from "bun:test";
 import {ImportedReaderDocument,importedBytesBefore,importedCharForByte,importedByteTarget} from "../src/reader/imported-document.ts";
-import {layoutContent} from "../src/reader/content-layout.ts";
+import {contentRows,layoutContent,readerRowKey,type ContentLayout,type ReaderRow} from "../src/reader/content-layout.ts";
+import {readerWindowEntries} from "../src/reader/window-entries.ts";
 import {ReadingProgressStore} from "../src/reader/progress.ts";
 import type {ContentBlock} from "../src/reader/content.ts";
 const handle={marker:"watchrss-watch-content:test.txt",byteLength:50000,chunkBytes:16384,chunkCount:4};
@@ -59,4 +60,81 @@ test('missing chunks fail explicitly and retry the same coordinate instead of ca
  const doc=new ImportedReaderDocument(handle,async index=>{reads.push(index);return available?'恢复正文':null;},measure,()=>{});
  await expect(doc.ensure(0)).rejects.toThrow('加载失败可重试');expect(doc.text(0)).toBeUndefined();
  available=true;await doc.ensure(0);expect(doc.text(0)).toBe('恢复正文');expect(reads).toEqual([0,0]);
+});
+
+test('sparse import snapshots keep every row, source coordinate, height and section across eviction and reflow',async()=>{
+ const count=65,book={...handle,chunkCount:count,byteLength:count*handle.chunkBytes};
+ let width=77;
+ const source=(index:number)=>index%11===0?'  \r\n':('第'+index+'节\r\n混合字形😀 '+index+' ').repeat(8);
+ const format=(block:ContentBlock)=>layoutContent([block],width,14,text=>text.length*7);
+ const doc=new ImportedReaderDocument(book,async i=>source(i),async block=>format(block),()=>{});
+ const loaded=new Map<number,ContentLayout>(),heights=new Map<number,number>();
+ const oracle=()=>{
+  const rows:ReaderRow[]=[];let top=0;
+  for(let index=0;index<count;index++){
+   const part=loaded.get(index),gap=index?6:0;
+   if(!part){const height=heights.get(index)??(index?6:1);
+    rows.push({kind:'text',text:'',blockIndex:index,character:0,sourceStart:0,top,height,gap:0,fontSlot:1,scale:1,color:'#00000000',lineHeight:height});top+=height;
+   }else{
+    part.rows.forEach((r,i)=>rows.push({...r,blockIndex:index,top:top+r.top+(i?gap:0),height:r.height+(i?0:gap),gap:r.gap+(i?0:gap)}));
+    top+=part.rows.length?part.height+gap:0;
+   }
+  }return {rows,height:top};
+ };
+ const snapshots:{layout:ContentLayout;rows:ReaderRow[]}[]=[];
+ const verify=()=>{
+  const layout=doc.layout(),list=contentRows(layout),reference=oracle(),header=41;
+  expect(list.length).toBe(reference.rows.length);expect(layout.height).toBe(reference.height);
+  expect(list.at(-list.length-1)).toBeUndefined();expect(list.at(list.length)).toBeUndefined();
+  expect(doc.anchor(12,header)).toMatchObject({section:'header',sectionOffset:12});
+  expect(doc.anchor(header+layout.height+3,header)).toMatchObject({section:'footer',sectionOffset:3});
+  for(let i=0;i<reference.rows.length;i++){
+   const row=reference.rows[i]!,actual=list.at(i)!;
+   expect(actual).toEqual(row);
+   if(!row.height)continue;
+   const y=header+row.top+row.gap+(row.height-row.gap)*.5,anchor=doc.anchor(y,header);
+   if(!loaded.has(row.blockIndex)){expect(anchor).toBeNull();continue;}
+   expect(list.at(i)).toBe(actual);
+   expect(anchor).toMatchObject({chunkIndex:row.blockIndex,charOffset:row.sourceStart});
+   expect(doc.offset(anchor!,header,Infinity)).toBeCloseTo(y,10);
+  }
+  snapshots.push({layout,rows:reference.rows});
+ };
+ const remember=(index:number)=>{
+  const text=source(index),part=text.trim()?format({type:'text',style:'body',text}):{rows:[],height:0,textLength:0};
+  loaded.set(index,part);heights.set(index,part.rows.length?part.height+(index?6:0):0);
+ };
+ verify();
+ for(const index of [0,32,64,33,1,20,0]){
+  await doc.ensure(index);remember(index);if(loaded.size>3)loaded.delete(loaded.keys().next().value!);verify();
+ }
+ width=98;heights.clear();for(const index of loaded.keys())remember(index);
+ await doc.relayout();verify();doc.close();
+ for(const {layout,rows} of snapshots)expect(layout.rows).toEqual(rows);
+});
+
+test('window entries reverse source keys including media and duplicate boundaries with bounded row ownership',()=>{
+ const layout=layoutContent([{type:'text',style:'body',text:'书'.repeat(10000)},{type:'image',url:'cover'},{type:'video',url:'play'}],30,14,s=>s.length*7);
+ const rows=[layout.rows[0]!,...layout.rows],reference=new Map(rows.map((row,i)=>[readerRowKey(row),i]));
+ let made=0;const indexed=readerWindowEntries(rows,row=>({row,serial:++made}),{});
+ expect(made).toBe(0);expect(indexed.entries.at(-1)).toBe(indexed.entries.at(rows.length-1));
+ expect(indexed.entries.at(rows.length)).toBeUndefined();expect(indexed.entries.at(-rows.length-1)).toBeUndefined();
+ for(const [key,i] of reference)expect(indexed.indices.get(key)).toBe(i);
+ for(const key of [null,{},'footer','text:00:0','image:0:0','text:900000:0'])expect(indexed.indices.get(key)).toBeUndefined();
+ expect(made).toBe(1);const first=indexed.entries.at(0);
+ for(let i=1;i<rows.length;i++)indexed.entries.at(i);
+ expect(indexed.entries.at(0)).not.toBe(first);
+});
+
+test('fractional imported line heights keep exact section and row edges through thousands of unseen chunks',async()=>{
+ const count=8192,book={...handle,chunkCount:count,byteLength:count*handle.chunkBytes};
+ const measured=1234.567;
+ const doc=new ImportedReaderDocument(book,async()=>'句',async block=>{
+  const layout=await measure(block),row=layout.rows[0]!;
+  return {rows:[{...row,height:measured}],height:measured,textLength:1};
+ },()=>{});
+ await doc.ensure(0);const layout=doc.layout(),rows=contentRows(layout);
+ let top=measured;
+ for(let i=1;i<count;i++){expect(rows.at(i)!.top).toBe(top);top+=6;}
+ expect(layout.height).toBe(top);expect(doc.anchor(top,0)?.section).toBe('footer');
 });

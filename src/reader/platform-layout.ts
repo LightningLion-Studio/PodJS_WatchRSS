@@ -97,9 +97,15 @@ export function* readerTextChunks(text:string,maximum=8192):Generator<{offset:nu
  if(!Number.isInteger(maximum)||maximum<2)throw new RangeError('Invalid reader window');
  if(!text.length){yield {offset:0,text:''};return;}
  for(let offset=0;offset<text.length;){
-  let end=Math.min(text.length,offset+maximum);
-  if(end<text.length){const newline=text.lastIndexOf('\n',end-1);if(newline>offset+maximum/2)end=newline+1;else if(/[\uD800-\uDBFF]/.test(text[end-1]!)||text[end-1]==='\r'&&text[end]==='\n')end--;}
-  yield {offset,text:text.slice(offset,end)};offset=end;
+  let chunk=text.slice(offset,offset+maximum);
+  if(offset+chunk.length<text.length){
+   // Search this window only. A paragraph without newlines must not scan
+   // its entire preceding text again for every chunk.
+   const newline=chunk.lastIndexOf('\n');
+   if(newline>maximum/2)chunk=chunk.slice(0,newline+1);
+   else if(/[\uD800-\uDBFF]/.test(chunk[chunk.length-1]!)||chunk.endsWith('\r')&&text[offset+chunk.length]==='\n')chunk=chunk.slice(0,-1);
+  }
+  yield {offset,text:chunk};offset+=chunk.length;
  }
 }
 

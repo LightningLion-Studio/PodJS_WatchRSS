@@ -26,7 +26,7 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
     draft.setMarkdown(value);syncHistoryState();
     void bodyInput?.setValue(value).catch(error=>props.onError(String(error)));
   };
-  onFrame(()=>draft.tick());
+  onFrame(()=>draft.tick(),()=>draft.state==="pending");
   const removeLifecycle=onLifecycleChange(state=>{
     if(state!=="active"&&!closing)void draft.flush().catch(error=>props.onError(String(error)));
   });

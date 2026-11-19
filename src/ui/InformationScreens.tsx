@@ -67,12 +67,16 @@ export function InformationScreen(props: InformationScreenProps) {
   let disposed = false;
   onCleanup(() => { disposed = true; });
   const report = (event:InformationRestorationEvent) => untrack(() => props.onRestorationEvent?.(event));
+  const pendingCommit = createMemo(() => {
+    const previous = committed();
+    return legal() !== previous.content || legalError() !== previous.error || isLoading() !== previous.isLoading;
+  });
   onFrame(() => {
+    if (!pendingCommit()) return;
     const next = {content:legal(),error:legalError(),isLoading:isLoading()}, previous = committed();
-    if (next.content === previous.content && next.error === previous.error && next.isLoading === previous.isLoading) return;
     setCommitted(next);
     if (next.content === null && next.isLoading && !previous.isLoading) report('loading-committed');
-  });
+  }, pendingCommit);
   const documentContent = createMemo(() => remote() ? committed().content : props.page === 'info' ? informationText.intro : props.page === 'licenses' ? informationText.licenses : null);
   // Keep the mounted list and its scroll position while revalidating cached content.
   const documentVisible = () => documentContent() !== null;

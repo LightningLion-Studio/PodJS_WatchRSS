@@ -22,8 +22,9 @@ export function MediaReaderDetail(props: {
   const chrome = () => readerChrome(props.preset);
   const title = useReaderTitleEntry(() => props.title, () => props.width - 28, () => props.preset, fonts,
     () => readerColor(resolvedReaderStyle(props.preset, "title").colorArgb));
-  const blocks = createMemo<ContentBlock[]>(() => [...props.blocks,
-    ...(props.message ? [{ type: "text" as const, text: props.message, style: "body" as const }] : [])]);
+  const blocks = createMemo<ContentBlock[]>(() => props.message
+    ? [...props.blocks, { type: "text", text: props.message, style: "body" }]
+    : props.blocks);
   const spacer = (height: number): ScrollEntry => ({ height, render: () => null });
   const header = createMemo<ScrollEntry[]>(() => [spacer(22), title(), spacer(6)]);
   const circle = (icon: string, left: number, active: boolean, press: () => void, label: string) =>

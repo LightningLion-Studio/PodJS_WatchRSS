@@ -12,6 +12,7 @@ import {For,Show,createEffect,createMemo,createSignal,onCleanup,untrack,type JSX
 import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {createGesture} from '@pocketjs/framework/gesture';
+import {useMinuteClock} from './minute-clock.ts';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import type {Scroller} from '@pocketjs/framework/kinetics';
 import {getDisplayMetrics,kv,onAxisDelta,onSystemBack,onLifecycleChange,lifecycle,RelativeAxis,RelativeAxisUnits,setNavigationState} from '@podjs/framework/watch';
@@ -133,7 +134,8 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  const readPresets=()=>{try{setPresetState(presets.load());setPresetRevision(v=>v+1);}catch(error){report(error);}};
  function report(error:unknown){setError(String(error));}
  readPresets();onCleanup(onReaderPresetsChanged(readPresets));
- const [clock,setClock]=createSignal(new Date()),[active,setActive]=createSignal(lifecycle()==='active');
+ const [active,setActive]=createSignal(lifecycle()==='active');
+ const clock=useMinuteClock(()=>active()&&presetState()?.selection.mode==='SYSTEM');
  onCleanup(onLifecycleChange(value=>setActive(value==='active')));
  const preset=createMemo(()=>{const state=presetState();return state?.records.length?activeReaderPreset(state,clock()):defaultReaderPreset(undefined,undefined,true,settings.load().fontSizeSp);});
  const fonts=createMemo(()=>readerFontResolver(presetState()??{},presetRevision()));
@@ -181,9 +183,8 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   onPanStart:c=>{currentLegal()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
   onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),onCancel:()=>motion.release(0,Date.now(),true)});
  onFrame(()=>{
-  if(presetState()?.selection.mode==='SYSTEM'&&Math.floor(Date.now()/60000)!==Math.floor(clock().getTime()/60000))setClock(new Date());
   if(motion.phase==='settling'){const result=motion.tick(Date.now());setOffset(motion.offset);if(result==='commit')closeLegal();else if(result==='cancel'){motion.reset();setOffset(0);}}
- });
+ },()=>motion.phase==='settling');
  const toggleTheme=()=>operate(()=>{
   // Seed legacy settings only when an explicit theme action needs preset IDs;
   // existing records, including tombstones, follow the established store policy.

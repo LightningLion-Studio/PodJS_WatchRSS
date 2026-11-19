@@ -17,31 +17,89 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
  let transfer:{item:DouyinItem;uri?:string;changed?:boolean}|undefined;
  const operations=new Set<{cancel():void}>();
  const wait=async<T>(operation:{result:Promise<T>;cancel():void}):Promise<T>=>{operations.add(operation);try{return await operation.result;}finally{operations.delete(operation);}};
- const keys=new Map<string,string>(),consumed=new Set<string>();
+ const maxKeys=16;
+ const keys=new Map<string,{key:string;authorization:string}>(),consumed=new Set<string>();
+ type InventoryEntry={value:LocalMediaItem;item:DouyinItem};
+ type InventoryIndex={epoch:number;authorization:string;ids?:Set<string>;reading?:Promise<InventoryEntry[]>};
+ let index:InventoryIndex|undefined;
  const config=()=>douyinPrestoreConfig(kv.get('watchrss.douyin.prestore.v1'));
  const allowed=async()=>config().enabled&&kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false);
  const scope=()=>client.stockAuthorizationScope();
  const source=async(value:LocalMediaItem|undefined,authorization:string|undefined)=>{
   if(!authorization||value?.metadata.stockAuthorization!==authorization)return;
   if(!value?.frame?.available||!(value.audioTracks>0)||!(value.videoTracks>0))return;
-  const item=restoredDouyinItem(value.metadata,value.uri);if(!item){if(keys.get(String(value.metadata.awemeId))===value.key)keys.delete(String(value.metadata.awemeId));await localMediaStore.remove(value.key).result;return;}
-  keys.set(item.awemeId,value.key);while(keys.size>16)keys.delete(keys.keys().next().value!);
+  const item=restoredDouyinItem(value.metadata,value.uri);if(!item){await localMediaStore.remove(value.key).result;return;}
   return {uri:value.uri,frame:value.frame,item};
  };
- const inventory=async()=>{
-  const own=epoch,authorization=await scope(),values=(await localMediaStore.list(DOUYIN_MAX_SHORT_EDGE).result).items;
-  const entries:{value:LocalMediaItem;item:DouyinItem}[]=[];
-  for(const value of values){
-   if(own!==epoch)return [];
-   const ready=await source(value,authorization);
-   if(ready)entries.push({value,item:ready.item});
+ const bind=(id:string,key:string,authorization:string)=>{
+  const known=keys.get(id);
+  if(known?.key===key&&known.authorization===authorization)return;
+  keys.set(id,{key,authorization});while(keys.size>maxKeys)keys.delete(keys.keys().next().value!);
+ };
+ const indexFor=(own:number,authorization:string)=>{
+  if(!index||index.epoch!==own||index.authorization!==authorization)index={epoch:own,authorization};
+  return index;
+ };
+ const invalidateInventory=()=>{if(index)index={epoch:index.epoch,authorization:index.authorization};};
+ const readInventory=(current:InventoryIndex)=>{
+  if(current.reading)return current.reading;
+  current.reading=(async()=>{
+   const {items}=await localMediaStore.list(DOUYIN_MAX_SHORT_EDGE).result;
+   const entries:InventoryEntry[]=[];
+   for(const value of items){
+    if(current.epoch!==epoch||index!==current)return [];
+    const ready=await source(value,current.authorization);
+    if(ready)entries.push({value,item:ready.item});
+   }
+   if(current.epoch!==epoch||index!==current)return [];
+   // Publish only after the entire scan succeeds. A prepared replacement can
+   // keep its older rendition on disk, so preserve the live binding if present.
+   const selected=new Map<string,InventoryEntry>();
+   for(const entry of entries){
+    const id=entry.item.awemeId,prior=selected.get(id),bound=keys.get(id);
+    if(prior&&bound?.authorization===current.authorization&&prior.value.key===bound.key)continue;
+    selected.set(id,entry);
+   }
+   for(const [id,entry] of selected)bind(id,entry.value.key,current.authorization);
+   // Native list hashes every complete movie and its frame. Keep only IDs for
+   // misses. A playable hit still verifies that specific file at lookup time.
+   current.ids=selected.size<=maxKeys?new Set(selected.keys()):undefined;
+   return entries;
+  })().finally(()=>{current.reading=undefined;});
+  return current.reading;
+ };
+ const stillAuthorized=(own:number,authorization:string)=>own===epoch&&index?.authorization===authorization;
+ const inventoryFor=async(own:number,authorization:string)=>{
+  let current=indexFor(own,authorization);
+  for(;;){
+   const entries=await readInventory(current);
+   const latest=index;
+   if(own!==epoch||latest?.authorization!==authorization)return [];
+   if(latest===current)return entries;
+   current=latest;
   }
-  return own===epoch?entries:[];
+ };
+ const inventory=async()=>{
+  const own=epoch,authorization=await scope();
+  return own===epoch&&authorization?inventoryFor(own,authorization):[];
  };
  const lookup=async(id:string)=>{
   const own=epoch,authorization=await scope();if(own!==epoch||!authorization)return;
-  let key=keys.get(id);if(!key){await inventory();key=keys.get(id);}if(!key)return;
-  const value=(await localMediaStore.lookup(key,DOUYIN_MAX_SHORT_EDGE).result).item;return own===epoch?source(value,authorization):undefined;
+  const current=indexFor(own,authorization);
+  if(current.ids&&!current.ids.has(id))return;
+  if(keys.get(id)?.authorization!==authorization)await inventoryFor(own,authorization);
+  while(stillAuthorized(own,authorization)){
+   const binding=keys.get(id),observed=index;
+   if(binding?.authorization!==authorization)return;
+   const {item}=await localMediaStore.lookup(binding.key,DOUYIN_MAX_SHORT_EDGE).result;
+   if(!stillAuthorized(own,authorization))return;
+   if(index!==observed||keys.get(id)!==binding)continue;
+   const ready=await source(item,authorization);
+   if(!stillAuthorized(own,authorization))return;
+   if(index!==observed||keys.get(id)!==binding)continue;
+   if(!ready||ready.item.awemeId!==id){keys.delete(id);return;}
+   return ready;
+  }
  };
  const service:DouyinStockService={
   present:localMediaStore.present,hide:localMediaStore.hide,
@@ -58,13 +116,16 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
    const timer=delay(50);
    const ids=await Promise.race([history,timer.result.then(()=>{reason='history_timeout';return [] as string[];})]);timer.cancel();
    if(own!==epoch)return [];
-   const watched=new Set(ids),eligible=values.filter(({value,item})=>!value.watched&&!watched.has(item.awemeId)&&!consumed.has(item.awemeId));
+   const watched=new Set(ids),eligible=values.filter(({value,item})=>{
+    const bound=keys.get(item.awemeId);
+    return (!bound||bound.key===value.key)&&!value.watched&&!watched.has(item.awemeId)&&!consumed.has(item.awemeId);
+   });
    report(eligible.length,eligible.reduce((bytes,entry)=>bytes+entry.value.bytes,0),eligible.length?reason:'no_eligible');return eligible.map(entry=>entry.item);
   },
   ready:lookup,playbackReady:lookup,lookup:async id=>(await lookup(id))?.uri,
-  consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const key=keys.get(id);if(key)void localMediaStore.watched(key).result.catch(()=>{});},
-  clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.catch(()=>{});},
-  suspend(){enabled=false;epoch++;for(const operation of operations)operation.cancel();operations.clear();void localMediaStore.cancel().result.catch(()=>{});},
+  consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const binding=keys.get(id);if(binding)void localMediaStore.watched(binding.key).result.catch(()=>{});},
+  clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.finally(invalidateInventory).catch(()=>{});},
+  suspend(){enabled=false;epoch++;index=undefined;for(const operation of operations)operation.cancel();operations.clear();void localMediaStore.cancel().result.catch(()=>{});},
   async networkChanged(){if(await allowed())await service.resume();else service.suspend();},
   offer(items,anchor){
    offeredRevision++;
@@ -96,9 +157,11 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
       const {uri}=await wait(mediaPrefixCache.register(key,item.playUrl,headers,true,[],douyinMediaNetworkDeadline([item.playUrl,...(audio?[audio]:[])]),audio,DOUYIN_MAX_SHORT_EDGE));
       active.uri=uri;
       if(!current()||active.changed)continue;
-      const result=await wait(localMediaStore.prepare(key,uri,{...storedDouyinMetadata(item),stockAuthorization:authorization},true));
+      const result=await wait(localMediaStore.prepare(key,uri,{...storedDouyinMetadata(item),stockAuthorization:authorization},true)).finally(invalidateInventory);
       if(!current())return;
-      if(!active.changed&&result.ready&&await source(result.item,authorization)){
+      const ready=!active.changed&&result.ready&&await source(result.item,authorization);
+      if(current()&&!active.changed&&ready&&result.item){
+       bind(ready.item.awemeId,result.item.key,authorization);
        if(consumed.has(item.awemeId))await localMediaStore.watched(key).result;
        else slots++;
       }

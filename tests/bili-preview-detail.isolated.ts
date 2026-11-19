@@ -1,7 +1,10 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
-import { createComponent, createMemo, createRenderEffect, createRoot, mergeProps } from 'solid-js';
+import * as solid from 'solid-js';
+const {createComponent, createMemo, createRenderEffect, createRoot, mergeProps} = solid;
+// The production bundle has one Solid owner graph for route state and the screen.
+mock.module(Bun.resolveSync("solid-js", Bun.resolveSync("@podjs/framework/navigation",import.meta.dir)), () => solid);
 import { NetworkRecovery } from '../src/network/recovery.ts';
 import { NetworkRecoveryContext } from '../src/network/context.ts';
 const require = createRequire(import.meta.url), { transformSync } = require('@babel/core');
@@ -14,7 +17,8 @@ type Node = { props: any };
 const element = (props: any): Node => ({ props });
 mock.module('@pocketjs/framework/renderer', () => ({ createComponent, mergeProps, memo: createMemo, effect: createRenderEffect }));
 mock.module('@pocketjs/framework/components', () => ({ FocusScope: element, View: element, Text: element, Image: element }));
-mock.module('@pocketjs/framework/host', () => ({ getOps: () => ({ measureText: (text: string) => text.length * 7 }) }));
+let descriptionMeasures=0;
+mock.module('@pocketjs/framework/host', () => ({ getOps: () => ({ measureText: (text: string) => { if (text.includes('界')) descriptionMeasures++; return text.length * 7; } }) }));
 mock.module('@podjs/framework/watch', () => ({ kv: { get: () => undefined, set() {} } }));
 mock.module('@podjs/framework/services', () => ({ delay: () => ({ result: Promise.resolve(), cancel() {} }), hostOperation: () => ({ result: Promise.resolve(), cancel() {} }) }));
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (props: any) => element({ get children() { return props.entries.map((entry: any) => entry.render()); } }) }));
@@ -129,4 +133,31 @@ test('cached Bili RSS-style detail offers a page retry without blocking cached c
   expect({title:rss.title,message:rss.message,blocking:scope.blocking,checks}).toEqual({
     title:'updated fixture',message:'',blocking:false,checks:0,
   });
+});
+
+test('collapsed detail measures its visible description once across part selection and loading updates',async()=>{
+  const desc='界'.repeat(2000);
+  descriptionMeasures=0;
+  let release!:()=>void;
+  const detail={item:{aid:7,cid:19,title:'fixture'},desc,pages:[{cid:19,page:1,part:'Part one'},{cid:20,page:2,part:'Part two'}]};
+  const root=createRoot(stop=>{stops.push(stop);return BiliScreen({
+    width:233,height:233,route:{name:'detail',aid:7},settings:{originalContentEnabled:true},
+    client:{detail:async()=>detail,getSession:()=>new Promise<null>(done=>{release=()=>done(null);})} as never,
+    onNavigate(){},onBack(){},
+  });});
+  await flush();
+  const find=(label:string)=>nodes(root).find(node=>node.props.accessibilityLabel===label)!;
+  expect(find(desc).props.onPress).toBeFunction();
+  const collapsed=descriptionMeasures;
+  expect(collapsed).toBeGreaterThan(0);
+  expect(collapsed).toBeLessThan(400);
+  release();await flush();
+  find('Part two').props.onPress();
+  expect(descriptionMeasures).toBe(collapsed);
+  find(desc).props.onPress();
+  expect(descriptionMeasures).toBeGreaterThan(collapsed+1000);
+  const expanded=nodes(find(desc)).map(node=>node.props.children).filter(s=>typeof s==='string').join('');
+  expect(expanded).toBe(desc);
+  find(desc).props.onPress();
+  expect(nodes(find(desc)).some(node=>node.props.children==='▼')).toBe(true);
 });

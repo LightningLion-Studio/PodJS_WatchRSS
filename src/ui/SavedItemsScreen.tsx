@@ -76,7 +76,8 @@ export function SavedItemsScreen(props:{width:number;height:number;active:boolea
     if(swipeReturn){const elapsed=Math.min(1,(Date.now()-swipeReturn.at)/180);const remain=(1-elapsed)**3;setSwipeOffset(swipeReturn.start*remain);if(elapsed>=1)resetSwipe();}
     if(!dragKey()||!scroller)return;
     if(touchY<42)scroller.scrollBy(-6,{immediate:true});else if(touchY>props.height-42)scroller.scrollBy(6,{immediate:true});
-  });
+  },()=> (props.loading && props.active) || !!swipeReturn ||
+    (!!dragKey() && !!scroller && (touchY<42 || touchY>props.height-42)));
   const lines=(text:string,size:number,width:number,maxLines:number)=>measuredLines(text,width,t=>getOps().measureText(t,size===17?22:size===14?1:0),maxLines).join("\n");
   const oneLine=(text:string,size:number,width:number)=>lines(text,size,width,1);
   const card=(item:SavedDisplayItem,floating=false)=><View onPress={floating?undefined:()=>{if(!dragKey()&&!swipeKey())props.onOpen(item);}} focusable={!floating} accessibilityHidden={floating} accessibilityRole="button" accessibilityLabel={`文章：${item.title}，${item.channelTitle} · ${savedTime(item.savedAt)}，${item.summary||"暂无摘要"}`} accessibilityHint="长按可拖动排序，左滑移除" class="absolute inset-0 rounded-[16]" style={{translateX:floating?0:swipeKey()===item.key?swipeOffset():0,bgColor:floating?"#2a2a2a":"#1c1f21"}}><Text class="absolute left-[14] right-[6] top-[14] text-[17px] leading-[21] text-[#f5f5f5]">{oneLine(item.title,17,props.width-2*SAFE-20)}</Text><Text class="absolute left-[14] right-[6] top-[35] text-sm leading-[17] text-[#b6b6b6]">{oneLine(`${item.channelTitle} · ${savedTime(item.savedAt)}`,14,props.width-2*SAFE-20)}{"\n"}{oneLine(item.summary||"暂无摘要",14,props.width-2*SAFE-20)}</Text></View>;

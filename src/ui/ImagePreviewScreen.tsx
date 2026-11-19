@@ -55,8 +55,10 @@ export function ImagePreviewScreen(props:{url:string;filePath?:string;width:numb
   },
   onCancel:()=>{if(backDragging){props.onBackGesture("cancel",0,0);backDragging=false;}cancel();}
  });
+ const inMotion=()=>props.active&&(!!target||Math.abs(scaleFlingVelocity)>.1||Math.abs(vx)+Math.abs(vy)>1);
  onFrame(()=>{
-  const now=Date.now(),dt=lastFrame?Math.min(.05,(now-lastFrame)/1000):0;lastFrame=now;if(!props.active||!dt)return;
+  if(!inMotion()){lastFrame=0;return;}
+  const now=Date.now(),dt=lastFrame?Math.min(.05,(now-lastFrame)/1000):0;lastFrame=now;if(!dt)return;
   const current=state();
   if(target){
    // Native low-stiffness, medium-bouncy spring (200, damping ratio .5).
@@ -69,7 +71,7 @@ export function ImagePreviewScreen(props:{url:string;filePath?:string;width:numb
    if(Math.abs(vx)+Math.abs(vy)>1){const moved=previewPanDecayStep(geometry(),next,vx,vy,dt);vx=moved.vx;vy=moved.vy;next=moved.state;}
    if(next!==current)setState(next);
   }
- });
+ },inMotion);
  onCleanup(cancel);
  return <View ref={n=>node=n} class="absolute inset-0 bg-black overflow-hidden"><TiledImage url={props.url} filePath={props.filePath} geometry={geometry()} state={state()} onError={()=>setFailed(true)} onSize={(width,height)=>{if(size().width!==width||size().height!==height)setSize({width,height});setLoaded(true);}}/>
   <Show when={!loaded()&&!failed()}><View class="absolute" style={{insetL:(props.width-40)/2,insetT:(props.height-40)/2,width:40,height:40}}><WatchProgressIndicator active={()=>props.active&&!loaded()&&!failed()}/></View></Show>

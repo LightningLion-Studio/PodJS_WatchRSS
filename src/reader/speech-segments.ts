@@ -1,7 +1,7 @@
 import type { Article } from "../ui/service.ts";
 import { parseContent } from "./content.ts";
 import type { ContentBlock } from "./content.ts";
-import { rowAtOffset, type ContentLayout, type ReaderRow } from "./content-layout.ts";
+import { contentRows, rowAtOffset, type ContentLayout, type ReaderRow } from "./content-layout.ts";
 
 export interface SpeechSegment {
   text: string;
@@ -40,7 +40,12 @@ export function boundarySpeechCharOffset(text: string, offset: number): number {
 
 /** Native fallback for long presses outside a text layout: next boundary in visible text. */
 export function visibleSpeechAnchor(layout: ContentLayout, blocks: readonly ContentBlock[], offset: number, headerHeight: number): SpeechAnchor | undefined {
-  const row = layout.rows.find(row => row.kind === "text" && row.top + row.height > offset - headerHeight);
+  const rows=contentRows(layout),y=offset-headerHeight;
+  let row:ReaderRow|undefined;
+  for(let i=rowAtOffset(rows,y);i<rows.length;i++){
+    const candidate=rows.at(i)!;
+    if(candidate.kind==="text"&&candidate.top+candidate.height>y){row=candidate;break;}
+  }
   if (!row) return undefined;
   const block = blocks[row.blockIndex]!;
   if (block.type !== "text") return undefined;
@@ -52,7 +57,7 @@ export function visibleSpeechAnchor(layout: ContentLayout, blocks: readonly Cont
 export function pressedSpeechAnchor(layout: ContentLayout, blocks: readonly ContentBlock[], x: number, y: number, offset: number, headerHeight: number, width: number, measure: (text: string, slot: number) => number, padding = 14, carets?: ReadonlyMap<ReaderRow,readonly number[]>): SpeechAnchor | undefined {
   const contentY = y + offset - headerHeight;
   if (contentY < 0) return undefined;
-  const row = layout.rows[rowAtOffset(layout.rows, contentY)];
+  const rows=contentRows(layout),row=rows.at(rowAtOffset(rows,contentY));
   if (!row || row.kind !== "text" || contentY >= row.top + row.height || contentY < row.top + row.gap) return visibleSpeechAnchor(layout, blocks, offset, headerHeight);
   const block = blocks[row.blockIndex]!;
   if (block.type !== "text") return undefined;

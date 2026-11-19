@@ -2,7 +2,7 @@ import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import {getDisplayMetrics} from '@podjs/framework/watch';
-import { onFrame } from "@pocketjs/framework/lifecycle";
+import {useMinuteClock} from "./minute-clock.ts";
 import { location, timeInput, type HostOperation } from "@podjs/framework/services";
 import { activeReaderPreset, availableReaderPresets, type ReaderPresetState, type ReaderThemeMode } from "../reader/preset-store.ts";
 import { formatScheduleMinutes, sunTimes, type ReaderThemeSchedule } from "../reader/theme-schedule.ts";
@@ -30,7 +30,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
   const [menu, setMenu] = createSignal<{ kind: "light" | "dark"; top: number }>();
   const [download, setDownload] = createSignal(false), [message, setMessage] = createSignal("");
   const [locating, setLocating] = createSignal(false), [pickingTime, setPickingTime] = createSignal(false);
-  const [now, setNow] = createSignal(new Date());
+  const now = useMinuteClock(props.active);
   let scroller: Scroller | undefined, roundStart = () => 0, disposed = false, pending: HostOperation<unknown> | undefined;
   const width = props.width - 36;
   const presets = createMemo(() => availableReaderPresets(props.state));
@@ -41,7 +41,6 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
     const date = now(), s = schedule();
     return s.latitude === null || s.longitude === null ? null : sunTimes({ year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() }, s.latitude, s.longitude);
   });
-  onFrame(() => { if (props.active() && Math.floor(Date.now() / 60_000) !== Math.floor(now().getTime() / 60_000)) setNow(new Date()); });
   onCleanup(() => { disposed = true; pending?.cancel(); });
   const updateLocation = async () => {
     if (locating() || pickingTime()) return;

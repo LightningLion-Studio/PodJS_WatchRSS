@@ -28,8 +28,9 @@ export function novelNavigation(chapters:readonly NovelChapter[],id:string){
 export function novelPageDirection(x:number,width:number):number {
  return width>0&&x>=0&&x<=width?(x<width/3?-1:x>width*2/3?1:0):0;
 }
+export const NOVEL_MENU_SHOW_MS=350, NOVEL_MENU_DIM_MS=1850;
 export function novelMenuAppearance(idleFor:number,moving:boolean){
- return {visible:!moving&&idleFor>=350,opacity:idleFor>=1850?.22:1};
+ return {visible:!moving&&idleFor>=NOVEL_MENU_SHOW_MS,opacity:idleFor>=NOVEL_MENU_DIM_MS ? .22 : 1};
 }
 
 export async function readNovelDirectory(db:Pick<SqlDatabase,'query'>,source:string,yieldTurn:()=>Promise<void>){

@@ -14,7 +14,10 @@ const renderer={createComponent,mergeProps,memo:createMemo,effect:createRenderEf
 const components={View:element,Text:element,Image:element};
 let gestures:any[]=[];const frames=new Set<()=>void>();
 const gesture={createGesture:(options:any)=>{gestures.push(options);onCleanup(()=>{gestures=gestures.filter(g=>g!==options);});}};
-const lifecycle={onFrame:(callback:()=>void)=>{frames.add(callback);onCleanup(()=>frames.delete(callback));}};
+const demands=new Map<()=>void,()=>boolean>();
+const lifecycle={onFrame:(callback:()=>void,needsFrame:()=>boolean=()=>true)=>{
+ frames.add(callback);demands.set(callback,needsFrame);onCleanup(()=>{frames.delete(callback);demands.delete(callback);});
+}};
 mock.module("@pocketjs/framework/renderer",()=>renderer);
 mock.module("@pocketjs/framework/components",()=>components);
 mock.module("@pocketjs/framework/gesture",()=>gesture);
@@ -73,8 +76,32 @@ test("U5 swipe oracle: frames, half-width threshold, cancel, edge forwarding, ca
  invoke("onPanStart",{x:100,dx:0});invoke("onPanMove",{dx:-120});invoke("onCancel");frame(180);
  setOpen(false);await settle();frame(180);invoke("onPanStart",{x:5,dx:0});invoke("onPanMove",{dx:100});invoke("onPanEnd",{dx:100});
  invoke("onPanStart",{x:5,dx:0});invoke("onCancel");
- setOpen(true);await settle();frame(90);frame(90);setEnabled(false);await settle();frame(180);expect(pair[1].region.node()).toBeNull();
+ setOpen(true);await settle();frame(180);setEnabled(false);await settle();frame(180);expect(pair[1].region.node()).toBeNull();
  setEnabled(true);setCardClass("custom-card");await settle();frame(180);check();
  }
  while(disposers.length)disposers.pop()!();expect(frames.size).toBe(0);expect(gestures).toHaveLength(0);
+});
+
+test("settled swipe rows release the display clock and wake for an external open", async () => {
+ let now=1000;
+ spyOn(Date,"now").mockImplementation(()=>now);
+ const [open,setOpen]=createSignal(false);
+ const tree=createRoot(stop=>{
+  disposers.push(stop);
+  return SwipeCard({get open(){return open();},swipeEnabled:true,onOpen(){},onFavorite(){},onWatchLater(){},
+   onStartSwipe(){},onOpenSwipe(){},onCloseSwipe(){},children:"card"});
+ });
+ await settle();
+ const wantsFrame=()=>[...demands.values()].some(active=>active());
+ expect(wantsFrame()).toBe(false);
+ setOpen(true);await settle();
+ expect(wantsFrame()).toBe(true);
+ const translateX=()=>nodes(tree).at(-1)?.props.style?.translateX;
+ now+=90;for(const cb of frames)cb();
+ expect(translateX()).toBe(-123);
+ now+=90;for(const cb of frames)cb();
+ expect(translateX()).toBe(-164);
+ expect(wantsFrame()).toBe(false);
+ setOpen(false);await settle();
+ expect(wantsFrame()).toBe(true);
 });

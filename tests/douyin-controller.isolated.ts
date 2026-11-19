@@ -23,9 +23,17 @@ mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
 mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
-mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
+let debugAllowed = false, debugTicks = 0;
+const debugContexts: string[][] = [];
+const frameObservers: {run: () => void; needsFrame: () => boolean}[] = [];
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{
+ get allowed(){ return debugAllowed; },
+ playbackUrl:(_id:string,url:string)=>url,
+ updateContext(current:string,next:string){ debugContexts.push([current,next]); },
+ tick:async()=>{ debugTicks++; }
+}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
-mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
+mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(run:()=>void,needsFrame:()=>boolean){frameObservers.push({run,needsFrame});}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
 mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
 const entryTimers:Array<{ms:number;fire:()=>void}>=[];
@@ -35,6 +43,7 @@ const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateStorage;publish?:(source:PlaybackSource|undefined)=>void}){
+ frameObservers.length=0;debugContexts.length=0;debugTicks=0;
  entryTimers.length=0;optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
@@ -1053,4 +1062,29 @@ test('NOPLAY an automatic player timeout can reprepare its still-authorized sele
  const entry=f.stack().at(-1)!,before=f.source();let calls=0;
  client.resolvePlayback=async(id,options)=>{calls++;expect(options).toMatchObject({forceRefresh:false,freshRequest:false,allowDetail:false,feedItem:a});return {ok:true,data:a};};
  await f.controller.reloadVideo(entry,321,()=>true,true);expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+});
+
+test('idle release video requests no guest frames and debug playback still sees the current and next items', async()=>{
+ for (const enabled of [false,true]) {
+  debugAllowed=enabled;
+  try {
+   const f=fixture();
+   const playlist=Array.from({length:40},(_,index)=>item(String(index)));
+   const selected=playlist[2]!;
+   f.controller.douyinPlay({item:selected,playback:selected,playlist,hasMore:false,immersive:true});
+   await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+   const queue=f.stack().at(-1)!.queue!;
+   const original=queue.snapshot.bind(queue);
+   let copies=0, requests=0;
+   queue.snapshot=()=>{copies++;return original();};
+   for(let frame=0;frame<600;frame++) {
+    if(frameObservers.some(observer=>observer.needsFrame()))requests++;
+    for(const observer of frameObservers)observer.run();
+   }
+   const expected = enabled ? 600 : 0;
+   expect({requests,copies,debugTicks}).toEqual({requests:expected,copies:0,debugTicks:expected});
+   if(enabled)expect(debugContexts.at(-1)).toEqual(['2','3']);
+   else expect(debugContexts).toHaveLength(0);
+  } finally {debugAllowed=false;}
+ }
 });

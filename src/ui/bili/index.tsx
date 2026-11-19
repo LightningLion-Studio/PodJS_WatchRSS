@@ -13,6 +13,7 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
 import type { BiliClient, BiliFavoriteFolder, BiliHistoryItem, BiliItem, BiliPlayUrl, BiliSearchResult, BiliSession, QrLoginRequest, QrPollResult } from "../../bili/index.ts";
+import type { ContentBlock } from "../../reader/content.ts";
 import { layoutUiText } from "../../reader/line-break.ts";
 import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
@@ -444,23 +445,28 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     const qr = () => props.onNavigate({ name: "share", aid: it?.aid, bvid: it?.bvid, title });
     if (props.onShare) props.onShare({ origin: "bili-detail", title, link: biliShareLink(it?.bvid, it?.aid) }, qr); else qr();
   }
-  const preset = () => props.preset ?? defaultReaderPreset();
+  const preset = createMemo(() => props.preset ?? defaultReaderPreset());
   const backgrounds = useReaderBackgrounds();
-  const entries = createMemo<ScrollEntry[]>(() => {
+  const detail = createMemo(() => state().detail);
+  const titleText = createMemo(() => detail()?.item.title?.trim() || (state().loading ? "加载中..." : state().error ? "详情加载失败" : "哔哩哔哩视频"));
+  const palette = createMemo(() => detailPalette(readerChrome(preset()).dark));
+  const cardWidthFor = () => (props.width ?? 233) - 36;
+  type DetailFont = ReturnType<typeof presetContentFont>;
+  const measureScaled = (font: DetailFont) => (text: string) => getOps().measureText(text, font.fontSlot) * font.scale;
+  const fontText = (font: DetailFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: font.color, tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
+  // Selection and interaction updates touch the mounted controls without
+  // rewrapping video titles or rebuilding the cover.
+  const primaryEntries = createMemo<ScrollEntry[]>(() => {
     // Cards follow the preset's light/dark scheme; the reader TITLE/BODY colours then sit on a
     // matching surface (native kept a dark card even on light presets: dark-on-dark text).
-    const pal = detailPalette(readerChrome(preset()).dark);
-    const width = props.width ?? 233, cardWidth = width - 36, inner = cardWidth - 12;
-    const data = state().detail, it = data?.item, st = state();
-    const titleFont = presetContentFont(preset(), "title"), bodyFont = presetContentFont(preset(), "body");
-    const measureScaled = (font: typeof titleFont) => (text: string) => getOps().measureText(text, font.fontSlot) * font.scale;
-    const fontText = (font: typeof titleFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: font.color, tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
+    const pal = palette(), cardWidth = cardWidthFor(), inner = cardWidth - 12;
+    const data = detail(), it = data?.item, titleFont = presetContentFont(preset(), "title");
     const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
       {it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={cardWidth} height={cardWidth * 2 / 3} fit="cover" class="absolute left-[0] top-[0]" /> : null}
       <View class={pal.dark ? "absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" : "absolute inset-0 bg-gradient-to-b from-transparent to-[#f7f4f0b3]"} />
       <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? "../assets/icons/bili-action-play-circle.svg" : "../assets/icons/bili-action-play-circle-dark.svg"} style={{ width: 32, height: 32 }} /></View>
     </View> };
-    const title = measuredLines(it?.title?.trim() || (st.loading ? "加载中..." : st.error ? "详情加载失败" : "哔哩哔哩视频"), inner, measureScaled(titleFont), 3);
+    const title = measuredLines(titleText(), inner, measureScaled(titleFont), 3);
     const owner = it?.owner?.name?.trim();
     const chips = [it?.stat?.view != null ? `播放 ${formatCount(it.stat.view)}` : "", it?.stat?.like != null ? `点赞 ${formatCount(it.stat.like)}` : "", it?.stat?.danmaku != null ? `弹幕 ${formatCount(it.stat.danmaku)}` : ""].filter(Boolean);
     const titleHeight = title.length * titleFont.lineHeight;
@@ -474,51 +480,62 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       {chipBoxes.filter(chip => chip.left + chip.w <= cardWidth - 6).map(chip => <View class="absolute h-[21] rounded-[10.5]" style={{ insetL: chip.left, insetT: chipsTop, width: chip.w, bgColor: pal.surfaceVariant }}><Text class="absolute left-[4] top-[2] text-[9px] leading-[17]" style={{ textColor: pal.onSurfaceVariant }}>{chip.text}</Text></View>)}
     </View> };
     const size = Math.max(36, Math.min(44, (cardWidth - 18) / 4)), rowLeft = (cardWidth - size * 4 - 18) / 2;
-    const locked = st.busy || st.loading || !data;
+    const locked = () => state().busy || state().loading || !data;
     const actionButtons = [
-      { icon: pal.dark ? "../assets/icons/bili-action-bili-thumb-up.svg" : "../assets/icons/bili-action-bili-thumb-up-dark.svg", label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
-      { icon: pal.dark ? "../assets/icons/bili-action-bili-coin.svg" : "../assets/icons/bili-action-bili-coin-dark.svg", label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
-      { icon: pal.dark ? "../assets/icons/bili-action-star.svg" : "../assets/icons/bili-action-star-dark.svg", label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
-      { icon: pal.dark ? "../assets/icons/bili-action-share.svg" : "../assets/icons/bili-action-share-dark.svg", label: "转发", selected: false, onPress: share },
-    ];
+      { kind: "like", icon: pal.dark ? "../assets/icons/bili-action-bili-thumb-up.svg" : "../assets/icons/bili-action-bili-thumb-up-dark.svg", label: "点赞" },
+      { kind: "coin", icon: pal.dark ? "../assets/icons/bili-action-bili-coin.svg" : "../assets/icons/bili-action-bili-coin-dark.svg", label: "投币" },
+      { kind: "favorite", icon: pal.dark ? "../assets/icons/bili-action-star.svg" : "../assets/icons/bili-action-star-dark.svg", label: "收藏" },
+      { kind: "share", icon: pal.dark ? "../assets/icons/bili-action-share.svg" : "../assets/icons/bili-action-share-dark.svg", label: "转发" },
+    ] as const;
     const iconSize = Math.min(24, Math.max(18, size * .55));
     const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
-      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center active:scale-96" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
-        <Image src={button.icon} style={{ width: iconSize * 32 / 24, height: iconSize * 32 / 24 }} />
-      </View>)}
+      {actionButtons.map((button, index) => {
+        const selected = () => button.kind !== "share" && !!state().interaction[button.kind];
+        const enabled = () => button.kind === "share" || !locked() && !(button.kind === "coin" && selected());
+        const press = () => button.kind === "share" ? share() : void controller.act(button.kind);
+        return <View onPress={enabled() ? press : undefined} focusable={enabled()} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center active:scale-96" style={{ bgColor: selected() ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
+          <Image src={button.icon} style={{ width: iconSize * 32 / 24, height: iconSize * 32 / 24 }} />
+        </View>;
+      })}
     </View> };
     const pages = data?.pages ?? [];
     const pageEntries = pages.map((page, index): ScrollEntry => {
-      const selected = st.selected === index, duration = detailDuration(page.duration);
+      const selected = () => state().selected === index, duration = detailDuration(page.duration);
       const textWidth = inner - (duration ? getOps().measureText(duration, FONT_SLOT[9]) + 6 : 0);
       const label = page.part?.trim() || `第${page.page ?? 1}集`, wrapped = measuredLines(label, textWidth, measureFor(17), 2);
       const height = 14.5 + wrapped.length * 17;
       return { height, render: () => <View onPress={busy() ? undefined : () => {controller.select(index);const cid=controller.selectedCid();if(cid)saveSelectedCid(cid);}} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
-        class={selected ? "absolute inset-0 rounded-[16] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16]"} style={{ bgColor: selected ? pal.surfaceVariant : pal.surface }}>
+        class={selected() ? "absolute inset-0 rounded-[16] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16]"} style={{ bgColor: selected() ? pal.surfaceVariant : pal.surface }}>
         <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17]" style={{ width: textWidth, textColor: pal.onSurface }}>{wrapped.join("\n")}</Text>
         {duration ? <Text class="absolute right-[6] text-[9px] leading-[17]" style={{ insetT: (height - 17) / 2 + .5, textColor: pal.onSurfaceVariant }}>{duration}</Text> : null}
       </View> };
     });
-    const desc = data?.desc?.trim();
-    const description = (): ScrollEntry[] => {
-      if (!desc) return [];
-      const measure = measureScaled(bodyFont), arrow = 17;
-      const all = measuredLines(desc, inner, measure), canExpand = all.length > 3;
-      const shown = expanded() || !canExpand ? all : measuredLines(desc, inner - arrow, measure, 3);
-      const height = 12 + shown.length * bodyFont.lineHeight;
-      return [sectionTitle(pal, "简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
-        {shown.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * bodyFont.lineHeight, width: inner, height: bodyFont.lineHeight }}>{fontText(bodyFont, line, 0, inner)}</View>)}
-        {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21]" style={{ insetT: height - 6 - 21, textColor: pal.onSurface }}>▼</Text> : null}
-      </View> }];
-    };
-    const message = st.error ? String(st.error) : busy() || st.message || (st.offline ? "本地已保存详情" : "");
+    return [cover, meta, actions, ...(pages.length ? [sectionTitle(pal, "分P", `${pages.length} 个`), ...pageEntries] : [])];
+  });
+  const descriptionEntries = createMemo<ScrollEntry[]>(() => {
+    const desc = detail()?.desc?.trim();
+    if (!desc) return [];
+    const pal = palette(), inner = cardWidthFor() - 12, bodyFont = presetContentFont(preset(), "body");
+    const measure = measureScaled(bodyFont), arrow = 17;
+    // A fourth full-width line suffices to detect a collapsed description.
+    const all = layoutUiText(desc, {width: Math.max(1, inner), measure, maxLines: expanded() ? undefined : 4});
+    const canExpand = all.length > 3;
+    const shown = expanded() || !canExpand ? all : measuredLines(desc, inner - arrow, measure, 3);
+    const height = 12 + shown.length * bodyFont.lineHeight;
+    return [sectionTitle(pal, "简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
+      {shown.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * bodyFont.lineHeight, width: inner, height: bodyFont.lineHeight }}>{fontText(bodyFont, line, 0, inner)}</View>)}
+      {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21]" style={{ insetT: height - 6 - 21, textColor: pal.onSurface }}>▼</Text> : null}
+    </View> }];
+  });
+  const statusMessage = createMemo(() => state().error ? String(state().error) : busy() || state().message || (state().offline ? "本地已保存详情" : ""));
+  const canRetry = createMemo(() => !!state().error && !state().loading);
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const cardWidth = cardWidthFor(), pal = palette(), it = detail()?.item, message = statusMessage();
     return [
-      cover, meta, actions,
-      ...(pages.length ? [sectionTitle(pal, "分P", `${pages.length} 个`), ...pageEntries] : []),
-      ...description(),
+      ...primaryEntries(), ...descriptionEntries(),
       ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle(pal, "评论"), surfaceCard(pal, "查看评论", cardWidth, pal.onSurface, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
       ...(message ? [surfaceCard(pal, message, cardWidth)] : []),
-      ...(st.error && !st.loading ? [surfaceCard(pal, "重试", cardWidth, pal.onSurface,
+      ...(canRetry() ? [surfaceCard(pal, "重试", cardWidth, pal.onSurface,
         () => { if (props.active !== false) void controller.load(); })] : []),
       { height: 50, render: () => <View class="absolute inset-0" /> },
     ];
@@ -554,11 +571,17 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
       if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title, cover: data?.item.cover, author: data?.item.owner?.name, description: data?.desc });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
-  const preset = () => props.preset ?? defaultReaderPreset();
+  const preset = createMemo(() => props.preset ?? defaultReaderPreset());
+  const detail = createMemo(() => state().detail);
   const display = createMemo(() => {
-    const it = state().detail?.item;
-    return { title: it?.title?.trim() || (it?.bvid ? `BV号 ${it.bvid}` : it?.aid ? `av${it.aid}` : "哔哩哔哩视频"), owner: it?.owner?.name?.trim() || "未知作者", desc: state().detail?.desc?.trim() || "暂无简介", cover: it?.cover };
+    const it = detail()?.item;
+    return { title: it?.title?.trim() || (it?.bvid ? `BV号 ${it.bvid}` : it?.aid ? `av${it.aid}` : "哔哩哔哩视频"), owner: it?.owner?.name?.trim() || "未知作者", desc: detail()?.desc?.trim() || "暂无简介", cover: it?.cover };
   });
+  const bodyBlocks = createMemo<ContentBlock[]>(() => [
+    { type: "text", text: `作者：${display().owner}`, style: "subtitle" },
+    { type: "text", text: `简介：${display().desc}`, style: "body" },
+    { type: "video", url: "bili-cover", poster: display().cover },
+  ]);
   function share() {
     const it = state().detail?.item, title = biliActionTitle(it?.title, it?.bvid, it?.aid);
     const qr = () => props.onNavigate({ name: "share", aid: it?.aid, bvid: it?.bvid, title });
@@ -579,7 +602,7 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
     </View>}>
     <MediaReaderDetail width={props.width ?? 233} height={props.height} preset={preset()} active={props.active ?? true}
       articleId={`bili-rss:${props.route.bvid ?? props.route.aid ?? ""}`} title={display().title} message={message()}
-      blocks={[{ type: "text", text: `作者：${display().owner}`, style: "subtitle" }, { type: "text", text: `简介：${display().desc}`, style: "body" }, { type: "video", url: "bili-cover", poster: display().cover }]}
+      blocks={bodyBlocks()}
       favorite={() => !!state().interaction.favorite} onPlay={() => void play()} onFavorite={() => { if (!state().busy && !state().loading) void controller.act("favorite"); }} onShare={share}
       onError={message => fail(props, new Error(message))} onRetry={canRetry() ? retry : undefined}
       ref={handle => props.ref?.({ scroller: handle.scroller, onRootBack: () => false })} />

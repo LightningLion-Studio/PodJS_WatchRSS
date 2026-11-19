@@ -1,4 +1,4 @@
-import type {ContentLayout,ReaderRow} from "./content-layout.ts";
+import {contentRows,type ContentLayout,type ReaderRow} from "./content-layout.ts";
 import type {SpeechHighlight} from "./speech-highlight.ts";
 export interface HighlightRect {left:number;top:number;width:number;height:number}
 export interface HighlightFont {fontSlot:number;scale:number;lineHeight:number;tracking?:number;textAlign?:number}
@@ -15,11 +15,11 @@ export function lineHighlightRect(text:string,width:number,font:HighlightFont,st
 export function contentHighlightRects(layout:ContentLayout,highlight:SpeechHighlight|undefined,width:number,measure:(text:string,slot:number)=>number,carets?:ReadonlyMap<ReaderRow,readonly number[]>):Map<ReaderRow,HighlightRect> {
   const result=new Map<ReaderRow,HighlightRect>();
   if(!highlight||highlight.isTitle||highlight.contentBlockIndex===undefined)return result;
-  const block=highlight.contentBlockIndex,rows=layout.rows;
+  const block=highlight.contentBlockIndex,rows=contentRows(layout);
   let low=0,high=rows.length;
-  while(low<high){const mid=(low+high)>>>1,row=rows[mid]!;if(row.blockIndex<block||(row.blockIndex===block&&row.kind==="text"&&(row.sourceStart??0)+row.text.length<=highlight.sourceStart))low=mid+1;else high=mid;}
+  while(low<high){const mid=(low+high)>>>1,row=rows.at(mid)!;if(row.blockIndex<block||(row.blockIndex===block&&row.kind==="text"&&(row.sourceStart??0)+row.text.length<=highlight.sourceStart))low=mid+1;else high=mid;}
   for(let index=low;index<rows.length;index++){
-    const row=rows[index]!;
+    const row=rows.at(index)!;
     if(row.blockIndex!==block)break;
     if(row.kind!=="text")continue;
     const start=row.sourceStart??0;if(start>=highlight.sourceEnd)break;

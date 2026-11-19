@@ -309,7 +309,7 @@ test('player captures an actual rendered Douyin frame with entry source and nati
  nativeVideoSample={hasRenderedFirstFrame:true,sourceGeneration:17};frameCaptures.length=0;internet='wifi';const [active,setActive]=createSignal(true);
  const source={title:'a',platform:'douyin' as const,awemeId:'frame-a',url:'podjs-media-cache://play/bound.mp4',headers:{Cookie:'fixture'},immersive:true};
  const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source,width:233,height:233,get active(){return active();},offset:0,round:true}));await turn();setActive(false);await turn();
- expect(frameCaptures.at(-1)).toEqual({key:'douyin:frame-a',source:{url:source.url,videoUrl:undefined,audioUrl:undefined,headers:{Cookie:'fixture'}},sourceGeneration:17});f.dispose();nativeVideoSample={};
+ expect(frameCaptures.at(-1)).toEqual({key:'douyin:frame-a',source:{url:source.url,videoUrl:undefined,audioUrl:undefined,headers:{Cookie:'fixture'},maxVideoShortEdge:720},sourceGeneration:17});f.dispose();nativeVideoSample={};
 });
 test('a restored actual-frame placeholder never prepares an unvalidated saved video URL',async()=>{
  const before=prepareLoops.length;let handle:any,retries=0;const source={title:'a',platform:'douyin' as const,awemeId:'a',url:'https://expired.invalid/video',previewOnly:true,immersive:true,previewFrame:{entryId:'a',frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/fixture.jpg',width:10,height:10,positionMs:0,capturedAt:1,capturedGeneration:3}}};

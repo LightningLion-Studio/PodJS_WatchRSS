@@ -64,7 +64,7 @@ export function BeianScreen(props: BeianScreenProps) {
     const now = Date.now();
     if (firstFrame === undefined) { firstFrame = now; return; }
     setElapsed(Math.min(1650, Math.max(0, now - firstFrame)));
-  });
+  }, () => props.active?.() !== false && qrReady() && elapsed() < 1650);
   const layout = createMemo(() => beianColumnLayout(props.width, props.height, density, text.title().heightPx, text.subtitle().heightPx, qrAvailable()));
   const qrAlpha = () => .12 + .88 * eased(elapsed() / 980, 0, .2);
   const qrScale = () => 1.16 - .16 * eased(elapsed() / 1500, .4, .2);
