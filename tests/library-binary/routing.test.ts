@@ -6,8 +6,8 @@ import {capabilityDigest,preparationDigest} from '../../src/sync/library-binary/
 import {cap,selection,binding,begin,object} from './helpers';
 const ready:Ready={identityVerified:true,accountConfirmed:true,legacyAcksDrained:true};
 for(const c of fixtures.cases)test('frozen peer projection: '+c.name,()=>expect(classifyPeer(c.probe,c.ready)).toBe(c.expected as PeerRoute));
-test('release defaults off; explicit S2 adapter readiness sets limits 1/65536',()=>{
- expect(RELEASE_B2_ENABLED).toBe(false);expect(s2Capability(cap.kinds,{...cap.limits,maxInFlightChunks:8,maxInFlightBytes:524288})).toEqual(cap);expect(()=>s2Capability([],cap.limits)).toThrow();
+test('release defaults on; explicit S2 adapter readiness sets limits 1/65536',()=>{
+ expect(RELEASE_B2_ENABLED).toBe(true);expect(s2Capability(cap.kinds,{...cap.limits,maxInFlightChunks:8,maxInFlightBytes:524288})).toEqual(cap);expect(()=>s2Capability([],cap.limits)).toThrow();
 });
 test('routing matrix uses send/receive intersection and independent v1 tasks',()=>{
  const scopes=[{domain:'rss',kind:'rssSource',direction:'phoneToWatch' as const,v1Available:true},{domain:'books',kind:'bookState',direction:'phoneToWatch' as const,v1Available:true},{domain:'notes',kind:'noteRecord',direction:'watchToPhone' as const,v1Available:true}];

@@ -2,7 +2,7 @@ import {BOOK_KINDS,LIMIT_KEYS,capability,selection,exact,row,bool,fail,type Bind
 import {capability as resumeCapability} from '../library-resume/wire';
 import {capabilityDigest} from './digests';
 
-export const RELEASE_B2_ENABLED=false;
+export const RELEASE_B2_ENABLED=true;
 export interface Ready {identityVerified:boolean;accountConfirmed:boolean;legacyAcksDrained:boolean}
 function isReady(ready:Ready):boolean {exact(ready,['identityVerified','accountConfirmed','legacyAcksDrained']);return Object.values(ready).every(v=>bool(v)===true);}
 export type PeerRoute='B2'|'PODJS_V1'|'COMPOSE_V14'|'WAIT_READY'|'CAPABILITY_MISMATCH'|'PEER_IMPLEMENTATION_UNKNOWN';

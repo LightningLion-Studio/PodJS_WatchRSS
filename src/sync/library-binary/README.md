@@ -4,9 +4,8 @@ The RFCOMM product entry is `BinaryApplicationService` →
 `LibraryBinaryConnection` → `BinaryConnection` / `BinaryByteTransport`.
 `RfcommLibraryListener` uses S1 `readBytes` / `writeBytes`. The locked framework
 supplies raw file reads/writes and verified native staging; no framework change
-is required. `RELEASE_B2_ENABLED=false` is the build default. A local integration
-host can explicitly inject `b2Enabled:true`; production builds change the build
-constant only after rollout authorization.
+is required. `RELEASE_B2_ENABLED=true` is the build default. A local integration
+host can inject `b2Enabled` to exercise either setting.
 
 The frozen r3 specification SHA-256 is
 `3d1ed2b857be3d599d52221c02c04b2672f80b5b42e9443eaeab844632cad8cb`.
