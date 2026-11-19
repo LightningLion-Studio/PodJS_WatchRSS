@@ -139,7 +139,7 @@ test('warm imported library rebuilds only the edited row and invalidates equal-l
   let encodes=0;const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async a=>{encodes++;return codec.encode(a);}}});
   await repo.cursor('phone');encodes=0;await repo.cursor('phone');expect(encodes).toBe(0);
   await f.db.execute("UPDATE articles SET title='one edit',fetched_at=fetched_at+1 WHERE id=2");
-  await repo.cursor('phone');expect(encodes).toBe(1); // only the edited local chapter is rebuilt
+  await repo.cursor('phone');expect(encodes).toBe(0); // the metadata edit retains the verified body summary
   encodes=0;const before=await repo.prepareWindow('phone',0);
   await f.db.execute("UPDATE article_original_chunks SET body='original B' WHERE article_id=3");
   const after=await repo.prepareWindow('phone',0);expect(encodes).toBe(1);
@@ -251,5 +251,53 @@ test('P6 article body adapter reads the verified v1 cache using native and canon
   const page=await f.repo.cloudRestoreMetadata();expect(page.articles).toHaveLength(1);expect(page.articles[0].articleId).not.toBe(f.id);
   const canonical=await f.repo.cloudArticleBody(page.articles[0].articleId);expect(canonical?.article.contentText).toBe('body');expect(canonical?.manifest.bodyHash).toBe(native?.manifest.bodyHash);expect((await f.repo.cloudArticleBody(f.id))?.article.contentText).toBe('body');
   expect(await f.repo.cloudArticleBody('missing')).toBeUndefined();
+ }finally{f.sql.close();}
+});
+
+test('legacy wire projection reuses body summaries after restart and rebuilds on journal loss',async()=>{
+ const f=await setup();
+ try{
+  await stableWindow(f);
+  let encodes=0;
+  const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async b=>{encodes++;return codec.encode(b);}}});
+  const warm=await repo.prepareWindow('phone',0);
+  expect(encodes).toBe(0);
+  await f.db.execute("UPDATE channels SET title='Renamed imports' WHERE id=1");
+  const renamed=await repo.prepareWindow('phone',0);
+  expect(renamed.fullArticleManifest[0]!.metadataHash).not.toBe(warm.fullArticleManifest[0]!.metadataHash);
+  expect(renamed.fullArticleManifest[0]!.bodyHash).toBe(warm.fullArticleManifest[0]!.bodyHash);
+  expect(encodes).toBe(0);
+  await f.db.execute("UPDATE articles SET content='updated after journal loss' WHERE id=1");
+  await f.db.execute('DELETE FROM sync_projection_events');
+  const rebuilt=await repo.prepareWindow('phone',0);
+  expect(rebuilt.fullArticleManifest[0]!.bodyHash).not.toBe(warm.fullArticleManifest[0]!.bodyHash);
+  expect(await f.db.query('SELECT * FROM sync_peer_state')).toEqual([]);
+ }finally{f.sql.close();}
+});
+
+test('canonical wire aliases work on SQLite without JSON1 and revalidate a changed GUID',async()=>{
+ const f=await setup();
+ try{
+  const query=f.db.query;
+  f.db.query=async(sql,...args)=>{
+   if(/\bjson_each\(/i.test(sql))throw Error('no such table: json_each');
+   if(/\bjson_array\(/i.test(sql))throw Error('no such function: json_array');
+   return query(sql,...args);
+  };
+  const url='https://example.com/rss-item';
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(2,'https://feed.example/rss','Feed',1)");
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,link,guid,dedup_key,fetched_at) VALUES(2,2,'RSS',?,'old-guid','rss-key',100)",[url]);
+  await f.db.execute("INSERT INTO article_saved_states(article_id,save_type,saved,changed_at) VALUES(2,'favorite',1,100)");
+  const nativeId=await stableArticleId(url,text.parseUri,codec);
+  const make=()=>{const repo=new SqlLibrarySessionRepository(f.db,f.ports);repo.configurePeer('phone',{supportsRssCanonicalIds:true});return repo;};
+  const alias=async(guid:string)=>{
+   const expected=await codec.sha256(new TextEncoder().encode(guid));
+   const window=await make().prepareWindow('phone',0);
+   expect(window.fullArticleManifest.find(row=>row.articleId===expected)?.legacyArticleIds).toEqual([nativeId]);
+  };
+  await alias('old-guid');
+  await alias('old-guid');
+  await f.db.execute("UPDATE articles SET guid='new-guid' WHERE id=2");
+  await alias('new-guid');
  }finally{f.sql.close();}
 });

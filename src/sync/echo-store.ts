@@ -7,7 +7,7 @@ let generationCounter=0;
 const key=(kind:string,id:string)=>kind+'\0'+id;
 export class PeerEchoStore {
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec){}
- private signature(value:object){const row=value as Record<string,unknown>;return hashJavaText(JSON.stringify(Object.fromEntries(Object.keys(row).sort().filter(k=>k!=='legacyArticleIds').map(k=>[k,row[k]]))),this.codec);}
+ private signature(value:object){const row=value as Record<string,unknown>;return hashJavaText(JSON.stringify(Object.fromEntries(Object.keys(row).sort().map(k=>[k,row[k]]))),this.codec);}
  private async records(peer:string){return this.db.query('SELECT e.* FROM sync_peer_echo e JOIN sync_peer_echo_generation g ON g.peer_device_id=e.peer_device_id AND g.generation=e.generation WHERE e.peer_device_id=?',[peer]);}
  async filter(peer:string,articles:readonly ArticleManifest[],sources:readonly SyncedSource[]){
   const proof=new Map((await this.records(peer)).map(r=>[key(String(r.kind),String(r.entity_id)),r]));
@@ -25,7 +25,13 @@ export class PeerEchoStore {
   const gen=Date.now()+':'+(++generationCounter),writes:{sql:string;params:SqlParams}[]=[];
   for(const [kind,id,value]of [...articles.map(a=>['article',a.articleId,a] as const),...sources.map(s=>['rssSource',s.url,s] as const)]){
    if(value.sourceDeviceId!==peer)continue;const stamp=await this.signature(value),received=remote.get(key(kind,id)),old=proof.get(key(kind,id));
-   const incomingStamp=received?.sourceDeviceId===peer?await this.signature(received):old&&String(old.local_signature)===stamp?String(old.incoming_signature):undefined;
+   let incomingStamp:string|undefined;
+   if(received?.sourceDeviceId===peer){
+    const aliases=(v:ArticleManifest|SyncedSource)=>'articleId' in v?JSON.stringify(v.legacyArticleIds??[]):'[]';
+    // A newer alias list in the local snapshot might have appeared after
+    // the acknowledged window. A receipt for the old list cannot hide it.
+    if(aliases(received)===aliases(value))incomingStamp=await this.signature(received);
+   }else if(old&&String(old.local_signature)===stamp)incomingStamp=String(old.incoming_signature);
    if(!incomingStamp)continue;
    writes.push({sql:'INSERT INTO sync_peer_echo(peer_device_id,generation,kind,entity_id,incoming_signature,local_signature) VALUES(?,?,?,?,?,?)',params:[peer,gen,kind,id,incomingStamp,stamp]});
   }

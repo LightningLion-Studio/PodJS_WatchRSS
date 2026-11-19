@@ -17,7 +17,7 @@ import type {RecordDocument} from '../cloud/records';
 import {FullSyncPerf} from './full-sync-perf';
 import {ManifestContention,LibrarySnapshotBusyError} from './manifest-contention';
 import {SqlDomainDefinitions,projectionGuard} from './domain-definitions';
-import {LibraryProjectionCache} from './projection-cache';
+import {LibraryProjectionCache,PROJECTION_EVENT_RETENTION} from './projection-cache';
 import type {AfterReadingAck} from '../books/reading-delta';
 import type {BookState,BookReading} from '../books/protocol';
 import {SqlBookStore} from '../books/store';
@@ -44,6 +44,7 @@ import {isImportedContentUrl} from '../core/imported-content.ts';
 import type {LibrarySessionRepository,LibraryWindow,PendingSyncSuccess} from './session.ts';
 import type {ReceivedArticle,RequestedArticleBody} from './article-batches.ts';
 import type {SyncedSource} from './library-wire.ts';
+import type {ArticleManifest} from './manifest.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
  noteAssetReader?:(key:string,check?:()=>void)=>Promise<Uint8Array>;
@@ -62,9 +63,10 @@ export interface SqlLibraryRepositoryPorts {
  now?:()=>number;
 }
 let snapshotScope=0;
+const libraryProjectionScope=(canonical:boolean,books:boolean)=>(canonical?':canonical':'')+(books?':books-v1':'');
 /** One shared instance serializes session operations. UI writes remain concurrent
  * and are detected by revision guards before advertising a sequence boundary. */
-export class SqlLibrarySessionRepository implements LibrarySessionRepository {
+export class SqlLibraryCloudRepository implements LibrarySessionRepository {
  /** Read-only C export: no RSS merge, cursor repair, reading migration or cache
   * publication. Each body's exact encoding is checked and discarded after its
   * bounded descriptor is captured; source reads later revalidate the version. */
@@ -114,7 +116,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private tail:Promise<unknown>=Promise.resolve();
  private readonly registerProjectionIds=new Map<string,string>();
  private peerCanonical=new Map<string,boolean>();private peerBooks=new Map<string,boolean>();
- readonly books:SqlBookStore|undefined;private bookActions:BookSyncActions|undefined;
+ readonly books:SqlBookStore|undefined;
  private readonly projection:LibraryProjectionCache;
  private cloudMemo?:Promise<MemoRepository>;
  private cloudProgress?:((unit:string)=>Promise<void>);
@@ -123,11 +125,11 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  setCloudDiagnostic(sink?:RepositoryDiagnostic){this.cloudDiagnostic=sink;}
  private work<T>(stage:string,run:()=>Promise<T>){return repositoryWork(f=>this.report(f),stage,run,this.ports.now);}
  private readonly definitions:SqlDomainDefinitions;private projectionGeneration?:string;
- private snapshotCache:{canonical:boolean;bookMode:boolean;revision:number;projectionSeq:number;articles:readonly PreparedArticle[];sources:readonly SyncedSource[]}|undefined;
- constructor(private readonly db:SqlDatabase,private readonly ports:SqlLibraryRepositoryPorts){
+ private snapshotCache:{canonical:boolean;bookMode:boolean;revision:number;projectionSeq:number;articles:readonly PreparedArticle[];sources:readonly SyncedSource[];manifests:readonly ArticleManifest[]}|undefined;
+ constructor(protected readonly db:SqlDatabase,private readonly ports:SqlLibraryRepositoryPorts){
   this.perf=new FullSyncPerf(ports.diagnostic);this.db=db=this.perf.database(db);this.ports=ports={...ports,codec:this.perf.codec(ports.codec)};
   this.projection=new LibraryProjectionCache(db,()=>ports.text.yieldTurn?.()??db.query('SELECT 1'),f=>this.report(f));this.definitions=new SqlDomainDefinitions(db,ports.codec,undefined,undefined,f=>this.report(f));
-  if(ports.bookFiles){this.books=new SqlBookStore(db,{sha256:ports.codec.sha256,files:ports.bookFiles,text:ports.files,stableId:url=>stableArticleId(url,ports.text.parseUri,ports.codec),deviceId:()=>this.identity(),warn:code=>this.report({stage:code}),diagnostic:fields=>this.report(fields),profile:(stage,ms)=>this.perf.add(stage,ms)});this.bookActions=new BookSyncActions(db,this.books);}
+  if(ports.bookFiles)this.books=new SqlBookStore(db,{sha256:ports.codec.sha256,files:ports.bookFiles,text:ports.files,stableId:url=>stableArticleId(url,ports.text.parseUri,ports.codec),deviceId:()=>this.identity(),warn:code=>this.report({stage:code}),diagnostic:fields=>this.report(fields),profile:(stage,ms)=>this.perf.add(stage,ms)});
   this.echo=new PeerEchoStore(db,ports.codec);this.now=ports.now??Date.now;this.local=new LocalArticleManifestStore(db,ports.codec,ports.text,ports.files,ports.migrateReading,ports.migrateReadingMany,f=>this.report(f),ports.reencodeStoredBodies);
   this.receiver=new SyncArticleReceiver(db,ports.codec,ports.files,ports.migrateReading,this.now,(a,target)=>this.local.resolveIncomingBody(a,target),()=>this.projectionGeneration,(stage,ms)=>this.perf.add(stage,ms));
   this.deletion=new SyncArticleDeletionStore(db,ports.codec,(a,target)=>this.local.resolveIncomingBody(a,target),itemIds=>ports.cleanupRemovedContent({itemIds,channels:[]}));this.sources=new SqlSourceSyncStore(db,ports.uri,this.now,removed=>ports.cleanupRemovedContent({itemIds:removed.itemIds,channels:[removed.channel]}));this.sequence=new SqlLibrarySequenceStore(db,this.now);
@@ -163,9 +165,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    this.report({stage:'repository.snapshot.retry',attempt,canonical:canonical?1:0,reason,revision,observedRevision:await libraryRevision(this.db),projectionSeq:sequence,observedProjectionSeq:await this.projection.sequence(),events:JSON.stringify(counts)});
   }catch{/* Diagnostics must not hide storage errors or change retry decisions. */}
  }
- private run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
+ protected run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
- private async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
+ protected async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
  private async legacySnapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
   await playbackWork.wait(check);
   idleHit(49);return this.work('legacySnapshot',async()=>{
@@ -194,9 +196,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
     }
     if(!cached||cached.revision!==revision||cached.canonical!==canonical||cached.bookMode!==bookMode){
      const articles=await this.local.snapshot(true,canonical,bookMode,check);trace('repository.articles');this.report({stage:'manifest.inventory',canonical:canonical?1:0,inventory:JSON.stringify(libraryInventory(articles.map(a=>({...a.article,deleted:a.manifest.deleted}))))});const sourceRows=preparedSources??await this.sources.export(id),bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
-     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),(canonical?':canonical':'')+(bookMode?':books-v1':''),undefined,await this.needsProjectionSeed());trace('repository.fingerprints');
+     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),libraryProjectionScope(canonical,bookMode),undefined,await this.needsProjectionSeed());trace('repository.fingerprints');
      if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
-     cached={canonical,bookMode,revision,projectionSeq:0,articles,sources};this.snapshotCache=cached;
+     cached={canonical,bookMode,revision,projectionSeq:0,articles,sources,manifests:articles.map(a=>a.manifest)};this.snapshotCache=cached;
     }
     await this.db.transaction([projectionGuard(generation),{sql:"UPDATE sync_fast_definitions SET seeded=1 WHERE domain='library' AND generation=?",params:[generation]}]);
     const {articles,sources}=cached;
@@ -208,20 +210,22 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   throw new LibrarySnapshotBusyError();
   });
  }
- private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
+ private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string,manifests:readonly ArticleManifest[])=>Promise<T>,canonical=false,bookMode=false,check?:()=>void,legacyCloud=false):Promise<T>{
   await playbackWork.wait(check);
-  idleHit(48);if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
+  idleHit(48);if(!canonical&&legacyCloud)return this.legacySnapshot((articles,sources,id)=>action(articles,sources,id,articles.map(a=>a.manifest)),canonical,bookMode,check);check?.();
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
   const id=await this.migrate();trace('repository.migrate');
   const contention=new ManifestContention(this.db,()=>this.ports.text.yieldTurn?.()??this.db.query('SELECT 1'),fields=>this.report(fields));
+  let quickRetry=false;
   for(let attempt=0;attempt<3;attempt++){
-   if(attempt)await contention.settle(attempt,check);
+   if(attempt&&!quickRetry)await contention.settle(attempt,check);
+   quickRetry=false;
    check?.();let revision=await libraryRevision(this.db);const projectionSeq=await this.projection.sequence();
    try{
     let cached=this.snapshotCache;
     if(!cached||cached.revision!==revision||cached.projectionSeq!==projectionSeq||cached.canonical!==canonical||cached.bookMode!==bookMode){
-     const scope=(canonical?':canonical':'')+(bookMode?':books-v1':'');
+     const scope=libraryProjectionScope(canonical,bookMode);
      let plan=await this.perf.time("snapshot.projection.plan",()=>this.projection.plan(scope,revision,bookMode));
      if(bookMode&&(!plan||plan.urls?.some(isImportedContentUrl))){await this.books?.registerLocal([],check);revision=await libraryRevision(this.db);plan=await this.projection.plan(scope,revision,bookMode);}
      if(!plan||plan.urls!==undefined)await this.perf.time("snapshot.reading",()=>this.local.prepareReadingForSnapshot(plan?.readingUrls??plan?.urls));
@@ -230,29 +234,45 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
      const preparedRevision=await libraryRevision(this.db);
      if(preparedRevision!==revision)plan=await this.projection.plan(scope,preparedRevision,bookMode);
      revision=preparedRevision;
-     this.local.restoreReusableBodies(plan?.rows.filter(r=>!plan?.bodyUrls?.includes(r.prepared.article.url))??[],async p=>(await this.projection.full([p]))[0]!);
-     if(plan)this.local.restoreProjectionBindings(new Map(plan.rows.filter(r=>!plan?.urls?.includes(r.prepared.article.url)).map(r=>[r.prepared.article.articleId,r.sourceItem])));
+     const dirty=new Set(plan?.urls),dirtyBodies=new Set(plan?.bodyUrls);
+     this.local.restoreReusableBodies(plan?.rows.filter(r=>dirty.has(r.prepared.article.url)&&!dirtyBodies.has(r.prepared.article.url))??[],async p=>(await this.projection.full([p]))[0]!);
+     if(plan)this.local.restoreProjectionBindings(new Map(plan.rows.filter(r=>!dirty.has(r.prepared.article.url)).map(r=>[r.prepared.article.articleId,r.sourceItem])));
      const observedSeq=plan?.seq??await this.projection.sequence();
      let articles:readonly PreparedArticle[],changedIds:Set<string>|undefined;
      if(plan&&plan.urls===undefined){articles=plan.rows.map(r=>r.prepared);changedIds=new Set();}
      else if(plan){
-      const dirty=new Set(plan.urls),old=plan.rows.map(r=>r.prepared),changed=await this.local.snapshot(true,canonical,bookMode,check,plan.urls);
+      const old=plan.rows.map(r=>r.prepared),changed=await this.local.snapshot(true,canonical,bookMode,check,plan.urls,false,!canonical);
       const kept=old.filter(p=>!dirty.has(p.article.url)),keptIds=new Set(kept.map(p=>p.article.articleId));
-      if(changed.some(p=>keptIds.has(p.article.articleId))){plan=undefined;articles=await this.local.snapshot(true,canonical,bookMode,check);}
-      else{changedIds=new Set([...old.filter(p=>dirty.has(p.article.url)).map(p=>p.article.articleId),...changed.map(p=>p.article.articleId)]);articles=[...kept,...changed];}
+      const oldDirty=old.filter(p=>dirty.has(p.article.url)),oldIds=new Set(oldDirty.map(p=>p.article.articleId));
+      const changedKeys=new Set(changed.map(p=>p.article.articleId));
+      const unsafe=changed.some(p=>keptIds.has(p.article.articleId)||!dirty.has(p.article.url))||
+       (!canonical&&(new Set(oldDirty.map(p=>p.article.url)).size!==dirty.size||oldIds.size!==changedKeys.size||[...oldIds].some(id=>!changedKeys.has(id))));
+      if(unsafe){
+       plan=undefined;this.local.restoreReusableBodies([]);
+       await this.local.prepareReadingForSnapshot();
+       articles=await this.local.snapshot(true,canonical,bookMode,check);
+      }else{changedIds=new Set([...oldIds,...changedKeys]);articles=[...kept,...changed];}
      }else articles=await this.local.snapshot(true,canonical,bookMode,check);
      trace('repository.articles');
      const bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
-     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),scope,changedIds,await this.needsProjectionSeed());trace('repository.fingerprints');
+     const manifests=canonical?await this.perf.time('snapshot.wireManifests',()=>this.canonicalWireManifests(articles)):articles.map(a=>a.manifest);
+     await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,manifests,sources,this.now(),scope,changedIds,await this.needsProjectionSeed(),canonical);trace('repository.fingerprints');
      if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
-     if(!plan||plan.urls!==undefined)await this.projection.publish(scope,revision,articles,this.local.projectionBindings(),plan,plan?.urls,observedSeq,generation);
-     if(await this.projection.sequence()!==observedSeq){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,observedSeq,'projection');continue;}
+     if(!plan||plan.urls!==undefined)await this.projection.publish(scope,revision,articles,this.local.projectionBindings(),plan,plan?.urls,observedSeq,generation,!plan&&!canonical&&this.local.hasLegacyCoverage());
+     const afterSeq=await this.projection.sequence();
+     if(afterSeq!==observedSeq){
+      // Derived cache writes can change the manifest's content witness. Read
+      // the dirty plan again immediately once; use normal contention backoff
+      // when source mutations or an incomplete event journal are involved.
+      quickRetry=attempt===0&&await this.projection.onlyDerivedEvents(observedSeq,afterSeq);
+      this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,observedSeq,'projection');continue;
+     }
      this.report({stage:'repository.projection',cached:plan?1:0,dirtyUrls:plan?.urls?.length??0,articles:articles.length});
-     cached={canonical,bookMode,revision,projectionSeq:observedSeq,articles,sources};this.snapshotCache=cached;
+     cached={canonical,bookMode,revision,projectionSeq:observedSeq,articles,sources,manifests};this.snapshotCache=cached;
     }
     await this.db.transaction([projectionGuard(generation),{sql:"UPDATE sync_fast_definitions SET seeded=1 WHERE domain='library' AND generation=?",params:[generation]}]);
-    const {articles,sources}=cached;
-    const result=await action(articles,sources,id);if(await libraryRevision(this.db)===revision&&await this.projection.sequence()===cached.projectionSeq)return result;
+    const {articles,sources,manifests}=cached;
+    const result=await action(articles,sources,id,manifests);if(await libraryRevision(this.db)===revision&&await this.projection.sequence()===cached.projectionSeq)return result;
     this.snapshotCache=undefined;
    }catch(error){check?.();if(await this.definitions.libraryGeneration()===generation&&await libraryRevision(this.db)===revision&&await this.projection.sequence()===projectionSeq)throw error;this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'validation');continue;}
    await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'action');
@@ -268,11 +288,19 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  }
  async canSkipLibrary(peer:string){
   await this.prepareFastProjection();if(await this.changedIdentityMode(peer)||await this.sequence.fastPathRequiresFull(peer))return false;
-  return !!(await this.db.query('SELECT peer FROM sync_fast_library_baseline WHERE peer=? AND generation=?',[peer,this.projectionGeneration]))[0];
+  const scope=libraryProjectionScope(!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer));
+  // The selected scope must still cover the retained event journal. The
+  // domain root witnesses relevant changes after that projection was built.
+  return !!(await this.db.query(`WITH latest(seq) AS (SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'),0))
+   SELECT 1 FROM sync_fast_library_baseline b
+   JOIN sync_fast_definitions d ON d.domain='library' AND d.generation=b.generation AND d.seeded=1
+   JOIN sync_projection_header h ON h.scope=? JOIN latest
+   WHERE b.peer=? AND b.generation=? AND h.seq BETWEEN max(0,latest.seq-?) AND latest.seq
+   AND h.revision<=(SELECT revision FROM sync_library_revision WHERE id=1)
+   AND (h.seq=latest.seq OR h.seq+1>=COALESCE((SELECT MIN(seq) FROM sync_projection_events),latest.seq+1))`,[scope,peer,this.projectionGeneration,PROJECTION_EVENT_RETENTION]))[0];
  }
  domainDefinitions(){return this.definitions;}
  deviceId(){return this.identity();}
- syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined);});}
  configurePeer(peer:string,capabilities:{supportsRssCanonicalIds?:boolean;supportsBookSyncV1?:boolean}){this.peerCanonical.set(peer,capabilities.supportsRssCanonicalIds===true);this.peerBooks.set(peer,!!this.books&&capabilities.supportsBookSyncV1===true);}
  private async changedIdentityMode(peer:string){const previous=(await this.db.query('SELECT rss_canonical,book_sync FROM sync_peer_features WHERE peer_device_id=?',[peer]))[0];return previous?!!Number(previous.rss_canonical)!==!!this.peerCanonical.get(peer)||!!Number(previous.book_sync)!==!!this.peerBooks.get(peer):!!this.peerCanonical.get(peer)||!!this.peerBooks.get(peer);}
  /** The manifest window captures its own upper bound after source merge. Never
@@ -280,15 +308,27 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  exchangeCursor(peer:string){return this.run(async()=>{await this.migrate();await this.prepareFastProjection();const c=await this.sequence.cursor(peer);return await this.changedIdentityMode(peer)?{...c,lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}:c;});}
  cursor(peer:string,check?:()=>void){return this.run(()=>this.snapshot(async()=>{const c=await this.sequence.cursor(peer);return await this.changedIdentityMode(peer)?{...c,lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}:c;},!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer),check));}
  mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean){return this.run(async()=>this.sources.merge(sources,remote,await this.migrate(),authoritative));}
- prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>{return this.run(()=>this.perf.time("window.total",()=>this.snapshot(async(articles,sources,id)=>{
-   const manifests=await this.wireManifests(articles,peer);const window=await this.sequence.prepareWindow(peer,id,manifests,async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq,{snapshotReconciled:true});
-   window.projectionGeneration=this.projectionGeneration;
+ prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>{return this.run(()=>this.perf.time("window.total",()=>this.snapshot(async(_articles,sources,id,manifests)=>{
+   const window=await this.sequence.prepareWindow(peer,id,manifests,async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq,{snapshotReconciled:true});
+   window.projectionGeneration=this.projectionGeneration;window.fullRssSources=sources;
    if(await this.changedIdentityMode(peer))return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'articleIdentityChanged'};
    if(!(await this.db.query('SELECT peer FROM sync_fast_library_baseline WHERE peer=? AND generation=?',[peer,this.projectionGeneration])).length)return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'projectionChanged'};
    return window.fullSnapshot?window:{...window,...await this.echo.filter(peer,window.articleManifest,window.rssSources)};
   },!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer),check)).finally(()=>this.perf.flush("window.perf")));}
- private async wireManifests(articles:readonly PreparedArticle[],peer:string){return this.perf.time("snapshot.wireManifests",()=>this.wireManifestsImpl(articles,peer));}
- private async wireManifestsImpl(articles:readonly PreparedArticle[],peer:string){if(!this.peerCanonical.get(peer))return articles.map(a=>a.manifest);const identities=await this.local.cloudRssIdentitiesForUrls([...new Set(articles.filter(p=>p.article.rssSourceUrl&&!isImportedContentUrl(p.article.rssSourceUrl)).map(p=>p.article.url))]),counts=new Map<string,number>();for(const r of identities)counts.set(r.nativeArticleId,(counts.get(r.nativeArticleId)??0)+1);const byId=new Map<string,typeof identities>();for(const r of identities){const rows=byId.get(r.articleId)??[];rows.push(r);byId.set(r.articleId,rows);}return articles.map(p=>{const rows=byId.get(p.article.articleId)??[],legacy=[...new Set(rows.flatMap(r=>[r.localArticleId,...(counts.get(r.nativeArticleId)===1?[r.nativeArticleId]:[])]))].filter(id=>id!==p.article.articleId);return legacy.length?{...p.manifest,legacyArticleIds:legacy}:p.manifest;});}
+ private async canonicalWireManifests(articles:readonly PreparedArticle[]){
+  const urls=[...new Set(articles.filter(p=>p.article.rssSourceUrl&&!isImportedContentUrl(p.article.rssSourceUrl)).map(p=>p.article.url))];
+  const identities=await this.local.wireRssIdentitiesForUrls(urls,this.projectionGeneration!);
+  const counts=new Map<string,number>(),byId=new Map<string,typeof identities>();
+  for(const row of identities){
+   counts.set(row.nativeArticleId,(counts.get(row.nativeArticleId)??0)+1);
+   const group=byId.get(row.articleId)??[];group.push(row);byId.set(row.articleId,group);
+  }
+  return articles.map(p=>{
+   const rows=byId.get(p.article.articleId);if(!rows)return p.manifest;
+   const legacy=[...new Set(rows.flatMap(r=>[r.localArticleId,...(counts.get(r.nativeArticleId)===1?[r.nativeArticleId]:[])]))].filter(id=>id!==p.article.articleId);
+   return legacy.length?{...p.manifest,legacyArticleIds:legacy}:p.manifest;
+  });
+ }
 
  exportSources(peer?:string,check?:()=>void){return this.run(()=>this.snapshot(async(_a,sources)=>sources,!!this.peerCanonical.get(peer??''),!!this.peerBooks.get(peer??''),check));}
  receiveArticle(entry:ReceivedArticle,remote:string,authoritative:boolean,receipt?:ReceiptBoundary,binary?:{staged:StagedArticleBody|null}){return this.run(()=>this.perf.time('receive.total',async()=>{await this.perf.time('receive.migrate',()=>this.migrate());if(!binary&&!this.projectionGeneration)await this.prepareFastProjection();const mapped=await this.perf.time('receive.bookMapping',async()=>this.books?.mapping(entry.article.articleId,entry.article.url));if(mapped){const book=(await this.books!.states()).find(b=>b.bookId===mapped.bookId);if(book&&(book.deleted||book.deletedChapters.includes(mapped.chapterIndex))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,...receipt.after('retainedLocal')]);}return 0;}}let target;
@@ -296,7 +336,28 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    const article=target?{...entry.article,articleId:target.localArticleId,legacyArticleIds:[...new Set([...entry.article.legacyArticleIds??[],entry.article.articleId])].filter(id=>id!==target.localArticleId)}:entry.article,body={...entry.body,articleId:article.articleId};
    const canonical=this.peerCanonical.get(remote)&&!article.deleted&&article.rssSourceUrl&&!isImportedContentUrl(article.rssSourceUrl)?{sql:`INSERT INTO cloud_rss_article_ids(item_id,article_id) SELECT item_id,? FROM sync_article_ids WHERE article_id=? AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id WHERE cloud_rss_article_ids.article_id IS NOT excluded.article_id`,params:[entry.article.articleId,article.articleId]}:undefined;const atomic=receipt&&canonical?{check:receipt.check,before:receipt.before,after:(outcome:import('./library-resume/wire').Outcome)=>[canonical,...receipt.after(outcome)]}:receipt;const applied=article.deleted?await this.deletion.receive(article,body,remote,authoritative,atomic,!!receipt,binary?this.local.resolveIncomingItem.bind(this.local):undefined):await this.receiver.receiveWithStats(article,body,remote,authoritative,target?.itemId,!!target,atomic,binary);if(canonical&&!receipt)await this.db.execute(canonical.sql,canonical.params);if(++this.receivedCount%100===0)this.perf.flush('receive.perf');return applied;
   }));}
- exportRequested(requests:readonly RequestedArticleBody[],peer?:string){return this.run(async()=>{this.perf.flush('receive.perf.final');try{if(requests.length===0)return [];return await this.snapshot(async articles=>{const ids=new Set(requests.map(r=>r.articleId));const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable);const outgoing:PreparedArticle[]=[];for(let start=0;start<selected.length;start+=32)outgoing.push(...await this.local.materializeRequestedBatch(await this.projection.full(selected.slice(start,start+32))));if(peer&&this.peerCanonical.get(peer)){const manifests=await this.wireManifests(outgoing,peer);return outgoing.map((p,i)=>({...p,manifest:manifests[i]!,article:{...p.article,...(manifests[i]!.legacyArticleIds?{legacyArticleIds:manifests[i]!.legacyArticleIds}:{})}}));}return outgoing;},!!(peer&&this.peerCanonical.get(peer)),!!(peer&&this.peerBooks.get(peer)));}finally{if(this.snapshotCache&&this.snapshotCache.articles.reduce((n,a)=>n+(a.encodedBody?.length??0)+2*(a.article.contentHtml?.length??0)+2*a.article.contentText.length,0)>32*1024*1024)this.snapshotCache=undefined;}});}
+ exportRequested(requests:readonly RequestedArticleBody[],peer?:string){return this.run(async()=>{
+  this.perf.flush('receive.perf.final');
+  try{
+   if(requests.length===0)return [];
+   const canonical=!!(peer&&this.peerCanonical.get(peer));
+   return await this.snapshot(async(articles,_sources,_device,manifests)=>{
+    const ids=new Set(requests.map(r=>r.articleId));
+    const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable),outgoing:PreparedArticle[]=[];
+    for(let start=0;start<selected.length;start+=32)outgoing.push(...await this.local.materializeRequestedBatch(await this.projection.full(selected.slice(start,start+32))));
+    if(!canonical)return outgoing;
+    const byId=new Map(manifests.filter(m=>ids.has(m.articleId)).map(m=>[m.articleId,m]));
+    // Alias uniqueness was established over the entire window.
+    return outgoing.map(p=>{
+     const manifest=byId.get(p.article.articleId)!;
+     return {...p,manifest,article:{...p.article,...(manifest.legacyArticleIds?{legacyArticleIds:manifest.legacyArticleIds}:{})}};
+    });
+   },canonical,!!(peer&&this.peerBooks.get(peer)));
+  }finally{
+   if(this.snapshotCache&&this.snapshotCache.articles.reduce((n,a)=>n+(a.encodedBody?.length??0)+2*(a.article.contentHtml?.length??0)+2*a.article.contentText.length,0)>32*1024*1024)this.snapshotCache=undefined;
+  }
+ });}
+
  /** Cloud uses the same serialization lane and transactional entity merge as phone sync. */
  private cloudReady?:Promise<void>;
  private cloudState(db:SqlDatabase=this.db):Promise<void>{const run=async()=>{await db.execute(`CREATE TABLE IF NOT EXISTS cloud_reading_commit(id INTEGER PRIMARY KEY,revision INTEGER NOT NULL)`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_rss_article_ids(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,article_id TEXT NOT NULL)`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_article_state(article_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL,body_hash TEXT NOT NULL,body_ready INTEGER NOT NULL DEFAULT 0,reading_clock INTEGER NOT NULL DEFAULT 0,reading_source TEXT NOT NULL DEFAULT '')`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_source_state(url TEXT PRIMARY KEY,projection TEXT NOT NULL,changed_at INTEGER NOT NULL,device TEXT NOT NULL)`);};if(db!==this.db)return run();return this.cloudReady??=run().catch(error=>{this.cloudReady=undefined;throw error;});}
@@ -440,7 +501,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const pendingPrivateArticleIds=exported.filter(a=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return !a.deleted&&(a.independentSaved||a.favoriteSaved||a.watchLaterSaved||isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl))&&m&&(bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)&&!Number(m.body_ready);}).map(a=>a.articleId);
   const project=(rows:ExportedArticle[])=>rows.map(cloudIdentity).filter((a):a is ExportedArticle=>!!a);
   return {articles:project(exported.map(origin).map(savedState).map(normalize)),sources:await this.cloudSourcesForExport(sources,device),stateArticles:project([...states.values()].map(savedState).map(normalize)),pendingPrivateBodies:pendingPrivateArticleIds.length>0,pendingPrivateArticleIds:pendingPrivateArticleIds.map(id=>byNative.get(id)?.articleId??id)};
- },canonical,!!this.books,check);}));}
+ },canonical,!!this.books,check,true);}));}
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void){return this.run(async()=>{
   await this.cloudState();const id=await this.migrate();const publicUrls=articles.filter(a=>a.rssSourceUrl&&!isImportedContentUrl(a.rssSourceUrl)&&!isLocalOnlyRssSource(a.rssSourceUrl)).map(a=>a.url),identities=publicUrls.length?await this.local.cloudRssIdentitiesForUrls(publicUrls,check,await this.local.cloudReadingItemIds(await Promise.all(articles.map(a=>this.ports.codec.sha256(utf8Encode(a.articleId)))),check)):[];let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
   const protectedIds=new Set((await querySyncPages(this.db,'SELECT article_id FROM article_register_state ORDER BY article_id')).map(r=>String(r.article_id)));
@@ -493,7 +554,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  }
 
  resetPeerState(){return this.run(()=>this.sequence.reset());}
- markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.perf.time("markSuccess.total",()=>this.snapshot(async(articles,sources)=>{const peer=pending.remoteDeviceId,manifests=await this.wireManifests(articles,peer),proof=await this.echo.stage(peer,manifests,sources,pending.receivedArticleManifest??[],pending.receivedSources??[]);await this.db.transaction([this.sequence.successStatement(pending),...(pending.fullSnapshot&&pending.projectionGeneration?[{sql:"INSERT INTO sync_fast_library_baseline(peer,generation) SELECT ?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain='library' AND generation=?) ON CONFLICT(peer) DO UPDATE SET generation=excluded.generation",params:[peer,pending.projectionGeneration,pending.projectionGeneration]}]:[]),{sql:'INSERT INTO sync_peer_features(peer_device_id,rss_canonical,book_sync) VALUES(?,?,?) ON CONFLICT(peer_device_id) DO UPDATE SET rss_canonical=excluded.rss_canonical,book_sync=excluded.book_sync',params:[peer,this.peerCanonical.get(peer)?1:0,this.peerBooks.get(peer)?1:0]},...proof]);},!!this.peerCanonical.get(pending.remoteDeviceId),!!this.peerBooks.get(pending.remoteDeviceId))).finally(()=>this.perf.flush("markSuccess.perf")));}
+ markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.perf.time("markSuccess.total",()=>this.snapshot(async(_articles,sources,_device,manifests)=>{const peer=pending.remoteDeviceId,proof=await this.echo.stage(peer,manifests,sources,pending.receivedArticleManifest??[],pending.receivedSources??[]);await this.db.transaction([this.sequence.successStatement(pending),...(pending.fullSnapshot&&pending.projectionGeneration?[{sql:"INSERT INTO sync_fast_library_baseline(peer,generation) SELECT ?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain='library' AND generation=?) ON CONFLICT(peer) DO UPDATE SET generation=excluded.generation",params:[peer,pending.projectionGeneration,pending.projectionGeneration]}]:[]),{sql:'INSERT INTO sync_peer_features(peer_device_id,rss_canonical,book_sync) VALUES(?,?,?) ON CONFLICT(peer_device_id) DO UPDATE SET rss_canonical=excluded.rss_canonical,book_sync=excluded.book_sync',params:[peer,this.peerCanonical.get(peer)?1:0,this.peerBooks.get(peer)?1:0]},...proof]);},!!this.peerCanonical.get(pending.remoteDeviceId),!!this.peerBooks.get(pending.remoteDeviceId))).finally(()=>this.perf.flush("markSuccess.perf")));}
  /** Phone clearLibrary removes the RSS library and sync cursors while keeping
   * the watch identity, standalone notes, account and reader configuration.
   * privateData is reserved for the explicit local ownership-clear service. */
@@ -506,7 +567,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   control?.progress('database');
   control?.check();
   const revision=await libraryRevision(db);
-  const caches=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_projection_light','sync_projection_rows','sync_projection_header','sync_projection_events','sync_fast_encoded_cache','sync_fast_library_baseline','sync_fast_roots','sync_fast_receipts','sync_stable_article_ids')")).map(row=>String(row.name));
+  const caches=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_projection_light','sync_projection_rows','sync_projection_header','sync_projection_legacy_coverage','sync_projection_events','sync_fast_encoded_cache','sync_fast_library_baseline','sync_fast_roots','sync_fast_receipts','sync_stable_article_ids')")).map(row=>String(row.name));
   const privateTables=privateData?(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('douyin_local_state','external_saved_migrations','sync_snapshot_retained','note_merge_conflicts','note_merge_guard','note_cloud_receipts','library_binary_snapshot_refs','library_binary_snapshot_files','library_binary_source_files','library_binary_request_quota','library_binary_cancellations','library_binary_assets','library_binary_connections','library_binary_peaks','library_binary_jobs','library_binary_objects','library_binary_requests','library_binary_pages','library_binary_snapshots','library_binary_prepare_requests','library_binary_preparations','library_binary_peer_ack')")).map(row=>String(row.name)):[];
   const channels=[...(retained?.channels??[]),...(await querySyncPages(db,'SELECT id,url FROM channels ORDER BY id')).map(r=>({id:Number(r.id),url:String(r.url)}))];
   const itemIds=[...new Set([...(retained?.itemIds??[]),...(await querySyncPages(db,'SELECT id FROM articles ORDER BY id')).map(r=>Number(r.id))])];
@@ -557,4 +618,15 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    await this.db.transaction(statements);await this.ports.cleanupRemovedContent({itemIds,channels});
   }finally{await this.db.execute('DELETE FROM sync_snapshot_retained WHERE scope=?',[scope]);}
  });}
+}
+
+/** The foreground session also serves the v1 book wire protocol. Headless
+ * cloud workers use the same book store without linking its wire handlers. */
+export class SqlLibrarySessionRepository extends SqlLibraryCloudRepository {
+ private readonly bookActions?:BookSyncActions;
+ constructor(db:SqlDatabase,ports:SqlLibraryRepositoryPorts){
+  super(db,ports);
+  if(this.books)this.bookActions=new BookSyncActions(this.db,this.books);
+ }
+ syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined);});}
 }

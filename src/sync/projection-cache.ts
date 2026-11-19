@@ -27,7 +27,10 @@ function readLight(value:unknown):CachedProjection{
  const manifest=manifestTuple.decode(value[4]) as unknown as PreparedArticle['manifest'];
  return {article:{articleId:manifest.articleId,url:value[1],rssSourceUrl:value[2],independentSaved:!!(value[3]&1),favoriteSaved:!!(value[3]&2),watchLaterSaved:!!(value[3]&4),contentHtml:null,contentText:''} as PreparedArticle['article'],manifest,encodedBody:null,...(value[5]!==null?{syntheticBytes:value[5]}:{})};
 }
+export const PROJECTION_EVENT_RETENTION=8192;
 let serial=0;
+const activeProjection=(condition:string)=>`EXISTS(SELECT 1 FROM sync_projection_rows p JOIN sync_projection_header h ON p.scope=h.scope AND p.generation=h.generation WHERE ${condition})`;
+const activeAliasProjection=(article:string)=>activeProjection(`p.scope LIKE ':canonical%' AND p.url IN (${article}.link,${article}.guid,${article}.dedup_key)`);
 /** Derived data only. The source revision and a complete change witness must
  * agree; an unknown writer, schema change or a missing journal forces a rebuild.
  * No article body is copied into this cache. */
@@ -40,9 +43,15 @@ export class LibraryProjectionCache {
  async initialize(){if(this.ready)await this.ready;const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);if(cookie===this.cookie)return;this.ready=repositoryWork(this.diagnostic,'projection-install',()=>this.install()).then(async()=>{this.loaded.clear();this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);}).catch(e=>{this.ready=undefined;throw e;});await this.ready;}
  private async install(){
   await this.db.transaction([
+   {sql:`CREATE TABLE IF NOT EXISTS sync_projection_wire_ids(
+    item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,generation TEXT NOT NULL,
+    channel_url TEXT NOT NULL,link TEXT,guid TEXT,dedup_key TEXT,bound_id TEXT,cloud_rss_id TEXT,
+    article_id TEXT NOT NULL,native_id TEXT NOT NULL)`},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_header(scope TEXT PRIMARY KEY,generation TEXT NOT NULL,revision INTEGER NOT NULL,seq INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_rows(scope TEXT NOT NULL,generation TEXT NOT NULL,article_id TEXT NOT NULL,url TEXT NOT NULL,position INTEGER NOT NULL,source_item INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(scope,generation,article_id))'},
    {sql:'CREATE INDEX IF NOT EXISTS sync_projection_url ON sync_projection_rows(scope,generation,url)'},
+   {sql:'CREATE INDEX IF NOT EXISTS sync_projection_source_item ON sync_projection_rows(source_item,scope,generation)'},
+   {sql:'CREATE TABLE IF NOT EXISTS sync_projection_legacy_coverage(scope TEXT PRIMARY KEY,generation TEXT NOT NULL)'},
    // Cold pagination must stream index order, not repeatedly sort multi-MiB JSON.
    {sql:'CREATE INDEX IF NOT EXISTS sync_projection_order ON sync_projection_rows(scope,generation,position,article_id)'},
    {sql:'CREATE INDEX IF NOT EXISTS sync_projection_article_url ON articles(COALESCE(link,dedup_key))'},
@@ -52,15 +61,22 @@ export class LibraryProjectionCache {
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_light(scope TEXT NOT NULL,generation TEXT NOT NULL,article_id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(scope,generation,article_id),FOREIGN KEY(scope,generation,article_id) REFERENCES sync_projection_rows(scope,generation,article_id) ON DELETE CASCADE)'},
    {sql:'CREATE TRIGGER IF NOT EXISTS sync_projection_light_delete BEFORE DELETE ON sync_projection_rows BEGIN DELETE FROM sync_projection_light WHERE scope=OLD.scope AND generation=OLD.generation AND article_id=OLD.article_id;END'},
    {sql:"CREATE TRIGGER IF NOT EXISTS sync_projection_light_invalidate AFTER UPDATE ON sync_projection_rows WHEN OLD.json IS NOT NEW.json OR OLD.url IS NOT NEW.url OR OLD.source_item IS NOT NEW.source_item OR OLD.scope IS NOT NEW.scope OR OLD.generation IS NOT NEW.generation OR OLD.article_id IS NOT NEW.article_id BEGIN DELETE FROM sync_projection_light WHERE scope=OLD.scope AND generation=OLD.generation AND article_id=OLD.article_id;END"},
-   {sql:'CREATE TABLE IF NOT EXISTS sync_projection_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,old_url TEXT,new_url TEXT)'},
+   {sql:'CREATE TABLE IF NOT EXISTS sync_projection_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,old_url TEXT,new_url TEXT, old_item INTEGER, new_item INTEGER, legacy_rebuild INTEGER NOT NULL DEFAULT 1)'},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_totals(id INTEGER PRIMARY KEY CHECK(id=1),real_events INTEGER NOT NULL)'},
    {sql:'INSERT OR IGNORE INTO sync_projection_totals VALUES(1,0)'},
    {sql:"CREATE TRIGGER IF NOT EXISTS sync_projection_totals_capture AFTER INSERT ON sync_projection_events WHEN NEW.kind NOT IN ('cacheUrl','cacheNone') BEGIN UPDATE sync_projection_totals SET real_events=real_events+1 WHERE id=1;END"},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_installation(id INTEGER PRIMARY KEY CHECK(id=1),definition TEXT NOT NULL)'},
   ]);
+  const columns=()=>this.db.query('PRAGMA table_info(sync_projection_events)');
+  const existing=await columns();
+  for(const [name,type] of [['old_item','INTEGER'],['new_item','INTEGER'],['legacy_rebuild','INTEGER NOT NULL DEFAULT 1']]){
+   if(existing.some(r=>r.name===name))continue;
+   try{await this.db.execute(`ALTER TABLE sync_projection_events ADD COLUMN ${name} ${type}`);}
+   catch(error){if(!/duplicate column name/i.test(String(error))||!(await columns()).some(r=>r.name===name))throw error;}
+  }
   const triggers=await this.db.query("SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' AND name NOT LIKE 'sync_projection_%' AND sql LIKE '%UPDATE sync_library_revision SET revision=revision+1%' ORDER BY name");
   const cacheLayouts=await Promise.all(['article_sync_content','article_sync_encoding_cache','article_native_sync_hash'].map(async table=>[table,await this.db.query('PRAGMA table_info('+table+')')]));
-  const definition='r47-cache-v8:'+JSON.stringify([triggers,cacheLayouts]),old=(await this.db.query('SELECT definition FROM sync_projection_installation WHERE id=1'))[0];
+  const definition='r47-cache-v9:'+JSON.stringify([triggers,cacheLayouts]),old=(await this.db.query('SELECT definition FROM sync_projection_installation WHERE id=1'))[0];
   if(old?.definition===definition)return;
   const statements:{sql:string;params?:SqlParams}[]=[];
   for(const t of await this.db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'sync_projection_track_%'"))statements.push({sql:`DROP TRIGGER "${String(t.name).replaceAll('"','""')}"`});
@@ -76,19 +92,27 @@ export class LibraryProjectionCache {
    };
    const full=['sync_local_identity','sync_books','sync_book_events'].includes(table),kind=table==='sync_book_reading'?'bookOnly':table==='sync_source_states'||table==='channels'&&op!=='DELETE'?'source':table==='channels'&&op==='DELETE'||full?'full':'url';
    const bodyTables=['article_body_chunks','article_original_chunks','article_previews','article_original_previews','article_original_meta'];
-   const bodyChange=table==='articles'?(op==='UPDATE'?['content','description','link','guid','dedup_key'].map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR '):'1'):bodyTables.includes(table)?'1':'0';
+   const changed=(fields:string[])=>fields.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR ');
+   const identityFields=['id','channel_id','link','guid','dedup_key'];
+   const bodyChange=table==='articles'?(op==='UPDATE'?changed(['content','description',...identityFields]):'1'):bodyTables.includes(table)?'1':'0';
+   const bodyItem=(ref:string)=>table==='articles'?`${ref}.id`:bodyTables.includes(table)?`${ref}.article_id`:'NULL';
+   const legacyRebuild=table==='articles'&&op==='UPDATE'?`(${changed(identityFields)})`:
+    table==='channels'&&op==='UPDATE'?`(${changed(['id','url'])})`:
+    [...bodyTables,'article_reading_state','article_saved_entry_times','sync_book_reading','sync_source_states'].includes(table)?'0':'1';
    const eligible=(ref:string)=>{
     const item=table==='articles'?`${ref}.id`:table==='sync_article_ids'||table==='sync_article_aliases'||table==='sync_saved_states'?`${ref}.item_id`:table==='article_reading_state'||table.startsWith('article_')?`${ref}.article_id`:null;
     if(!item)return '1';
     const a=table==='articles'?ref:'a',local=`EXISTS(SELECT 1 FROM channels ch WHERE ch.id=${a}.channel_id AND (ch.url LIKE '%watchrss://phone-imports%' OR ch.url LIKE '%https://watchrss.local/import-content%' OR ch.url LIKE '%https://watchrss.local/import-epub%' OR ch.url LIKE '%https://watchrss.local/import-txt-novel%'))`;
-    const test=`(${local} OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=${a}.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=${a}.id) OR EXISTS(SELECT 1 FROM sync_projection_rows p JOIN sync_projection_header h ON p.scope=h.scope AND p.generation=h.generation WHERE p.url=COALESCE(${a}.link,${a}.dedup_key)))`;
+    const alias=table==='articles'||table==='sync_article_ids'?` OR ${activeAliasProjection(a)}`:'';
+    const test=`(${local} OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=${a}.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=${a}.id) OR ${activeProjection(`p.url=COALESCE(${a}.link,${a}.dedup_key)`)} OR (${bodyChange}) AND ${activeProjection(`p.source_item=${a}.id`)}${alias})`;
     return table==='articles'?test:`EXISTS(SELECT 1 FROM articles a WHERE a.id=${item} AND ${test})`;
    };
    const book=(ref:string)=>{const item=table==='articles'?`${ref}.id`:table==='sync_article_ids'||table==='sync_article_aliases'||table==='sync_saved_states'?`${ref}.item_id`:table==='article_reading_state'||table.startsWith('article_')?`${ref}.article_id`:null;return item?`EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=${item} AND b.registration_complete=1)`:'0';};
    const refs=op==='UPDATE'?['OLD','NEW']:[op==='DELETE'?'OLD':'NEW'];
    const kindSql=table==='channels'&&op==='UPDATE'?`CASE WHEN ${['url','title','description','image_url','created_at','sort_order','is_pinned'].map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR ')} THEN 'source' ELSE 'none' END`:kind==='url'?`CASE WHEN NOT (${refs.map(eligible).join(' OR ')}) THEN 'none' WHEN ${refs.map(book).join(' OR ')} THEN CASE WHEN ${bodyChange} THEN 'bookBodyUrl' ELSE 'bookUrl' END WHEN ${bodyChange} THEN 'bodyUrl' ELSE 'url' END`:`'${kind}'`;
 
-   const body=`INSERT INTO sync_projection_events(kind,old_url,new_url) VALUES(${kindSql},${op==='INSERT'?'NULL':url('OLD')},${op==='DELETE'?'NULL':url('NEW')});`;
+   const item=(ref:string)=>`CASE WHEN ${bodyChange} THEN ${bodyItem(ref)} END`;
+   const body=`INSERT INTO sync_projection_events(kind,old_url,new_url,old_item,new_item,legacy_rebuild) VALUES(${kindSql},${op==='INSERT'?'NULL':url('OLD')},${op==='DELETE'?'NULL':url('NEW')},${op==='INSERT'?'NULL':item('OLD')},${op==='DELETE'?'NULL':item('NEW')},${legacyRebuild});`;
    const begin=sql.search(/\bBEGIN\b/);if(begin<0)throw Error('Unrecognized projection revision trigger');
    const prefix=sql.slice(0,begin).replace(' AFTER DELETE ', ' BEFORE DELETE ').replace(/^CREATE TRIGGER(?: IF NOT EXISTS)?\s+\S+/,`CREATE TRIGGER IF NOT EXISTS sync_projection_track_${String(t.name)}`);
    statements.push({sql:prefix+'BEGIN '+body+'END'});
@@ -100,7 +124,7 @@ export class LibraryProjectionCache {
     if(table==='sync_books'&&op!=='UPDATE')continue;
     const condition=op==='UPDATE'?' WHEN '+cols.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR '):'';
     const ref=op==='DELETE'?'OLD':'NEW';
-    const relevant=table==='cloud_rss_article_ids'?`EXISTS(SELECT 1 FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id=${ref}.item_id AND (c.url LIKE '%watchrss.local/import-%' OR c.url='watchrss://phone-imports' OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=a.id) OR EXISTS(SELECT 1 FROM sync_projection_rows p JOIN sync_projection_header h ON p.scope=h.scope AND p.generation=h.generation WHERE p.url=COALESCE(a.link,a.dedup_key))))`:'1';
+    const relevant=table==='cloud_rss_article_ids'?`EXISTS(SELECT 1 FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id=${ref}.item_id AND (c.url LIKE '%watchrss.local/import-%' OR c.url='watchrss://phone-imports' OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=a.id) OR ${activeProjection('p.url=COALESCE(a.link,a.dedup_key)')} OR ${activeAliasProjection('a')}))`:'1';
     statements.push({sql:`CREATE TRIGGER IF NOT EXISTS sync_projection_track_extra_${table}_${op.toLowerCase()} ${op==='DELETE'?'BEFORE':'AFTER'} ${op} ON ${table}${condition} BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;INSERT INTO sync_projection_events(kind) VALUES(CASE WHEN ${relevant} THEN 'full' ELSE 'none' END);END`});
    }
   }
@@ -108,18 +132,28 @@ export class LibraryProjectionCache {
    const currentColumns=(await this.db.query('PRAGMA table_info('+table+')')).map(r=>String(r.name));
    for(const op of ['INSERT','UPDATE','DELETE']){
     const ref=op==='DELETE'?'OLD':'NEW',condition=op==='UPDATE'?' WHEN '+currentColumns.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR '):'';
-    statements.push({sql:`CREATE TRIGGER IF NOT EXISTS sync_projection_track_cache_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${condition} BEGIN INSERT INTO sync_projection_events(kind,new_url) SELECT CASE WHEN EXISTS(SELECT 1 FROM channels c WHERE c.id=articles.channel_id AND (c.url LIKE '%watchrss.local/import-%' OR c.url='watchrss://phone-imports')) OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=articles.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=articles.id) OR EXISTS(SELECT 1 FROM sync_projection_rows p JOIN sync_projection_header h ON p.scope=h.scope AND p.generation=h.generation WHERE p.url=COALESCE(articles.link,articles.dedup_key)) THEN 'cacheUrl' ELSE 'cacheNone' END,COALESCE(link,dedup_key) FROM articles WHERE id=${ref}.item_id;END`});
+    const oldItem=op==='INSERT'?'NULL':'OLD.item_id',newItem=op==='DELETE'?'NULL':'NEW.item_id';
+    const itemUrl=(item:string)=>`(SELECT COALESCE(link,dedup_key) FROM articles WHERE id=${item})`;
+    statements.push({sql:`CREATE TRIGGER IF NOT EXISTS sync_projection_track_cache_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${condition} BEGIN INSERT INTO sync_projection_events(kind,old_url,new_url,old_item,new_item,legacy_rebuild) SELECT CASE WHEN EXISTS(SELECT 1 FROM channels c WHERE c.id=articles.channel_id AND (c.url LIKE '%watchrss.local/import-%' OR c.url='watchrss://phone-imports')) OR EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=articles.id) OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=articles.id) OR ${activeProjection(`p.url=COALESCE(articles.link,articles.dedup_key)`)} OR ${activeProjection(`p.source_item IN (${oldItem},${newItem})`)} OR ${activeAliasProjection('articles')} THEN 'cacheUrl' ELSE 'cacheNone' END,${itemUrl(oldItem)},${itemUrl(newItem)},${oldItem},${newItem},0 FROM articles WHERE id=${ref}.item_id;END`});
    }
   }
-  statements.push({sql:'DELETE FROM sync_projection_header'},{sql:'INSERT OR REPLACE INTO sync_projection_installation VALUES(1,?)',params:[definition]});
+  statements.push({sql:'DELETE FROM sync_projection_legacy_coverage'},{sql:'DELETE FROM sync_projection_header'},{sql:'INSERT OR REPLACE INTO sync_projection_installation VALUES(1,?)',params:[definition]});
   await this.db.transaction(statements);
  }
  async sequence(){await this.initialize();return Number((await this.db.query("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'),0) AS seq"))[0]!.seq);}
+ async onlyDerivedEvents(from:number,to:number){
+  const row=(await this.db.query(`SELECT count(*) AS n, max(seq) AS last
+   FROM sync_projection_events WHERE seq>? AND kind IN ('cacheUrl','cacheNone')`,[from]))[0];
+  return Number(row?.n)===to-from&&Number(row?.last)===to;
+ }
  async plan(scope:string,revision:number,bookMode:boolean):Promise<ProjectionPlan|undefined>{
-  await this.initialize();const h=(await this.db.query('SELECT * FROM sync_projection_header WHERE scope=?',[scope]))[0];if(!h)return;
-  const events=await querySyncPages(this.db,'SELECT seq,kind,old_url,new_url FROM sync_projection_events WHERE seq>? ORDER BY seq',[Number(h.seq)]);
+  await this.initialize();const h=(await this.db.query(`SELECT h.*,c.generation AS legacy_coverage FROM sync_projection_header h
+   LEFT JOIN sync_projection_legacy_coverage c ON c.scope=h.scope AND c.generation=h.generation WHERE h.scope=?`,[scope]))[0];if(!h)return;
+  const legacy=!scope.startsWith(':canonical');
+  const events=await querySyncPages(this.db,'SELECT seq,kind,old_url,new_url,old_item,new_item,legacy_rebuild FROM sync_projection_events WHERE seq>? ORDER BY seq',[Number(h.seq)]);
   const seq=await this.sequence();if(seq-Number(h.seq)!==events.length)return;
   if(revision<Number(h.revision)||revision-Number(h.revision)!==events.filter(r=>!['cacheUrl','cacheNone'].includes(String(r.kind))).length||events.some(r=>r.kind==='full'||r.kind==='bookOnly'&&!bookMode||['url','bodyUrl','cacheUrl','bookUrl','bookBodyUrl'].includes(String(r.kind))&&!r.old_url&&!r.new_url))return;
+  if(legacy&&events.some(r=>Number(r.legacy_rebuild)!==0))return;
   const urls=[...new Set(events.flatMap(r=>(['url','bodyUrl','cacheUrl'].includes(String(r.kind))||!bookMode&&['bookUrl','bookBodyUrl'].includes(String(r.kind)))?[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]:[]))];
   let rows=this.loaded.get(scope+'\0'+[h.generation,h.revision,h.seq].join(':'));
   if(!rows){rows=[];
@@ -141,10 +175,35 @@ export class LibraryProjectionCache {
   // backfilled, with the same revision guard used by normal publication.
   for(let at=0;at<backfill.length;at+=200)await this.db.transaction([revisionGuard(revision),...backfill.slice(at,at+200)]);
   for(const key of this.loaded.keys())if(key.startsWith(scope+'\0'))this.loaded.delete(key);this.loaded.set(scope+'\0'+[h.generation,h.revision,h.seq].join(':'),rows);}
+  const dirty=new Set(urls);
+  const bodyUrls=new Set(events.filter(r=>r.kind==='bodyUrl'||r.kind==='cacheUrl'||!bookMode&&r.kind==='bookBodyUrl').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]));
+  const bodyItems=new Map<number,unknown>();
+  for(const r of events)for(const [item,url] of [[r.old_item,r.old_url],[r.new_item,r.new_url]]){
+   if(item==null)continue;
+   const id=Number(item);bodyItems.set(id,bodyItems.has(id)&&bodyItems.get(id)!==url?null:url);
+  }
+  for(const {sourceItem,prepared:{article}} of rows)if(bodyItems.has(sourceItem)){
+   // The partial selector is a URL selector, not a body-binding selector.
+   // Resolve cross-URL dependencies with the complete article inventory.
+   if(bodyItems.get(sourceItem)!==article.url)return;
+   dirty.add(article.url);bodyUrls.add(article.url);
+  }
   const sources=new Set(events.filter(r=>r.kind==='source').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string') as string[]));
-  for(const r of rows)if(r.prepared.article.rssSourceUrl&&sources.has(r.prepared.article.rssSourceUrl)&&!urls.includes(r.prepared.article.url))urls.push(r.prepared.article.url);
-  if(urls.length>64)return;
-  return {generation:String(h.generation),revision:Number(h.revision),seq,rows,...(events.length?{urls,readingUrls:[...new Set(events.filter(r=>!['cacheUrl','cacheNone','source','none'].includes(String(r.kind))&&(!bookMode||!['bookUrl','bookBodyUrl'].includes(String(r.kind)))).flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))],bodyUrls:[...new Set(events.filter(r=>r.kind==='bodyUrl'||r.kind==='cacheUrl'||!bookMode&&r.kind==='bookBodyUrl').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))]}:{})};
+  if(sources.size)for(const {prepared:{article}} of rows){
+   const source=article.rssSourceUrl??(article.independentSaved?'watchrss://phone-imports':null);
+   if(source&&sources.has(source))dirty.add(article.url);
+  }
+  if(dirty.size>64)return;
+  if(legacy&&dirty.size&&h.legacy_coverage==null)return;
+  if(dirty.size){
+   const marks=[...dirty].map(()=>'?').join(',');
+   // Body ownership may point at another physical URL. A partial rebuild
+   // cannot safely replace a clean manifest row with an affected body binding.
+   if((await this.db.query(`SELECT 1 FROM sync_projection_rows p LEFT JOIN articles a ON a.id=p.source_item
+    WHERE p.scope=? AND p.generation=? AND p.source_item>0 AND p.url NOT IN (${marks})
+    AND (a.id IS NULL OR COALESCE(a.link,a.dedup_key) IN (${marks})) LIMIT 1`,[scope,h.generation,...dirty,...dirty])).length)return;
+  }
+  return {generation:String(h.generation),revision:Number(h.revision),seq,rows,...(events.length?{urls:[...dirty],readingUrls:[...new Set(events.filter(r=>!['cacheUrl','cacheNone','source','none'].includes(String(r.kind))&&(!bookMode||!['bookUrl','bookBodyUrl'].includes(String(r.kind)))).flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))],bodyUrls:[...bodyUrls]}:{})};
  }
  async full(prepared:readonly PreparedArticle[]):Promise<PreparedArticle[]>{return cpuWorkAsync('projection-rebuild','items',prepared.length,async()=>{
   const groups=new Map<string,{p:PreparedArticle;ref:{scope:string;generation:string;id:string;sourceItem:number}}[]>();
@@ -157,8 +216,10 @@ export class LibraryProjectionCache {
    }
   }return [...prepared];
  });}
- async publish(scope:string,revision:number,articles:readonly PreparedArticle[],bindings:ReadonlyMap<string,number>,previous?:ProjectionPlan,urls?:readonly string[],observedSeq?:number,definitionGeneration?:string){
+ async publish(scope:string,revision:number,articles:readonly PreparedArticle[],bindings:ReadonlyMap<string,number>,previous?:ProjectionPlan,urls?:readonly string[],observedSeq?:number,definitionGeneration?:string,legacyCoverage=false){
   await this.initialize();const guards=definitionGeneration?[projectionGuard(definitionGeneration)]:[];let generation=Date.now().toString(36)+'-'+(++serial);const seq=observedSeq??await this.sequence();
+  const header=()=>({sql:`INSERT INTO sync_projection_header(scope,generation,revision,seq) VALUES(?,?,?,?)
+   ON CONFLICT(scope) DO UPDATE SET generation=excluded.generation,revision=excluded.revision,seq=excluded.seq`,params:[scope,generation,revision,seq]});
   const dirty=urls?new Set(urls):undefined,write=dirty?articles.filter(p=>dirty.has(p.article.url)):articles;
   const positionBase=previous&&urls?Number((await this.db.query('SELECT COALESCE(MAX(position),-1)+1 AS next FROM sync_projection_rows WHERE scope=? AND generation=?',[scope,previous.generation]))[0]!.next):0;
   const rowStatements=(p:PreparedArticle,i:number)=>[{sql:'INSERT INTO sync_projection_rows(scope,generation,article_id,url,position,source_item,json) VALUES(?,?,?,?,?,?,?)',params:[scope,generation,p.article.articleId,p.article.url,positionBase+i,bindings.get(p.article.articleId)??0,JSON.stringify(packedProjection(p,bindings.get(p.article.articleId)??0))]},{sql:'INSERT INTO sync_projection_light VALUES(?,?,?,?)',params:[scope,generation,p.article.articleId,JSON.stringify(lightProjection(p,bindings.get(p.article.articleId)??0))]}];
@@ -168,15 +229,17 @@ export class LibraryProjectionCache {
   const incremental=!!previous&&!!urls&&write.length<=900;
   if(incremental){
    generation=previous!.generation;
-   await this.db.transaction([...guards,revisionGuard(revision),...(urls!.length?[{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation=? AND url IN ('+urls!.map(()=>'?').join(',')+')',params:[scope,generation,...urls!]}]:[]),...write.flatMap(rowStatements),{sql:'INSERT OR REPLACE INTO sync_projection_header VALUES(?,?,?,?)',params:[scope,generation,revision,seq]}]);
+   await this.db.transaction([...guards,revisionGuard(revision),...(urls!.length?[{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation=? AND url IN ('+urls!.map(()=>'?').join(',')+')',params:[scope,generation,...urls!]}]:[]),...write.flatMap(rowStatements),header()]);
   }else{
   if(previous&&urls){const clause=urls.length?' AND url NOT IN ('+urls.map(()=>'?').join(',')+')':'';await this.db.transaction([...guards,revisionGuard(revision),{sql:'INSERT INTO sync_projection_rows(scope,generation,article_id,url,position,source_item,json) SELECT scope,?,article_id,url,position,source_item,json FROM sync_projection_rows WHERE scope=? AND generation=?'+clause,params:[generation,scope,previous.generation,...urls]},{sql:'INSERT INTO sync_projection_light SELECT l.scope,?,l.article_id,l.json FROM sync_projection_light l JOIN sync_projection_rows p ON p.scope=l.scope AND p.generation=? AND p.article_id=l.article_id WHERE l.scope=? AND l.generation=?',params:[generation,generation,scope,previous.generation]}]);}
   for(let at=0;at<write.length;at+=100){
    await this.db.transaction([...guards,revisionGuard(revision),...write.slice(at,at+100).flatMap((p,i)=>rowStatements(p,at+i))]);
   }
-  await this.db.transaction([...guards,revisionGuard(revision),{sql:'INSERT OR REPLACE INTO sync_projection_header VALUES(?,?,?,?)',params:[scope,generation,revision,seq]},{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation!=?',params:[scope,generation]}]);
+  await this.db.transaction([...guards,revisionGuard(revision),header(),{sql:'DELETE FROM sync_projection_rows WHERE scope=? AND generation!=?',params:[scope,generation]},
+   ...(legacyCoverage?[{sql:'INSERT OR REPLACE INTO sync_projection_legacy_coverage VALUES(?,?)',params:[scope,generation]}]:[])]);
   }
-  await this.db.transaction([...guards,{sql:'DELETE FROM sync_projection_rows WHERE scope IN (SELECT scope FROM sync_projection_header WHERE seq<?)',params:[Math.max(0,seq-8192)]},{sql:'DELETE FROM sync_projection_header WHERE seq<?',params:[Math.max(0,seq-8192)]},{sql:'DELETE FROM sync_projection_events WHERE seq<=(SELECT MIN(seq) FROM sync_projection_header)'}]);
+  const cutoff=Math.max(0,seq-PROJECTION_EVENT_RETENTION);
+  await this.db.transaction([...guards,{sql:'DELETE FROM sync_projection_rows WHERE scope IN (SELECT scope FROM sync_projection_header WHERE seq<?)',params:[cutoff]},{sql:'DELETE FROM sync_projection_header WHERE seq<?',params:[cutoff]},{sql:'DELETE FROM sync_projection_events WHERE seq<=(SELECT MIN(seq) FROM sync_projection_header)'}]);
   for(const key of this.loaded.keys())if(key.startsWith(scope+'\0'))this.loaded.delete(key);
   this.loaded.set(scope+'\0'+[generation,revision,seq].join(':'),articles.map(p=>{const ref=this.lazy.get(p);if(ref)this.lazy.set(p,{...ref,scope,generation});return {prepared:(ref||!bindings.get(p.article.articleId)&&p.encodedBody?p:{article:{...p.article,contentHtml:null,contentText:''},manifest:p.manifest,encodedBody:null}),sourceItem:bindings.get(p.article.articleId)??0};}));
  }

@@ -95,6 +95,8 @@ export class LocalArticleManifestStore {
  setEncodingGeneration(value:string){if(this.encodingGeneration===value)return;this.encodingGeneration=value;this.rowCache.clear();this.rowCacheBytes=0;this.stableIds.clear();this.stableReady=undefined;this.reusableBodies.clear();this.bodySourceIds.clear();}
  private rowSelect(){return this.encodingGeneration?ROW_SELECT.replace(' FROM articles a JOIN channels ch',', (SELECT generation FROM sync_fast_encoded_cache g WHERE g.item_id=a.id AND g.body_hash=c.body_hash) AS body_generation FROM articles a JOIN channels ch'):ROW_SELECT;}
  private bodySourceIds=new Map<string,number>();
+ private legacyCoverage=false;
+ hasLegacyCoverage(){return this.legacyCoverage;}
  private reusableBodies=new Map<number,PreparedArticle>();
  private completeReusable:((p:PreparedArticle)=>Promise<PreparedArticle>)|undefined;
  private async reusableMetadata(id:number){const p=this.reusableBodies.get(id);if(!p)return;const full=await this.completeReusable?.(p)??p;this.reusableBodies.set(id,full);return full;}
@@ -202,6 +204,58 @@ export class LocalArticleManifestStore {
   for await(const group of this.cloudIdentityBatches(rows,check,requireBounded))for(const identity of group.identities)if(identity)out.push(identity);return out;
  }
  async cloudRssIdentitiesForUrls(urls:readonly string[],check?:()=>void,itemIds:readonly number[]=[]):Promise<CloudRssIdentity[]>{const out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,[...part,...part,...part],{key:'id'});for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}for(let at=0;at<itemIds.length;at+=100){const part=itemIds.slice(at,at+100),rows=await this.db.query(IDENTITY_SELECT+' WHERE a.id IN ('+part.map(()=>'?').join(',')+')',part);for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
+ /** Aliases are counted over all matching physical rows, including unsaved
+  * rows. Cache only the IDs of identities whose inputs exclude body text. */
+ async wireRssIdentitiesForUrls(urls:readonly string[],generation:string){
+  const input=new Map<number,Row>();
+  // Leave room for the generation and keyset parameters under SQLite's
+  // legacy 999-variable limit.
+  const urlsPerQuery=700;
+  for(let at=0;at<urls.length;at+=urlsPerQuery){
+   const part=urls.slice(at,at+urlsPerQuery);
+   // Android 11's SQLite builds do not include JSON1.
+   const rows=await querySyncKeysetPages(this.db,`WITH wanted(value) AS (VALUES ${part.map(()=>'(?)').join(',')})
+    SELECT a.id,m.article_id AS bound_id,w.article_id AS cached_article_id,w.native_id AS cached_native_id
+    FROM articles a JOIN channels ch ON ch.id=a.channel_id
+    LEFT JOIN sync_article_ids m ON m.item_id=a.id LEFT JOIN cloud_rss_article_ids i ON i.item_id=a.id
+    LEFT JOIN sync_projection_wire_ids w ON w.item_id=a.id AND w.generation=?
+     AND w.channel_url=ch.url AND w.link IS a.link AND w.guid IS a.guid AND w.dedup_key IS a.dedup_key
+     AND w.bound_id IS m.article_id AND w.cloud_rss_id IS i.article_id
+     AND length(w.article_id)=64 AND w.article_id NOT GLOB '*[^0-9a-f]*'
+     AND length(w.native_id)=64 AND w.native_id NOT GLOB '*[^0-9a-f]*'
+    WHERE ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>?
+    AND (a.link IN wanted OR a.guid IN wanted OR a.dedup_key IN wanted) ORDER BY a.id`,
+    [...part,generation],{key:'id',pageSize:part.length+1});
+   for(const row of rows)input.set(num(row.id),row);
+  }
+  type Alias=Pick<CloudRssIdentity,'articleId'|'nativeArticleId'|'localArticleId'>;
+  const resolved=new Map<number,Alias>(),writes:{sql:string;params:SqlParams}[]=[];
+  const rows=[...input.values()].sort((a,b)=>num(a.id)-num(b.id)),missing:number[]=[];
+  for(const row of rows){
+   const articleId=str(row.cached_article_id);
+   if(articleId)resolved.set(num(row.id),{articleId,nativeArticleId:str(row.cached_native_id),localArticleId:str(row.bound_id)||articleId});
+   else missing.push(num(row.id));
+  }
+  const dirty:Row[]=[];
+  for(let at=0;at<missing.length;at+=160){
+   const ids=missing.slice(at,at+160);
+   dirty.push(...await querySyncPages(this.db,IDENTITY_SELECT+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+') ORDER BY a.id',ids,ids.length+1));
+  }
+  for await(const batch of this.cloudIdentityBatches(dirty))for(const [index,identity] of batch.identities.entries()){
+   if(!identity)continue;
+   const row=batch.rows[index]!;
+   resolved.set(identity.itemId,identity);
+   const legacy=!!row.bound_id&&row.guid===row.bound_id&&row.dedup_key===row.bound_id&&!row.cloud_rss_id;
+   let cacheable=!!row.cloud_rss_id||!legacy&&!!str(row.guid).trim();
+   if(!cacheable)try{canonicalRssUrl(str(row.link),false);cacheable=true;}catch{/* An opaque identity may depend on current body text. */}
+   if(cacheable){
+    writes.push({sql:'INSERT OR REPLACE INTO sync_projection_wire_ids(item_id,generation,channel_url,link,guid,dedup_key,bound_id,cloud_rss_id,article_id,native_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
+     params:[row.id,generation,row.channel_url,row.link,row.guid,row.dedup_key,row.bound_id,row.cloud_rss_id,identity.articleId,identity.nativeArticleId]});
+   }
+  }
+  for(let at=0;at<writes.length;at+=200)await this.db.transaction([projectionGuard(generation),...writes.slice(at,at+200)]);
+  return rows.flatMap(row=>{const identity=resolved.get(num(row.id));return identity?[identity]:[];});
+ }
  /** Ordinary read RSS rows are absent from saved-article snapshots. */
  async cloudReadingStates(all=false,check?:()=>void):Promise<ExportedArticle[]>{
   const device=String((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??'');
@@ -248,8 +302,8 @@ export class LocalArticleManifestStore {
    articles.push({cloudReadingItemId:num(r.id),articleId:id,...(identity?{cloudRssArticleId:id,cloudLegacyArticleIds:[identity.localArticleId,identity.nativeArticleId].filter(x=>x!==id)}:{}),sourceDeviceId:str(r.native_reading_source)||(m&&str(m.reading_source)&&clock===num(m.reading_clock)?str(m.reading_source):device),url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:m&&hash&&hash===str(m.body_hash)?str(m.content_hash):hash||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_url),rssSourceTitle:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_title),independentSaved:str(r.channel_url)==='watchrss://phone-imports',independentChangedAt:str(r.channel_url)==='watchrss://phone-imports'?num(r.fetched_at):0,independentSortOrder:0,favoriteSaved:!!num(favorite?.saved),favoriteChangedAt:num(favorite?.changed_at),favoriteSortOrder:num(favorite?.sort_order),watchLaterSaved:!!num(later?.saved),watchLaterChangedAt:num(later?.changed_at),watchLaterSortOrder:num(later?.sort_order),deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:clock,isRead:!!num(r.is_read)});
   }return {articles,next:rows.length===limit?num(rows.at(-1)!.id):undefined};
  }
- async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls,readOnly));}
- private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false):Promise<PreparedArticle[]> {
+ async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false,deferBodyCache=false):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls,readOnly,deferBodyCache));}
+ private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false,deferBodyCache=false):Promise<PreparedArticle[]> {
   await playbackWork.wait(check);
   if(urls?.length===0)return [];
   await new ArticleKeepStore(this.db).initialize();
@@ -264,7 +318,7 @@ export class LocalArticleManifestStore {
   const originalDb=this.db;this.db={...originalDb,query:async(q,p,label)=>{const at=Date.now();try{return await originalDb.query(q,p,label);}finally{stats.sqlMs+=Date.now()-at;stats.sqlCalls++;budget.boundary();}},execute:(q,p,label)=>originalDb.execute(q,p,label),transaction:async ss=>{const at=Date.now();try{return await originalDb.transaction(ss);}finally{stats.sqlTransactionMs+=Date.now()-at;stats.sqlTransactionCalls++;budget.boundary();}}};
   try{
   check?.();const checkpoint=(weight=1)=>budget.checkpoint(weight);
-  if(!urls)this.bodySourceIds.clear();
+  if(!urls){this.bodySourceIds.clear();this.legacyCoverage=false;}
   const identity=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!identity)throw new Error('Initialize sync identity first');const device=str(identity.device_id);
   if(!readingPrepared)await this.prepareReadingForSnapshot(urls);
   const revision=await libraryRevision(this.db);this.preparationRevision=revision;
@@ -272,7 +326,7 @@ export class LocalArticleManifestStore {
   // evaluated every preceding chapter's body/cache joins on the watch SQLite.
   const orderedIds=await querySyncPages(this.db,'SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ('+ROW_CONDITION+')'+(urls?' AND COALESCE(a.link,a.dedup_key) IN ('+marks+')':'')+(bookMode?' AND NOT EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=a.id AND b.registration_complete=1)':'')+' ORDER BY a.fetched_at DESC,a.id DESC',urls??[]);
   const selected=new Map<number,Row>();
-  for(let at=0;at<orderedIds.length;at+=100){check?.();const ids=orderedIds.slice(at,at+100).map(r=>num(r.id));for(const row of await querySyncPages(this.db,this.rowSelect()+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+')',ids,100))selected.set(num(row.id),row);}
+  for(let at=0;at<orderedIds.length;at+=160){check?.();const ids=orderedIds.slice(at,at+160).map(r=>num(r.id));for(const row of await querySyncPages(this.db,this.rowSelect()+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+')',ids,ids.length+1))selected.set(num(row.id),row);}
   const metadataRows=orderedIds.map(r=>{const row=selected.get(num(r.id));if(!row)throw Error('Local library changed during sync snapshot');return row;});
   const queries=urls?[SAVES.replace(' ORDER BY',` WHERE s.article_id IN (SELECT id FROM articles WHERE COALESCE(link,dedup_key) IN (${marks})) ORDER BY`),STATES.replace(' ORDER BY',` WHERE url IN (${marks}) ORDER BY`),DELETES.replace(' ORDER BY',` WHERE article_url IN (${marks}) ORDER BY`),SYNC_DELETES.replace(' ORDER BY',` WHERE url IN (${marks}) ORDER BY`)]:[SAVES,STATES,DELETES,SYNC_DELETES],data:Row[][]=[metadataRows];for(const q of queries)data.push(await querySyncPages(this.db,q,urls??[]));
   const bookIds=bookMode?new Set((await querySyncPages(this.db,'SELECT m.article_id FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1'+(urls?' AND m.url IN ('+marks+')':'')+' ORDER BY m.article_id',urls??[])).map(r=>str(r.article_id))):new Set<string>();
@@ -292,7 +346,7 @@ export class LocalArticleManifestStore {
   let sourceIds:Map<string,number>|undefined;
   const sourceRow=async(channel:string,id:string):Promise<Row|undefined>=>{
    const key=channel+'\0'+id,known=sourceRows.get(key);
-   if(known!==undefined)return known??undefined;
+   if(known!==undefined){if(known)byItem.set(num(known.id),known);return known??undefined;}
    let row=rowsBySource.get(key);
    if(!row&&!urls){
     // Negative source/identity probes dominate cancelled-save inventories.
@@ -308,6 +362,51 @@ export class LocalArticleManifestStore {
    ...rows.filter(row=>str(row.channel_url)==='watchrss://phone-imports'||isImportedContentUrl(str(row.channel_url))).map(row=>num(row.id))]);
   const publicIdentities:CloudRssIdentity[]=[];for(const r of rows)if(neededIds.has(num(r.id))&&/^https?:\/\//i.test(str(r.channel_url))){await checkpoint();const identity=await this.cloudIdentity(r);if(identity)publicIdentities.push(identity);}const nativeCounts=new Map<string,Set<string>>();for(const r of publicIdentities){const ids=nativeCounts.get(r.url)??new Set<string>();ids.add(r.articleId);nativeCounts.set(r.url,ids);}const publicByItem=new Map(publicIdentities.map(r=>[r.itemId,r]));
   const ids=new Map<number,string>();for(const id of neededIds){await checkpoint();const row=byItem.get(id);if(row)ids.set(id,canonicalIds||(nativeCounts.get(publicByItem.get(id)?.url??'')?.size??0)>1?(publicByItem.get(num(row.id))??await this.cloudIdentity(row))?.articleId??(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))):(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))));}
+  // The URL selector is safe only when every physical contributor to an ID
+  // belongs to the same URL. Prove that from the full manifest input, before
+  // the representative and its aliases disappear into a single output row.
+  const legacyUrls=new Map<string,string>(),physicalUrls=new Set<string>();
+  let legacyCoverage=!urls&&!canonicalIds&&!readOnly&&ids.size===neededIds.size;
+  const witnessLegacyUrl=(id:string,url:string)=>{
+   if(!legacyCoverage)return;
+   const other=legacyUrls.get(id);
+   if(!url||other!==undefined&&other!==url)legacyCoverage=false;
+   else legacyUrls.set(id,url);
+  };
+  if(legacyCoverage){
+   for(const [item,id] of ids){
+    const url=str(byItem.get(item)?.link);
+    if(!url||physicalUrls.has(url)){legacyCoverage=false;break;}
+    physicalUrls.add(url);witnessLegacyUrl(id,url);
+   }
+   for(const state of persisted){
+    const url=str(state.url);witnessLegacyUrl(str(state.article_id),url);
+    if(state.item_id!=null&&str(byItem.get(num(state.item_id))?.link)!==url)legacyCoverage=false;
+   }
+   for(const deletion of syncDeletions)witnessLegacyUrl(str(deletion.article_id),str(deletion.url));
+  }
+  const missingSources=new Map<string,[string,string]>();
+  for(const [item,id]of ids){
+   const row=byItem.get(item)!;
+   for(const channel of [str(row.channel_url),...(/^https?:\/\//i.test(str(row.channel_url))?[]:['watchrss://phone-imports'])]){
+    const key=channel+'\0'+id;
+    if(!rowsBySource.has(key))missingSources.set(key,[channel,id]);
+   }
+  }
+  const sourcePairs=[...missingSources.values()];
+  for(let at=0;at<sourcePairs.length;at+=160){
+   const page=sourcePairs.slice(at,at+160);check?.();
+   for(const [channel,id]of page)sourceRows.set(channel+'\0'+id,null);
+   const matches=await this.db.query(`WITH wanted(url,dedup) AS (VALUES ${page.map(()=>'(?,?)').join(',')})
+    SELECT DISTINCT a.id FROM wanted w JOIN channels ch ON ch.url=w.url JOIN articles a ON a.channel_id=ch.id AND a.dedup_key=w.dedup`,page.flat());
+   const missing=matches.filter(r=>!byItem.has(num(r.id))).map(r=>num(r.id));
+   const fetched=missing.length?await querySyncPages(this.db,this.rowSelect()+' WHERE a.id IN ('+missing.map(()=>'?').join(',')+')',missing,missing.length+1):[];
+   const fetchedById=new Map(fetched.map(row=>[num(row.id),row]));
+   for(const match of matches){
+    const item=num(match.id),row=byItem.get(item)??fetchedById.get(item);
+    if(row)sourceRows.set(str(row.channel_url)+'\0'+str(row.dedup_key),row);
+   }
+  }
   // A confirmed keep can arrive under the normalized URL ID after an older
   // reader journaled its deletion under another ID. Re-advertising that stale
   // alias as deleted makes the phone ask for the same decision on a full sync.
@@ -330,7 +429,7 @@ export class LocalArticleManifestStore {
   // Persisted clocks retain remote provenance; UI rows only seed missing state.
   for(const s of persisted){if(supersededAliases.has(str(s.article_id))&&num(s.changed_at)<(receipts.get(str(s.url))?.clock??0))continue;const id=s.item_id==null?str(s.article_id):ids.get(num(s.item_id))??str(s.article_id);states.set(id+'\0'+str(s.save_type),{articleId:id,type:str(s.save_type),url:str(s.url),saved:!!num(s.saved),changedAt:num(s.changed_at),sortOrder:num(s.sort_order),device:str(s.source_device_id),itemId:s.item_id==null?null:num(s.item_id)});}
   for(const d of syncDeletions)if(!supersededAliases.has(str(d.article_id)))put({articleId:str(d.article_id),type:'delete',url:str(d.url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device:str(d.source_device_id)});
-  for(const d of deletions){await checkpoint();const id=await this.stableId(str(d.article_url));for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url:str(d.article_url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
+  for(const d of deletions){await checkpoint();const url=str(d.article_url),id=await this.stableId(url);witnessLegacyUrl(id,url);for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url,saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
   const groups=new Map<string,Row[]>();
   for(const type of ['favorite','watchLater'])for(const s of saves){if(str(s.save_type)!==type||!num(s.saved)||!byItem.has(num(s.article_id)))continue;const id=ids.get(num(s.article_id))!,list=groups.get(id)??[];list.push(s);groups.set(id,list);}
   const out:PreparedArticle[]=[],active=new Set<string>(),usedRows=new Set<number>(),preparedRowIds=new Map<string,number>();
@@ -410,12 +509,12 @@ export class LocalArticleManifestStore {
   // manifest; the old full-library reread doubled host SQL bridge work.
   for(const p of out){const id=this.bodySourceIds.get(p.article.articleId);if(id!==undefined)usedRows.add(id);}
   const cacheIds=[...usedRows].sort((a,b)=>a-b);
-  for(let offset=0;offset<cacheIds.length;offset+=100){
-   const part=cacheIds.slice(offset,offset+100),marks=part.map(()=>'?').join(',');
+  for(let offset=0;offset<cacheIds.length;offset+=160){
+   const part=cacheIds.slice(offset,offset+160),marks=part.map(()=>'?').join(',');
    const current=await querySyncPages(this.db,`SELECT a.id,COALESCE(NULLIF(c.body_hash,''),n.body_hash,'') AS cached_body_hash,
     c.body_hash AS encoded_body_hash,c.content_bytes AS cached_content_bytes,c.body_bytes,c.chunk_size,c.chunk_hashes,e.body_hash AS local_encoded_body_hash
     FROM articles a LEFT JOIN article_sync_content c ON c.item_id=a.id LEFT JOIN article_sync_encoding_cache e ON e.item_id=a.id AND e.body_hash=c.body_hash
-    LEFT JOIN article_native_sync_hash n ON n.item_id=a.id WHERE a.id IN (${marks}) ORDER BY a.id`,part,50);
+    LEFT JOIN article_native_sync_hash n ON n.item_id=a.id WHERE a.id IN (${marks}) ORDER BY a.id`,part,part.length+1);
    if(current.length!==part.length)throw new Error('Local library changed during sync snapshot');
    for(const now of current){const before=byItem.get(num(now.id));
     if(!before||['cached_body_hash','encoded_body_hash','body_bytes','chunk_size','chunk_hashes','local_encoded_body_hash'].some(key=>now[key]!==before[key]))
@@ -423,8 +522,12 @@ export class LocalArticleManifestStore {
    }
   }
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during sync snapshot");
-  for(let at=0;!readOnly&&at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
+  // The legacy incremental manifest already has the exact summary. Store its
+  // projection under the witness without turning a derived body hash into a
+  // second state change before the peer receives this first response.
+  for(let at=0;!readOnly&&!deferBodyCache&&at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
   trace('snapshot.complete');
+  if(!urls)this.legacyCoverage=legacyCoverage;
   return out;
   }finally{try{await this.flushStableProgress();}finally{this.preparationRevision=previousPreparation;this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}}
  }
@@ -547,9 +650,9 @@ export class LocalArticleManifestStore {
   // Row fields cover metadata/inline text, and chunk_revision covers external
   // chunk mutations. Reuse body work across a one-article edit or source merge.
   if(!this.cacheRows)return this.buildRow(r,id,device,saved,bodySource,clocks);
-  const reusable=await this.reusableMetadata(num(bodySource.id)),metadata=await this.reusableMetadata(num(r.id));
+  const reusable=this.reusableBodies.get(num(bodySource.id)),metadata=this.reusableBodies.get(num(r.id));
   const {cache_html:_html,cache_text:_text,...metadataRow}=r,{cache_html:_sourceHtml,cache_text:_sourceText,...sourceMetadata}=bodySource;
-  const key=id+'\0'+str(r.id),stamp=await hashJavaText(JSON.stringify([metadataRow,id,device,saved,bodySource===r?null:sourceMetadata,clocks,reusable?[reusable.manifest.bodyHash,reusable.manifest.bodyByteCount,reusable.manifest.chunkHashes]:null,metadata?.article.contentHash??null]),this.codec);
+  const key=id+'\0'+str(r.id),stamp=await hashJavaText(JSON.stringify([metadataRow,id,device,saved,bodySource===r?null:sourceMetadata,clocks,reusable?[reusable.manifest.bodyHash,reusable.manifest.bodyByteCount,reusable.manifest.chunkHashes]:null,metadata?.manifest.contentHash??null]),this.codec);
   const previous=this.rowCache.get(key);if(previous?.stamp===stamp)return previous.prepared;
   const prepared=await this.buildRow(r,id,device,saved,bodySource,clocks);
   const bytes=128+(prepared.encodedBody?.length??0)+2*(prepared.article.contentText.length+(prepared.article.contentHtml?.length??0));
@@ -561,13 +664,13 @@ export class LocalArticleManifestStore {
   return prepared;
  }
  private async buildRow(r:Row,id:string,device:string,saved?:{savedAt:number;favorite:boolean;later:boolean;favoriteChanged:number;favoriteOrder:number;laterChanged:number;laterOrder:number},bodySource:Row=r,clocks?:{favorite?:State;later?:State}):Promise<PreparedArticle>{
-  const persisted=await this.reusableMetadata(num(r.id)),cached=(blank(str(r.cached_body_hash))?null:this.cachedBody(bodySource))??this.reusableBody(bodySource);
-  if(cached){if(r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):persisted?persisted.article.excerpt:await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);}
+  const persisted=this.reusableBodies.get(num(r.id)),cached=(blank(str(r.cached_body_hash))?null:this.cachedBody(bodySource))??this.reusableBody(bodySource);
+  if(cached){if(r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):persisted?(await this.reusableMetadata(num(r.id)))!.article.excerpt:await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);}
   const {available,contentHtml,contentText}=cached?{available:true,contentHtml:null,contentText:''}:await this.bodyForReencode(bodySource);
   if(!cached&&r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);
   const channel=str(r.channel_url),independent=channel==='watchrss://phone-imports',source=saved?(/^https?:\/\//i.test(nativeTrim(channel))?channel:null):independent?null:channel;
   const url=r.link==null&&r.bound_id?str(r.bound_url):saved?str(r.link):blank(nullable(r.link))?str(r.dedup_key):str(r.link),imported=saved?.savedAt??num(r.fetched_at);
-  let article:ExportedArticle={articleId:id,sourceDeviceId:device,url,title:saved?str(r.title):blank(str(r.title))?url:str(r.title),siteName:str(r.channel_title),excerpt:r.summary==null?str(r.description):str(r.summary),contentHtml,contentText,imageUrl:nullable(r.preview_image??r.image_url),contentHash:blank(str(r.cached_body_hash))?(persisted?.article.contentHash??await hashJavaText(!available?url:contentHtml??(blank(contentText)?url:contentText),this.codec)):str(r.cached_body_hash),importedAt:imported,updatedAt:saved?Math.max(num(r.fetched_at),imported,saved.favoriteChanged,saved.laterChanged):num(r.fetched_at),independentSaved:independent,independentChangedAt:independent?imported:0,independentSortOrder:independent?imported:0,rssSourceUrl:source,rssSourceTitle:source===null?null:str(r.channel_title),favoriteSaved:saved?.favorite??false,favoriteChangedAt:saved?.favoriteChanged??clocks?.favorite?.changedAt??0,favoriteSortOrder:saved?.favoriteOrder??clocks?.favorite?.sortOrder??0,watchLaterSaved:saved?.later??false,watchLaterChangedAt:saved?.laterChanged??clocks?.later?.changedAt??0,watchLaterSortOrder:saved?.laterOrder??clocks?.later?.sortOrder??0,deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)};
+  let article:ExportedArticle={articleId:id,sourceDeviceId:device,url,title:saved?str(r.title):blank(str(r.title))?url:str(r.title),siteName:str(r.channel_title),excerpt:r.summary==null?str(r.description):str(r.summary),contentHtml,contentText,imageUrl:nullable(r.preview_image??r.image_url),contentHash:blank(str(r.cached_body_hash))?(persisted?.manifest.contentHash??await hashJavaText(!available?url:contentHtml??(blank(contentText)?url:contentText),this.codec)):str(r.cached_body_hash),importedAt:imported,updatedAt:saved?Math.max(num(r.fetched_at),imported,saved.favoriteChanged,saved.laterChanged):num(r.fetched_at),independentSaved:independent,independentChangedAt:independent?imported:0,independentSortOrder:independent?imported:0,rssSourceUrl:source,rssSourceTitle:source===null?null:str(r.channel_title),favoriteSaved:saved?.favorite??false,favoriteChangedAt:saved?.favoriteChanged??clocks?.favorite?.changedAt??0,favoriteSortOrder:saved?.favoriteOrder??clocks?.favorite?.sortOrder??0,watchLaterSaved:saved?.later??false,watchLaterChangedAt:saved?.laterChanged??clocks?.later?.changedAt??0,watchLaterSortOrder:saved?.laterOrder??clocks?.later?.sortOrder??0,deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)};
   // Encoding/hash algorithm upgrades may change bytes without changing the
   // owned body. Preserve received origin/clocks only after comparing hydrated
   // logical content; metadata/reading differences still use existing clocks.

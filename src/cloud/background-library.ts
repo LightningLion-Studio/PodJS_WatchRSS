@@ -8,7 +8,7 @@ import {stableGzipHeader} from '@podjs/framework/crypto';
 import type {SqlDatabase} from '../core/types';
 import {initializeSchema} from '../core/schema';
 import {ensureSyncDevice} from '../sync/local-identity';
-import {SqlLibrarySessionRepository} from '../sync/library-repository';
+import {SqlLibraryCloudRepository} from '../sync/library-repository';
 import {SqlReadingProgressStore} from '../reader/sql-progress';
 import {ReadingProgressStore} from '../reader/progress';
 import {ImportedTextWriter,javaUtf8Chunks} from '../reader/imported-text-writer';
@@ -46,7 +46,7 @@ export async function createBackgroundLibrary(host:CloudHostRequest,readKv:(key:
   try{await append(input.path,encode(html),0);const result=await host<{path:string}>('file.htmlText',{path:input.path,maxOutputBytes:32*1024*1024});output=result.path;const bytes=await ports.files.read(output);if(!bytes)throw Error('HTML 转码失败');return utf8Decode(bytes);}
   finally{await host('file.delete',{path:input.path}).catch(()=>{});if(output)await host('file.delete',{path:output}).catch(()=>{});}
  }};
- return new SqlLibrarySessionRepository(db,{noteAssetReader:createNoteAssetReader(host),noteAssetWriter:createNoteAssetWriter(host),noteAssetCollector:createNoteAssetCollector(host),bookFiles:createBookFiles(bookHost,ports.crypto.sha256),codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeStagedText:(key,value,checkpoint)=>writeResumable(key,value,checkpoint,true),
+ return new SqlLibraryCloudRepository(db,{noteAssetReader:createNoteAssetReader(host),noteAssetWriter:createNoteAssetWriter(host),noteAssetCollector:createNoteAssetCollector(host),bookFiles:createBookFiles(bookHost,ports.crypto.sha256),codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeStagedText:(key,value,checkpoint)=>writeResumable(key,value,checkpoint,true),
   syncStagedText:async()=>{const synced=await articleHost<{synced:boolean}>('file.syncDirectory',{path:'article_content'});if(!synced.synced)throw Error('后台正文目录持久化失败');},
   storeText:(key,value,checkpoint)=>writer.storeText(key,value,()=>false,checkpoint)},migrateReading:id=>reading.migrate(id),prepareReadingMigration:ids=>reading.migrationStatements(ids),migrateReadingMany:ids=>reading.migrateMany(ids),cleanupRemovedContent:async({itemIds})=>{
   for(const id of itemIds){const directory=`offline/rss/${id}`;const listing=await host<{entries:{file:boolean;path:string}[]}>('file.list',{path:directory}).catch(()=>undefined);for(const e of listing?.entries??[])if(e.file&&e.path.startsWith(directory+'/')&&!e.path.slice(directory.length+1).includes('/'))await host('file.delete',{path:e.path});}

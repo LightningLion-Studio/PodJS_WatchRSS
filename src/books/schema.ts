@@ -40,3 +40,29 @@ export const BOOK_SCHEMA=[
  ...BOOK_INSTALL_SCHEMA,
  ...BOOK_READING_SCHEMA,
 ];
+
+
+// Installed lazily with a one-time backfill of unfinished v1 packages.
+export const BOOK_PART_RECEIPT_SCHEMA=[
+ `CREATE TABLE IF NOT EXISTS sync_book_part_receipts(
+  book_id TEXT NOT NULL,package_sha256 TEXT NOT NULL,fingerprint TEXT NOT NULL,
+  byte_count INTEGER NOT NULL,chunk_count INTEGER NOT NULL,received INTEGER NOT NULL CHECK(received>=0),
+  PRIMARY KEY(book_id,package_sha256))`,
+ `INSERT OR IGNORE INTO sync_book_part_receipts
+  SELECT book_id,package_sha256,CASE WHEN min(fingerprint)=max(fingerprint) AND min(byte_count)=max(byte_count)
+   AND min(chunk_count)=max(chunk_count) THEN min(fingerprint) ELSE '' END,min(byte_count),min(chunk_count),count(*)
+  FROM sync_book_parts GROUP BY book_id,package_sha256`,
+ `CREATE TRIGGER IF NOT EXISTS sync_book_part_receipt_insert AFTER INSERT ON sync_book_parts BEGIN
+  INSERT INTO sync_book_part_receipts VALUES(NEW.book_id,NEW.package_sha256,NEW.fingerprint,NEW.byte_count,NEW.chunk_count,1)
+  ON CONFLICT(book_id,package_sha256) DO UPDATE SET received=CASE
+   WHEN fingerprint=NEW.fingerprint AND byte_count=NEW.byte_count AND chunk_count=NEW.chunk_count THEN received+1
+   ELSE NULL END;
+ END`,
+ `CREATE TRIGGER IF NOT EXISTS sync_book_part_receipt_delete AFTER DELETE ON sync_book_parts BEGIN
+  UPDATE sync_book_part_receipts SET received=received-1 WHERE book_id=OLD.book_id AND package_sha256=OLD.package_sha256;
+  DELETE FROM sync_book_part_receipts WHERE book_id=OLD.book_id AND package_sha256=OLD.package_sha256 AND received=0;
+ END`,
+ `CREATE TRIGGER IF NOT EXISTS sync_book_part_receipt_immutable BEFORE UPDATE ON sync_book_parts BEGIN
+  SELECT RAISE(ABORT,'book_request_invalid');
+ END`,
+];

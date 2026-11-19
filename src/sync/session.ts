@@ -27,7 +27,7 @@ export interface SyncFrameConnection {
  detachStream?():SyncByteStream;
  close():Promise<void>;
 }
-export interface LibraryWindow extends ChangeSequence {projectionGeneration?:string;articleManifest:readonly ArticleManifest[];fullArticleManifest:readonly ArticleManifest[];rssSources:readonly SyncedSource[];peerAckedSeq:number}
+export interface LibraryWindow extends ChangeSequence {projectionGeneration?:string;fullRssSources?:readonly SyncedSource[];articleManifest:readonly ArticleManifest[];fullArticleManifest:readonly ArticleManifest[];rssSources:readonly SyncedSource[];peerAckedSeq:number}
 export interface PendingSyncSuccess {remoteDeviceId:string;localSeqToInclusive:number;remoteSeqToInclusive:number;remoteProtocolVersion:number;fullSnapshot:boolean;projectionGeneration?:string;receivedArticleManifest?:readonly ArticleManifest[];receivedSources?:readonly SyncedSource[]}
 /** All mutation methods must resolve only after durable application. Applied
  * counts are native state-operation counts, not the number of article rows. */
@@ -259,7 +259,7 @@ export class LibrarySyncSession {
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
   const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied,()=>this.check()));this.check();
   const force=bool(request.forceFull),full=force||mode!=='merge'||!bool(request.supportsChangeSequences)||optLong(request.version)<8;
-  const legacyWindow:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:await this.repository.exportSources(peer,()=>this.check()),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
+  const legacyWindow:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:prepared.fullRssSources??await this.repository.exportSources(peer,()=>this.check()),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
   const window=legacySubset?{...legacyWindow,fromSeqExclusive:0,toSeqInclusive:0,fullSnapshot:false,fallbackReason:'binarySubset'}:legacyWindow;
   this.log.event("library.local.exported",{outgoingArticles:window.articleManifest.length,fullArticles:window.fullArticleManifest.length,outgoingSources:window.rssSources.length,chunked:true,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,fullSnapshot:window.fullSnapshot});
   this.capabilities(request);

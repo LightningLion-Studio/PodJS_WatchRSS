@@ -86,14 +86,38 @@ export function combineManifestFrames(frames:readonly JsonObject[]):JsonObject {
  return combined;
 }
 export function buildManifestFrames(payload:JsonObject):JsonObject[]{
- if(payload.phase!=='manifest')throw new Error('Only manifest messages can use manifest batches');const base:JsonObject={...payload,supportsManifestBatches:true};if(nativeJsonSize(base)<=MAX_FRAME_BYTES)return [base];
- const groups:{name:string;value:JsonObject}[][]=[];let group:{name:string;value:JsonObject}[]=[],bytes=0;
- for(const name of manifestFields)for(const raw of Array.isArray(base[name])?base[name] as unknown[]:[]){const value=object(raw);if(!value)continue;const size=nativeJsonSize(value);if(size>MAX_FRAME_BYTES)throw new Error('Manifest entry exceeds frame limit');if(group.length&&bytes+size>1024*1024){groups.push(group);group=[];bytes=0;}group.push({name,value});bytes+=size;}
- if(group.length)groups.push(group);if(!groups.length||groups.length+1>512)throw new Error('Manifest metadata/batch limit exceeded');
+ if(payload.phase!=='manifest')throw new Error('Only manifest messages can use manifest batches');
+ const base:JsonObject={...payload,supportsManifestBatches:true},empty={...base};
+ const entries:{name:typeof manifestFields[number];value:unknown;size:number}[]=[];
+ let arrayBytes=0;
+ for(const name of manifestFields){
+  const rows=base[name];if(!Array.isArray(rows))continue;
+  empty[name]=[];arrayBytes+=Math.max(0,rows.length-1);
+  for(const value of rows){const size=jsonBytes(value);arrayBytes+=size;entries.push({name,value,size});}
+ }
+ if(nativeJsonSize(empty)+arrayBytes<=MAX_FRAME_BYTES)return [base];
+ const groups:{items:typeof entries;bytes:number}[]=[];
+ let items:typeof entries=[],bytes=0;
+ for(const entry of entries){
+  if(!object(entry.value))continue;
+  if(entry.size>MAX_FRAME_BYTES)throw new Error('Manifest entry exceeds frame limit');
+  if(items.length&&bytes+entry.size>1024*1024){groups.push({items,bytes});items=[];bytes=0;}
+  items.push(entry);bytes+=entry.size;
+ }
+ if(items.length)groups.push({items,bytes});
+ if(!groups.length||groups.length+1>512)throw new Error('Manifest metadata/batch limit exceeded');
  const count=groups.length+1,total=Array.isArray(base.articleManifest)?base.articleManifest.length:0;
- const header:JsonObject={...base,manifestBatchIndex:0,manifestBatchCount:count,manifestTotalArticles:total};for(const name of manifestFields)if(name in header)header[name]=[];
- const frames=[header,...groups.map((items,i)=>{const frame:JsonObject={...(payload.success!==undefined?{success:bool(payload.success)}:{}),version:optLong(payload.version,14),action:ACTION_SYNC_LIBRARY,phase:'manifest',deviceId:string(payload.deviceId),sentAt:optLong(payload.sentAt),supportsManifestBatches:true,articleManifest:[],bodyRequests:[],rssSources:[],manifestBatchIndex:i+1,manifestBatchCount:count,manifestTotalArticles:total};for(const item of items)(frame[item.name] as JsonObject[]).push(item.value);return frame;})];
- if(frames.some(f=>nativeJsonSize(f)>MAX_FRAME_BYTES))throw new Error('Manifest frame exceeds limit');return frames;
+ const header:JsonObject={...base,manifestBatchIndex:0,manifestBatchCount:count,manifestTotalArticles:total};
+ for(const name of manifestFields)if(name in header)header[name]=[];
+ if(nativeJsonSize(header)>MAX_FRAME_BYTES)throw new Error('Manifest frame exceeds limit');
+ return [header,...groups.map(({items,bytes},i)=>{
+  const frame:JsonObject={...(payload.success!==undefined?{success:bool(payload.success)}:{}),version:optLong(payload.version,14),action:ACTION_SYNC_LIBRARY,phase:'manifest',deviceId:string(payload.deviceId),sentAt:optLong(payload.sentAt),supportsManifestBatches:true,articleManifest:[],bodyRequests:[],rssSources:[],manifestBatchIndex:i+1,manifestBatchCount:count,manifestTotalArticles:total};
+  const overhead=nativeJsonSize(frame);
+  for(const item of items)(frame[item.name] as JsonObject[]).push(item.value as JsonObject);
+  const commas=manifestFields.reduce((n,name)=>n+Math.max(0,(frame[name] as JsonObject[]).length-1),0);
+  if(overhead+bytes+commas>MAX_FRAME_BYTES)throw new Error('Manifest frame exceeds limit');
+  return frame;
+ })];
 }
 function articleItems(prepared:PreparedArticle,request:RequestedArticleBody):JsonObject[]{
  const payload=bodyForRequest(prepared,request),a=prepared.article;
