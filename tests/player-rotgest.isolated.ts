@@ -19,7 +19,7 @@ let panelProps:any,arrowProps:any;
 mock.module('../src/ui/PlayerDetailPanel.tsx',()=>({
  PlayerDetailArrow:(props:any)=>{arrowProps=props;return null;},
  PlayerDetailPanel:(props:any)=>{panelProps=props;props.ref?.({crown(){}});return null;},
- createDetailSlide:()=>{const [shown,set]=createSignal(false);return {shown,x:()=>shown()?0:233,begin(){},move(){set(true);},end(){},reset(){set(false);},open(){set(true);},close(){set(false);}};},
+ createDetailSlide:()=>{const [shown,set]=createSignal(false);return {shown,x:()=>shown()?0:233,begin(){return true;},move(){set(true);},end(){},reset(){set(false);},open(){set(true);},close(){set(false);}};},
 }));
 let phase='active',listener:(phase:string)=>void=()=>{},prepared=0;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>false,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:(delta:number)=>Math.sign(delta)}));

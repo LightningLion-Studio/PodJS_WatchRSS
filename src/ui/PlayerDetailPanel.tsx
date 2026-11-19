@@ -1,4 +1,4 @@
-import { batch, createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
+import { batch, createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture, type GestureOptions } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
@@ -22,25 +22,54 @@ const ABOUT_LINES_PER_FRAME = 2;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
-export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): void; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
+export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): boolean; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
 export function createDetailSlide(width: () => number, onSettled?: (open: boolean) => void): DetailSlide {
   const [x, setX] = createSignal(width());
-  const [animating,setAnimating]=createSignal(false);
-  let from = 0, to = 0, started = 0, base = 0;
-  const animate = (target: number) => { from = x(); to = target; started = Date.now(); setAnimating(from !== to); if (!animating()) onSettled?.(target === 0); };
-  createRenderEffect(()=>{if(!animating())return;onFrame(() => {
+  const [animating, setAnimating] = createSignal(false);
+  const [dragBase, setDragBase] = createSignal<number>();
+  let from = 0, to = 0, started = 0;
+  const animate = (target: number) => batch(() => {
+    // A late move, release or cancel from the interrupted finger must not
+    // replace an explicit Back or reopen the panel after a route reset.
+    setDragBase();
+    if (animating() && to === target) return;
+    from = x();
+    to = target;
+    started = Date.now();
+    setAnimating(from !== to);
+    if (!animating()) onSettled?.(target === 0);
+  });
+  onFrame(() => {
+    if (!animating()) return;
     const t = (Date.now() - started) / SLIDE_MS;
-    setX(from + (to - from) * ease(t));
-    if (t >= 1) { setAnimating(false); setX(to); onSettled?.(to === 0); }
-  });});
+    if (t < 1) setX(from + (to - from) * ease(t));
+    else batch(() => { setAnimating(false); setX(to); onSettled?.(to === 0); });
+  }, animating);
   return {
-    x, shown: () => x() < width(),
+    // Keep the dismiss recognizer alive if the held finger drags all the way
+    // off-screen. It must still be able to reverse or receive the release.
+    x, shown: () => x() < width() || (dragBase() ?? width()) < width(),
     open: () => animate(0), close: () => animate(width()),
-    begin: () => { setAnimating(false); base = x(); },
-    move: dx => setX(Math.max(0, Math.min(width(), base + dx))),
-    end: vx => { const w = width(), opening = base >= w; animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0)); },
-    cancel: () => animate(base >= width() ? width() : 0),
-    reset: () => { setAnimating(false); setX(width()); },
+    begin: () => {
+      if (dragBase() !== undefined) return false;
+      batch(() => { setDragBase(x()); setAnimating(false); });
+      return true;
+    },
+    move: dx => {
+      const base = dragBase();
+      if (base !== undefined) setX(Math.max(0, Math.min(width(), base + dx)));
+    },
+    end: vx => {
+      const base = dragBase();
+      if (base === undefined) return;
+      const w = width(), opening = base >= w;
+      animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0));
+    },
+    cancel: () => {
+      const base = dragBase();
+      if (base !== undefined) animate(base >= width() ? width() : 0);
+    },
+    reset: () => batch(() => { setDragBase(); setAnimating(false); setX(width()); }),
   };
 }
 
@@ -163,16 +192,28 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     onCancel: () => scroller.endDrag(0),
   });
   // A rightward drag in picture coordinates slides the panel off the player.
-  let closing = false;
+  let closing: number | undefined;
   const dismiss = createPanelGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
-    onPanStart: contact => { closing = contact.dx > 0; if (closing) { props.slide.begin(); props.slide.move(contact.dx); } },
-    onPanMove: contact => { if (closing) props.slide.move(contact.dx); },
-    onPanEnd: contact => { if (closing) props.slide.end(contact.vx); closing = false; },
-    onCancel: () => { if (closing) props.slide.cancel(); closing = false; },
+    onPanStart: contact => {
+      if (contact.dx <= 0 || !props.slide.begin()) return;
+      closing = contact.id;
+      props.slide.move(contact.dx);
+    },
+    onPanMove: contact => { if (closing === contact.id) props.slide.move(contact.dx); },
+    onPanEnd: contact => {
+      if (closing !== contact.id) return;
+      closing = undefined;
+      props.slide.end(contact.vx);
+    },
+    onCancel: contact => {
+      if (closing !== contact.id) return;
+      closing = undefined;
+      props.slide.cancel();
+    },
   });
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
-  onCleanup(() => { closing = false; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
+  onCleanup(() => { closing = undefined; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
 
 
   const InfoPage = () => <>
