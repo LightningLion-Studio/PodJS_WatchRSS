@@ -1,6 +1,6 @@
 import {compareLifecycleTokens} from '@podjs/framework/lifecycle-token';
-import {validateInstall} from './install-validation';
-import {rangedLines,type FileCheckpoint} from '@podjs/framework/work-window';
+import {bookValidationRow,bookValidationRows,openBookInstall,validateInstall,verifyBookInstall} from './install-validation';
+import type {FileCheckpoint} from '@podjs/framework/work-window';
 import {repositoryWork,type RepositoryDiagnostic} from '../sync/repository-work';
 import {encodeUtf8} from '@podjs/framework/bytes';
 import {authoritativeBody,previewEquivalent,matchingBodyDigest} from './body-authority';
@@ -268,8 +268,10 @@ export class SqlBookStore {
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }
- async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint):Promise<number>{
-  await this.capture();const existing=await this.record(id),expected=existing?this.state(existing):undefined;
+ async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint,cloud=false):Promise<number>{
+  await this.capture();
+  const startRevision=cloud?await libraryRevision(this.db):undefined;
+  const existing=await this.record(id),expected=existing?this.state(existing):undefined;
   await checkpoint?.check();if(!/^[a-f0-9]{64}$/.test(id)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_package_identity_or_size');
   const actual=await this.ports.files.hash(info.path);if(actual.size!==info.size||actual.sha256!==info.sha256)throw Error('book_package_changed');
   // Installed metadata certifies these exact bytes. Capture current native
@@ -280,38 +282,96 @@ export class SqlBookStore {
    const missing=(await this.db.query('SELECT 1 FROM sync_book_chapters m LEFT JOIN articles a ON a.id=m.item_id WHERE m.book_id=? AND a.id IS NULL AND NOT EXISTS(SELECT 1 FROM sync_book_delete_members d WHERE d.book_id=m.book_id AND d.chapter_index=m.chapter_index) LIMIT 1',[id])).length;
    if(installed.exists&&installed.size===info.size&&num(directory?.n)===expected!.chapterCount&&(!missing||expected!.deleted)){await this.captureReading();await checkpoint?.check();return 0;}
   }
-  const verified=await validateInstall(this.db,this.ports.files,info,id,this.ports.sha256,expected,checkpoint);
-  const header=verified.header,device=await this.ports.deviceId(),state:BookState=expected??{bookId:id,fingerprint:verified.fingerprint,title:header.title,chapterCount:header.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:device,sourceUrl:header.sourceUrl,kind:header.kind,...(header.instanceId===undefined?{}:{instanceId:header.instanceId})};
+  // Cloud can verify each decoded chapter as it creates the private shadow.
+  // Its receipt namespace is separate from older and Bluetooth installs.
+  const verified=cloud?undefined:await validateInstall(this.db,this.ports.files,info,id,this.ports.sha256,expected,checkpoint);
+  const {binding,header,row,lines}=verified??await openBookInstall(this.db,this.ports.files,info,id,this.ports.sha256,checkpoint,true);
+  if(cloud&&expected&&(expected.chapterCount!==header.chapterCount||expected.instanceId!==header.instanceId))throw Error('book_package_invalid');
+  const stageKey=cloud?'cloud:'+binding:info.sha256;
+  const device=await this.ports.deviceId(),state:BookState=expected??{bookId:id,fingerprint:verified?.fingerprint??'',title:header.title,chapterCount:header.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:device,sourceUrl:header.sourceUrl,kind:header.kind,...(header.instanceId===undefined?{}:{instanceId:header.instanceId})};
+  const validatedIndex=num(row.validated_index);
+  const chapterHashes=verified?.chapterHashes??(validatedIndex?await bookValidationRows(this.db,binding):[]).map((r,i)=>{
+   if(num(r.chapter_index)!==i+1)throw Error('book_package_invalid');
+   return str(r.chapter_hash);
+  });
+  if(cloud&&chapterHashes.length!==validatedIndex)throw Error('book_package_invalid');
   const mappings=new Map((await querySyncKeysetPages(this.db,'SELECT * FROM sync_book_chapters WHERE book_id=? AND chapter_index>? ORDER BY chapter_index',[id],{key:'chapter_index'})).map(r=>[num(r.chapter_index),r]));
-  const revision=await libraryRevision(this.db),presentRows=await querySyncKeysetPages(this.db,`SELECT a.id,a.link,a.channel_id,a.dedup_key,ch.url AS channel_url,(SELECT article_id FROM sync_article_ids WHERE item_id=a.id) AS article_id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE (a.link LIKE 'https://watchrss.local/import-%' OR a.link LIKE 'watchrss://import/instance-v1/%') AND a.id>? ORDER BY a.id`),present=new Map(presentRows.map(r=>[str(r.link),r])),byItem=new Map(presentRows.map(r=>[num(r.id),r]));
+  const revision=startRevision??await libraryRevision(this.db),presentRows=await querySyncKeysetPages(this.db,`SELECT a.id,a.link,a.channel_id,a.dedup_key,ch.url AS channel_url,(SELECT article_id FROM sync_article_ids WHERE item_id=a.id) AS article_id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE (a.link LIKE 'https://watchrss.local/import-%' OR a.link LIKE 'watchrss://import/instance-v1/%') AND a.id>? ORDER BY a.id`),present=new Map(presentRows.map(r=>[str(r.link),r])),byItem=new Map(presentRows.map(r=>[num(r.id),r]));
   const legacyDeletes=new Map((await this.rows('SELECT url,changed_at FROM sync_article_deletions ORDER BY url')).map(r=>[str(r.url),num(r.changed_at)]));
-  const resume=num(verified.row.stage_revision)===revision;
-  if(!resume)await this.db.transaction([{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:[id,info.sha256]},{sql:'UPDATE sync_book_install SET stage_index=0,stage_offset=0,stage_revision=? WHERE binding=?',params:[revision,verified.binding]}]);
-  let index=resume?num(verified.row.stage_index):0,stageOffset=resume&&num(verified.row.stage_offset)?num(verified.row.stage_offset):num(verified.row.header_offset),maxDelete=state.deletionClock;const deletionSet=new Set(state.deletedChapters);let staged:Statement[]=[],stageBytes=0;
-  const prior=await querySyncKeysetPages(this.db,'SELECT chapter_index,existing_item,url FROM sync_book_stage WHERE book_id=? AND package_sha256=? AND chapter_index>? ORDER BY chapter_index',[id,info.sha256],{key:'chapter_index'});
+  const resume=num(row.stage_revision)===revision;
+  if(!resume)await this.db.transaction([...(cloud?[revisionGuard(revision)]:[]),{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:[id,stageKey]},{sql:'UPDATE sync_book_install SET stage_index=0,stage_offset=0,stage_revision=? WHERE binding=?',params:[revision,binding]}]);
+  let index=resume?num(row.stage_index):0,stageOffset=resume&&num(row.stage_offset)?num(row.stage_offset):num(row.header_offset),maxDelete=state.deletionClock;const deletionSet=new Set(state.deletedChapters);let staged:Statement[]=[],validation:Statement[]=[],stageBytes=0,pageStart=stageOffset;
+  const prior=await querySyncKeysetPages(this.db,'SELECT chapter_index,existing_item,url FROM sync_book_stage WHERE book_id=? AND package_sha256=? AND chapter_index>? ORDER BY chapter_index',[id,stageKey],{key:'chapter_index'});
   const usedItems=new Set(prior.filter(r=>r.existing_item!=null).map(r=>num(r.existing_item))),usedUrls=new Set(prior.map(r=>str(r.url)));
-  if(index){const unit='book-stage:'+verified.binding+':'+revision+':'+index;if(!checkpoint?.has(unit))await checkpoint?.commit(unit);}
-  const flushStage=async()=>{if(!staged.length)return;await checkpoint?.check();await this.db.transaction([revisionGuard(revision),...staged,{sql:'UPDATE sync_book_install SET stage_index=?,stage_offset=? WHERE binding=?',params:[index,stageOffset,verified.binding]}]);staged=[];stageBytes=0;const unit='book-stage:'+verified.binding+':'+revision+':'+index;if(!checkpoint?.has(unit))await checkpoint?.commit(unit);await checkpoint?.check();};
+  if(index){const unit='book-stage:'+binding+':'+revision+':'+index;if(!checkpoint?.has(unit))await checkpoint?.commit(unit);}
+  const stageText=cloud&&checkpoint?.scope&&this.ports.text.syncStagedText?this.ports.text.storeStagedText:undefined;
+  let textDirectoryDirty=false;
+  const flushStage=async()=>{
+   if(!staged.length)return;
+   await checkpoint?.check();
+   const progress:Statement={sql:'UPDATE sync_book_install SET stage_index=?,stage_offset=? WHERE binding=?',params:[index,stageOffset,binding]};
+   // The body files are durable before this transaction. Commit the chapter
+   // hash and its shadow row together so a lost secure reply adopts both.
+   const verifiedPrefix:Statement[]=(cloud&&index>validatedIndex)?[{
+    sql:'UPDATE sync_book_install SET validated_index=?,validated_offset=? WHERE binding=?',
+    params:[index,stageOffset,binding],
+   }]:[];
+   if(textDirectoryDirty){
+    await this.ports.text.syncStagedText!();
+    await checkpoint?.check();
+   }
+   await this.db.transaction([revisionGuard(revision),...staged,...validation,progress,...verifiedPrefix]);
+   textDirectoryDirty=false;
+   staged=[];validation=[];stageBytes=0;pageStart=stageOffset;
+   const unit='book-stage:'+binding+':'+revision+':'+index;
+   if(!checkpoint?.has(unit))await checkpoint?.commit(unit);
+   await checkpoint?.check();
+  };
   // Small immutable chapter files are covered by the next durable SQL staging
   // page. A crash before that commit rehashes/adopts their deterministic targets;
   // no temporary file or uncommitted row becomes progress. Large files retain
   // piece receipts so a single chapter cannot exhaust a work window.
   const stagedFiles=checkpoint?.scope?{scope:()=>checkpoint.scope!(),has:checkpoint.has,check:checkpoint.check,commit:async()=>{await checkpoint.check();}}:checkpoint;
-  for await(const line of rangedLines((at,max)=>this.ports.files.read(info.path,at,max),info.size,stageOffset)){
-   await checkpoint?.check();stageOffset=line.end;
-   const c=parseBookChapter(line.text,++index),mapped=mappings.get(c.chapterIndex),candidate=present.get(c.url);const found=mapped?.item_id!=null?byItem.get(num(mapped.item_id)):undefined,old=found&&!usedItems.has(num(found.id))?found:undefined;if(old)usedItems.add(num(old.id));
+  for await(const line of lines(stageOffset)){
+   await checkpoint?.check();
+   const lineBytes=cloud?line.end-stageOffset:encodeUtf8(line.text).length;
+   stageOffset=line.end;
+   const c=parseBookChapter(line.text,++index);
+   if(cloud&&index>header.chapterCount)throw Error('book_package_invalid');
+   if(cloud&&index>validatedIndex){
+    const digest=await chapterHash(index,c.title,c.contentText,this.ports.sha256);
+    chapterHashes.push(digest);
+    validation.push(bookValidationRow(binding,index,digest,c.url,stageOffset));
+   }
+   const mapped=mappings.get(c.chapterIndex),candidate=present.get(c.url);const found=mapped?.item_id!=null?byItem.get(num(mapped.item_id)):undefined,old=found&&!usedItems.has(num(found.id))?found:undefined;if(old)usedItems.add(num(old.id));
    const collision=!!candidate&&!old||usedUrls.has(c.url),bookArticle=mapped?str(mapped.article_id):await bookArticleId(id,c.chapterIndex,this.ports.sha256),url=old?str(old.link):collision?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}/chapter/${c.chapterIndex}`:c.url,wireId=old?.article_id?str(old.article_id):await this.ports.stableId(url),single=header.sourceUrl.startsWith('https://watchrss.local/import-content/txt/'),channel=old?str(old.channel_url):candidate&&!old?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}`:single?'https://watchrss.local/import-content':header.sourceUrl;
    usedUrls.add(url);const clock=legacyDeletes.get(c.url)??0;if(clock>(state.lifecycle?.startedAt??state.updatedAt)){deletionSet.add(c.chapterIndex);maxDelete=Math.max(maxDelete,clock);}
-   const store=async(text:string|null,key:string)=>text===null||text.length<=50000?text:this.ports.text.storeText(key,text,text.length<=65536?stagedFiles:checkpoint),chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
+   const store=async(text:string|null,key:string)=>{
+    if(text===null||text.length<=50000)return text;
+    if(stageText&&text.length<=65536){
+     textDirectoryDirty=true;
+     return stageText(key,text,stagedFiles!);
+    }
+    return this.ports.text.storeText(key,text,text.length<=65536?stagedFiles:checkpoint);
+   };
+   const chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
    const content=await store(chosen,`${id}-${c.chapterIndex}-content`),html=c.contentHtml===chosen?content:await store(c.contentHtml,`${id}-${c.chapterIndex}-html`),text=c.contentText===chosen?content:await store(c.contentText,`${id}-${c.chapterIndex}-text`);
-   staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',params:[id,info.sha256,c.chapterIndex,bookArticle,wireId,url,channel,single?'导入内容':state.title,c.title,content,html,text,state.deleted||deletionSet.has(c.chapterIndex)?1:0,old?num(old.id):null,verified.chapterHashes[c.chapterIndex-1]!]});
-   stageBytes+=encodeUtf8(line.text).length;if(staged.length>=32||stageBytes>=262144)await flushStage();
+   staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',params:[id,stageKey,c.chapterIndex,bookArticle,wireId,url,channel,single?'导入内容':state.title,c.title,content,html,text,state.deleted||deletionSet.has(c.chapterIndex)?1:0,old?num(old.id):null,chapterHashes[c.chapterIndex-1]!]});
+   // A file-backed chapter contributes only its marker and metadata to SQL.
+   // Keep the SQL payload small and journal at most 1 MiB of source per page.
+   stageBytes+=cloud?4*(c.title.length+url.length+channel.length+(content?.length??0)+(html?.length??0)+(text?.length??0))+1024:lineBytes;
+   if(staged.length>=32||stageBytes>=262144||cloud&&stageOffset-pageStart>=1048576)await flushStage();
   }
-  await flushStage();if(index!==state.chapterCount)throw Error('book_directory_changed');
-  for(const r of await querySyncKeysetPages(this.db,'SELECT v.chapter_index,v.source_url FROM sync_book_validation v WHERE v.binding=? AND v.chapter_index>? ORDER BY v.chapter_index',[verified.binding],{key:'chapter_index'})){const clock=legacyDeletes.get(str(r.source_url))??0;if(clock>(state.lifecycle?.startedAt??state.updatedAt)){deletionSet.add(num(r.chapter_index));maxDelete=Math.max(maxDelete,clock);}}
-  const next=mergeBook(state,{...state,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
-  if(await libraryRevision(this.db)!==revision)throw Error('book_library_changed_during_staging');const published=await this.ports.files.publish(info,id);
-  const ss=this.packageStatements(next,published,info.sha256,revision,verified.binding);
+  await flushStage();
+  if(index!==state.chapterCount||cloud&&stageOffset!==info.size)throw Error(cloud?'book_package_invalid':'book_directory_changed');
+  const fingerprint=cloud?await verifyBookInstall(header,id,chapterHashes,this.ports.sha256,expected):state.fingerprint;
+  if(legacyDeletes.size)for(const r of await bookValidationRows(this.db,binding)){const clock=legacyDeletes.get(str(r.source_url))??0;if(clock>(state.lifecycle?.startedAt??state.updatedAt)){deletionSet.add(num(r.chapter_index));maxDelete=Math.max(maxDelete,clock);}}
+  const accepted={...state,fingerprint};
+  const next=mergeBook(accepted,{...accepted,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
+  if(await libraryRevision(this.db)!==revision)throw Error('book_library_changed_during_staging');
+  const published=await this.ports.files.publish(info,id);
+  if(cloud)await checkpoint?.check();
+  const ss=this.packageStatements(next,published,stageKey,revision,binding);
   if(!this.db.transactionChanges)throw Error('Book install requires committed counts');const counts=await this.db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id);await this.captureReading();return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next);
  }
  /** Import into a job-owned shadow. No package path or chapter is readable

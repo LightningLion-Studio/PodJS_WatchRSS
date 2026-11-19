@@ -24,17 +24,27 @@ export interface RestoreCodecCheckpoint {
  resolve?(object:CloudObject):Promise<Uint8Array>;
  entry?(object:CloudObject,path:string):Promise<Uint8Array|undefined>;
  materializeOnly?:boolean;
+ /** The caller will verify the assembled native file before consuming it. */
+ deferAssembledFile?:boolean;
  /** Assemble receipted chunks without rereading their plaintext prefix.
   * Verify object.contentSha256 before publishing an object receipt. */
  assemble?(object:CloudObject,parts:string[],length:number):Promise<Uint8Array>;
  inflate?(object:CloudObject,parts:string[]):Promise<Uint8Array>;
- inflateChunk?(object:CloudObject,index:number,plain:Uint8Array,maximum:number):Promise<Uint8Array>;
+ /** A deferred file assembler can accept a verified length instead of guest bytes. */
+ inflateChunk?(object:CloudObject,index:number,plain:Uint8Array,maximum:number):Promise<Uint8Array|number>;
  /** Secure receipt for a complete, authenticated local chunk. No plaintext IO. */
  length?(object:CloudObject,part:string):Promise<number|undefined>;
  link?(object:CloudObject,parts:string[],length:number):Promise<void>;
  reload?(chunk:CloudChunk):Promise<Uint8Array>;
  metric?(stage:'chunk'|'object'|'source-hash'|'decrypt'|'inflate',bytes:number,started:number,cached:boolean,chunkIndex?:number):void;
  now?():number;
+}
+export interface RestoredFile {
+ readonly path:string;
+ readonly size:number;
+ readonly sha256:string;
+ read(offset:number,maxBytes:number):Promise<Uint8Array>;
+ close():Promise<void>;
 }
 export interface SnapshotCrypto {
  localPlaintext?:boolean;
@@ -51,6 +61,7 @@ export interface SnapshotCrypto {
  gunzip(bytes:Uint8Array,maxBytes:number):Promise<Uint8Array>;
  gunzipSealedParts?(key:Uint8Array,parts:SealedPart[],length:number,outputPrefix:string,aadPrefix:string,maxOutputBytes:number,offset:number,receipt:(step:SealedGzipStep)=>Promise<void>,allowShortOutput?:boolean):Promise<string>;
  openSealedParts?(key:Uint8Array,parts:{path:string;aadBase64:string;bytes:number}[],length:number):Promise<Uint8Array>;
+ openSealedPartsFile?(key:Uint8Array,parts:{path:string;aadBase64:string;bytes:number}[],length:number):Promise<RestoredFile>;
 }
 export interface CloudChunk {plaintextSha256:string;ciphertextSha256:string;plaintextBytes:number;ciphertextBytes:number;saltBase64:string;nonceBase64:string;}
 export interface CloudObject {features?:CloudFeatures;entryRef?:{object:string;entryPath:string;encoding:'identity'};objectKeyEnvelope?:{version:1;scope:string;saltBase64:string;nonceBase64:string;ciphertextBase64:string};privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;encoding:'gzip-chunks-v1'|'gzip'|'identity';originalBytes:number;encodedBytes:number;chunks:CloudChunk[];readerKeyEnvelope?:{version:number;saltBase64:string;nonceBase64:string;ciphertextBase64:string;scope?:string};}
@@ -207,6 +218,12 @@ export class WatchCloudCodec {
  async openRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){check(bytes.length>=28);if(this.crypto.localPlaintext&&utf8Decode(bytes.subarray(0,4))==='PLN4'){const value=bytes.subarray(28),expected=await this.sealRestoreProjection(key,scope,value);check(await equalBytesAsync(expected,bytes,{yield:this.crypto.yieldTurn}));return value;}return this.crypto.decrypt(await this.projectionKey(key),utf8Encode(scope),bytes.subarray(0,12),bytes.subarray(12));}
  get plaintextRestore(){return this.crypto.localPlaintext===true;}
  get batchedRestoreParts(){return !!this.crypto.openSealedParts;}
+ get batchedRestoreFiles(){return !!this.crypto.openSealedPartsFile;}
+ async openRestoreFile(key:Uint8Array,parts:{path:string;scope:string;bytes:number}[],length:number){
+  if(!this.crypto.openSealedPartsFile)throw Error('cloud_snapshot_projection_missing');
+  return this.crypto.openSealedPartsFile(await this.projectionKey(key),parts.map(p=>({path:p.path,aadBase64:bytesToBase64(utf8Encode(p.scope)),bytes:p.bytes})),length);
+ }
+
  async openRestoreParts(key:Uint8Array,parts:{path:string;scope:string;bytes:number}[],length:number){if(!this.crypto.openSealedParts)throw Error('cloud_snapshot_projection_missing');return this.crypto.openSealedParts(await this.projectionKey(key),parts.map(p=>({path:p.path,aadBase64:bytesToBase64(utf8Encode(p.scope)),bytes:p.bytes})),length);}
  async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>,selected:readonly CloudObject[]=manifest.objects,checkpoint?:RestoreCodecCheckpoint):Promise<Map<string,Uint8Array>>{
   this.guard.require();if(!checkpoint?.manifestValidated)validateManifest(manifest);if(cloudCompatibility(manifest).opaque)throw Error('cloud_format_opaque');const result=new Map<string,Uint8Array>();
@@ -224,11 +241,25 @@ export class WatchCloudCodec {
       let blob=lookahead?await lookahead.take(c):await read(c.ciphertextSha256);await checkpoint?.check();
       const next=o.chunks[index+1];if(next&&lookahead&&await checkpoint?.length?.(o,'chunk:'+(index+1))===undefined)lookahead.start(next);
       const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);await checkpoint?.check();await checkpoint?.verified?.(c,blob);}
-      const inflateAt=checkpoint?.now?.()??Date.now();part=o.encoding==='gzip-chunks-v1'?(checkpoint?.inflateChunk?await checkpoint.inflateChunk(o,index,plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total))):plain;if(o.encoding==='gzip-chunks-v1')checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);if(!(o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk))await checkpoint?.write(o,'chunk:'+index,part);
+      const inflateAt=checkpoint?.now?.()??Date.now();
+     if(o.encoding==='gzip-chunks-v1'){
+      const maximum=Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total);
+      const output=await (checkpoint?.inflateChunk?checkpoint.inflateChunk(o,index,plain,maximum):this.crypto.gunzip(plain,maximum));
+      if(typeof output==='number'){
+       check(checkpoint?.deferAssembledFile&&checkpoint.assemble&&Number.isSafeInteger(output)&&output>=0&&output<=maximum);
+       total+=output;
+       checkpoint.metric?.('inflate',output,inflateAt,false,index);
+       checkpoint.metric?.('chunk',output,began,false,index);
+       continue;
+      }
+      part=output;
+      checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);
+     }else part=plain;
+     if(!(o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk))await checkpoint?.write(o,'chunk:'+index,part);
      }
      total+=part.length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));if(!(o.encoding!=='gzip'&&checkpoint?.assemble)&&!(o.encoding==='gzip'&&checkpoint?.inflate)&&(!checkpoint?.materializeOnly||o.encoding==='gzip'||!!o.contentSha256))parts.push(part);checkpoint?.metric?.('chunk',part.length,began,!!saved,index);
     }
-    await checkpoint?.check();if(o.encoding!=='gzip'&&checkpoint?.assemble){check(total===o.originalBytes);const bytes=await checkpoint.assemble(o,o.chunks.map((_,i)=>'chunk:'+i),total);if(!checkpoint.materializeOnly||o.contentSha256)check(bytes.length===total);result.set(o.name,bytes);checkpoint.metric?.('object',total,started,false);continue;}if(o.encoding==='gzip'&&checkpoint?.inflate){check(total===o.encodedBytes);const bytes=await checkpoint.inflate(o,o.chunks.map((_,i)=>'chunk:'+i));result.set(o.name,bytes);checkpoint.metric?.('object',o.originalBytes,started,false);continue;}if(checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256){check(total===o.originalBytes);await checkpoint.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),o.originalBytes);result.set(o.name,new Uint8Array());continue;}const bytes=o.encoding==='gzip'?await this.crypto.gunzip(join(parts),o.originalBytes):join(parts);check(bytes.length===o.originalBytes);if(o.contentSha256)check(await this.crypto.sha256(bytes)===o.contentSha256);if(o.encoding==='gzip')await checkpoint?.write(o,'object',bytes);else await checkpoint?.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),bytes.length);result.set(o.name,bytes);checkpoint?.metric?.('object',bytes.length,started,false);
+    await checkpoint?.check();if(o.encoding!=='gzip'&&checkpoint?.assemble){check(total===o.originalBytes);const bytes=await checkpoint.assemble(o,o.chunks.map((_,i)=>'chunk:'+i),total);if(!checkpoint.deferAssembledFile&&(!checkpoint.materializeOnly||o.contentSha256))check(bytes.length===total);result.set(o.name,bytes);checkpoint.metric?.('object',total,started,false);continue;}if(o.encoding==='gzip'&&checkpoint?.inflate){check(total===o.encodedBytes);const bytes=await checkpoint.inflate(o,o.chunks.map((_,i)=>'chunk:'+i));result.set(o.name,bytes);checkpoint.metric?.('object',o.originalBytes,started,false);continue;}if(checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256){check(total===o.originalBytes);await checkpoint.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),o.originalBytes);result.set(o.name,new Uint8Array());continue;}const bytes=o.encoding==='gzip'?await this.crypto.gunzip(join(parts),o.originalBytes):join(parts);check(bytes.length===o.originalBytes);if(o.contentSha256)check(await this.crypto.sha256(bytes)===o.contentSha256);if(o.encoding==='gzip')await checkpoint?.write(o,'object',bytes);else await checkpoint?.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),bytes.length);result.set(o.name,bytes);checkpoint?.metric?.('object',bytes.length,started,false);
    }finally{await lookahead?.close();if(root!==key)root.fill(0);}
   }return result;
  }
