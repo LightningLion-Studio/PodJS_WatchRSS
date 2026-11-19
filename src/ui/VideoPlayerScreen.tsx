@@ -58,6 +58,24 @@ function PlayerButton(props: { hidden?: boolean; left: number; top: number; size
   </View></Show>;
 }
 
+function PlayerTimeline(props: {positionMs: number; durationMs: number}) {
+  const elapsed = createMemo(() => formatPlayerTime(props.positionMs));
+  const duration = createMemo(() => formatPlayerTime(props.durationMs));
+  const measure = (text: string) => Math.max(16, Math.ceil(getOps().measureText(text, 19)));
+  const startWidth = createMemo(() => measure(elapsed()));
+  const endWidth = createMemo(() => measure(duration()));
+  const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);
+  const timelineProgress = createMemo(() => progressWidth(props.positionMs, props.durationMs, barWidth()));
+  return <>
+    <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{elapsed()}</Text>
+    <View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]">
+      <Show when={timelineProgress()>0}><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{width:timelineProgress()}} /></Show>
+      <View class="absolute top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" style={{insetL:Math.max(0,Math.min(barWidth()-4,timelineProgress()-2))}} />
+    </View>
+    <Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{duration()}</Text>
+  </>;
+}
+
 export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; offset: number; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onRejectAdjacent?:(source:DouyinPreparedSource,mirrorIndex?:number)=>void; onAdjacentKey?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>; canSelectTarget?:(direction:"next"|"previous")=>boolean; onSelectTarget?:(direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onReload?:(positionMs:number,current:()=>boolean,retryCurrent?:boolean)=>void|Promise<void>; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
   const network=useNetworkRecovery();
   const [networkWaiting,setNetworkWaiting]=createSignal(false);
@@ -910,10 +928,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const detailCover = createMemo(() => props.source.posterUrl ? { url: props.source.posterUrl, bucket: props.source.platform === "bili" ? "bili-preview" as const : undefined, portrait: portraitVideo() } : undefined, undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
   const volumePercent = () => systemVolumePercent(state()?.volumeIndex ?? Math.round((state()?.volume??0)*(state()?.volumeMax??1)),state()?.volumeMax??1);
   const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233 * uiScale()) / 2, uiTop = () => (props.height - 233 * uiScale()) / 2;
-  const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
-  const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
-  const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);
-  const timelineProgress=()=>progressWidth(state()?.positionMs??0,state()?.durationMs??0,barWidth());
   const errorWidth=()=>Math.max(170,props.width-62);
   const errorLines=createMemo(()=>measuredLines(props.onReload?error():'播放失败',errorWidth()-16,text=>getOps().measureText(text,0),3));
   const errorTextHeight=()=>Math.max(1,errorLines().length)*14;
@@ -950,7 +964,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         {/* Three across: icon corners stay inside the 233 circle at this height. */}
         <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
       </Show>
-      <Show when={Number.isFinite(state()?.durationMs)&&(state()?.durationMs??0)>0}><Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><Show when={timelineProgress()>0}><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{width:timelineProgress()}} /></Show><View class="absolute top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" style={{insetL:Math.max(0,Math.min(barWidth()-4,timelineProgress()-2))}} /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text></Show>
+      <Show when={Number.isFinite(state()?.durationMs)&&(state()?.durationMs??0)>0}>
+        <PlayerTimeline positionMs={state()?.positionMs??0} durationMs={state()?.durationMs??0}/>
+      </Show>
       <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
     <Show when={props.active && controlsVisible() && !error() && !networkPrompt() && !detailShown() && !(props.round && volumeVisible())}><PlayerDetailArrow left={uiLeft()} top={uiTop()} scale={uiScale()} rotation={displayRotation()} round={props.round} onOpen={() => { if (canOpenDetail()) slide.open(); }} /></Show>

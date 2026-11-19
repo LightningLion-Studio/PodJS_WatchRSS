@@ -13,6 +13,7 @@ import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
 import {readerBodyState} from '../reader/body-state.ts';
+import {useMinuteClock} from './minute-clock.ts';
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {captureActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
@@ -212,6 +213,10 @@ export default function WatchRSS(props: {
   };
   const motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
+  // Keep the previous route mounted for restoration. Paint it when a back swipe reveals it.
+  const backUnderlay = createMemo(() =>
+    backOffset() > 0 && page() !== "video" ? stack().at(-2) : undefined
+  );
   function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
   function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
@@ -691,10 +696,7 @@ export default function WatchRSS(props: {
   },()=>previewOpenPending&&motion.phase==="idle"&&!!previewState());
   createEffect(() => setReaderPreviewVisible(page() === "reader-preview"));
   onCleanup(() => setReaderPreviewVisible(false));
-  const [presetClock, setPresetClock] = createSignal(new Date());
-  let presetClockTimer:ReturnType<typeof delay>|undefined,presetClockDisposed=false;
-  const tickPresetClock=()=>{if(presetClockDisposed)return;presetClockTimer=delay(60000-Date.now()%60000);void presetClockTimer.result.then(()=>{if(presetClockDisposed)return;if(presetState()?.selection.mode==="SYSTEM")setPresetClock(new Date());tickPresetClock();},()=>{});};
-  tickPresetClock();onCleanup(()=>{presetClockDisposed=true;presetClockTimer?.cancel();});
+  const presetClock = useMinuteClock(() => foreground() && presetState()?.selection.mode === "SYSTEM");
   const readerPreset = createMemo(() =>
     presetState()
       ? activeReaderPreset(presetState()!, presetClock())
@@ -1532,12 +1534,7 @@ export default function WatchRSS(props: {
             : current().page === "video"
               ? -2 * width
               : 0,
-          opacity:
-            current().page === "video" && !active()
-              ? 0
-              : stack().indexOf(entry) >= stack().length - 2
-                ? 1
-                : 0,
+          opacity: active() || backUnderlay() === entry ? 1 : 0,
         }}
       >
         <Show when={!selfTitled()}>

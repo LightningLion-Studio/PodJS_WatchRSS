@@ -19,7 +19,11 @@ mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{
  for(const key of ['onDown','onMove','onUp','onCancel','onTap','onLongPress','onPanStart','onPanMove','onPanEnd'])if(options[key])handle[key]=(c?:Record<string,unknown>)=>options[key](contact({frames:key==='onPanEnd'?6:0,...c}));
  gestures.push(handle);return {dispose(){}};
 }}));
-mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(text:string)=>text.length*8})}));
+let trackTimeWidths=false,timeWidthReads=0;
+mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(text:string,slot:number)=>{
+ if(trackTimeWidths&&slot===19)timeWidthReads++;
+ return text.length*8;
+}})}));
 let occludingHit:any=null;
 mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,resolveTouchHit:()=>occludingHit,pressNode(){}}));
 const frames:Array<()=>void>=[];mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void){frames.push(fn);}}));
@@ -1024,4 +1028,32 @@ test('DYROTATE switching during a rotation tween uses its destination on both su
   expect(sessionCalls.find(c=>c.method==='promote')?.transform?.rotationDeg).toBe(90);
   now+=300;frames.forEach(fn=>fn());await flush();expect(handle.gestureRotation()).toBe(90);
  }finally{Date.now=savedNow;}
+});
+
+test('playback control layout reuses unchanged time label widths across native state pushes',async()=>{
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'rss',title:'local',url:'file:///fixture.mp4'},width:233,height:233,active:true,offset:0,round:true});});
+ await flush();
+ trackTimeWidths=true;timeWidthReads=0;
+ try{
+  current={...state('playing'),positionMs:1100,durationMs:240000};
+  jankStateChanged(current);
+  const visible=nodes(root);
+  const elapsed=visible.find(node=>node.kind==='Text'&&node.props.children==='0:01');
+  const duration=visible.find(node=>node.kind==='Text'&&node.props.children==='4:00');
+  const bar=visible.find(node=>node.kind==='View'&&node.props.class?.includes('bg-[#ff6700]'));
+  expect(elapsed).toBeDefined();expect(duration).toBeDefined();expect(bar).toBeDefined();
+  for(let n=0;n<10;n++){
+   const positionMs=1100+n*50;
+   current={...current,positionMs};
+   jankStateChanged(current);
+   expect(elapsed!.props.style.width).toBe(32);expect(duration!.props.style.width).toBe(32);
+   expect(bar!.props.style.width).toBeCloseTo(positionMs/240000*106,5);
+  }
+  expect(timeWidthReads).toBe(2);
+  jankStateChanged({...current,positionMs:3600000,durationMs:7200000});
+  expect(elapsed!.props.children).toBe('1:00:00');
+  expect(duration!.props.children).toBe('2:00:00');
+  expect(elapsed!.props.style.width).toBe(56);expect(duration!.props.style.width).toBe(56);
+  expect(timeWidthReads).toBe(4);
+ }finally{trackTimeWidths=false;}
 });

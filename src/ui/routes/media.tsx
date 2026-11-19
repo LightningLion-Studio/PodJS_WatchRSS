@@ -183,7 +183,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
           initialPool={props.entry.initialVideoPool}
-          onAdjacentPoster={direction=>{const state=props.entry.queue?.snapshot();return state?.playlist[state.index+(direction==='next'?1:-1)]?.coverUrl;}}
+          onAdjacentPoster={direction=>props.entry.queue?.itemAtOffset(direction==='next'?1:-1)?.coverUrl}
           onBluetoothAllowed={value=>douyinPreload.allowBluetooth(value,props.entry)}
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
           width={props.width}
@@ -245,13 +245,13 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? () => props.changeDouyinVideo(props.entry, "previous")
               : undefined
           }
-          onAdjacentKey={props.entry.queue?(direction,distance=1)=>{const q=props.entry.queue!.snapshot();return q.playlist[q.index+(direction==='next'?distance:-distance)]?.awemeId;}:undefined}
+          onAdjacentKey={props.entry.queue?(direction,distance=1)=>props.entry.queue!.itemAtOffset(direction==='next'?distance:-distance)?.awemeId:undefined}
           onPrepareAdjacent={
             props.entry.queue
               ? (direction,distance) => props.prepareDouyinAdjacent(props.entry,direction,distance)
               : undefined
           }
-          canSelectTarget={props.entry.queue?direction=>direction==='next'||props.entry.queue!.snapshot().index>0||props.entry.playback?.immersive===true:undefined}
+          canSelectTarget={props.entry.queue?direction=>direction==='next'||props.entry.queue!.selectedIndex>0||props.entry.playback?.immersive===true:undefined}
           onSelectTarget={props.entry.queue?(direction,distance,prepared)=>props.selectDouyinTarget(props.entry,direction,distance,prepared):undefined}
           onPromoteAdjacent={
             props.entry.queue
