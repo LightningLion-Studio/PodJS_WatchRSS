@@ -112,17 +112,18 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const [layoutAllowed, allowLayout] = createSignal(false);
   onFrame(() => allowLayout(true), () => !layoutAllowed() && props.slide.x() === 0);
+  const text=createMemo(()=>layoutAllowed()?detailText({title:props.title(),description:props.description()}):{title:'',description:''});
   const info = createMemo(() => {
     const value = cover();
     const meta = { title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait };
     const cached = detailSummaries.get(props.slide);
     if (cached && (Object.keys(meta) as (keyof DetailMeta)[]).every(key => meta[key] === cached.meta[key])) return cached.layout;
     if (!layoutAllowed()) return EMPTY_INFO;
-    const layout = infoLayout(meta, measure);
+    const layout = infoLayout(meta, measure,text());
     detailSummaries.set(props.slide, { meta, layout });
     return layout;
   });
-  const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
+  const description = createMemo(() => text().description);
   const fullDescription = createMemo(() => info().descriptionMore ? description() : "");
   const [about, setAbout] = createSignal<string[]>([]);
   const [aboutCount, setAboutCount] = createSignal(0);
@@ -138,7 +139,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   // scroll can read them without waiting for the end of the description.
   createEffect(() => {
     const text = fullDescription();
-    aboutJob = text ? aboutLineIterator(text, measure) : undefined;
+    aboutJob = text ? aboutLineIterator(text, measure,true) : undefined;
     batch(() => { setAbout([]); setAboutCount(0); });
   });
   const needsAboutLines = () => !!aboutJob && props.slide.x() === 0 && !selected() &&

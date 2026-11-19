@@ -1,3 +1,4 @@
+let compactTick:(v:any)=>void=()=>{};
 let jankStateChanged:(v:any)=>void=()=>{};
 import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
@@ -57,10 +58,11 @@ let heldPrepare:Promise<any>|undefined;
 let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any[]=[];
 let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
-const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
+let captured=0,sampled=0;mock.module('@podjs/framework/render-checkpoint',()=>({renderCheckpoint:()=>++sampled}));
+const video={captureFrame:async()=>{captured++;return {available:true};},retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoProgress:(fn:any)=>{compactTick=fn;return ()=>{if(compactTick===fn)compactTick=()=>{};};},onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;independentKeyframes=false;lifecycleState='active';});
 let deliveredNativeState:any;
@@ -624,7 +626,8 @@ test('DYLOSS reverse boundary records each release and snaps back without retiri
  const marks:any[]=[];(globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
  heldPrepare=new Promise(()=>{});
  try{
-  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/0',title:'boundary'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},canSelectTarget:direction=>direction==='next'||selected>0,onSelectTarget:()=>{selected++;}});});await flush();
+  let atEnd=false;const requested:string[]=[];
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/0',title:'boundary'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},canSelectTarget:direction=>direction==='next'?!atEnd:selected>0,onBoundaryRelease:direction=>requested.push(direction),onSelectTarget:()=>{selected++;}});});await flush();
   const before=retires,g=gestures[0];
   for(let n=0;n<50;n++){
    g.onPanStart({dy:12});g.onPanMove({dy:100});g.onPanEnd({vy:500});
@@ -632,6 +635,12 @@ test('DYLOSS reverse boundary records each release and snaps back without retiri
   }
   expect(selected).toBe(0);expect(pauses).toBe(0);expect(retires).toBe(before);expect(prepares).toHaveLength(1);
   const releases=marks.filter(v=>v.code==='gesture_release');expect(releases).toHaveLength(50);expect(releases.every(v=>v.direction==='cancel'&&v.delta===0&&v.reason==='boundary')).toBe(true);
+  atEnd=true;requested.length=0;
+  for(const dy of [-12,-100]){
+   g.onPanStart({dy:-9});g.onPanMove({dy});g.onPanEnd({vy:0});
+   for(let t=0;t<280;t+=16){time+=16;ticks.splice(0).forEach(f=>f());await flush();}
+  }
+  expect(requested).toEqual(['next']);expect(pauses).toBe(0);expect(retires).toBe(before);
  }finally{Date.now=realNow;(globalThis as any).pod=originalPod;heldPrepare=undefined;}
 });
 
@@ -854,16 +863,23 @@ for(const useSessions of [false,true])test(`DYZOOM mode survives source replacem
 });
 
 for(const useSessions of [false,true])test(`DYZOOM rotation sends destination geometry before the first angle frame sessions=${useSessions}`,async()=>{
- sessionsCapable=useSessions;decoderLimit=3;initial='available';const saved=video.setTransform,sessionSaved=sessionPort.setTransform;const transforms:any[]=[];video.setTransform=async(v?:any)=>{transforms.push(v);};sessionPort.setTransform=async(id:string,v?:any)=>{transforms.push(v);return sessionValue(id);};
+ sessionsCapable=useSessions;decoderLimit=3;initial='available';const saved=video.setTransform,sessionSaved=sessionPort.setTransform;const transforms:any[]=[];video.setTransform=async(v?:any)=>{transforms.push(v);};sessionPort.setTransform=async(id:string,v?:any)=>{transforms.push({...v,sessionId:id});return sessionValue(id);};
  const realNow=Date.now;let now=1000;Date.now=()=>now;
  try {
-  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/a.mp4',title:'a'},width:233,height:200,active:true,offset:0,round:true});});await flush();
+  const source={platform:'douyin' as const,immersive:true,awemeId:'a',url:'local/a.mp4',title:'a'};
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:200,active:true,offset:0,round:true,onNext(){},onPrepareAdjacent:async()=>({key:'b',source:{...source,awemeId:'b',url:'local/b.mp4'}})});});await flush();await flush();
+  const adjacent=useSessions?sessionCalls.filter(c=>c.method==='prepare'&&c.prewarm).at(-1)?.sessionId:undefined;
+  if(useSessions)expect(adjacent).toBeDefined();
   for(const [from,target] of [[0,90],[90,180],[180,270],[270,0]]) {
    transforms.length=0;
    const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));button!.props.onPress();await flush();
    expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(from);
    for(let i=0;i<21;i++){now+=15;frames.forEach(fn=>fn());await flush();}
    expect(transforms.length).toBeGreaterThan(2);expect(transforms.every(v=>v.scaleRotationDeg===target)).toBe(true);expect(transforms.at(-1).rotationDeg).toBe(target);
+   if(useSessions){
+    const hidden=transforms.filter(t=>t.sessionId===adjacent);
+    expect(hidden.map(t=>t.rotationDeg)).toEqual([target]);
+   }
   }
  }finally {Date.now=realNow;video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
 });
@@ -1214,4 +1230,30 @@ test('256 MB keeps a pixel-only reverse neighbour and presents it on the first d
   sessionPort.release=savedRelease;
   globals.pod=savedPod;
  }
+});
+
+test('duplicate first frames make one functional capture, with a new exit frame after progress and no release diagnostics',async()=>{
+ debugAllowed=false;captured=0;sampled=0;
+ const source={platform:'douyin' as const,immersive:true,awemeId:'capture',title:'capture',url:'https://video/capture',previewFrame:{entryId:'capture',frame:{available:true as const,kind:'actual_frame' as const,path:'frame.png',width:200,height:200,positionMs:0,capturedAt:0,capturedGeneration:1}}};
+ current=state('buffering');
+ let finish!:(s:any)=>void;heldPrepare=new Promise(resolve=>finish=resolve);
+ createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true});});
+ await flush();finish(current={...state('playing'),sourceGeneration:5});await flush();
+ jankStateChanged({...state('buffering'),sourceGeneration:5,hasRenderedFirstFrame:false});
+ jankStateChanged({...state('playing'),sourceGeneration:5});await flush();
+ expect(captured).toBe(1);
+ current={...state('playing'),sourceGeneration:5,positionMs:3200};jankStateChanged(current);
+ lifecycleState='background';lifecycleListeners.forEach(fn=>fn('background'));await flush();
+ expect(captured).toBe(2);stops.pop()!();expect(sampled).toBe(0);expect(captured).toBe(2);
+});
+
+test('compact progress updates full checkpoint position while stale sessions and generations cannot overwrite it',async()=>{
+ const checkpoints:number[]=[];
+ const source={platform:'douyin' as const,immersive:true,title:'progress',awemeId:'progress',url:'https://video/progress'};
+ createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true,onCheckpoint:(kind,pos)=>{if(kind==='pause_or_exit')checkpoints.push(pos);}});});await flush();
+ jankStateChanged({...state('playing'),sourceGeneration:8,positionMs:500,durationMs:10_000});
+ compactTick({sourceGeneration:8,positionMs:4200,durationMs:10000,bufferedMs:2200,networkStalled:false});
+ compactTick({sourceGeneration:6,positionMs:7000,durationMs:10000,bufferedMs:200,networkStalled:false});
+ compactTick({sourceGeneration:8,sessionId:'other',positionMs:8900,durationMs:10000,bufferedMs:200,networkStalled:false});
+ stops.pop()!();expect(checkpoints.at(-1)).toBe(4200);expect(prepares.at(-1).compactProgress).toBe(true);
 });

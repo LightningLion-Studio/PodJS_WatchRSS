@@ -35,10 +35,10 @@ export class DouyinSqlStateStorage implements DouyinStateStorage {
   async apply(changes:readonly DouyinStateChange[]):Promise<void>{
     if(!changes.length)return;
     if(changes.some(change=>LEGACY.has(change.key)&&change.value!==null))throw Error("Legacy Douyin records are read-only");
-    const db=await this.db();
-    await db.transaction(changes.filter(change=>!LEGACY.has(change.key)).map(({key,value})=>value===null
+    const statements=changes.filter(change=>!LEGACY.has(change.key)).map(({key,value})=>value===null
       ?{sql:'DELETE FROM douyin_local_state WHERE key=?',params:[key]}
-      :{sql:'INSERT OR REPLACE INTO douyin_local_state(key,value) VALUES(?,?)',params:[key,value]}));
+      :{sql:'INSERT OR REPLACE INTO douyin_local_state(key,value) VALUES(?,?)',params:[key,value]});
+    if(statements.length)await (await this.db()).transaction(statements);
     // Publication precedes cleanup. A failed cleanup never destroys the only copy.
     for(const {key,value} of changes)if(LEGACY.has(key)){
       if(value!==null)throw Error('Legacy Douyin records are read-only');

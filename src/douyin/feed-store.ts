@@ -10,7 +10,7 @@ import {applyDouyinState,readDouyinState,type DouyinStateChange,type DouyinState
 import type { DouyinFeedSnapshot, DouyinItem } from "./types.ts";
 
 export interface RecentFeed extends DouyinFeedSnapshot { anchorAwemeId: string | null; savedAtMillis: number; resolved: Record<string, number> }
-const EMPTY = (): RecentFeed => ({ items: [], cursor: null, hasMore: false, anchorAwemeId: null, savedAtMillis: 0, resolved: {} });
+export const emptyRecentFeed = (): RecentFeed => ({ items: [], cursor: null, hasMore: false, anchorAwemeId: null, savedAtMillis: 0, resolved: {} });
 export const QUEUE_KEY = "douyin.playback-queue.v1";
 export const FEED_KEY = "douyin.feed.v1", RECENT_KEY = "douyin.recent-window.v1";
 export function normalizeItems(items: DouyinItem[]): DouyinItem[] {
@@ -136,7 +136,7 @@ export class DouyinFeedStore {
     }
     const metadata=await this.metadata(key);
     const raw=metadata?await this.readVersioned(metadata):await this.readLegacy(key);
-    if(!raw)return EMPTY();
+    if(!raw)return emptyRecentFeed();
     const {snapshot,changed}=filterSnapshot(raw,key===QUEUE_KEY?200:40);
     // V2 owns restore once published, including after an interrupted migration.
     if(!metadata||changed)await this.saveNow(key,snapshot,changed);
@@ -144,7 +144,7 @@ export class DouyinFeedStore {
     return snapshot;
   });}
   async bootstrap(): Promise<RecentFeed> {
-    await this.writes;
+    await this.writes.catch(()=>{});
     const [feed, recent] = await Promise.all([this.read(FEED_KEY), this.read(RECENT_KEY)]);
     return traceServiceWork("douyin.store.bootstrapResult",()=>{const resolved:Record<string,number>={}, freshest=new Map<string,DouyinItem>();
     for(const snapshot of [recent,feed])for(const item of snapshot.items){const timestamp=Number(snapshot.resolved[item.awemeId])||0;if(!freshest.has(item.awemeId)||timestamp>resolved[item.awemeId]){freshest.set(item.awemeId,item);resolved[item.awemeId]=timestamp;}}
@@ -161,8 +161,26 @@ export class DouyinFeedStore {
     const items=await normalizeItemsInTurns(snapshot.items,key===QUEUE_KEY?200:40),ids=items.map(item=>item.awemeId);
     const originals=new Map(snapshot.items.filter(item=>typeof item?.awemeId==="string").map(item=>[item.awemeId.trim(),item]));
     const knownRaw=await this.storage.get(PLAYBACK_ITEMS_KEY),known=new Set<string>(knownRaw?JSON.parse(knownRaw):[]);
-    // Encode only new/changed immutable item DTOs. Bound each guest turn to one
-    // item; durable SQL updates retain one item plus the small ownership index; a page turn never re-encodes a list.
+    // Commit small groups and their ownership index together. Larger legacy DTOs
+    // remain supported as single-row batches. Publish memo state only after commit.
+    const pending:{
+      id:string;original:DouyinItem;fields:unknown[];resolvedAtMillis:number;change:DouyinStateChange;
+    }[]=[];
+    let pendingBytes=0;
+    const flush=async()=>{
+      if(!pending.length)return;
+      const ownership={key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...known])};
+      const rows=pending.map(row=>row.change);
+      // Without transactions reserve the keys for cleanup first. The visible
+      // snapshot is still published only after every row succeeds.
+      await applyDouyinState(this.storage,this.storage.apply?[...rows,ownership]:[ownership,...rows]);
+      for(const row of pending){
+        const memo={fields:row.fields,resolvedAtMillis:row.resolvedAtMillis};
+        this.persisted.set(row.id,memo);
+        this.durableItems.set(row.original,{...memo,revision:this.revision(row.id,true)});
+      }
+      pending.length=0;pendingBytes=0;
+    };
     let compared=0;
     for(const item of items){
       if(compared++%4===0)await yieldWorkTurn().result;
@@ -178,12 +196,16 @@ export class DouyinFeedStore {
       }
       await yieldWorkTurn().result;
       const value=traceServiceWork('douyin.store.itemEncode',()=>JSON.stringify(item));
+      const encoded='{"resolvedAtMillis":'+resolvedAtMillis+',"item":'+value+'}';
+      // UTF-8 uses at most three bytes per UTF-16 code unit (four per pair).
+      const bytes=3*(encoded.length+item.awemeId.length);
+      if(pending.length&&(pendingBytes+bytes>96*1024||pending.length>=8))await flush();
       known.add(item.awemeId);
-      // Reuse the item JSON: do not traverse/serialize its variants again.
-      await applyDouyinState(this.storage,[{key:playbackItemKey(item.awemeId),value:'{"resolvedAtMillis":'+resolvedAtMillis+',"item":'+value+'}'},{key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...known])}]);
-      this.persisted.set(item.awemeId,{fields,resolvedAtMillis});
-      this.durableItems.set(original,{fields,resolvedAtMillis,revision:this.revision(item.awemeId,true)});
+      pending.push({id:item.awemeId,original,fields,resolvedAtMillis,change:{key:playbackItemKey(item.awemeId),value:encoded}});
+      pendingBytes+=bytes;
+      if(pendingBytes>=96*1024)await flush();
     }
+    await flush();
     const {items:_,...fields}=snapshotWithItems(snapshot,items,[]),metadata:SnapshotRecord={...fields,ids};
     const referenced=new Set(ids);
     for(const other of SNAPSHOTS)if(other!==key)for(const id of (await this.metadata(other))?.ids??[])referenced.add(id);

@@ -13,7 +13,7 @@ const lookupStock=(key:string)=>{
  return gate?{result:gate.then(()=>({item})),cancel(){}}:value({item});
 };
 const value=(v:any)=>({result:Promise.resolve(v),cancel(){}});
-mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}}}));
+mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,kv:{get:()=>undefined,set(){}}}));
 mock.module('@podjs/framework/services',()=>({delay:()=>({result:new Promise(()=>{}),cancel(){}}),discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
 mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,decodableDouyinItem:async(v:any)=>v,VideoPlaybackTrace:class{event(){}},registerVideoResolution(){}}));
 mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{remove:()=>value(undefined),register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{remove:(key:string)=>{stored=stored.filter(v=>v.key!==key);return value(undefined);},configure:(c:any)=>{config=c;return value(undefined);},list:listStock,lookup:lookupStock,prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
@@ -181,6 +181,22 @@ function manualGate(){
  const resume=new Promise<void>(resolve=>release=resolve);
  return {reached,release,wait(){entered();return resume;}};
 }
+
+test('repeated window offers reuse full inventory until a movie is consumed',async()=>{
+ online=true;stored=['a','b','c'].map(id=>({key:id,uri:'file:///'+id,metadata:{awemeId:id,authorName:'a',description:'d',durationMs:1000,stockAuthorization:'account'},audioTracks:1,videoTracks:1,watched:false,frame:{available:true}}));
+ const host=createHostDouyinStock({stockAuthorizationScope:async()=>'account',isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})} as any);
+ const candidate={awemeId:'d',description:'d',authorName:'a',durationMs:1000,playUrl:'https://fixture.invalid/d',variants:[]};
+ verifiedLists=0;
+ try{
+  for(let i=0;i<4;i++){host.offer!([candidate] as any);await host.resume();}
+  expect(verifiedLists).toBe(1);
+  const lookups=verifiedLookups;
+  expect(await host.completeIds!()).toEqual(new Set(['a','b','c']));
+  expect(verifiedLists).toBe(1);expect(verifiedLookups).toBe(lookups);
+  host.consume('a');host.offer!([candidate] as any);await host.resume();
+  expect(await host.lookup('d')).toBe('file:///complete/d.mp4');
+ }finally{host.suspend();}
+});
 
 for(const late of ['lookup','list'] as const)test('a late '+late+' cannot replace a newer rendition in the same authorization and epoch',async()=>{
  const scope='owner',oldKey='asset-a',freshUri='file:///complete/x.mp4';

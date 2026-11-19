@@ -27,3 +27,25 @@ test('variant diagnostic identifies the actual source URL instead of recomputing
  expect(douyinVariantSummary(item).selected).toBe(1);
  expect(douyinVariantSummary({...item,playUrl:'outside-variants'}).selected).toBe(-1);
 });
+
+test('detailed variant inspection stays dormant in ordinary releases',async()=>{
+ const {traceDouyinVariants}=await import('../../src/douyin/playback-diagnostics.ts');
+ const item={get variants(){throw Error('eager candidate traversal');}} as unknown as DouyinItem;
+ expect(()=>traceDouyinVariants(item,'feed')).not.toThrow();
+});
+
+test('release metrics can enable and disable detailed variant events without per-item setting reads',async()=>{
+ const {traceDouyinVariants}=await import('../../src/douyin/playback-diagnostics.ts');
+ const originalNow=Date.now,pod=Object.getOwnPropertyDescriptor(globalThis,'pod');
+ let enabled=false,reads=0,events=0,now=originalNow()+10_000;
+ Date.now=()=>now;Object.defineProperty(globalThis,'pod',{configurable:true,value:{
+  takeEvents:()=>[],kvGet:(key:string)=>{if(key==='watchrss.video-opt.v1'){reads++;return JSON.stringify({metrics:enabled,percent:100});}return '0';},
+  benchmark:(raw:string)=>{if(JSON.parse(raw).code==='media_variant')events++;return 1;},
+ }});
+ const item={playUrl:'fixture',variants:[{playUrl:'fixture',width:360,height:640,bitrate:100,codec:'h264'}]} as DouyinItem;
+ try{
+  traceDouyinVariants(item,'detail');traceDouyinVariants(item,'detail');expect([reads,events]).toEqual([1,0]);
+  enabled=true;now+=1100;traceDouyinVariants(item,'detail');traceDouyinVariants(item,'feed');expect([reads,events]).toEqual([2,2]);
+  enabled=false;now+=1100;traceDouyinVariants(item,'feed');expect([reads,events]).toEqual([3,2]);
+ }finally{Date.now=originalNow;if(pod)Object.defineProperty(globalThis,'pod',pod);else Reflect.deleteProperty(globalThis,'pod');}
+});

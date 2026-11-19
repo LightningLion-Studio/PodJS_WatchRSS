@@ -179,3 +179,29 @@ test('RELOAD forced detail resolution does not join an older unforced request',a
  expect(count).toBe(2);expect(old.ok).toBe(true);expect(fresh).toMatchObject({ok:true,data:{playUrl:'https://fixture.invalid/fresh'}});
  expect(await f.client.resolvePlayback('same')).toMatchObject({ok:true,data:{playUrl:'https://fixture.invalid/fresh'}});
 });
+
+test('first-page publication preserves the requested size and survives an unavailable snapshot store',async()=>{
+ const f=fixture();const write=f.options.secureStorage.set;
+ f.options.secureStorage.set=async(key,value)=>{if(key.startsWith('douyin.playback-item.v2.'))throw Error('disk full');await write(key,value);};
+ f.replies.push(response({aweme_list:[wire('first')]}));
+ expect(await f.client.fetchFeedPage({count:16,publishBeforeSave:true})).toMatchObject({ok:true,data:{items:[{awemeId:'first'}]}});
+ expect(new NodeURL(f.requests[0]!.url).searchParams.get('count')).toBe('16');
+});
+test('logout while reading the previous queue cannot reintroduce cached video URLs',async()=>{
+ const f=fixture();f.replies.push(response({aweme_list:[wire('old')]}));const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ await f.client.savePlaybackQueue(page.data.items,'old',null,false);
+ let readStarted!:(value?:unknown)=>void,release!:(value?:unknown)=>void;
+ const started=new Promise(r=>readStarted=r),gate=new Promise(r=>release=r),get=f.options.secureStorage.get;
+ f.options.secureStorage.get=async key=>{const value=await get(key);if(key.startsWith('douyin.playback-item.v2.')){readStarted();await gate;}return value;};
+ const restore=f.client.restorePlaybackQueue();await started;const logout=f.client.logout();release();
+ const result=await restore;await logout;
+ expect(result.items).toEqual([]);expect(f.client.feedSnapshot().items).toEqual([]);
+});
+
+test('cached detail lookup leaves its existing payload weight in place',async()=>{
+ const f=fixture();f.replies.push(response({aweme_list:[wire('hot')]}));
+ const result=await f.client.fetchFeedPage();if(!result.ok)throw Error('missing hot page');
+ const hot=result.data.items[0]!,description=hot.description;let reads=0;
+ Object.defineProperty(hot,'description',{configurable:true,enumerable:true,get(){reads++;return description;}});
+ expect((await f.client.fetchDetail('hot')).ok).toBe(true);expect(reads).toBe(0);
+});

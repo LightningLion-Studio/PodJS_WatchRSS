@@ -1,3 +1,5 @@
+import {debugGate} from '../debug/gate.ts';
+import {videoOptEnabled} from '../media/video-opt.ts';
 import {benchmark} from '@podjs/framework/benchmark';
 import {appLogger} from '../logs/app-logger.ts';
 import {normalizedDouyinResolution} from './playback-selector.ts';
@@ -13,7 +15,19 @@ export function douyinVariantSummary(item:DouyinItem){
   bitrate:safe(v.bitrate),gear:gear(v.gearName),resolution:safe(normalizedDouyinResolution(v)??0),playable:!!v.playUrl.trim(),
  }))};
 }
+// A page can contain dozens of videos. Read the host rollout setting once
+// per second while active; debug builds keep their explicit trace facility.
+let lastMetricsCheck=-Infinity,metricsEnabled=false;
+function variantDiagnosticsEnabled(){
+ if(debugGate.allowed)return true;
+ const now=Date.now();
+ if(now<lastMetricsCheck||now-lastMetricsCheck>=1000){
+  metricsEnabled=videoOptEnabled('metrics');lastMetricsCheck=now;
+ }
+ return metricsEnabled;
+}
 export function traceDouyinVariants(item:DouyinItem,outlet:'feed'|'detail'|'foreground',source?:'feed-cache'|'network'){
+ if(!variantDiagnosticsEnabled())return;
  const summary=douyinVariantSummary(item);let seq=0;for(const [index,v]of summary.variants.entries()){const row={variant_outlet:outlet,variant_index:index,variant_count:summary.count,width:v.width,height:v.height,bitrate:v.bitrate,gear:v.gear,codec:v.codec as 'h264'|'h265'|'unknown',selected:index===summary.selected};if(seq)benchmark.mark('media_variant',seq,row);else seq=benchmark.begin('media_variant',row);}
- appLogger.i('DouyinVariants',JSON.stringify({outlet,...(source?{source}:{}),...douyinVariantSummary(item)}));
+ appLogger.i('DouyinVariants',JSON.stringify({outlet,...(source?{source}:{}),...summary}));
 }

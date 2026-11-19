@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
-import { createComponent, createMemo, createRenderEffect, createRoot, mergeProps } from 'solid-js';
+import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
 import type { BrowserAvailability } from '@podjs/framework/services';
 import type { InternetStatus } from '../src/onboarding/state.ts';
 import type { DouyinScreenProps } from '../src/ui/douyin/index.tsx';
@@ -46,7 +46,7 @@ function mount(scope?: InstanceType<typeof NetworkRecovery>) {
 }
 for (const status of ['no_provider', 'initialization_failed'] as const) test(`${status} renders B6 unavailable page without authorizing`, async () => {
   probe = async () => ({ status }); const f = mount(); await settle(); f.press(); await settle();
-  expect(calls).toEqual(['probe']); expect(f.text()).toContain('无法打开登录页'); expect(f.text()).toContain('当前设备无法初始化 WebView');
+  expect(calls).toEqual(['probe']); expect(f.text()).toContain('输入 Cookie');expect(f.text()).toContain('无法打开登录页'); expect(f.text()).toContain('当前设备无法初始化 WebView');
 });
 test('authorization waits for probe and ignores repeat presses while busy', async () => {
   let finish!: (result: BrowserAvailability) => void; probe = () => new Promise(resolve => { finish = resolve; });
@@ -64,7 +64,7 @@ test('missing probe capability preserves B6 authorization', async () => {
 });
 test('probe errors reuse B6 unavailable handling', async () => {
   probe = async () => { throw { code: 'webview_unavailable' }; }; const f = mount(); await settle(); f.press(); await settle();
-  expect(calls).toEqual(['probe']); expect(f.text()).toContain('无法打开登录页');
+  expect(calls).toEqual(['probe']); expect(f.text()).toContain('输入 Cookie');expect(f.text()).toContain('无法打开登录页');
 });
 test('successful settings logout delegates clear-task navigation to the route owner',async()=>{
  let returned=0,navigated=0,logout=0;
@@ -88,10 +88,10 @@ test('detail passes selected reader preset and offline metadata to the common re
   expect(request.playlist).toEqual([item]);expect(request.hasMore).toBe(false);expect(request.cursor).toBeUndefined();expect(destination).toEqual({name:'player',awemeId:'1'});
 });
 test('history row marks before navigation without passing a history playback queue', async () => {
-  const history=[sample('3'),sample('2'),sample('1')].map(item=>({item,watchedAtMillis:1}));let destination:any;const writes:any[]=[];let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
-  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'history'},client:{onAuthExpired:()=>()=>{},listHistory:async()=>history,recordHistory:async(item:any)=>{writes.push(item);await gate;}},onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
+  const history=[sample('3'),sample('2'),sample('1')].map(item=>({item,watchedAtMillis:1}));let reads=0,destination:any;const writes:any[]=[];let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
+  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'history'},client:{onAuthExpired:()=>()=>{},listHistory:async()=>{reads++;return history;},recordHistory:async(item:any)=>{writes.push(item);await gate;}},onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
   await settle();const row=nodes(root).find(n=>n.props.onPress&&nodes(n).some(child=>child.kind==='Text'&&String(child.props.children).includes('title 2')))!;
-  row.props.onPress();row.props.onPress();expect(writes).toEqual([sample('2')]);expect(destination).toBeUndefined();release();await settle();expect(destination.item).toEqual(sample('2'));expect(destination.playlist).toBeUndefined();
+  row.props.onPress();row.props.onPress();expect(writes).toEqual([sample('2')]);expect(destination).toBeUndefined();release();await settle();expect(destination.item).toEqual(sample('2'));expect(destination.playlist).toBeUndefined();expect(reads).toBe(1);
 });
 
 test('feed row marks watched even without playback before opening offline detail', async () => {
@@ -103,7 +103,7 @@ test('feed row marks watched even without playback before opening offline detail
 });
 test('saved detail metadata lookup does not create Douyin watched history on reader entry', async () => {
   let writes=0;
-  const client={onAuthExpired:()=>()=>{},listHistory:async()=>[],listSaved:async()=>[{item:sample('saved')}],recordHistory:async()=>{writes++;}};
+  const client={onAuthExpired:()=>()=>{},findLocalItem:async(id:string)=>id==='saved'?sample('saved'):undefined,recordHistory:async()=>{writes++;}};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:'saved'},client,settings:{}} as unknown as DouyinScreenProps);});
   await settle();expect(readerProps.title).toBe('title saved');expect(writes).toBe(0);
 });
@@ -188,7 +188,7 @@ test('D2 failed authorization clears QR and can retry without exposing raw excep
 });
 
 test('D2 history detail initial refresh failure retains the native direct-URL fallback as a single item',async()=>{
- const item=sample('stored');let request:any;
+ const item={...sample('stored'),playUrl:'https://v3-dy-o.zjcdn.com/media.mp4'};let request:any;
  const client={onAuthExpired:()=>()=>{},resolvePlayback:async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'})};
  createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:item.awemeId,item},client,onPlay:(value:any)=>request=value,onNavigate(){},settings:{}} as unknown as DouyinScreenProps);});
  await settle();readerProps.onMedia({type:'video'});await settle();
@@ -297,7 +297,7 @@ test('NETOVERLAY RSS-mode feed failure uses route recovery while optional share 
 test('Douyin detail offers a new read after the recovery layer returns a transport failure',async()=>{
  let reads=0;
  const client={
-  onAuthExpired:()=>()=>{},listHistory:async()=>[],listSaved:async()=>[],
+  onAuthExpired:()=>()=>{},findLocalItem:async()=>undefined,
   fetchDetail:async()=>{reads++;return {ok:false,code:'REQUEST_FAILED',message:'fixture detail failure',networkFailure:true};},
  };
  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({
@@ -313,4 +313,48 @@ test('Douyin detail offers a new read after the recovery layer returns a transpo
  retry!.props.onPress();await settle();
  expect(reads).toBe(2);
  expect(text()).toContain('fixture detail failure');
+});
+
+test('a slow detail play coalesces repeat taps and cannot navigate after leaving and returning',async()=>{
+ const [active,setActive]=createSignal(true),item=sample('slow');let requests=0,opens=0,finish!:(value:any)=>void;
+ const result=new Promise(resolve=>finish=resolve);
+ const client={onAuthExpired:()=>()=>{},resolvePlayback:async()=>{requests++;return result;}};
+ createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:item.awemeId,item},client,get active(){return active();},onPlay(){opens++;},onNavigate(){opens++;},settings:{}} as unknown as DouyinScreenProps);});
+ await settle();readerProps.onMedia({type:'video'});readerProps.onMedia({type:'video'});
+ setActive(false);setActive(true);finish({ok:true,data:item});await settle();
+ expect([requests,opens]).toEqual([1,0]);
+});
+test('photo detail opens its image and shares its own title',async()=>{
+ const note={kind:'note',awemeId:'photo',description:'相册标题',authorName:'作者',likeCount:5,imageUrls:['https://cdn.test/image.jpg']};
+ const client={onAuthExpired:()=>()=>{},findLocalItem:async()=>undefined,fetchDetail:async()=>({ok:true,data:note}),getSavedState:async()=>({favorite:false,watchLater:false})};
+ let image='',shared:any;
+ createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:'photo'},client,onOpenImage:(url:string)=>image=url,onShare:(input:any)=>shared=input,settings:{}} as unknown as DouyinScreenProps);});
+ await settle();expect(readerProps.title).toBe('相册标题');readerProps.onShare();readerProps.onImage?.(note.imageUrls[0]);
+ expect([image,shared.title]).toEqual([note.imageUrls[0],'相册标题']);
+});
+
+test('RSS account changes during paging clear old visible and in-flight rows before the new page',async()=>{
+ let version=1,status='logged-in',changed!:(value:string)=>void;
+ const pages:Array<(value:any)=>void>=[];
+ const client={authState:()=>status,playbackAuthorizationVersion:()=>version,subscribeAuth:(listener:typeof changed)=>{changed=listener;return ()=>{};},
+  onAuthExpired:()=>()=>{},restorePlaybackQueue:async()=>({items:[]}),fetchFeedPage:()=>new Promise(resolve=>pages.push(resolve))};
+ createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'feed'},client,settings:{originalContentEnabled:false}} as unknown as DouyinScreenProps);});
+ const page=(id:string)=>({ok:true,data:{items:[sample(id)],nextCursor:id,hasMore:true}});
+ await settle();pages[0]!(page('old'));await settle();rssProps.onNext();await settle();
+ status='logged-out';version++;changed(status);status='logged-in';version++;changed(status);await settle();
+ pages[1]!(page('late'));await settle();
+ expect(rssProps.items.map((row:any)=>row.id)).toEqual([]);expect(pages).toHaveLength(3);
+ pages[2]!(page('new'));await settle();expect(rssProps.items.map((row:any)=>row.id)).toEqual(['new']);
+});
+test('manual login persists only a verified cookie and keeps validation errors visible without a browser',async()=>{
+ let verdict:'unknown'|'unauthenticated'|'authenticated'='unknown',saves=0,navigations=0;
+ const client={onAuthExpired:()=>()=>{},verifyLoginCookie:async()=>verdict,applyCookie:async()=>{saves++;return {ok:true};}};
+ probe=async()=>({status:'no_provider'});
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'login'},client,settings:{},onNavigate(){navigations++;},input:async()=>'fixture credential'} as unknown as DouyinScreenProps);});
+ await settle();nodes(root).find(n=>n.kind==='View'&&n.props.focusable&&n.props.onPress)!.props.onPress();await settle();
+ const manual=()=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(child=>child.kind==='Text'&&child.props.children==='输入 Cookie'))!.props.onPress();
+ const content=()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('');
+ manual();await settle();expect(saves).toBe(0);expect(content()).toContain('暂时无法验证 Cookie');
+ verdict='unauthenticated';manual();await settle();expect(saves).toBe(0);expect(content()).toContain('Cookie 无效');
+ verdict='authenticated';manual();await settle();expect([saves,navigations]).toEqual([1,1]);
 });

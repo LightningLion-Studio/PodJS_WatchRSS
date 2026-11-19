@@ -21,6 +21,10 @@ mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:
 const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:0.55)*(slot===23?21:slot===24?9:12),0)})}));
 let debugAllowed=false;
 mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
+const watch=await import('@podjs/framework/watch');
+let entryLife:'active'|'background'='active';const lifeListeners=new Set<(s:string)=>void>();
+const setEntryLife=(state:typeof entryLife)=>{entryLife=state;for(const listener of lifeListeners)listener(state);};
+mock.module('@podjs/framework/watch',()=>({...watch,lifecycle:()=>entryLife,onLifecycleChange:(listener:(s:string)=>void)=>{lifeListeners.add(listener);return()=>lifeListeners.delete(listener);}}));
 let gesture:any;
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gesture=options;return {dispose(){}};}}));
 const realServices=await import('@podjs/framework/services');
@@ -544,4 +548,15 @@ for(const handedOff of [false,true])test(`NOPLAY source ownership survives cover
  if(handedOff)request.onSourcePublished?.({platform:'douyin',awemeId:'1',previewOnly:true});
  f.setActive(false);expect(request.isCurrent()).toBe(handedOff);
  if(handedOff){await f.client.logout();expect(request.isCurrent()).toBe(false);}
+});
+
+test('backgrounded entry suspends retry; a fifteen minute cooldown cannot trigger work at two minutes',async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.press();
+ const attempts=()=>f.plays.length;expect(attempts()).toBe(1);
+ f.plays[0].onFailure({code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:900000});
+ const timer=retryTimers.find(t=>!t.cancelled&&t.ms===120000);expect(timer).toBeDefined();
+ timer!.fire();await settle();expect(attempts()).toBe(1);
+ const pending=retryTimers.at(-1)!;setEntryLife('background');
+ try{expect(pending.cancelled).toBe(true);pending.fire();await settle();expect(attempts()).toBe(1);}
+ finally{setEntryLife('active');}
 });

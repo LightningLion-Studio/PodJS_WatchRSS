@@ -166,7 +166,7 @@ export class NetworkRecovery {
   this.lastOrder=order;
   this.status=status;
   if(status!=='bluetooth')this.bluetoothDismissed=false;
-  this.refreshUsable();
+  if(this.waiting)this.refreshUsable();else this.publish();
  }
  private check():Promise<void>{
   if(this.pendingCheck)return this.pendingCheck.done;
@@ -227,7 +227,7 @@ export class NetworkRecovery {
  }
  /** Wake pending work when a cached source becomes playable without a network change. */
  refreshUsable(){
-  if(!this.active)return;
+  if(!this.active||!this.waiting)return;
   const wasWaiting=this.waiting;
   const connected=this.status==='available'||this.status==='bluetooth';
   for(const waiter of this.waiters){

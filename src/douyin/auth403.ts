@@ -83,22 +83,9 @@ export class Douyin403Policy {
     return this.activeCooldown(api)??this.enterCooldown(api,false);
   }
   private async probeLogin(cookie:string,api:DouyinApiCategory):Promise<DouyinLoginProbeResult>{
-    let result:DouyinLoginProbeResult='unknown',timedOut=false;
-    const probe=this.ports.options.probe;
-    if(probe){
-      const timer=(this.ports.options.timer??(ms=>hostServices.delay(ms)))(5000);
-      let operation:DouyinLoginProbeOperation|undefined;
-      try{
-        const requested=probe({cookie,timeoutMs:5000});
-        operation=requested&&'result' in requested?requested:undefined;
-        const pending=operation?operation.result:requested as Promise<DouyinLoginProbeResult>;
-        const value=await Promise.race([pending,timer.result.then(()=> 'timeout' as const)]);
-        if(value==='timeout')timedOut=true;
-        else if(value==='authenticated'||value==='unauthenticated')result=value;
-      }catch{result='unknown';}
-      finally{timer.cancel();try{operation?.cancel();}catch{}}
-    }
-    this.ports.metric({stage:'probe',api,count:1,result:timedOut?'timeout':result});return result;
+    const {result,timedOut}=await verifyDouyinLoginCookie(cookie,this.ports.options);
+    this.ports.metric({stage:'probe',api,count:1,result:timedOut?'timeout':result});
+    return result;
   }
   private async decide(cookie:string,api:DouyinApiCategory):Promise<Douyin403Decision>{
     const pending=this.probe??=this.probeLogin(cookie,api);
@@ -117,4 +104,24 @@ export class Douyin403Policy {
     douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:true,retry_after_ms:delayMs,error_code:'cooldown'});
     return {kind:'limited',authenticated:this.states[api].authenticated,retryAfterMs:Math.max(0,this.states[api].until-this.ports.now())};
   }
+}
+
+/** Read-only verification. An inconclusive or expired probe never changes the active account. */
+export async function verifyDouyinLoginCookie(cookie:string,options:Douyin403Options){
+    let result:DouyinLoginProbeResult='unknown',timedOut=false;
+    const probe=options.probe;
+    if(probe){
+      const timer=(options.timer??(ms=>hostServices.delay(ms)))(5000);
+      let operation:DouyinLoginProbeOperation|undefined;
+      try{
+        const requested=probe({cookie,timeoutMs:5000});
+        operation=requested&&'result' in requested?requested:undefined;
+        const pending=operation?operation.result:requested as Promise<DouyinLoginProbeResult>;
+        const value=await Promise.race([pending,timer.result.then(()=> 'timeout' as const)]);
+        if(value==='timeout')timedOut=true;
+        else if(value==='authenticated'||value==='unauthenticated')result=value;
+      }catch{result='unknown';}
+      finally{timer.cancel();try{operation?.cancel();}catch{}}
+    }
+    return {result,timedOut};
 }

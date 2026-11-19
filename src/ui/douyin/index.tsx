@@ -5,9 +5,14 @@ import {usageTelemetry} from '../../telemetry/host.ts';
 import {DouyinQrLoadTelemetry} from '../../telemetry/qr-load.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { DouyinFavoriteController } from '../../douyin/favorite.ts';
-import { DouyinRssFeedController, type DouyinRssFeedSnapshot } from '../../douyin/rss-feed.ts';
+import { DouyinRssFeedController, type DouyinRssFeedSnapshot,type DouyinRssArchive,type DouyinRssRow } from '../../douyin/rss-feed.ts';
 import { DouyinActionsController, type DouyinActionDone } from '../../douyin/actions.ts';
-import { douyinVideoTarget } from "../../reader/media.ts";
+import { isDouyinPageUrl } from "../../reader/media.ts";
+import {validatedDouyinPlaybackItem} from '../../douyin/playback-source.ts';
+import {douyinMediaNetworkDeadline} from '../../douyin/media-expiry.ts';
+import {isDouyinRetryableFailure} from '../../douyin/errors.ts';
+import {measuredLines} from '../../reader/measured-text.ts';
+import {getOps} from '@pocketjs/framework/host';
 import {appLogger} from '../../logs/app-logger.ts';
 import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
@@ -31,7 +36,7 @@ import { readerColor } from "../../reader/content-layout.ts";
 import {wireFields} from "../../sync/article-batches.ts";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
-import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack, mapArray } from "solid-js";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RssFeedScreen, feedEmptyStateEntry, feedPillEntry } from "../RssScreens.tsx";
@@ -96,12 +101,19 @@ export interface DouyinScreenProps {
   onUnsupported?: (message: string) => void;
   onLogoutSuccess?: () => void;
   settings: DouyinSettingsBindings;
+  onOpenImage?: (url:string)=>void;
+  rssArchive?:DouyinRssArchive;
   input: (prompt: string, value?: string) => Promise<string | null>;
   ref?: (value: { scroller: Scroller }) => void;
 }
 
-/** Session data is retained in full; ScrollEntries virtualizes rendered entries. */
-const feedSnapshots = new WeakMap<DouyinClient, DouyinRssFeedSnapshot>();
+/** Retain the display rows and paging cursor when the list is covered. */
+const feedSnapshots = new WeakMap<DouyinClient,{version:number|undefined;snapshot:DouyinRssFeedSnapshot}>();
+
+function discardFeed(client:DouyinClient) {
+  feedSnapshots.get(client)?.snapshot.records.discard();
+  feedSnapshots.delete(client);
+}
 
 function lines(text: string, width: number, size = 13): string[] {
   const cjk = size, latin = Math.ceil(size / 2);
@@ -110,8 +122,14 @@ function lines(text: string, width: number, size = 13): string[] {
 function messageOf(result: DouyinResult<unknown>, fallback: string): string {
   return result.ok ? fallback : result.message || fallback;
 }
-function itemTitle(item?: DouyinItem | null): string { return item?.description?.trim() || "抖音视频"; }
-function itemSummary(item: DouyinItem): string {
+function itemTitle(item?: Pick<DouyinItem,'description'> | null): string { return item?.description?.trim() || "抖音视频"; }
+const displayArticles=new WeakMap<DouyinRssRow,Article>();
+function rssArticle(row:DouyinRssRow):Article {
+  let article=displayArticles.get(row);
+  if(!article){article={id:row.awemeId,title:itemTitle(row),excerpt:itemSummary(row),content:'',read:true};displayArticles.set(row,article);}
+  return article;
+}
+function itemSummary(item: DouyinRssRow): string {
   const author = item.authorName?.trim() || "未知作者";
   return item.likeCount && item.likeCount > 0 ? `${author} · 赞 ${formatCount(item.likeCount)}` : author;
 }
@@ -196,7 +214,7 @@ function LoginScreen(props: DouyinScreenProps) {
       const saved = await props.client.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
       loginLog.completed();
-      if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
+      if (!disposed && current === generation) { discardFeed(props.client); props.onNavigate({name:"entry"}); }
     } catch (error) {
       if(nativeCompleted||!benchRequested)douyinBench.error(currentBench);
       acceptingStatus = false;
@@ -205,23 +223,28 @@ function LoginScreen(props: DouyinScreenProps) {
     } finally { if (!disposed && current === generation) { authorization = undefined; setAuthStatus(finishLoginStatus(authStatus())); setBusy(false); } }
   };
   const inputCookie = async () => {
-    if (gate() || busy()) return;
+    if (busy()) return;
+    const current=++generation;
+    const valid=()=>!disposed&&current===generation&&props.active!==false;
     setBusy(true);
     try {
-      const cookie = await props.input("输入抖音 Cookie"); if (!cookie?.trim() || disposed || gate()) return;
-      const result = await props.client.applyCookie(cookie.trim());
-      if (disposed) return;
-      if (result.ok) {
-        const verified = await props.client.isLoggedIn();
-        if (disposed) return;
-        if (verified) { feedSnapshots.delete(props.client); props.onNavigate({ name: "entry" }); }
-        else setMessage("Cookie 已保存，但抖音未确认登录状态");
-      } else setMessage(messageOf(result, "Cookie 登录失败"));
-    } catch (error) { if (!disposed) setMessage(`Cookie 登录失败：${String(error)}`); }
-    finally { if (!disposed) setBusy(false); }
+      const cookie=(await props.input("输入抖音 Cookie"))?.trim();
+      if(!cookie||!valid())return;
+      const verified=await props.client.verifyLoginCookie(cookie);
+      if(!valid())return;
+      if(verified!=='authenticated'){
+        setMessage(verified==='unauthenticated'?'Cookie 无效，请重新输入':'暂时无法验证 Cookie，请稍后重试');
+        return;
+      }
+      const result=await props.client.applyCookie(cookie);
+      if(!valid())return;
+      if(result.ok){discardFeed(props.client);props.onNavigate({name:"entry"});}
+      else setMessage(messageOf(result,'Cookie 登录失败'));
+    }catch{if(valid())setMessage('Cookie 登录失败，请重试');}
+    finally{if(!disposed&&generation===current)setBusy(false);}
   };
   const detail = () => lines(message(), props.width - 60, 12);
-  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), ...statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">{busy() ? "加载中…" : failed() ? "重试登录" : "网页登录"}</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">{busy() ? "正在等待登录二维码…" : "打开抖音官方登录页"}</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), ...statusCard(gate()!.title,gate()!.detail),...(/Cookie/.test(message())?statusCard("登录状态",message()):[]),button(busy()?"验证中...":"输入 Cookie",busy()?undefined:()=>void inputCookie()),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">{busy() ? "加载中…" : failed() ? "重试登录" : "网页登录"}</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">{busy() ? "正在等待登录二维码…" : "打开抖音官方登录页"}</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
   return <Show when={!gate() && statusMode() && authStatus().qr} fallback={<ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />}>
     <View class="absolute inset-0 bg-black items-center justify-center">
       <Text class="absolute top-[16] text-sm text-white">请使用手机扫码</Text>
@@ -232,19 +255,36 @@ function LoginScreen(props: DouyinScreenProps) {
 }
 
 /** Native list/history callers mark before navigation; saved-reader entry does not. */
-function detailNavigation(props: DouyinScreenProps, onRecorded?: () => Promise<void>) {
-  let busy = false, disposed = false;
-  onCleanup(() => { disposed = true; });
-  return async (item: DouyinItem, playlist?: DouyinItem[]) => {
-    if (busy || disposed) return;
-    busy = true;
-    try {
-      await props.client.recordHistory(item);
-      if (disposed) return;
-      await onRecorded?.();
-      if (!disposed) props.onNavigate({name:"detail",awemeId:item.awemeId,item,...(playlist ? {playlist} : {})});
-    } finally { busy = false; }
+// Retained routes can leave and re-enter before an asynchronous tap completes.
+function routeAction(props:DouyinScreenProps) {
+  let revision=0,disposed=false,busy=false;
+  createEffect(()=>{if(props.active===false){revision++;busy=false;}});
+  onCleanup(()=>{disposed=true;revision++;});
+  return async (work:(current:()=>boolean)=>Promise<void>)=>{
+    if(disposed||busy||props.active===false)return;
+    const ticket=++revision,auth=props.client.playbackAuthorizationVersion?.();
+    const current=()=>!disposed&&ticket===revision&&props.active!==false&&props.client.playbackAuthorizationVersion?.()===auth;
+    busy=true;
+    try{await work(current);}finally{if(ticket===revision)busy=false;}
   };
+}
+function playNavigation(props:DouyinScreenProps,report:(message:string)=>void) {
+  const run=routeAction(props);
+  return (resolve:()=>Promise<DouyinPlayRequest|undefined>)=>run(async current=>{
+    try {
+      const request=await resolve();
+      if(!current()||!request)return;
+      props.onPlay({...request,isCurrent:current});
+      await props.onNavigate({name:'player',awemeId:request.item.awemeId});
+    }catch(error){if(current())report(error instanceof Error?error.message:String(error));}
+  });
+}
+function detailNavigation(props:DouyinScreenProps) {
+  const run=routeAction(props);
+  return (item:DouyinItem)=>run(async current=>{
+    await props.client.recordHistory(item);
+    if(current())props.onNavigate({name:"detail",awemeId:item.awemeId,item});
+  });
 }
 
 function FeedScreen(props: DouyinScreenProps) {
@@ -253,18 +293,21 @@ function FeedScreen(props: DouyinScreenProps) {
   const auth=observeDouyinAuth(props.client);
   const openDetail = detailNavigation(props);
   const [resume, setResume] = createSignal<Awaited<ReturnType<DouyinClient["restorePlaybackQueue"]>>>();
-  onMount(() => { let current = true; onCleanup(() => { current = false; }); void props.client.restorePlaybackQueue().then(value => { if (current) setResume(value); }).catch(() => {}); });
-  const continuePlayback = async () => {
-    const queue = resume(), id = queue?.anchorAwemeId; if (!queue || !id) return;
-    try {
-      const result = await network.result(()=>props.client.resolvePlayback(id));
-      if (!result.ok) { setError(result.message); return; }
-      props.onPlay({item:result.data,playback:result.data,playlist:queue.items,cursor:queue.cursor ?? undefined,hasMore:queue.hasMore});
-      props.onNavigate({name:"player",awemeId:id});
-    } catch (error) { setError(String(error)); }
-  };
-  const initial = feedSnapshots.get(props.client);
-  const controller: DouyinRssFeedController = new DouyinRssFeedController({fetchFeedPage:options=>network.result(()=>props.client.fetchFeedPage(options),()=>controller.state.items.length>0)}, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client, snapshot));
+
+  const navigateToPlayer=playNavigation(props,message=>setError(message));
+  const continuePlayback=()=>navigateToPlayer(async()=>{
+    const queue=resume(),id=queue?.anchorAwemeId;
+    if(!queue||!id)return;
+    const result=await network.result(()=>props.client.resolvePlayback(id));
+    if(!result.ok)throw Error(result.message);
+    return {item:result.data,playback:result.data,playlist:queue.items,cursor:queue.cursor??undefined,hasMore:queue.hasMore};
+  });
+  const authorization=()=>props.client.playbackAuthorizationVersion?.();
+  let version=authorization();
+  const retained=feedSnapshots.get(props.client);
+  if(retained&&retained.version!==version)discardFeed(props.client);
+  const initial=feedSnapshots.get(props.client)?.snapshot;
+  const controller: DouyinRssFeedController = new DouyinRssFeedController({fetchFeedPage:options=>network.result(()=>props.client.fetchFeedPage(options),()=>controller.state.items.length>0)}, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client,{version,snapshot}),props.rssArchive);
   const [feed, setFeed] = createSignal(controller.state), [error, setError] = createSignal("");
   const items = () => feed().items, hasMore = () => feed().hasMore, loading = () => feed().loading;
   useCachedNetworkContent(()=>items().length>0||(resume()?.items.length??0)>0);
@@ -273,14 +316,30 @@ function FeedScreen(props: DouyinScreenProps) {
   const load = (append = false) => { if(auth()!=='logged-in')return Promise.resolve(); setError(""); if (append) return controller.loadMore(); setRefreshing(true); return controller.refresh().finally(() => setRefreshing(false)); };
   createEffect(() => setError(feed().error));
   onCleanup(() => controller.dispose());
-  createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && auth()==='logged-in' && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
+  createEffect(()=>{
+    const status=auth(),current=authorization();
+    if(current!==version||status==='logged-out'){
+      version=current;discardFeed(props.client);controller.reset();setResume(undefined);
+    }
+    if(status!=='logged-in')return;
+    let cancelled=false;
+    onCleanup(()=>{cancelled=true;});
+    void props.client.restorePlaybackQueue().then(saved=>{if(!cancelled&&current===authorization())setResume(saved);}).catch(()=>{});
+    if(!feedSnapshots.has(props.client))void untrack(()=>load(false));
+  });
   // Native DouyinRssFeedScreen reuses FeedHeader / FeedItemEntry / FeedActions: swipe reveals 收藏 / 稍后再看
   // (toggle + toast), long press opens the actions page with the item, pull refresh and auto load near the end.
   const loggedIn=()=>auth()==='unknown'?null:auth()==='logged-in';
   const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
-  const byId = createMemo(() => new Map(items().map(item => [item.awemeId, item])));
-  const articles = createMemo<Article[]>(() => auth() !== 'logged-in' ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
-  const withItem = (article: Article, run: (item: DouyinItem) => void) => { const item = byId().get(article.id); if (item) run(item); };
+  const articles=mapArray(()=>auth()==='logged-in'?items():[],rssArticle);
+  const rowAction=routeAction(props);
+  const withItem=(article:Article,action:(item:DouyinItem)=>void)=>void rowAction(async current=>{
+    try{
+      const item=await controller.item(article.id);
+      if(!current())return;
+      if(item)action(item);else setError('未能读取这条抖音内容，请刷新后重试');
+    }catch{if(current())setError('未能读取这条抖音内容，请重试');}
+  });
   const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
   const leading = createMemo<ScrollEntry[]>(() => [platformNoticeEntry(props.width - 36, platformNotice("抖音", true)), ...(auth() === 'unknown' ? [feedEmptyStateEntry("读取登录状态…", "", props.width)] : loggedIn() === false
     ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({ name: "login" })), true)]
@@ -313,18 +372,18 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       .catch(error => { if (current) setError(String(error)); });
   });
   const item = () => content()?.kind === "video" ? (content() as Extract<DouyinContent, { kind: "video" }>).item : null;
-  const play = async () => {
-    const current = item(); if (!current) return;
-    try {
-      const result = await network.result(()=>props.client.resolvePlayback(current.awemeId),()=>!!current.playUrl.trim()&&!douyinVideoTarget(current.playUrl));
-      // RssPlayerViewModel allows the stored direct URL when initial refresh fails.
-      const playback = result.ok ? result.data : current.playUrl.trim() && !douyinVideoTarget(current.playUrl) ? current : null;
-      if (!playback) { setError(result.ok ? "播放地址为空" : result.message); return; }
-      // Native history/detail uses a single RssPlayerActivity, never the history/feed list.
-      props.onPlay({ item: current, playback, playlist: [playback], hasMore: false, detailPlayback: true });
-      props.onNavigate({ name: "player", awemeId: current.awemeId });
-    } catch (error) { setError(String(error)); }
-  };
+  const navigateToPlayer=playNavigation(props,setError);
+  const play=()=>navigateToPlayer(async()=>{
+    const selected=item();
+    if(!selected)return;
+    const fallback=validatedDouyinPlaybackItem(selected),url=fallback.playUrl;
+    const expiry=douyinMediaNetworkDeadline([url]);
+    const usable=()=>!!url&&!isDouyinPageUrl(url)&&(expiry===undefined||Date.now()<expiry);
+    const result=await network.result(()=>props.client.resolvePlayback(selected.awemeId),usable);
+    if(!result.ok&&(!isDouyinRetryableFailure(result.code)||!usable()))throw Error(result.message);
+    const playback=result.ok?result.data:fallback;
+    return {item:selected,playback,playlist:[playback],hasMore:false,detailPlayback:true};
+  });
   const preset = createMemo(() => props.preset ?? defaultReaderPreset());
   // Native DouyinDetailActivity renders the article DetailContent: reader title, then the blocks,
   // then the reader's favorite / share circles. Favorite uses the persistent local saved store.
@@ -335,7 +394,8 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
   onCleanup(() => favoriteController.dispose());
   const toggleFavorite = async () => { const current = item(); if (current) await favoriteController.toggle(current); };
   const share = () => {
-    const title = wireFields.trim(item()?.description ?? "") || "抖音视频", qr = () => props.onNavigate({ name: "share", awemeId: props.awemeId });
+    const value=content(),note=value?.kind==='note'?value:undefined;
+    const title=wireFields.trim(note?.description??item()?.description??'')||(note?'抖音图文':'抖音视频'), qr = () => props.onNavigate({ name: "share", awemeId: props.awemeId });
     if (props.onShare) props.onShare({ origin: "detail", title, link: douyinShareLink(props.awemeId) }, qr); else qr();
   };
   return <Show when={content()} fallback={<View class="absolute inset-0 items-center justify-center" style={{ bgColor: readerColor(preset().background.colorArgb) }}>
@@ -353,7 +413,7 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       const title = () => { const first = blocks()[0]; return first?.type === "text" ? first.text : "抖音视频"; };
       return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false} keepAwake={props.readerKeepAwake}
         articleId={`douyin:${props.awemeId}`} title={title()} blocks={body()} message={error() || notice()}
-        favorite={favorite} onPlay={() => void play()} onFavorite={() => void toggleFavorite()} onShare={share}
+        favorite={favorite} onPlay={() => void play()} onImage={props.onOpenImage} onFavorite={()=>{if(item())void toggleFavorite();else setError('图文内容暂不支持加入本地收藏');}} onShare={share}
         onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })} />;
     }}
   </Show>;
@@ -361,10 +421,26 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
 
 function HistoryScreen(props: DouyinScreenProps) {
   const [history, setHistory] = createSignal<DouyinHistoryEntry[]>([]), [error, setError] = createSignal("");
-  const refresh = async () => { try { setHistory(await props.client.listHistory()); } catch (e) { setError(String(e)); } };
-  const openDetail = detailNavigation(props, refresh);
-  createEffect(() => { if (props.route.name === "history") void refresh(); });
-  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [...statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
+  let generation=0;
+  const refresh=async()=>{
+    const own=++generation;
+    try{const rows=await props.client.listHistory();if(own===generation)setHistory(rows);}
+    catch(e){if(own===generation)setError(String(e));}
+  };
+  const openDetail=detailNavigation(props);
+  createEffect(()=>{if(props.active!==false)void refresh();else generation++;});
+  onCleanup(()=>{generation++;});
+  const entries=createMemo<ScrollEntry[]>(()=>[
+    header("播放历史","保存在本地，记录最近播放内容"),
+    ...(history().length?[button("清空历史",async()=>{await props.client.clearHistory();await refresh();})]:[]),
+    ...history().map(entry=>({height:64,render:()=>{
+      const {item,watchedAtMillis}=entry,width=props.width-60;
+      const title=measuredLines(itemTitle(item),width,text=>getOps().measureText(text,18),1);
+      const summary=measuredLines(`${item.authorName||"未知作者"} · ${new Date(watchedAtMillis).toLocaleString()}`,width,text=>getOps().measureText(text,0),2);
+      return <View onPress={()=>void openDetail(item).catch(error=>setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{title.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summary.join("\n")}</Text></View>;
+    }})),
+    ...(!history().length?statusCard(error()?"读取失败":"暂无播放历史",error()||"播放过的视频会显示在这里"):[]),
+  ]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
@@ -397,11 +473,11 @@ function SettingsScreen(props: DouyinScreenProps) {
   return <PlatformSettingsScreen width={props.width} height={props.height} loggedIn={loggedIn}
     showOriginalContent originalContentEnabled={props.settings.originalContentEnabled} onToggleOriginal={() => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)}
     showContinuePlaybackInBackground continuePlaybackInBackgroundEnabled={props.settings.continuePlaybackInBackgroundEnabled} onToggleContinuePlaybackInBackground={() => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)}
-    deleteEnabled onDelete={async () => { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); }}
+    deleteEnabled onDelete={async () => { await props.settings.onDeleteChannel(); discardFeed(props.client); }}
     onLogin={()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:'login'}))}
     onLogout={() => {
       douyinBench.logoutStart(props.client);
-      const cleanup=props.client.logout();feedSnapshots.delete(props.client);props.onLogoutSuccess?.();
+      const cleanup=props.client.logout();discardFeed(props.client);props.onLogoutSuccess?.();
       return cleanup.catch(error=>{toast(`退出清理失败：${String(error)}`);});
     }}
     onError={error => toast(error instanceof Error ? error.message : String(error))} ref={props.ref} />;
@@ -416,6 +492,7 @@ function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
 
 function DouyinScreenImpl(props: DouyinScreenProps) {
   onCleanup(props.client.onAuthExpired(()=>{
+    discardFeed(props.client);
     if((props.active??true)&&props.route.name!=='login')props.onNavigate({name:'login'});
   }));
   return <Show when={props.route} keyed>{route => {

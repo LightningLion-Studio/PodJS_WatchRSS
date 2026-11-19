@@ -103,6 +103,8 @@ export class DouyinStock {
 }
 
 export type DouyinStockService=Pick<DouyinStock,'restore'|'ready'|'lookup'|'playbackReady'|'consume'|'clear'|'suspend'|'networkChanged'|'resume'>&{offer?(items:readonly DouyinItem[],anchor?:string):void;
+ /** Speculation only. Actual playback must verify the selected file. */
+ completeIds?():Promise<ReadonlySet<string>>;
  present?:typeof import('@podjs/framework/media-prefix-cache').localMediaStore.present;
  hide?:typeof import('@podjs/framework/media-prefix-cache').localMediaStore.hide;
 };

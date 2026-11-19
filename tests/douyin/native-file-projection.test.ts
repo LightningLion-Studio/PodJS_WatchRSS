@@ -7,7 +7,7 @@ import {projectJsonValue} from '@podjs/framework/json';
 import type {DownloadResult,FileJsonProjection} from '@podjs/framework/services';
 import {createMediaTransport,readProjectedRows} from '../../src/media/transport.ts';
 import {DouyinClient} from '../../src/douyin/client.ts';
-import {douyinFeedSelection,mapProjectedDouyinFeed,parseDouyinFeedAsync,parseDouyinItem} from '../../src/douyin/parser.ts';
+import {douyinFeedSelection,mapProjectedDouyinFeed,parseDouyinDetail,parseDouyinFeedAsync,parseDouyinItem} from '../../src/douyin/parser.ts';
 
 const library=process.env.PODJS_FILE_JSON_TEST_LIB;
 const fixture={
@@ -86,8 +86,8 @@ test('row reader rejects incomplete or invalid input and honours cancellation',a
   ()=>{throw Error('stale row mapped');},{isCurrent:()=>active,onCancel:()=>()=>{}})).rejects.toThrow('cancelled');
 });
 
-function transportFixture(project:(path:string,size:number)=>Promise<FileJsonProjection>){
- const sizes={download:0,read:0,remove:0},bytes=new TextEncoder().encode('{"aweme_list":[]}');
+function transportFixture(project:(path:string,size:number,spec:NonNullable<import('../../src/cloud/types.ts').HttpRequest['fileProjection']>)=>Promise<FileJsonProjection>,content='{"aweme_list":[]}'){
+ const sizes={download:0,read:0,remove:0},bytes=new TextEncoder().encode(content);
  const transport=createMediaTransport({
   download:async args=>{sizes.download++;return {path:String(args.path),size:bytes.length,status:200,headers:{}} as DownloadResult;},
   read:async(_path,offset)=>{sizes.read++;return bytes.subarray(offset);},
@@ -114,4 +114,54 @@ test('only missing framework support falls back to reading the same file',async(
  const invalid=transportFixture(async()=>({kind:'invalid'}));
  expect(await invalid.client.fetchFeedPage()).toMatchObject({ok:false,code:'PARSE_FAILED'});
  expect(invalid.sizes).toEqual({download:1,read:0,remove:1});
+});
+
+test('cold detail uses a projected private response for videos, notes and advertisements',async()=>{
+ for(const [row,content] of [
+  [fixture.aweme_list[0],{kind:'video',item:{awemeId:'offline-1'}}],
+  [{aweme_id:'note',aweme_type:68,images:[{url_list:['https://fixture/n']}],author:{nickname:'A'},statistics:{digg_count:7}}, {kind:'note',awemeId:'note',likeCount:7,imageUrls:['https://fixture/n']}],
+  [{aweme_id:'ad',raw_ad_data:{payload:'not needed'}},{kind:'ad',awemeId:'ad'}],
+ ] as const) {
+  const f=transportFixture(async(_path,_size,spec)=>{
+   const result=projectJsonValue({aweme_detail:row,status_code:0,unneeded:'x'.repeat(2000)},spec.selection);
+   expect(result).not.toHaveProperty('unneeded');
+   return {kind:'object',json:JSON.stringify(result)};
+  });
+  expect(await f.client.fetchDetail(row.aweme_id)).toMatchObject({ok:true,data:content});
+  expect(f.sizes).toEqual({download:1,read:0,remove:1});
+ }
+});
+
+test('unsupported projection or a large selected detail falls back to the same downloaded file',async()=>{
+ const description='照片🙂'.repeat(36_000);
+ const body=JSON.stringify({status_code:0,aweme_detail:{aweme_id:'long-note',aweme_type:150,images:[{url_list:['https://fixture/n']}],desc:description}});
+ for(const project of [async()=>({kind:'limit'} as const),async()=>{throw Object.assign(Error('unsupported_method:file.projectJson'),{code:'invalid_argument'});}]){
+  const f=transportFixture(project,body);
+  const detail=await f.client.fetchDetail('long-note');
+  expect(detail.ok&&detail.data.kind==='note'&&detail.data.description===description).toBe(true);
+  expect(f.sizes).toEqual({download:1,read:1,remove:1});
+ }
+});
+
+test.skipIf(!library)('native detail projection preserves note images and ad markers with large ignored metadata',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'pod-detail-native-')),path=join(dir,'detail.json');
+ const {symbols,close}=dlopen(library!,{
+   pod_file_project_json:{args:[FFIType.i32,FFIType.ptr,FFIType.u64,FFIType.ptr,FFIType.u64],returns:FFIType.ptr},
+   pod_file_project_json_free:{args:[FFIType.ptr],returns:FFIType.void},
+ });
+ try{
+  for(const row of [fixture.aweme_list[0],fixture.aweme_list[1],{aweme_id:'n',aweme_type:150,desc:'图文',images:[{url_list:['https://fixture.invalid/image']}]}]){
+   const raw=JSON.stringify({status_code:0,aweme_detail:row,unused:'x'.repeat(1_000_000)});
+   writeFileSync(path,raw);
+   const f=transportFixture(async(_path,_size,spec)=>{
+    const selection=Buffer.from(JSON.stringify(spec.selection)),tokens=Buffer.from(JSON.stringify(spec.tokens));
+    const pointer=symbols.pod_file_project_json(openSync(path,'r'),ptr(selection),BigInt(selection.length),ptr(tokens),BigInt(tokens.length));
+    if(!pointer)throw Error('native detail projection failed');
+    try{return {kind:'object',json:new CString(pointer).toString()};}finally{symbols.pod_file_project_json_free(pointer);}
+   },raw);
+   const detail=await f.client.fetchDetail(row.aweme_id);
+   expect(detail).toMatchObject({ok:true,data:parseDouyinDetail(raw)});
+   expect(f.sizes).toEqual({download:1,read:0,remove:1});
+  }
+ }finally{close();rmSync(dir,{recursive:true,force:true});}
 });

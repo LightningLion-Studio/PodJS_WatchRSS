@@ -103,3 +103,43 @@ test('RVRESCAP3-06 HEVC runtime downgrade preserves the existing AVC choice',asy
  const hevc={playUrl:'https://review.invalid/hevc',codec:'h265',width:480,height:856,bitrate:100000};
  expect((await decodableDouyinItem({...item,playUrl:avc.playUrl,variants:[avc,hevc]})).playUrl).toBe(avc.playUrl);
 });
+
+test('foreground Media3 drop windows lower the next AVC rendition even on a fast network',async()=>{
+ const clock=Date.now;let now=1_000_000;
+ const mid={playUrl:'https://fixture/480',codec:'h264',width:480,height:854,bitrate:900000};
+ const low={...mid,playUrl:'https://fixture/360',width:360,height:640,bitrate:350000};
+ const offTrack={...low,playUrl:'https://fixture/video-only',format:'dash',bitrate:100};
+ const mislabeled={...low,playUrl:'https://fixture/high',definition:'360p',width:1080,height:1920,bitrate:90};
+ const candidates={...item,playUrl:mid.playUrl,variants:[mid,low,offTrack,mislabeled]};
+ try{
+  Date.now=()=>now;enable('adaptive');invalidateVideoNetwork();
+  const trace=new VideoPlaybackTrace('douyin');trace.event('prepare');
+  let generation=1,position=0;
+  const feed=(drops:number,presented=true)=>{
+   const state={state:'playing',hasRenderedFirstFrame:true,sourceGeneration:generation,positionMs:position,
+    metrics:{droppedFrames:drops,rebufferCount:0,throughputBps:50_000_000}};
+   trace.sample(state,presented);now+=1000;position+=1000;
+  };
+  const choose=async()=>(await decodableDouyinItem(candidates)).playUrl;
+  feed(0);feed(48);feed(48);feed(48);feed(48);expect(await choose()).toBe(mid.playUrl);
+  feed(52);feed(56);generation++;position=0;
+  feed(35);feed(35);feed(35);feed(40);feed(44);feed(0);
+  expect(await choose()).toBe(mid.playUrl);
+  feed(0);feed(0);feed(5);feed(10);feed(15,false);feed(20);
+  expect(await choose()).toBe(mid.playUrl);
+  feed(20);feed(20);feed(25);feed(30);feed(35);feed(40);
+  expect(await choose()).toBe(low.playUrl);
+  now+=60_001;
+  expect(await choose()).toBe(mid.playUrl);
+  // Media3 can batch counts. Two 50-frame reports 20s apart still represent
+  // sustained loss; one late report on its own must not lower the rendition.
+  generation++;position=0;
+  for(let seconds=0;seconds<25;seconds++)feed(seconds<22?0:50);
+  expect(await choose()).toBe(mid.playUrl);
+  for(let seconds=25;seconds<=44;seconds++)feed(seconds<42?50:100);
+  expect(await choose()).toBe(low.playUrl);
+  expect((await decodableDouyinItem({...candidates,variants:[mid,offTrack,mislabeled]})).playUrl).toBe(mid.playUrl);
+  values.clear();
+  expect(await choose()).toBe(mid.playUrl);
+ }finally{Date.now=clock;invalidateVideoNetwork();}
+});

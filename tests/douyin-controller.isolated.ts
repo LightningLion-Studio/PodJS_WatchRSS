@@ -35,7 +35,7 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(run:()=>void,needsFrame:()=>boolean){frameObservers.push({run,needsFrame});}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
-mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
+mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{restoreFrame:async()=>({available:false}),captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
 const entryTimers:Array<{ms:number;fire:()=>void}>=[];
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
@@ -72,11 +72,11 @@ test('stock selection uses one validated URI/frame bundle and does not repeat sl
 });
 
 test('entry predecodes verified stock once, and entering adopts that exact hidden pool',async()=>{
- let primed=0,released=0;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
+ let primed=0,released=0,compact:boolean|undefined;const pool={prime:(_target:unknown,options:{compactProgress?:boolean})=>{compact=options.compactProgress;primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
  const f=fixture(false,pool),a=item('entry-first'),owner={};await f.controller.douyinNavigate({name:'entry'});const entry=f.stack().at(-1)!;
  readyOverride=async()=>({url:'podjs-media-cache://play/entry.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/entry.jpg'}}});
  await f.controller.primeDouyinEntry(entry,owner,[a],null,7);expect(primed).toBe(1);expect(entry.page).toBe('douyin');expect((await client.restorePlaybackQueue()).items).toEqual([]);
- await f.controller.primeDouyinEntry(entry,owner,[a],null,7);expect(primed).toBe(1);
+ await f.controller.primeDouyinEntry(entry,owner,[a],null,7);expect(primed).toBe(1);expect(compact).toBe(true);
  f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,entrySeq:7});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
  expect(primed).toBe(1);expect(f.stack().at(-1)?.initialVideoPool).toBe(pool as any);expect((await client.restorePlaybackQueue()).anchorAwemeId).toBe(a.awemeId);
  f.controller.stopDouyinEntry(owner);expect(released).toBe(0);
@@ -104,11 +104,11 @@ test('entry never allocates a decoder for remote content or a missing verified f
  readyOverride=async()=>({url:'https://fixture.invalid/video',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/no.jpg'}}});await f.controller.primeDouyinEntry(entry,owner,[a],null,10);expect(primed).toBe(0);
 });
 test('initial decoder starts while navigation persistence is pending, and the route receives the same pool',async()=>{
- let primed=0,released=0,finish!:()=>void;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
+ let primed=0,released=0,compact:boolean|undefined,finish!:()=>void;const pool={prime:(_target:unknown,options:{compactProgress?:boolean})=>{compact=options.compactProgress;primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
  const f=fixture(false,pool),a=item('prime');const save=client.savePlaybackQueue.bind(client);client.savePlaybackQueue=async(...args:any[])=>{await new Promise<void>(yes=>finish=yes);return save(...args as Parameters<typeof save>);};
  readyOverride=async()=>({url:'podjs-media-cache://play/prime.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/prime.jpg'}}});
  f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});const opened=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});while(!finish)await Promise.resolve();
- expect(primed).toBe(1);expect(f.stack().at(-1)?.page).toBe('douyin');finish();await opened;expect(f.stack().at(-1)?.initialVideoPool).toBe(pool as any);expect(released).toBe(0);
+ expect(primed).toBe(1);expect(f.stack().at(-1)?.page).toBe('douyin');finish();await opened;expect(f.stack().at(-1)?.initialVideoPool).toBe(pool as any);expect(released).toBe(0);expect(compact).toBe(true);
 });
 test('leaving an entry releases a pending decoder reservation without reopening its player',async()=>{
  let previewReleased=0,released=0,finish!:()=>void;const pool={prime:()=>({result:Promise.resolve({}),cancel(){}}),releaseAll:async()=>{released++;}};
@@ -484,6 +484,37 @@ test('DYBACK two-item reverse fling clamps to the earliest item before the next 
 test('DYBACK nonimmersive single detail keeps its route at the previous boundary',async()=>{
  const f=fixture(),a=item('detail');f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:false,hasMore:false,detailPlayback:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
  const entry=f.stack().at(-1)!;f.controller.selectDouyinTarget(entry,'previous',1);expect(f.stack().at(-1)).toBe(entry);
+ const route=f.render();expect(route.canSelectTarget('next')).toBe(false);
+ const source=f.source();route.onBoundaryRelease('next');await Promise.resolve();expect(f.source()).toBe(source);
+});
+
+test('an unloaded feed boundary keeps the current video until the requested page is ready',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');
+ let release!:(page:any)=>void;
+ client.fetchFeedPage=()=>new Promise(resolve=>release=resolve);
+ client.resolvePlayback=async(id,options)=>({ok:true,data:options?.feedItem??item(id)});
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:true,hasMore:true,cursor:'next-page'});
+ await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const route=f.render(),playing=f.source();
+ expect(route.canSelectTarget('next')).toBe(false);route.onBoundaryRelease('next');
+ await Promise.resolve();expect(f.source()).toBe(playing);
+ release({ok:true,data:{items:[b],hasMore:false,nextCursor:null}});
+ for(let i=0;i<200;i++)await Promise.resolve();
+ expect(f.source()).toMatchObject({awemeId:'b',url:b.playUrl});
+});
+
+test('cold selection of a complete local DASH movie drops the remote companion',async()=>{
+ const f=fixture(),first=item('first'),dash=item('dash');
+ dash.variants=[{codec:'h264',width:480,height:854,bitrate:800000,format:'dash',playUrl:dash.playUrl,audioUrl:'https://media.invalid/audio'}];
+ f.controller.douyinPlay({item:first,playback:first,playlist:[first,dash],immersive:true,hasMore:false});
+ await f.controller.douyinNavigate({name:'player',awemeId:first.awemeId});
+ const entry=f.stack().at(-1)!,local='file:///verified/dash.mp4';
+ localPaths.set(dash.awemeId,local);
+ canonicalSource={...dash,playUrl:local,variants:[{codec:'h264',width:360,height:640,bitrate:300000,playUrl:local}]};
+ f.controller.selectDouyinTarget(entry,'next');
+ for(let i=0;i<80;i++)await Promise.resolve();
+ expect(f.source()).toMatchObject({url:local,videoWidth:360,videoHeight:640});
+ expect(f.source().audioUrl).toBeUndefined();
 });
 
 test('DYSWAP selecting a decoded neighbour publishes its authorized source synchronously',async()=>{

@@ -1684,6 +1684,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
+              onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
               preset={readerPreset}

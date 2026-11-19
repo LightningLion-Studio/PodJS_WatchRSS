@@ -44,7 +44,7 @@ export interface InfoLayout { cover?: Rect; title: TextLine[]; author?: { rect: 
 const clean = (text: string | undefined) => { const value = (text ?? "").replace(/\s+/g, " ").trim(); return /^[\s\-—–.。…·]*$/.test(value) ? "" : value; };
 /** Douyin titles are the description; show that text once, as the description. */
 export function detailText(meta: Pick<DetailMeta, "title" | "description">): { title: string; description: string } {
-  const title = clean(meta.title), description = clean(meta.description);
+  const title=clean(meta.title),description=meta.title===meta.description?title:clean(meta.description);
   if (!description || description === title) return title.length > 36 && meta.description !== undefined ? { title: "", description: title } : { title, description: "" };
   return { title, description };
 }
@@ -85,8 +85,8 @@ const lineRects = (y: number, count: number, lineHeight: number, maxWidth: numbe
  * text tapers with the round screen. When everything cannot fit, description lines go
  * first, then title lines; missing fields leave no gap.
  */
-export function infoLayout(meta: DetailMeta, measure: (text: string, slot: number) => number): InfoLayout {
-  const text = detailText(meta), author = clean(meta.author);
+export function infoLayout(meta: DetailMeta, measure: (text: string, slot: number) => number, text=detailText(meta)): InfoLayout {
+  const author = clean(meta.author);
   const title = textPrefix(text.title, INFO_TEXT_LIMIT);
   const description = textPrefix(text.description, INFO_TEXT_LIMIT);
   const maxTitle = description ? 2 : 3, maxDescription = title ? 3 : 5;
@@ -157,8 +157,8 @@ export const ABOUT = { slot: 1, size: 14, lineHeight: 20, width: 184, caption: 1
 /** Longest description laid out, in code points; beyond it the text ends with an ellipsis. */
 export const ABOUT_MAX_CHARS = 20_000;
 /** Every line of the description at the column width. Bounded so a pathological body stays cheap. */
-export function* aboutLineIterator(text: string, measure: (text: string, slot: number) => number): Generator<string> {
-  const normalized = clean(text), prefix = textPrefix(normalized, ABOUT_MAX_CHARS);
+export function* aboutLineIterator(text: string, measure: (text: string, slot: number) => number, alreadyNormalized=false): Generator<string> {
+  const normalized = alreadyNormalized?text:clean(text), prefix = textPrefix(normalized, ABOUT_MAX_CHARS);
   const body = prefix === normalized ? prefix : prefix + "…";
   if (body) yield* layoutUiTextLines(body, { width: ABOUT.width, measure: value => measure(value, ABOUT.slot) });
 }

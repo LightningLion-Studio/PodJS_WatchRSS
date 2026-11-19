@@ -4,6 +4,8 @@ import type {CloudContentState} from './content-lifecycle';
 import {decodeUtf8} from '../core/utf8-decode.ts';
 
 export interface HttpRequest {
+  /** Cancellation without changing foreground transport priority. */
+  lifetime?:RequestLifetime;
   background?:RequestLifetime;
   method: string;
   url: string;

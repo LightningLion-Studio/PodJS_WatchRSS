@@ -25,6 +25,13 @@ export function compactDouyinHistory(item:DouyinItem,watchedAt:number):HistoryRo
   return {awemeId,title:text(item.description),author:text(item.authorName),coverUrl:typeof item.coverUrl==='string'?item.coverUrl:undefined,playUrl,likeCount:Number(item.likeCount)||0,watchedAt};
 }
 function unpack(row:HistoryRow):DouyinHistoryEntry{return {watchedAtMillis:row.watchedAt,item:{awemeId:row.awemeId,description:row.title,authorName:row.author,coverUrl:row.coverUrl,playUrl:row.playUrl,likeCount:row.likeCount,createdAtSeconds:0,authorId:'',commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}};}
+function historyEntry(raw:string|null,id:string):DouyinHistoryEntry|undefined {
+  if(raw===null)throw Error('Missing Douyin history row');
+  const row=JSON.parse(raw);
+  if(row.awemeId!==id||!row.playUrl||!Number.isFinite(row.watchedAt))throw Error('Invalid Douyin history row');
+  const entry=unpack(row),item=admitDouyinItem(entry.item);
+  return item?{...entry,item}:undefined;
+}
 function parseIndex(raw:string):HistoryIndex{
   const v=JSON.parse(raw);if(v?.version!==2||!Array.isArray(v.entries)||!Array.isArray(v.watched)||v.entries.length>HISTORY_LIMIT||v.watched.length>WATCHED_LIMIT)throw Error('Invalid Douyin history index');
   const ids=new Set<string>(),slots=new Set<number>();
@@ -77,11 +84,17 @@ export class DouyinHistoryStore {
     });
   }
   mark(id:string):Promise<void>{id=id.trim();if(!id)return Promise.resolve();return this.enqueue(async()=>{const old=await this.initialize(),index={...old,watched:[...old.watched.filter(value=>value!==id),id].slice(-WATCHED_LIMIT)};await this.storage.set(HISTORY_INDEX_KEY,JSON.stringify(index));this.ready=Promise.resolve(index);});}
+  find(id:string):Promise<DouyinHistoryEntry|undefined>{
+    return this.enqueue(async()=>{
+      const ref=(await this.initialize()).entries.find(entry=>entry.id===id);
+      return ref?historyEntry(await this.storage.get(historyRowKey(ref.slot)),id):undefined;
+    });
+  }
   list():Promise<DouyinHistoryEntry[]>{return this.enqueue(async()=>{
     const index=await this.initialize(),result:DouyinHistoryEntry[]=[];
     for(let start=0;start<index.entries.length;start+=8){
       const refs=index.entries.slice(start,start+8),rows=await readDouyinState(this.storage,refs.map(e=>historyRowKey(e.slot)));
-      for(let i=0;i<rows.length;i++){if(rows[i]===null)throw Error('Missing Douyin history row');const row=JSON.parse(rows[i]!);if(row.awemeId!==refs[i]!.id||!row.playUrl||!Number.isFinite(row.watchedAt))throw Error('Invalid Douyin history row');const entry=unpack(row),item=admitDouyinItem(entry.item);if(item)result.push({...entry,item});}
+      for(let i=0;i<rows.length;i++){const entry=historyEntry(rows[i]!,refs[i]!.id);if(entry)result.push(entry);}
       await yieldWorkTurn().result;
     }return result;
   });}

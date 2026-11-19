@@ -23,9 +23,9 @@ import { hasCapability, kv } from "@podjs/framework/watch";
 import {readWatchConfig,WATCH_COOLDOWN_KEY} from './bili/watch-api/config.ts';
 
 export const mediaTransport=createMediaTransport({
- download:(args,background)=>{
-  const op=hostOperation<DownloadResult>('http.download',{...args,...(background?{background:true}:{})});
-  return backgroundResult(op,background);
+ download:(args,lifetime)=>{
+  const op=hostOperation<DownloadResult>('http.download',args);
+  return backgroundResult(op,lifetime);
  },
  read:async(path,offset)=>(await fileChunks.readBytes(path,offset)).bytes,
  project:async(path,size,projection,background)=>{
@@ -60,13 +60,13 @@ export const biliClient=createBiliClient({watchApi:()=>readWatchConfig(kv),watch
  else await biliPreviewCache.remove(item).catch(()=>appLogger.w('BiliPreview','preview removal failed'));},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
 export const biliPreviewCache=createHostBiliPreview(biliClient);
 const douyinSecure={get:secure.get,set:secure.set,remove:secure.delete};
-const douyinRequestConfig=()=>readDouyinRequestConfig(kv,douyinSecure);
+const douyinRequestConfig=(cookie?:string|null)=>readDouyinRequestConfig(kv,douyinSecure,cookie);
 const createDouyinClient=(transport:HttpTransport)=>new DouyinClient({
  requestConfig:douyinRequestConfig,
  auth403:{enabled:()=>readDouyin403Enabled(kv),probe:createDouyinLoginProbe({transport,requestConfig:douyinRequestConfig})},
  onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
  transport,
- savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
+ savedStore:{find:async id=>(await getDouyinSavedStore()).find(id),list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:(key,observation)=>secure.delete(key,observation)},
  historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });

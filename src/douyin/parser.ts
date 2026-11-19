@@ -64,11 +64,29 @@ export function parseDouyinItem(value:unknown,origin:"feed"|"detail"="detail"):D
  return raw?admittedPlayback(raw,origin):null;
 }
 export function parseDouyinFeed(raw:string):DouyinFeedPage { const root=object(traceServiceWork("douyin.feed.json",()=>JSON.parse(raw),raw.length)); if(!root)throw new Error("响应不是 JSON 对象"); const items=traceServiceWork("douyin.feed.map",()=>array(root.aweme_list).map(row=>parseDouyinItem(row,"feed")).filter((v):v is DouyinItem=>v!==null),array(root.aweme_list).length); const cursor=number(root.max_cursor)>0?String(number(root.max_cursor)):string(root.cursor).trim()||null; return {items,nextCursor:cursor,hasMore:number(root.has_more)==1}; }
-export function parseDouyinDetail(raw:string):DouyinContent|null { const detail=object(object(traceServiceWork("douyin.detail.json",()=>JSON.parse(raw),raw.length))?.aweme_detail); if(!detail)throw new Error("响应缺少 aweme_detail"); if(isAd(detail))return {kind:'ad',awemeId:string(detail.aweme_id)}; const type=number(detail.aweme_type); if(type===68||type===150){const images=array(detail.images).map(firstUrl).filter(Boolean);if(!images.length)throw new Error("图文内容缺少图片");return {kind:"note",awemeId:string(detail.aweme_id),description:string(detail.desc),authorName:string(object(detail.author)?.nickname),likeCount:number(object(detail.statistics)?.digg_count),imageUrls:images};} const rawItem=readDouyinItem(detail,"detail");if(!rawItem)throw new Error("视频内容缺少标识或播放地址");const item=admittedPlayback(rawItem,"detail");return item?{kind:"video",item}:null; }
+export function parseDouyinDetail(raw:string):DouyinContent|null {
+ return mapDouyinDetail(traceServiceWork('douyin.detail.json',()=>JSON.parse(raw),raw.length));
+}
+export function mapDouyinDetail(value:unknown):DouyinContent|null {
+ const detail=object(object(value)?.aweme_detail);
+ if(!detail)throw new Error('响应缺少 aweme_detail');
+ if(isAd(detail))return {kind:'ad',awemeId:string(detail.aweme_id)};
+ const type=number(detail.aweme_type);
+ if(type===68||type===150){
+  const imageUrls=array(detail.images).map(firstUrl).filter(Boolean);
+  if(!imageUrls.length)throw new Error('图文内容缺少图片');
+  return {kind:'note',awemeId:string(detail.aweme_id),description:string(detail.desc),authorName:string(object(detail.author)?.nickname),likeCount:number(object(detail.statistics)?.digg_count),imageUrls};
+ }
+ const item=readDouyinItem(detail,'detail');
+ if(!item)throw new Error('视频内容缺少标识或播放地址');
+ const admitted=admittedPlayback(item,'detail');
+ return admitted?{kind:'video',item:admitted}:null;
+}
 
 const urlAddress={url_list:null,width:null,height:null} as const;
 const variantFields={play_addr:urlAddress,url_list:null,width:null,height:null,gear_name:null,codec_type:null,is_h265:null,bit_rate:null,format:null,video_extra:{definition:null,quality:null},quality_type:null} as const;
 const itemFields={aweme_type:null,is_ads:null,raw_ad_data:{},aweme_id:null,desc:null,create_time:null,author:{uid:null,nickname:null,avatar_thumb:{url_list:null}},statistics:{digg_count:null,comment_count:null,share_count:null,collect_count:null},video:{width:null,height:null,bit_rate:[variantFields],bit_rate_audio:[{audio_meta:{codec_type:null,bitrate:null,url_list:{main_url:null,backup_url:null}}}],play_addr_h264:variantFields,play_addr_265:variantFields,play_addr_h265:variantFields,play_addr_bytevc1:variantFields,play_addr:variantFields,cover:{url_list:null},duration:null}} as const;
+export const douyinDetailSelection={status_code:null,aweme_detail:{...itemFields,images:[{url_list:null}]}} as const;
 export const douyinFeedSelection={status_code:null,aweme_list:[itemFields],max_cursor:null,cursor:null,has_more:null} as const;
 type FeedMappingStage=(value:'project_upload'|'project_native'|'project_fallback'|'mapping')=>void;
 /** Only discard fields the existing mapper never reads. Native JSON projection

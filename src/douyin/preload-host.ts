@@ -38,8 +38,8 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const results=new DouyinPrefetchResults(Date.now,saved);let resultOff:(()=>void)|undefined,token=0;
  const foreground=(id:string)=>plan?.hooks?.isForeground(id)??(plan?.mode==='active'&&plan.anchor===id);
  const sources=new PlaybackCache<string,DouyinItem>(2*1024*1024,16,(item,key)=>playbackPayloadBytes(item)+key.length*2);
- const registered=new PlaybackCache<string,{uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number}>(2*1024*1024,16,value=>2*(value.uri.length+value.playUrl.length+(value.audioUrl?.length??0)+value.headersKey.length+value.mirrors.reduce((n,url)=>n+url.length,0)));
- const remember=(uri:string,item:DouyinItem)=>{sources.delete(uri);sources.set(uri,item);while(sources.size>16)sources.delete(sources.keys().next().value!);return uri;};
+ const registered=new PlaybackCache<string,{uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number}>(2*1024*1024,DOUYIN_PROXY.entryLimit,value=>2*(value.uri.length+value.playUrl.length+(value.audioUrl?.length??0)+value.headersKey.length+value.mirrors.reduce((n,url)=>n+url.length,0)));
+ const remember=(uri:string,item:DouyinItem)=>{if(sources.get(uri)!==item)sources.set(uri,item);return uri;};
  const bluetoothOwners=new Set<unknown>();
  let ownerHeaders:{owner:unknown;authorization:number;value:Promise<Record<string,string>>}|undefined;
  const headersForOwner=()=>{const authorization=client.playbackAuthorizationVersion?.()??0;if(ownerHeaders&&ownerHeaders.owner===owner&&ownerHeaders.authorization===authorization)return ownerHeaders.value;
@@ -53,7 +53,12 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  })().catch(()=>{appLogger.w('DouyinProxy','legacy cache cleanup failed; playback continues');});
  const stats=async()=>{const s=await mediaPrefixCache.stats().result;appLogger.i('DouyinProxy',`cache files=${s.files} bytes=${s.bytes} downloadedBytes=${s.downloadedBytes} cacheReadBytes=${s.cacheReadBytes} networkReadBytes=${s.networkReadBytes} maxBytes=${s.maxBytes}`);return s;};
  const allowed=async()=>douyinPreloadAllowed(await discovery.networkSnapshot(),bluetoothOwners.has(owner));
- const playbackLookup=async(id:string)=>stock?.playbackReady?(await stock.playbackReady(id))?.uri:stock?.lookup(id);
+ const playbackLookup=async(id:string)=>{
+  if(!stock?.playbackReady)return stock?.lookup(id);
+  const ready=await stock.playbackReady(id);
+  if(ready?.item)remember(ready.uri,ready.item);
+  return ready?.uri;
+ };
  const optionalCache=async<T>(work:()=>Promise<T>):Promise<T|undefined>=>{try{return await work();}catch(error){if(!douyinCacheUnavailable(error))throw error;appLogger.w('DouyinProxy','optional cache unavailable');return undefined;}};
  const pending=new Map<string,Promise<string|undefined>>();
  const forget=(id:string,uri:string)=>{
@@ -86,7 +91,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const expires=Math.min(...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
    const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,douyinMediaNetworkDeadline([selected.playUrl,...mirrors,...(audioUrl?[audioUrl]:[])]),audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
    if(previous&&previous.uri!==uri)forget(id,previous.uri);
-   if(!current()){await mediaPrefixCache.remove(uri).result.catch(()=>{});return;}
+   // Register is idempotent. A late reply can name the capability an active
+   // player already holds. Only explicit invalidation may revoke that URI.
+   if(!current())return;
    registered.delete(id);registered.set(id,{uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires});
    registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return remember(uri,selected);
   })();
@@ -140,7 +147,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   // A reverse gesture can return to a decoded source outside the last window.
   // Publish known, still-authorized registrations before serial stock/resolution
   // awaits. Native can reload its disk pixels while those unrelated reads wait.
-  // Reuse the existing 16-entry/2 MiB registration budget, not another history.
+  // The registration index covers the bounded proxy window within its byte budget.
   const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort());
   for(const item of targets){
    const known=registered.get(item.awemeId),selected=preserveSelectedDouyinItem(item);
@@ -148,12 +155,20 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
     prepareTarget(selected,known.uri);
   }
   if(prepared.size)await publish(foregroundBitrate);
-  for(const item of targets){
-   if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
+  if(own!==generation)return;
+  const complete=stock?.completeIds?await optionalCache(()=>stock.completeIds!())??new Set<string>():undefined;
+  if(own!==generation)return;
+  const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
+  const previousIds=new Set(mode==='active'?plan!.items.slice(Math.max(0,center-DOUYIN_PROXY.backwardCount),center).map(item=>item.awemeId):[]);
+  let unpublished=0;
+  for(const [order,item] of targets.entries()){
+   if(own!==generation)return;
    // Backward entries register existing sources only. They never request detail.
-   const backward=mode==='active'&&plan!.items.findIndex(value=>value.awemeId===item.awemeId)<center;
-   const stocked=await playbackLookup(item.awemeId);if(own!==generation)return;
-   if(stocked?.startsWith('file:'))continue;
+   const backward=previousIds.has(item.awemeId);
+   const stocked=complete?undefined:await playbackLookup(item.awemeId);if(own!==generation)return;
+   if(complete?.has(item.awemeId)||stocked?.startsWith('file:')){
+    prepared.delete(item.awemeId);published.delete(item.awemeId);continue;
+   }
    // Background expiry never triggers a feed request. Foreground resolution owns bootstrap refresh.
    if(!stocked&&douyinMediaExpiry(preserveSelectedDouyinItem(item).playUrl,Date.now())<=Date.now())continue;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
@@ -161,14 +176,20 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const uri=stocked??await register(result.data,headers,()=>own===generation,true);if(own!==generation)return;if(!uri)continue;
    const source=sources.get(uri)??result.data;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(source.variants??[]).find(v=>v.playUrl===source.playUrl)?.bitrate??0;
-   // Publish new sources immediately without resending unchanged seeded targets.
-   if(prepareTarget(source,uri,!!stocked)||lastBitrate!==foregroundBitrate)await publish(foregroundBitrate);
+   if(prepareTarget(source,uri,!!stocked))unpublished++;
+   // Keep the near handoff immediate. Distant speculative registrations can
+   // share a native window replacement, including its eligibility checks.
+   if((order<4&&unpublished>0)||unpublished>=6||lastBitrate!==foregroundBitrate){
+    await publish(foregroundBitrate);unpublished=0;
+   }
   }
   if(own===generation){await publish(foregroundBitrate);stock?.offer?.(targets,plan?.anchor);await stats();}
  };
  const consume=async(event:MediaPrefetchResult)=>{
   if(event.httpStatus===403||event.httpStatus===429){trafficStoppedUntil=Date.now()+30_000;stock?.suspend?.();stop();return;}
-  const action=results.result(event,foreground);if(action)try{kv.set('watchrss.douyin.prefetch-failures',results.snapshot());}catch{}if(!action||action.action==='none')return;
+  const action=results.result(event,foreground);
+  if(action?.historyChanged)try{kv.set('watchrss.douyin.prefetch-failures',results.snapshot());}catch{}
+  if(!action||action.action==='none')return;
   const {binding}=action,own=generation,currentPlan=plan;if(!currentPlan)return;
   if(action.action==='rejectSource'){
    if(binding.generation!==own)return;
@@ -256,7 +277,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const initial=windowItem(),current=()=>{const latest=windowItem();return latest===initial||!latest||latest.playUrl===initial?.playUrl;};
    const local=await optionalCache(()=>playbackLookup(item.awemeId));
    if(!current())throw cancelled();
-   if(local)return remember(local,item);
+   if(local)return sources.has(local)?local:remember(local,item);
    await cleanupOldFiles();
    const resolved=await client.resolvePlayback(item.awemeId,{feedItem:item,allowDetail:false});
    if(!current())throw cancelled();

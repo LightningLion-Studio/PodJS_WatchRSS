@@ -1,3 +1,4 @@
+import {createDouyinRssArchive} from '../../douyin/rss-archive.ts';
 import type { ReaderPreset } from "../../reader/preset.ts";
 import type {DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import type { BrowserOrigin } from "../../browser/open.ts";
@@ -26,6 +27,8 @@ import type { AppServices, Channel } from "../service.ts";
 import type { Page, RouteEntry } from "./types.ts";
 import type { HttpExportMode } from "../../remote-input/exports.ts";
 import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
+
+const rssArchive=createDouyinRssArchive(async()=>(await (await import('../../services.ts')).getExternalSavedStore()).db);
 
 interface MediaRoutesProps {
   createBatteryTelemetry?:()=>import("@podjs/framework/telemetry").ActiveBatterySession;
@@ -63,6 +66,7 @@ interface MediaRoutesProps {
   primeDouyinEntry?:(entry:RouteEntry,owner:unknown,items:import("../../douyin/types.ts").DouyinItem[],anchor:string|null,seq?:number)=>void;
   stopDouyinEntry?:(owner:unknown)=>void;
   loginDouyin: () => Promise<void>;
+  onOpenImage?:(url:string)=>void;
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
@@ -174,6 +178,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onNavigate={props.openDouyin}
           onBack={() => props.popPage()}
           onPlay={props.playDouyin}
+          onOpenImage={props.onOpenImage}
+          rssArchive={rssArchive}
           onRequestQrLogin={() => void props.loginDouyin()}
           input={(title, value) => props.services.input(title, value)}
           onUnsupported={props.setError}
@@ -254,7 +260,11 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? (direction,distance) => props.prepareDouyinAdjacent(props.entry,direction,distance)
               : undefined
           }
-          canSelectTarget={props.entry.queue?direction=>direction==='next'||props.entry.queue!.selectedIndex>0||props.entry.playback?.immersive===true:undefined}
+          canSelectTarget={props.entry.queue?direction=>direction==='next'?props.entry.queue!.hasNextItem:props.entry.queue!.selectedIndex>0||props.entry.playback?.immersive===true:undefined}
+          onBoundaryRelease={direction=>{
+            if(direction==='next'&&props.entry.queue?.canFetchNextPage)
+              void props.changeDouyinVideo(props.entry,'next').catch(()=>{});
+          }}
           onSelectTarget={props.entry.queue?(direction,distance,prepared)=>props.selectDouyinTarget(props.entry,direction,distance,prepared):undefined}
           onPromoteAdjacent={
             props.entry.queue

@@ -111,3 +111,46 @@ test('detail request/challenge counters are fixed categories; no secsdk signatur
 test('an HTML challenge after a 403 resign never invokes the login probe or expires Cookie',async()=>{
  const f=fixture();f.replies.push(response('',403),response('<html>challenge</html>'));expect(await f.client.fetchDetail('1')).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(f.requests).toHaveLength(2);expect(f.expired()).toBe(0);expect(await f.client.isLoggedIn()).toBe(true);
 });
+
+test('a successful isolated page reads its credential once',async()=>{
+ const values=new Map([['douyin.cookie','uid_tt=27; sessionid=fixture']]);let reads=0;
+ const secure={get:async(key:string)=>{if(key==='douyin.cookie')reads++;return values.get(key)??null;},set:async(k:string,v:string)=>{values.set(k,v);},remove:async(k:string)=>{values.delete(k);}};
+ const f=fixture({secureStorage:secure});f.replies.push(page(['first']));
+ expect(await f.client.fetchFeedPage()).toMatchObject({ok:true});
+ expect(reads).toBe(1);
+});
+test('JSON rate limiting keeps HTTP status and Retry-After; authentication remains valid',async()=>{
+ const f=fixture();f.replies.push({...response({},429),headers:{'Retry-After':'120'}});
+ expect(await f.client.fetchFeedPage()).toMatchObject({ok:false,code:'RATE_LIMITED',httpStatus:429,retryAfterMs:120_000});
+ expect(f.client.authState()).toBe('logged-in');
+});
+test('checking a candidate credential cannot commit or erase the current account',async()=>{
+ const f=fixture();f.replies.push(response({status_code:8}),response({status_code:0}));
+ expect(await f.client.verifyLoginCookie('invalid-candidate')).toBe('unauthenticated');
+ expect(await f.client.verifyLoginCookie('good-candidate')).toBe('authenticated');
+ expect(f.requests.map(r=>r.headers.Cookie)).toEqual(['invalid-candidate','good-candidate']);
+ expect(await f.client.readCookie()).toBe('uid_tt=1; sessionid=SYNTHETIC_COOKIE');
+});
+test('a presented item can recover its new feed URL and stays hidden from subsequent recommendations',async()=>{
+ const f=fixture();f.replies.push(page(['current']));const first=await f.client.fetchFeedPage();if(!first.ok)throw Error('missing first page');
+ const item=first.data.items[0]!;await f.client.recordPresented(item);
+ const refreshed={...wire('current'),video:{play_addr:{url_list:['https://fixture/new-address']}}};
+ f.replies.push(response({status_code:0,aweme_list:[refreshed]}));
+ expect(await f.client.resolvePlayback('current',{feedItem:item,allowDetail:false,forceRefresh:true})).toMatchObject({ok:true,data:{playUrl:'https://fixture/new-address'}});
+ f.replies.push(page(['current','next']));expect(await f.client.fetchFeedPage()).toMatchObject({ok:true,data:{items:[{awemeId:'next'}]}});
+});
+
+test('429 honors the server delay even for an HTML response',async()=>{
+ const f=fixture();f.replies.push({...response('<html>too many requests</html>',429),headers:{'Retry-After':'120'}});
+ expect(await f.client.fetchFeedPage()).toMatchObject({code:'RATE_LIMITED',httpStatus:429,retryAfterMs:120_000});
+});
+test('cancelling an active verification releases its foreground download',async()=>{
+ let started=false,cancelled=false;
+ const probe=createDouyinLoginProbe({signer:{sign:()=>''},transport:{request:async request=>{
+  started=true;expect(request.background).toBeUndefined();
+  return new Promise<HttpResponse>((_resolve,reject)=>request.lifetime?.onCancel(()=>{cancelled=true;reject(Error('cancelled'));}));
+ }}});
+ const op=probe({cookie:'fixture',timeoutMs:5000});
+ if(!('result' in op))throw Error('fixture operation');
+ await until(()=>started);op.cancel();expect(cancelled).toBe(true);expect(await op.result).toBe('unknown');
+});

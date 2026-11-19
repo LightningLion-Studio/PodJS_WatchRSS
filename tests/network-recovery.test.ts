@@ -125,3 +125,11 @@ test('Wi-Fi recovery clears the mask even if the observer never saw the outage',
   expect(calls).toBe(2);
  }finally{scope.dispose();}
 });
+
+test('playback progress with no pending network work does not wake overlay subscribers',()=>{
+ const f=fixture('available');let events=0;f.scope.subscribe(()=>events++);
+ for(let tick=0;tick<24;tick++)f.scope.refreshUsable();
+ expect(events).toBe(0);
+ f.set('bluetooth');expect(events).toBe(1);
+ f.scope.dispose();
+});

@@ -16,7 +16,7 @@ import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 import { platformNoticeEntry } from "../PlatformNotice.tsx";
 import { platformNotice } from "../../announcement/platform.ts";
-import {lifecycle} from '@podjs/framework/watch';
+import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import {WatchProgressIndicator} from '../WatchProgressIndicator.tsx';
 
 import {douyinEntryLayout,douyinEntrySubtitle,entrySubtitleLine,entryRectStyle,type DouyinEntryState} from './entry-layout.ts';
@@ -39,18 +39,35 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   let failures=0,refreshSeq=0,presentedRefresh=0;
   const finishRefresh=(failed=false,failure?:unknown)=>{if(refreshSeq){douyinBench.refreshDone(refreshSeq,failed,failure);presentedRefresh=refreshSeq;refreshSeq=0;}};
   let loadTimer:{cancel():void}|undefined;
-  let retryTimer:{cancel():void}|undefined;
-  const cancelRetry=()=>{retryTimer?.cancel();retryTimer=undefined;};
+  const [foreground,setForeground]=createSignal(lifecycle()==='active');
+  onCleanup(onLifecycleChange(state=>setForeground(state==='active')));
+  const active=()=>!disposed&&(props.active??true)&&foreground();
+  let retryTimer:{cancel():void}|undefined,retry:{deadline:number;playback:boolean}|undefined;
+  const stopRetryTimer=()=>{retryTimer?.cancel();retryTimer=undefined;};
+  const cancelRetry=()=>{stopRetryTimer();retry=undefined;};
   let retryPlayback=false,playbackFailed=false;
+  // The PodJS timer accepts at most two minutes. Only the final wake can retry.
+  function armRetry(remaining?:number) {
+    const task=retry;
+    if(!task||retryTimer||!active())return;
+    const wait=Math.max(0,Math.min(remaining??Infinity,task.deadline-Date.now()));
+    const chunk=Math.min(120_000,Math.max(1,wait));
+    const timer=hostServices.delay(chunk);retryTimer=timer;
+    void timer.result.then(()=>{
+      if(retryTimer!==timer||retry!==task||!active())return;
+      retryTimer=undefined;
+      if(wait>chunk){armRetry(wait-chunk);return;}
+      retry=undefined;
+      void (task.playback?enter('retry'):load(true));
+    },()=>{if(retryTimer===timer)retryTimer=undefined;});
+  }
   const scheduleRetry=(result:{code:import('../../douyin/types.ts').DouyinErrorCode;retryAfterMs?:number},current:()=>boolean)=>{
-    if(!isDouyinRetryableFailure(result.code))return;
+    if(!current()||!isDouyinRetryableFailure(result.code))return;
     setError(formatDouyinError(result.code));cancelRetry();
     const backoff=Math.min(30000,1000*2**Math.min(5,failures++));
     const wait=Number.isFinite(result.retryAfterMs)?Math.max(1000,Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,result.retryAfterMs!)):isDouyinTemporaryFailure(result.code)?Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,30000*2**Math.min(5,failures-1)):backoff;
-    const timer=hostServices.delay(wait);retryTimer=timer;
-    void timer.result.then(()=>{if(retryTimer!==timer)return;retryTimer=undefined;if(current())void (retryPlayback?enter('retry'):load(true));},()=>{});
+    retry={deadline:Date.now()+wait,playback:retryPlayback};armRetry(wait);
   };
-  const active=()=>!disposed&&(props.active??true);
   const requireLogin=async(current:()=>boolean)=>{
     if(!current())return;cancelRetry();setItems([]);anchor=null;cursor=null;hasMore=false;setError(formatDouyinError('NOT_LOGGED_IN'));
     // Only the client may expire verified authentication. A screen never infers it.
@@ -58,7 +75,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const load=async(refresh=false,measureRefresh=false)=>{
     if(!active()||busy()||opening())return;
     cancelRetry();
-    const own=++generation,current=()=>active()&&own===generation;
+    const own=++generation,authorization=props.client.playbackAuthorizationVersion();
+    const current=()=>active()&&own===generation&&props.client.playbackAuthorizationVersion()===authorization;
     if(auth()==='logged-out')return;
     retryPlayback=false;
     if(measureRefresh){if(presentedRefresh)douyinBench.cancelPresented('refresh_done',presentedRefresh);presentedRefresh=0;refreshSeq=douyinBench.refreshStart();}
@@ -80,6 +98,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         let cached:ReturnType<DouyinScreenProps['client']['freshPlaybackSnapshot']>|undefined;
         const publishCached=()=>{if(current()&&stockDecided&&!stockChosen&&!networkPublished&&cached?.items.length){setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;}};
         const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(snapshot=>{
+          if(!current())return;
           const value=props.client.freshPlaybackSnapshot(snapshot);
           if(value.items.length&&(kind==='queue'||!queueReady)){if(kind==='queue')queueReady=true;cached=value;publishCached();}
         }).catch(()=>{});
@@ -109,7 +128,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       }
       if(!logged())return;
       appLogger.d('DouyinEntry',`feed requested reason=${refresh?'refresh':'bootstrap'}`);
-      const result=await traceServiceWork("douyin.entry.fetch",()=>network.result(()=>props.client.fetchFeedPage({count:16}),()=>items().length>0));if(!current()||choseStock)return;
+      const result=await traceServiceWork("douyin.entry.fetch",()=>network.result(()=>props.client.fetchFeedPage({count:16,publishBeforeSave:true}),()=>items().length>0));if(!current()||choseStock)return;
       if(result.ok){sealLocal();cancelRetry();setError('');failures=0;traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));
@@ -147,7 +166,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   };
   benchmark.mark('startup_stage',entrySeq,{startup_stage:'entry_mounted'});
   const preloadOwner={};
-  createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
+  createEffect(()=>{const list=items(),enabled=active();if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));
   // Local inventory and external intents only select an anchor. A tap/swipe
   // enters the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
@@ -155,7 +174,18 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy< -30||c.dy< -12&&(c.vy??0)< -400)void enter();else if(c.dy>50)void load(true,true);}});
   // Back on the cover after the stream: a stale opening flag must never swallow the next enter.
   createEffect(()=>{if(props.route.name==='entry'&&(props.active??true))untrack(()=>setOpening(false));});
-  createEffect(()=>{if((props.active??true)&&auth()!=='logged-out')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
+  createEffect(()=>{
+    const routeActive=props.active??true,authenticated=auth()!=='logged-out',resumed=foreground();
+    if(routeActive&&authenticated&&resumed){
+      untrack(()=>{if(retry)armRetry();else void load();});
+      return;
+    }
+    generation++;loadTimer?.cancel();loadTimer=undefined;
+    if(routeActive&&authenticated)stopRetryTimer();else cancelRetry();
+    if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);
+    refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);
+  });
+  onCleanup(()=>{disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);generation++;loadTimer?.cancel();cancelRetry();gesture.dispose();});
   // Submit no guest scene while restoring: frame zero is the first page content.
   return <Show when={(props.active??true)&&!stockPending()}><ImmersiveEntryContent width={props.width} height={props.height}
    auth={auth()} hasItems={items().length>0} busy={busy()} slow={slow()} error={error()}

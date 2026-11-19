@@ -18,6 +18,10 @@ export function biliVideoTarget(link?:string):BiliVideoTarget|null {
   if(/^BV/i.test(id)&&id.length>2)return {bvid:'BV'+id.slice(2),...(cid?{cid}:{})};
   const aid=/^av/i.test(id)?positive(id.slice(2)):undefined;return aid?{aid,...(cid?{cid}:{})}:null;
 }
+export function isDouyinPageUrl(link:string):boolean {
+  const url=urlParts(link);
+  return !!url&&(domain(url.host,'douyin.com')||domain(url.host,'iesdouyin.com'));
+}
 export function douyinVideoTarget(link?:string):{awemeId?:string;webUrl:string}|null {
   const raw=link?.trim()??"",url=urlParts(raw);if(!url)return null;
   if(domain(url.host,'douyinvod.com')||/^v\d+-dy(?:-[a-z0-9]+)*\.zjcdn\.com$/.test(url.host))return {webUrl:raw};

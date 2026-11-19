@@ -15,7 +15,7 @@ import { readerChrome } from "../reader/chrome.ts";
 export function MediaReaderDetail(props: {
   width: number; height: number; preset: ReaderPreset; active: boolean; keepAwake?:boolean;
   articleId: string; title: string; blocks: ContentBlock[]; message?: string;
-  favorite: Accessor<boolean>; onPlay: () => void; onFavorite: () => void; onShare: () => void;
+  favorite: Accessor<boolean>; onPlay: () => void; onImage?:(url:string)=>void; onFavorite: () => void; onShare: () => void;
   onError: (message: string) => void; onRetry?: () => void; ref?: (handle: ReaderBodyHandle) => void;
 }) {
   const fonts = useReaderFonts();
@@ -48,6 +48,6 @@ export function MediaReaderDetail(props: {
   const text = () => [props.title, ...props.blocks.flatMap(block => block.type === "text" ? [block.text] : [])].join("\n");
   return <ReaderBody top={0} preset={props.preset} header={header()} footer={footer()} articleId={props.articleId} text={text()} blocks={blocks()}
     width={props.width} height={props.height} fontSize={props.preset.body.fontSizeSp} lineHeight={props.preset.body.fontSizeSp * props.preset.body.lineHeightEm}
-    onMedia={() => props.onPlay()} active={props.active} keepAwake={props.keepAwake} autoStart={false} speed={1}
+    onMedia={block=>{if(block.type==="image"&&props.onImage)props.onImage(block.url);else props.onPlay();}} active={props.active} keepAwake={props.keepAwake} autoStart={false} speed={1}
     onControls={() => {}} onError={props.onError} ref={handle => props.ref?.(handle)} />;
 }

@@ -3,6 +3,21 @@ import { DouyinPlaybackQueue, type DouyinClient, type DouyinItem } from "../../s
 
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:"",authorName:"",likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:1,variants:[]});
 
+for(const success of [true,false])test(`a refill shifting a pending resolution preserves every other video (success=${success})`,async()=>{
+ let release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const client={async resolvePlayback(id:string){
+  if(id==='71'){await gate;if(!success)return {ok:false,code:'UNSUPPORTED',message:'unavailable'};}
+  return {ok:true,data:item(id)};
+ },async fetchFeedPage(){return {ok:true,data:{items:Array.from({length:5},(_,i)=>item(String(80+i))),hasMore:false,nextCursor:null}};}} as unknown as DouyinClient;
+ const queue=new DouyinPlaybackQueue(client,{items:Array.from({length:80},(_,i)=>item(String(i))),selectedAwemeId:'70',hasMore:true,limit:80});
+ const next=queue.next();
+ await queue.fillAhead(16);release();
+ expect(await next).toMatchObject({ok:true,data:{item:{awemeId:success?'71':'72'}}});
+ const ids=queue.snapshot().playlist.map(value=>value.awemeId);
+ expect(ids).toEqual(Array.from({length:80},(_,i)=>String(i+5)).filter(id=>success||id!=='71'));
+});
+
 test("queue resolves previous/next and incrementally fetches the page tail",async()=>{const fetched:string[]=[];const client={async resolvePlayback(id:string){return {ok:true as const,data:{...item(id),description:`resolved-${id}`},source:"feed-cache" as const};},async fetchFeedPage({cursor}:{cursor?:string|null}){fetched.push(cursor??"");return {ok:true as const,data:{items:[item("3"),item("4")],nextCursor:"next-2",hasMore:false},source:"network" as const};}} as unknown as DouyinClient;const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2")],selectedAwemeId:"2",cursor:"next-1",hasMore:true});const previous=await queue.previous();expect(previous).toMatchObject({ok:true,data:{item:{awemeId:"1"},index:0}});await queue.next();const loaded=await queue.next();expect(loaded).toMatchObject({ok:true,data:{item:{awemeId:"3"},cursor:"next-2",hasMore:false,index:2}});expect(fetched).toEqual(["next-1"]);});
 
 test("queue is bounded to 40 while retaining newly appended items",async()=>{const initial=Array.from({length:40},(_,i)=>item(String(i)));const client={async resolvePlayback(id:string){return {ok:true as const,data:item(id)};},async fetchFeedPage(){return {ok:true as const,data:{items:[item("40")],nextCursor:null,hasMore:false}};}} as unknown as DouyinClient;const queue=new DouyinPlaybackQueue(client,{items:initial,selectedAwemeId:"39",cursor:"c",hasMore:true});const result=await queue.next();expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.message);expect(result.data.item.awemeId).toBe("40");expect(result.data.playlist[0].awemeId).toBe("1");expect(result.data.playlist).toHaveLength(40);expect(result.data.index).toBe(39);});

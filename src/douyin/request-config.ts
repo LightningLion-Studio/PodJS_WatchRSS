@@ -13,7 +13,7 @@ export interface DouyinRequestConfig {
   isNewNotice?:string; needSocialCount?:string;
 }
 export interface DouyinRequestConfigStore {get<T>(key:string):T|undefined|null;set<T>(key:string,value:T):unknown}
-export type DouyinRequestConfigSource=()=>DouyinRequestConfig|Promise<DouyinRequestConfig>;
+export type DouyinRequestConfigSource=(cookie?:string|null)=>DouyinRequestConfig|Promise<DouyinRequestConfig>;
 const publicFields=['versionCode','versionName','userAgent','browserVersion','isNewNotice','needSocialCount'] as const;
 const privateFields=['verifyFp','fp','msToken','webid','uifid'] as const;
 const secretKey=(source:'local'|'remote')=>`douyin.request.${source}.private.v1`;
@@ -46,9 +46,9 @@ export async function applyDouyinRequestConfig(store:DouyinRequestConfigStore,se
   await secure.set(secretKey(source),JSON.stringify({scope,values:privateValues}));
   store.set(source==='local'?DOUYIN_REQUEST_LOCAL_KEY:DOUYIN_REQUEST_REMOTE_KEY,visible);
 }
-export async function readDouyinRequestConfig(store:DouyinRequestConfigStore,secure:DouyinSecureStorage):Promise<DouyinRequestConfig> {
+export async function readDouyinRequestConfig(store:DouyinRequestConfigStore,secure:DouyinSecureStorage,cookie?:string|null):Promise<DouyinRequestConfig> {
   const result:DouyinRequestConfig={};
-  let scope:string|null=null;try{scope=cookieScope(await secure.get('douyin.cookie'));}catch{}
+  let scope:string|null=null;try{scope=cookieScope(cookie===undefined?await secure.get('douyin.cookie'):cookie);}catch{}
   for(const source of ['remote','local'] as const){
     let visible:Record<string,unknown>={},hidden:Record<string,unknown>={};
     try{visible=record(store.get(source==='local'?DOUYIN_REQUEST_LOCAL_KEY:DOUYIN_REQUEST_REMOTE_KEY));}catch{}
@@ -60,7 +60,7 @@ export async function readDouyinRequestConfig(store:DouyinRequestConfigStore,sec
   }
   return result;
 }
-export async function resolveDouyinRequestConfig(source?:DouyinRequestConfigSource):Promise<DouyinRequestConfig>{try{return sanitizeDouyinRequestConfig(await source?.());}catch{return {};}}
+export async function resolveDouyinRequestConfig(source?:DouyinRequestConfigSource,cookie?:string|null):Promise<DouyinRequestConfig>{try{return sanitizeDouyinRequestConfig(await source?.(cookie));}catch{return {};}}
 const baseParams:Readonly<Record<string,string>>={device_platform:'webapp',aid:'6383',channel:'channel_pc_web',pc_client_type:'1',version_code:'170400',version_name:'17.4.0',cookie_enabled:'true',screen_width:'680',screen_height:'907',browser_language:'zh-CN',browser_platform:'Win32',browser_name:'Chrome',browser_version:'155.0.0.0',browser_online:'true',engine_name:'Blink',engine_version:'155.0.0.0',os_name:'Windows',os_version:'10',cpu_core_num:'12',device_memory:'8',platform:'PC',downlink:'10',effective_type:'4g',from_user_page:'1',locate_query:'false',need_time_list:'1',pc_libra_divert:'Windows',publish_video_strategy_type:'2',round_trip_time:'0',show_live_replay_strategy:'1',time_list_query:'0',whale_cut_token:'',update_version_code:'170400',msToken:''};
 export function douyinRequestProfile(config:DouyinRequestConfig={}) {
   const c=sanitizeDouyinRequestConfig(config),params:Record<string,string>={...baseParams};

@@ -20,8 +20,9 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
  const maxKeys=16;
  const keys=new Map<string,{key:string;authorization:string}>(),consumed=new Set<string>();
  type InventoryEntry={value:LocalMediaItem;item:DouyinItem};
- type InventoryIndex={epoch:number;authorization:string;ids?:Set<string>;reading?:Promise<InventoryEntry[]>};
+ type InventoryIndex={epoch:number;authorization:string;ids?:Set<string>;capacity?:{unwatched:number;expires:number};reading?:Promise<InventoryEntry[]>};
  let index:InventoryIndex|undefined;
+ let configured:string|undefined;
  const config=()=>douyinPrestoreConfig(kv.get('watchrss.douyin.prestore.v1'));
  const allowed=async()=>config().enabled&&kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false);
  const scope=()=>client.stockAuthorizationScope();
@@ -64,6 +65,7 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
    // Native list hashes every complete movie and its frame. Keep only IDs for
    // misses. A playable hit still verifies that specific file at lookup time.
    current.ids=selected.size<=maxKeys?new Set(selected.keys()):undefined;
+   current.capacity={unwatched:entries.filter(entry=>!entry.value.watched).length,expires:Date.now()+5*60_000};
    return entries;
   })().finally(()=>{current.reading=undefined;});
   return current.reading;
@@ -97,12 +99,20 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
    const ready=await source(item,authorization);
    if(!stillAuthorized(own,authorization))return;
    if(index!==observed||keys.get(id)!==binding)continue;
-   if(!ready||ready.item.awemeId!==id){keys.delete(id);return;}
+   if(!ready||ready.item.awemeId!==id){keys.delete(id);if(index)index.capacity=undefined;return;}
    return ready;
   }
  };
  const service:DouyinStockService={
   present:localMediaStore.present,hide:localMediaStore.hide,
+  async completeIds(){
+   const own=epoch,authorization=await scope();
+   if(own!==epoch||!authorization)return new Set<string>();
+   const cached=indexFor(own,authorization);
+   if(cached.ids&&cached.capacity&&cached.capacity.expires>Date.now())return new Set(cached.ids);
+   const entries=await inventoryFor(own,authorization);
+   return new Set(entries.map(entry=>entry.item.awemeId));
+  },
   async restore(){
    const own=epoch;
    const report=(count:number,bytes:number,reason:'ready'|'disabled'|'native_empty'|'no_eligible'|'history_timeout'|'history_failed'|'native_failed')=>appLogger.i('DouyinStock',`entry_stock count=${count} bytes=${bytes} reason=${reason}`);
@@ -123,9 +133,13 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
    report(eligible.length,eligible.reduce((bytes,entry)=>bytes+entry.value.bytes,0),eligible.length?reason:'no_eligible');return eligible.map(entry=>entry.item);
   },
   ready:lookup,playbackReady:lookup,lookup:async id=>(await lookup(id))?.uri,
-  consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const binding=keys.get(id);if(binding)void localMediaStore.watched(binding.key).result.catch(()=>{});},
+  consume(id){
+   consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);
+   const binding=keys.get(id);
+   if(binding)void localMediaStore.watched(binding.key).result.finally(invalidateInventory).catch(()=>{});
+  },
   clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.finally(invalidateInventory).catch(()=>{});},
-  suspend(){enabled=false;epoch++;index=undefined;for(const operation of operations)operation.cancel();operations.clear();void localMediaStore.cancel().result.catch(()=>{});},
+  suspend(){enabled=false;epoch++;index=undefined;configured=undefined;for(const operation of operations)operation.cancel();operations.clear();void localMediaStore.cancel().result.catch(()=>{});},
   async networkChanged(){if(await allowed())await service.resume();else service.suspend();},
   offer(items,anchor){
    offeredRevision++;
@@ -138,11 +152,20 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
    candidates=items.slice(center+(anchor?1:0),center+21).filter(i=>/^https?:/.test(i.playUrl));
    void service.resume().catch(()=>{});
   },
-  resume(){const wasEnabled=enabled;enabled=true;if(running)return wasEnabled?running:running.catch(()=>{}).then(()=>enabled?service.resume():undefined);const own=++epoch,offerRevision=offeredRevision,current=()=>enabled&&own===epoch;
+  resume(){const wasEnabled=enabled;enabled=true;if(running)return wasEnabled?running:running.catch(()=>{}).then(()=>enabled?service.resume():undefined);const own=epoch,offerRevision=offeredRevision,current=()=>enabled&&own===epoch;
    const work=(async()=>{
     const authorization=await scope();if(!current()||!authorization)return;
-    const cfg=config();await localMediaStore.configure(cfg).result;if(!current()||!await allowed()||!current())return;
-    let slots=(await inventory()).filter(entry=>!entry.value.watched).length;const watched=new Set(await client.listWatchedIds());
+    const cfg=config(),settings=JSON.stringify(cfg);
+    if(settings!==configured){
+     await localMediaStore.configure(cfg).result;if(!current())return;
+     configured=settings;invalidateInventory();
+    }
+    if(!await allowed()||!current())return;
+    const capacity=indexFor(own,authorization).capacity;
+    let slots=capacity&&capacity.expires>Date.now()?capacity.unwatched:
+     (await inventoryFor(own,authorization)).filter(entry=>!entry.value.watched).length;
+    if(slots>=cfg.count||!current())return;
+    const watched=new Set(await client.listWatchedIds());
     for(const candidate of candidates){
      if(!current()||offerRevision!==offeredRevision||slots>=cfg.count||!await allowed()||!current())return;
      if(watched.has(candidate.awemeId)||consumed.has(candidate.awemeId))continue;

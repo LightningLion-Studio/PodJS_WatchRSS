@@ -12,9 +12,9 @@ export class DouyinPrefetchResults {
  begin(newOwner=false){this.bindings.clear();if(newOwner)this.refreshed.clear();}
  bind(binding:PrefetchBinding){for(const [token,value] of this.bindings)if(value.id===binding.id)this.bindings.delete(token);this.bindings.set(binding.itemToken,binding);}
  current(binding:PrefetchBinding){return this.bindings.get(binding.itemToken)===binding;}
- result(event:MediaPrefetchResult,foreground:(id:string)=>boolean):{binding:PrefetchBinding;action:'refresh'|'quarantine'|'rejectSource'|'none'}|undefined {
+ result(event:MediaPrefetchResult,foreground:(id:string)=>boolean):{binding:PrefetchBinding;action:'refresh'|'quarantine'|'rejectSource'|'none';historyChanged?:boolean}|undefined {
   const binding=this.bindings.get(event.itemToken);if(!binding||binding.generation!==event.generation)return;
-  if(event.result==='success'){const record=this.records.get(binding.id);if(record)record.consecutive=0;this.refreshed.delete(binding.id);return {binding,action:'none'};}
+  if(event.result==='success'){const record=this.records.get(binding.id),historyChanged=!!record?.consecutive;if(record)record.consecutive=0;this.refreshed.delete(binding.id);return {binding,action:'none',historyChanged};}
   if(event.category===DOUYIN_RESOLUTION_LIMIT){
    if(event.mirrorIndex===1&&!binding.mirror)return;
    return {binding:event.mirrorIndex===1?{...binding,url:binding.mirror!}:binding,action:'rejectSource'};
@@ -22,8 +22,8 @@ export class DouyinPrefetchResults {
   const previous=this.records.get(binding.id);
   this.records.delete(binding.id);this.records.set(binding.id,{id:binding.id,count:(previous?.count??0)+1,consecutive:(previous?.consecutive??0)+1,reason:event.category,lastFailureAt:this.now(),generation:binding.generation});
   while(this.records.size>200)this.records.delete(this.records.keys().next().value!);
-  if(event.httpStatus===403&&!this.refreshed.has(binding.id)){this.refreshed.add(binding.id);return {binding,action:'refresh'};}
-  return {binding,action:(this.records.get(binding.id)!.consecutive>=2&&!foreground(binding.id))?'quarantine':'none'};
+  if(event.httpStatus===403&&!this.refreshed.has(binding.id)){this.refreshed.add(binding.id);return {binding,action:'refresh',historyChanged:true};}
+  return {binding,action:(this.records.get(binding.id)!.consecutive>=2&&!foreground(binding.id))?'quarantine':'none',historyChanged:true};
  }
  reset(id:string){this.refreshed.delete(id);const record=this.records.get(id);if(record)record.consecutive=0;}
  snapshot(){return Array.from(this.records.values(),value=>({...value}));}

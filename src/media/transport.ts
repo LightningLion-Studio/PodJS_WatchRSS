@@ -7,10 +7,10 @@ import {videoOptEnabled} from './video-opt.ts';
 import {videoResponseBudget} from './traffic-policy.ts';
 
 export interface MediaTransportPorts {
-  download(args:Record<string,unknown>,background?:import('../cloud/types.ts').RequestLifetime):Promise<DownloadResult>;
+  download(args:Record<string,unknown>,lifetime?:import('../cloud/types.ts').RequestLifetime):Promise<DownloadResult>;
   read(path:string,offset:number):Promise<Uint8Array>;
   readPortable?(path:string,offset:number):Promise<Uint8Array>;
-  project?(path:string,size:number,projection:NonNullable<HttpRequest['fileProjection']>,background?:HttpRequest['background']):Promise<NonNullable<HttpResponse['fileProjection']>['value']>;
+  project?(path:string,size:number,projection:NonNullable<HttpRequest['fileProjection']>,lifetime?:HttpRequest['lifetime']):Promise<NonNullable<HttpResponse['fileProjection']>['value']>;
   remove(path:string):Promise<unknown>;
   base64(bytes:Uint8Array):string;
 }
@@ -32,16 +32,21 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
     if(request.method!=='GET'&&request.method!=='POST')throw new Error('Unsupported media request method');
     // A request path is useful for diagnosis; signed query strings and headers are not.
     appLogger.d('Network',`${request.method} media request`);
+    const lifetime=request.lifetime??request.background;
     const path=`media-json/request-${Date.now()}-${++sequence}.json`;
     return withOwnedPrivateFile(path,path=>ports.remove(path),async path=>{
-      if(request.background&&!request.background.isCurrent())throw Error("cancelled");
+      if(lifetime&&!lifetime.isCurrent())throw Error("cancelled");
       const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:videoResponseBudget(request.url,videoOptEnabled('traffic')),
-        timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})},request.background);
+        ...(request.background?{background:true}:{}),timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})},lifetime);
       if(request.fileProjection&&ports.project){
-        if(request.background&&!request.background.isCurrent())throw Error('cancelled');
+        if(lifetime&&!lifetime.isCurrent())throw Error('cancelled');
         try {
-          const value=await ports.project(path,response.size,request.fileProjection,request.background);
-          return {status:response.status,headers:response.headers,body:new Uint8Array(0),fileProjection:{value,size:response.size}};
+          const value=await ports.project(path,response.size,request.fileProjection,lifetime);
+          // A single detail object can exceed the native projection result limit.
+          // Read the same bounded private file once so large notes still work.
+          if(value.kind!=='limit'||request.fileProjection.rows){
+            return {status:response.status,headers:response.headers,body:new Uint8Array(0),fileProjection:{value,size:response.size}};
+          }
         }catch(error){
           if(!projectionUnavailable(error))throw error;
         }
@@ -51,7 +56,7 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
       let bytes:Uint8Array;
       try {
         bytes=await readDownloadedBytes(path,response.size,async(path,offset)=>{
-          if(request.background&&!request.background.isCurrent())throw Error('cancelled');
+          if(lifetime&&!lifetime.isCurrent())throw Error('cancelled');
           if(bridgePressure&&portable)return portable(path,offset);
           try {return await ports.read(path,offset);}
           catch(error){

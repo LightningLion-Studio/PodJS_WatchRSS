@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {generateKeyPairSync} from 'node:crypto';
 import {crypto,enabled,key} from './k2-crypto';
 import {WatchCloudSyncService,type CloudSession} from '../../src/cloud/service';
 import {WatchCloudCodec,type SnapshotInput} from '../../src/cloud/codec';
@@ -143,7 +144,9 @@ test('structured Sync Objects 426 retains upgrade_required and displays upgrade 
 test('v2 withdrawal in the second authenticated bootstrap stops the prepared round',async()=>{
  const f=await fixture(),bootstrap=f.client.bootstrap.bind(f.client);
  let requests=0;const ready:boolean[]=[];
- f.client.bootstrap=async()=>({...await bootstrap(),syncV2:++requests===1?{algorithm:'ES256'}:undefined});
+ const {publicKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
+ const receiptKey={algorithm:'ES256' as const,receiptKeyId:'e'.repeat(32),receiptSigningPublicKey:publicKey.export({type:'spki',format:'der'}).toString('base64')};
+ f.client.bootstrap=async()=>({...await bootstrap(),syncV2:++requests===1?receiptKey:undefined});
  const ports={
   open:async()=>f.session,network:async()=>({active:true,validated:true,wifi:true,metered:false}),
   hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async<T>(fn:()=>Promise<T>)=>fn(),

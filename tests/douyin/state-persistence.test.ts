@@ -154,3 +154,17 @@ test('RVRESCAP4-03 rewrites all affected snapshots by source and preserves unrel
   expect(f.legacy.size).toBe(0);
  }finally{f.raw.close();}
 });
+
+test('short playback rows share bounded SQL transactions; history lookup reads only the requested slot',async()=>{
+ const f=fixture();try{
+  const rows=Array.from({length:16},(_,i)=>item('row-'+i)),feed=new DouyinFeedStore(f.storage);
+  await feed.save(FEED_KEY,{items:rows,cursor:null,hasMore:false,anchorAwemeId:null,savedAtMillis:42,resolved:Object.fromEntries(rows.map(r=>[r.awemeId,42]))});
+  const batches=f.changes.filter(batch=>batch.some(change=>change.key.startsWith('douyin.playback-item.v2.')));
+  expect(batches.length).toBeLessThan(5);
+  const history=new DouyinHistoryStore(f.storage);for(const row of rows)await history.record(row,42);
+  const reads:string[]=[];const many=f.storage.getMany.bind(f.storage);
+  f.storage.getMany=async keys=>{reads.push(...keys);return many(keys);};
+  expect(await history.find('row-3')).toMatchObject({item:{awemeId:'row-3'}});
+  expect(reads.filter(key=>key.includes('history.row'))).toHaveLength(1);
+ }finally{f.raw.close();}
+});

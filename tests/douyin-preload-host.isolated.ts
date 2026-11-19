@@ -2,7 +2,8 @@ import {test,expect,mock} from 'bun:test';
 import {dispatchMemoryPressure} from '@podjs/framework/memory';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
-const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
+let registrationWait:((uri:string)=>Promise<void>|undefined)|undefined;
+const result=(value:any)=>({result:value?.uri&&registrationWait?Promise.resolve(registrationWait(value.uri)).then(()=>value):Promise.resolve(value),cancel(){}});
 mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{if(registrationFailure)throw registrationFailure;registrations.push({key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge:_maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
@@ -438,4 +439,72 @@ test('unchanged authorized prefix targets publish one native window on a repeate
   expect(last.every((x:any)=>x.generation!==first[0].generation)).toBe(true);
   expect({cold,warm:warm.length}).toEqual({cold:4,warm:1});
  }finally{host.stop(owner);}
+});
+
+test('full default window batches distant targets without thrashing registrations',async()=>{
+ const videos=Array.from({length:30},(_,n)=>({...items[0]!,awemeId:String(n),playUrl:'https://fixture.invalid/'+n}));
+ const host=createHostDouyinPreload({resolvePlayback:async(_id:string,options:any)=>({ok:true,data:options.feedItem}),buildPlaybackHeaders:async()=>({})} as any),owner={};
+ windows=[];registrations=[];host.allowBluetooth(true,owner);
+ try{
+  host.start(owner,videos,'5','active');for(let n=0;n<8;n++)await flush();
+  expect(windows.at(-1).items).toHaveLength(24);
+  const cold=windows.length;
+  host.start(owner,videos,'5','active');for(let n=0;n<8;n++)await flush();
+  expect(registrations).toHaveLength(24);
+  expect(windows.length-cold).toBe(1);
+  expect(cold).toBeLessThanOrEqual(8);
+ }finally{host.stop(owner);}
+});
+
+test('a stale registration reply cannot revoke the URI held by a playing source',async()=>{
+ const base=Date.now(),now=Date.now,local={resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem}),buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinPreload(local as any),owner={};
+ const uri=await host.playback(items[0]!,{});removed=[];
+ let release!:()=>void;
+ try{
+  Date.now=()=>base+6*60_000;
+  registrationWait=()=>{registrationWait=undefined;return new Promise<void>(resolve=>release=resolve);};
+  host.allowBluetooth(true,owner);host.start(owner,items,'a','active');await flush();
+  expect(release).toBeDefined();
+  host.start(owner,items,'a','active');release();await flush();
+  expect(removed).not.toContain(uri);
+ }finally{registrationWait=undefined;Date.now=now;host.stop(owner);}
+});
+
+test('stock lookup binds the verified local rendition to its URI',async()=>{
+ const local='file:///verified/movie.mp4',movie={...items[1]!,playUrl:local};
+ const stock={playbackReady:async()=>({uri:local,item:movie})};
+ const host=createHostDouyinPreload(client as any,stock as any);
+ expect(await host.lookup(movie.awemeId)).toBe(local);
+ expect(host.sourceFor(local)).toBe(movie);
+ await host.playback(items[1]!,{});expect(host.sourceFor(local)).toBe(movie);
+ host.stop();
+});
+
+test('a completed neighbouring movie retires its old speculative prefix without another full-file lookup',async()=>{
+ let complete=false,lookups=0;
+ const stock={completeIds:async()=>new Set(complete?['b']:[]),playbackReady:async(id:string)=>{
+  lookups++;return complete&&id==='b'?{uri:'file:///complete/b.mp4',item:items[1]}:undefined;
+ }};
+ const host=createHostDouyinPreload({buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem})} as any,stock as any),owner={};
+ try{
+  windows=[];host.allowBluetooth(true,owner);host.start(owner,items,'a','active');await flush();
+  const previous=windows.at(-1).items[1].uri;
+  complete=true;host.start(owner,items,'a','active');await flush();
+  expect(windows.at(-1).items.some((x:any)=>x.uri===previous)).toBe(false);
+  expect(lookups).toBe(0);
+  expect(await host.lookup('b')).toBe('file:///complete/b.mp4');expect(lookups).toBe(1);
+ }finally{host.stop(owner);}
+});
+
+test('a successful prefix writes failure history only when it clears a recorded failure',async()=>{
+ const original=(globalThis as any).pod,writes:string[]=[];
+ (globalThis as any).pod={...original,takeEvents:()=>[],kvGet:()=>undefined,kvSet:(key:string)=>{writes.push(key);return 0;}};
+ const host=createHostDouyinPreload({resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem}),buildPlaybackHeaders:async()=>({})} as any),owner={};
+ try{
+  host.allowBluetooth(true,owner);host.start(owner,items,'a','active');await flush();
+  const target=windows.at(-1).items[0],send=(success:boolean)=>resultListener({...target,result:success?'success':'failure',httpStatus:0,category:success?'success':'transport'});
+  send(true);send(true);send(false);send(true);send(true);
+  expect(writes.filter(key=>key==='watchrss.douyin.prefetch-failures')).toHaveLength(2);
+ }finally{host.stop(owner);(globalThis as any).pod=original;}
 });

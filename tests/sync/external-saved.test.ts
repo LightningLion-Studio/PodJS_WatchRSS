@@ -172,3 +172,29 @@ test('C12 detail star persists to global SQL favorites, reopens, cancels via C04
   detail.dispose();actions.dispose();f.sql.close();f=await setup(path);expect(await f.douyin.state('7')).toEqual({favorite:false,watchLater:false});
  }finally{f.sql.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('a library with 1050 other saves preserves point lookup and every subsequent list page',async()=>{
+ const f=await setup();try{
+  await f.douyin.set(video,'favorite',true);await f.douyin.set(video,'watchLater',true);
+  f.sql.exec(`WITH RECURSIVE rows(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM rows WHERE n<1050)
+   INSERT INTO articles(channel_id,title,link,dedup_key,fetched_at)
+   SELECT (SELECT id FROM channels WHERE url='builtin:douyin'),'fixture','https://www.douyin.com/video/more-'||n,'synthetic-'||n,0 FROM rows`);
+  f.sql.exec(`INSERT INTO article_saved_states(article_id,save_type,saved,changed_at,sort_order)
+   SELECT id,'favorite',1,0,id FROM articles WHERE dedup_key LIKE 'synthetic-%'`);
+  const select=f.db.query.bind(f.db);let pages=0;
+  f.db.query=async(sql,params)=>{
+   const rows=await select(sql,params);
+   if(rows.length>1000)throw Error('Query exceeds 1000 rows; use LIMIT and pagination');
+   if(sql.includes('LIMIT ? OFFSET ?'))pages++;
+   return rows;
+  };
+  expect(await f.douyin.state('7')).toEqual({favorite:true,watchLater:true});
+  expect(await f.douyin.find('7')).toMatchObject({awemeId:'7',playUrl:video.playUrl});
+  expect(await f.douyin.find('missing')).toBeUndefined();
+  expect(pages).toBe(0);
+  const entries=await f.douyin.list();
+  expect(entries).toHaveLength(1052);expect(pages).toBeGreaterThan(1);
+  expect(entries.filter(entry=>entry.awemeId==='7').map(x=>x.kind).sort()).toEqual(['favorite','watchLater']);
+  expect(new Set(entries.map(entry=>entry.awemeId)).size).toBe(1051);
+ }finally{f.sql.close();}
+});
