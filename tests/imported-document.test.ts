@@ -122,7 +122,9 @@ test('window entries reverse source keys including media and duplicate boundarie
  for(const [key,i] of reference)expect(indexed.indices.get(key)).toBe(i);
  for(const key of [null,{},'footer','text:00:0','image:0:0','text:900000:0'])expect(indexed.indices.get(key)).toBeUndefined();
  expect(made).toBe(1);const first=indexed.entries.at(0);
- for(let i=1;i<rows.length;i++)indexed.entries.at(i);
+ const iterator=indexed.entries[Symbol.iterator]();
+ expect(made).toBe(2);expect(iterator.next().value).toBe(first);expect(made).toBe(2);
+ expect(Array.from(indexed.entries,entry=>entry.row)).toEqual(rows);
  expect(indexed.entries.at(0)).not.toBe(first);
 });
 
