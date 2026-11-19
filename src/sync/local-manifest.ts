@@ -206,17 +206,14 @@ export class LocalArticleManifestStore {
   * rows. Cache only the IDs of identities whose inputs exclude body text. */
  async wireRssIdentitiesForUrls(urls:readonly string[],generation:string){
   const input=new Map<number,Row>();
-  for(let at=0;at<urls.length;at+=400){
-   const part=urls.slice(at,at+400);
+  // Leave room for the generation and keyset parameters under SQLite's
+  // legacy 999-variable limit.
+  const urlsPerQuery=700;
+  for(let at=0;at<urls.length;at+=urlsPerQuery){
+   const part=urls.slice(at,at+urlsPerQuery);
    // Android 11's SQLite builds do not include JSON1.
    const rows=await querySyncKeysetPages(this.db,`WITH wanted(value) AS (VALUES ${part.map(()=>'(?)').join(',')})
-    SELECT a.id,m.article_id AS bound_id,w.article_id AS cached_article_id,w.native_id AS cached_native_id,
-     CASE WHEN w.item_id IS NULL THEN a.title END AS title,
-     CASE WHEN w.item_id IS NULL THEN a.link END AS link,
-     CASE WHEN w.item_id IS NULL THEN a.guid END AS guid,
-     CASE WHEN w.item_id IS NULL THEN a.dedup_key END AS dedup_key,
-     CASE WHEN w.item_id IS NULL THEN ch.url END AS channel_url,
-     CASE WHEN w.item_id IS NULL THEN i.article_id END AS cloud_rss_id
+    SELECT a.id,m.article_id AS bound_id,w.article_id AS cached_article_id,w.native_id AS cached_native_id
     FROM articles a JOIN channels ch ON ch.id=a.channel_id
     LEFT JOIN sync_article_ids m ON m.item_id=a.id LEFT JOIN cloud_rss_article_ids i ON i.item_id=a.id
     LEFT JOIN sync_projection_wire_ids w ON w.item_id=a.id AND w.generation=?
@@ -231,11 +228,16 @@ export class LocalArticleManifestStore {
   }
   type Alias=Pick<CloudRssIdentity,'articleId'|'nativeArticleId'|'localArticleId'>;
   const resolved=new Map<number,Alias>(),writes:{sql:string;params:SqlParams}[]=[];
-  const rows=[...input.values()].sort((a,b)=>num(a.id)-num(b.id)),dirty:Row[]=[];
+  const rows=[...input.values()].sort((a,b)=>num(a.id)-num(b.id)),missing:number[]=[];
   for(const row of rows){
    const articleId=str(row.cached_article_id);
    if(articleId)resolved.set(num(row.id),{articleId,nativeArticleId:str(row.cached_native_id),localArticleId:str(row.bound_id)||articleId});
-   else dirty.push(row);
+   else missing.push(num(row.id));
+  }
+  const dirty:Row[]=[];
+  for(let at=0;at<missing.length;at+=160){
+   const ids=missing.slice(at,at+160);
+   dirty.push(...await querySyncPages(this.db,IDENTITY_SELECT+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+') ORDER BY a.id',ids,ids.length+1));
   }
   for await(const batch of this.cloudIdentityBatches(dirty))for(const [index,identity] of batch.identities.entries()){
    if(!identity)continue;
