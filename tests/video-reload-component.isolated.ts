@@ -364,3 +364,96 @@ test('NOPLAY only an automatic unexpired Douyin timeout may retry the current so
   await flush();await tick(351);expect(flags).toEqual([reuse]);
  }
 });
+
+test('foreground resource failure page retries the same video until the decoder recovers',async()=>{
+ const source={platform:'douyin',immersive:true,awemeId:'resource',url:'file:///fixture/resource.mp4',title:'fixture'};
+ nextError={code:'decoder_admission_deferred'};
+ const player=reloadMount(source);
+ await flush();
+ expect(player.text()).toContain('播放器资源不足');
+ expect(prepares).toHaveLength(1);
+ expect(retries).toBe(0);
+
+ nextError={code:'decoder_admission_deferred'};
+ await tick(1000);
+ expect(player.text()).toContain('播放器资源不足');
+ expect(prepares).toHaveLength(2);
+ await tick(1999);expect(prepares).toHaveLength(2);
+ await tick(1);
+ expect(player.text()).not.toContain('播放器资源不足');
+ expect(current.state).toBe('playing');
+ expect(prepares.map(value=>value.url)).toEqual([source.url,source.url,source.url]);
+ expect(retries).toBe(0);
+ await tick(30_000);expect(prepares).toHaveLength(3);
+});
+
+test('changing sources cancels the pending decoder retry',async()=>{
+ const source={platform:'douyin',immersive:true,awemeId:'old-resource',url:'file:///fixture/old.mp4',title:'fixture'};
+ nextError={code:'decoder_admission_deferred'};
+ const player=reloadMount(source);
+ await flush();
+ player.publish({...source,awemeId:'new-resource',url:'file:///fixture/new.mp4'});
+ await flush();
+ await tick(30_000);
+ expect(prepares.map(value=>value.url)).toEqual([source.url,'file:///fixture/new.mp4']);
+ expect(retries).toBe(0);
+});
+
+test('a deferred decoder at the prepare deadline retries without resolving a new source',async()=>{
+ const source={platform:'douyin',immersive:true,awemeId:'deadline-resource',url:'file:///fixture/deadline.mp4',title:'fixture'};
+ heldPrepare=new Promise(()=>{});
+ const player=reloadMount(source);
+ await flush();
+ current={...state('preparing'),decoderAdmissionDeferred:true};
+ stateEvents.forEach(listener=>listener(current));
+ await flush();
+ await tick(20_000);
+ expect(player.text()).toContain('播放器资源不足');
+ expect(retries).toBe(0);
+ await tick(1000);
+ expect(prepares.map(value=>value.url)).toEqual([source.url,source.url]);
+ expect(current.state).toBe('playing');
+ expect(player.text()).not.toContain('播放器资源不足');
+});
+
+test('decoder retry pauses in the background and resumes in the foreground',async()=>{
+ const source={platform:'douyin',immersive:true,awemeId:'suspend-resource',url:'file:///fixture/suspend.mp4',title:'fixture'};
+ nextError={code:'decoder_admission_deferred'};
+ const player=reloadMount(source);
+ await flush();
+ lifecycleTo('background');
+ await tick(30_000);
+ expect(prepares).toHaveLength(1);
+ lifecycleTo('active');
+ await tick(999);
+ expect(prepares).toHaveLength(1);
+ await tick(1);
+ expect(prepares).toHaveLength(2);
+ expect(current.state).toBe('playing');
+ expect(player.text()).not.toContain('播放器资源不足');
+ expect(retries).toBe(0);
+});
+
+test('session decoder admission recovery keeps the session backend and same source',async()=>{
+ const source={platform:'douyin',immersive:true,awemeId:'session-resource',url:'file:///fixture/session.mp4',title:'fixture'};
+ sessionsCapable=true;decoderLimit=2;sessionCalls.length=0;sessionStates.clear();
+ const original=sessionPort.prepare;
+ let deny=true;
+ sessionPort.prepare=(options:any)=>{
+  const result=original(options);
+  return deny&&!options.prewarm ? {...result,result:Promise.reject({code:'resource_exhausted'})} : result;
+ };
+ try{
+  const player=reloadMount(source);
+  await flush();
+  expect(player.text()).toContain('播放器资源不足');
+  expect(prepares).toHaveLength(0);
+  deny=false;
+  await tick(1000);
+  expect(sessionCalls.filter(call=>call.method==='prepare'&&!call.prewarm).map(call=>call.url)).toEqual([source.url,source.url]);
+  expect((await player.diagnostics()).state).toBe('playing');
+  expect(player.text()).not.toContain('播放器资源不足');
+  expect(prepares).toHaveLength(0);
+  expect(retries).toBe(0);
+ }finally{sessionPort.prepare=original;}
+});

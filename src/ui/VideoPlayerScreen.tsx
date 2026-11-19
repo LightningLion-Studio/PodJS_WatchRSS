@@ -6,7 +6,7 @@ import {VideoReloadPolicy,VideoBufferedStallWait,videoSourceExpired} from './vid
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playbackWork} from '../core/playback-work';
 import {PlayerAnimationDiagnostics} from './player-animation-diagnostics.ts';
-import {playerFailureCode,playerFailureFields,formatPlayerFailure,closedPlayerState} from '../media/player-errors.ts';
+import {playerFailureCode,playerFailureFields,formatPlayerFailure,closedPlayerState,videoResourceUnavailable} from '../media/player-errors.ts';
 import type {FailureStage} from '@podjs/framework/benchmark';
 import {benchmark,type VideoBenchmarkAction} from '@podjs/framework/benchmark';
 import {VideoFirstFrameWait} from '@podjs/framework/video-paging';
@@ -122,6 +122,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let reloadResume:number|undefined;
   let freshPrepare=false,needsFreshResolution=false;
   let resumeAutoplay:boolean|undefined;
+  type ResourceRetry={source:PlaybackSource;positionMs:number;autoplay:boolean;attempt:number;timer?:HostOperation<void>};
+  let resourceRetry:ResourceRetry|undefined;
+  const stopResourceTimer=()=>{if(resourceRetry){resourceRetry.timer?.cancel();resourceRetry.timer=undefined;}};
+  const cancelResourceRetry=()=>{stopResourceTimer();resourceRetry=undefined;};
+  const isResourceFailure=(value:unknown)=>immersiveDouyin&&videoResourceUnavailable(value);
+  createEffect(()=>{
+    const source=props.source;
+    if(!props.active||resourceRetry?.source!==source)cancelResourceRetry();
+  });
+  onCleanup(cancelResourceRetry);
   createEffect(()=>{if(reloadPolicy.select(props.source)){reloadCount=0;bufferedStall.cancel();reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}});
   const cancelReload=()=>{reloadPolicy.cancel();reloadWait?.cancel();reloadWait=undefined;reloadTimeout?.cancel();reloadTimeout=undefined;setReconnecting(false);};
   onCleanup(cancelReload);
@@ -222,12 +232,22 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const detail=playerFailureFields(value,stage),fault=playerFailureCode(value);
     if(fault==='cancelled'||fault==='stale')return;
     recoveryDeadline.cancel();
-    if(props.onReload&&!terminal&&!resolutionRejected(value)&&fault!=='restricted'&&fault!=='permission_denied'){void reload(false,value);return;}
+    const resourceFailure=isResourceFailure(value);
+    if(resourceFailure&&resourceRetry?.source===props.source){armResourceRetry();return;}
+    if(!resourceFailure)cancelResourceRetry();
+    if(props.onReload&&!resourceFailure&&!terminal&&!resolutionRejected(value)&&fault!=='restricted'&&fault!=='permission_denied'){void reload(false,value);return;}
     props.source.releaseStartupPreview?.();
     if(!terminal&&props.source.platform==='douyin'&&props.source.immersive&&props.onPlaybackFailure&&['network','expired'].includes(playbackFailure(value))){benchmark.begin('error_page',{reason:'candidate_retry',...detail});return;}
-    benchmark.begin('error_page',{reason:'exhausted',...detail}); if(benchmarkSeq)benchmark.mark("error",benchmarkSeq,{generation:pendingBenchmark?.generation??benchmarkGeneration,...detail}); appLogger.e('VideoPlayer','Playback failed'); setHandoff(false); if (!disposed) { const message = resolutionRejected(value)?'视频清晰度超过 720P':formatPlayerFailure(fault); setNetworkFailure(douyinNetworkFailure(value)); setError(message); emitCheckpoint("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
+    benchmark.begin('error_page',{reason:'exhausted',...detail}); if(benchmarkSeq)benchmark.mark("error",benchmarkSeq,{generation:pendingBenchmark?.generation??benchmarkGeneration,...detail}); appLogger.e('VideoPlayer','Playback failed'); setHandoff(false); if (!disposed) { const message = resolutionRejected(value)?'视频清晰度超过 720P':formatPlayerFailure(fault); setNetworkFailure(douyinNetworkFailure(value)); setError(message); emitCheckpoint("error", checkpointPosition, checkpointDuration); props.onError?.(message); }
+    if(resourceFailure){
+      if(resourceRetry?.source!==props.source)resourceRetry={source:props.source,positionMs:checkpointPosition,autoplay:autoplayAllowed,attempt:0};
+      setReady(false);
+      armResourceRetry();
+    }
+  };
   const resolutionRejected=(value:unknown)=>(props.source.platform==='douyin'||props.source.maxVideoShortEdge!==undefined)&&(value as {code?:string}|undefined)?.code===DOUYIN_RESOLUTION_LIMIT;
   const recoverPlaybackFailure = (value: unknown) => {
+    if(isResourceFailure(value))return;
     if(networkWaiting()||networkRetriedSource===props.source&&isTransportFailure(value))return;
     if(disposed||!props.active||lifecycle()!=='active'||videoSessionOwner!==sessionOwner)return;
     if(resolutionRejected(value)){
@@ -311,8 +331,23 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
    observeState(value);
   }));
   const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active)return; try { const next = await media.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed({code:next.errorCode}); recoverPlaybackFailure({code:next.errorCode,mirrorIndex:next.mirrorIndex}); } lastPlaybackState = "error"; return; } const firstObserved=next.hasRenderedFirstFrame&&!state()?.hasRenderedFirstFrame;setState(next);if(next.state==='playing'&&next.hasRenderedFirstFrame)networkRetriedSource=undefined;network.refreshUsable(); if(next.hasRenderedFirstFrame||next.hasCachedFirstFrame){setFirstFrame(true);if(firstObserved)captureFrame();} if (!volumeRunning && next.volume !== observedVolume) { virtualVolume = next.volume; observedVolume = next.volume; } if(props.onReload)reloadPolicy.observe(generation,next.positionMs,next.state==="playing");const progress=viewing.observe(next); checkpointPosition = progress.positionMs; checkpointDuration = progress.durationMs; if(progress.completed)emitCheckpoint("ended",progress.positionMs,progress.durationMs); else if(progress.reportProgress)props.onProgress?.(progress.positionMs, progress.durationMs); lastPlaybackState = next.state; if(progress.firstEnd)void advanceAfterEnd().catch(failed); } catch (value) { if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner||!props.active)return;if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'state');else{failed(value,false,'state');if(props.source.platform==="bili"){lastPlaybackState="error";recoverPlaybackFailure(value);}} } };
-  const prepare = (retryNetwork = false) => {
+  function armResourceRetry(){
+    const retry=resourceRetry;
+    if(!retry||retry.timer||disposed||!props.active||lifecycle()!=="active")return;
+    const own=generation;
+    const timer=delay(1000*2**Math.min(3,retry.attempt));
+    retry.timer=timer;
+    void timer.result.then(()=>{
+      if(retry.timer!==timer||resourceRetry!==retry)return;
+      retry.timer=undefined;
+      if(disposed||!props.active||lifecycle()!=="active"||own!==generation||retry.source!==props.source||videoSessionOwner!==sessionOwner)return;
+      retry.attempt++;
+      prepare(true,retry);
+    }).catch(()=>{});
+  }
+  const prepare = (retryNetwork = false, resourceAttempt?:ResourceRetry) => {
     if(disposed||!props.active||lifecycle()!=="active"||props.source.previewOnly)return;
+    if(!resourceAttempt)cancelResourceRetry();
     appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'} source=${props.source.url?.startsWith('podjs-media-cache:')?'proxy':douyinSourceNeedsInternet(props.source.url??props.source.videoUrl)?'network':'local'}`);if(networkPrompt()&&!retryNetwork)return;
     if(sessionPool&&sessionCapacity==="unchecked"){
       sessionCapacity="checking";
@@ -329,11 +364,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if(sessionPool&&sessionCapacity==="checking")return;
     if(props.onReload&&!usingSessions())retiredNativeGeneration=Math.max(retiredNativeGeneration,state()?.sourceGeneration??-1);
-    resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&resumeAutoplay!==false&&(source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;preparingState=undefined;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!immersiveDouyin)setMode("standard");if(!douyinPlayer())setRotation(0);finishRotation('source-change');setDisplayRotation(rotation());setPan(0);panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;if(douyinSourceNeedsInternet(source.url??source.videoUrl))network.requestStarted();const op=media.prepare({...source,...(source.platform==='douyin'?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}:{}),...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...restingBounds(),visible:props.active},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});
+    resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=resourceAttempt?{...props.source,resumePositionMs:resourceAttempt.positionMs}:props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&(resourceAttempt?.autoplay??(resumeAutoplay!==false))&&(source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;if(!resourceAttempt)props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;preparingState=undefined;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!immersiveDouyin)setMode("standard");if(!douyinPlayer())setRotation(0);finishRotation('source-change');setDisplayRotation(rotation());setPan(0);panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;if(!resourceAttempt)setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;if(douyinSourceNeedsInternet(source.url??source.videoUrl))network.requestStarted();const op=media.prepare({...source,...(source.platform==='douyin'?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}:{}),...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...restingBounds(),visible:props.active},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation&&!resourceAttempt)warmEarly();});
     if(props.onReload||Number.isFinite(source.recoveryDeadlineMs)&&!recoveredSources.has(props.source))recoveryDeadline.arm(props.onReload?20_000:source.recoveryDeadlineMs!-Date.now(),delay,
       ()=>!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner&&!state()?.hasRenderedFirstFrame,
-      ()=>{generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});failed({code:'timeout'});},source.platform==='douyin'&&props.onReload?{maxMs:120_000,read:()=>Math.max(state()?.metrics?.bytesLoaded??0,preparingState?.generation===ownGeneration?preparingState.value.metrics?.bytesLoaded??0:0)}:undefined);
-    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!immersiveDouyin||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(immersiveDouyin)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
+      ()=>{
+        const admissionPending=preparingState?.generation===ownGeneration&&preparingState.value.decoderAdmissionDeferred===true;
+        generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();
+        void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});
+        failed({code:admissionPending?'decoder_admission_deferred':'timeout'},false,'prepare');
+      },source.platform==='douyin'&&props.onReload?{maxMs:120_000,read:()=>Math.max(state()?.metrics?.bytesLoaded??0,preparingState?.generation===ownGeneration?preparingState.value.metrics?.bytesLoaded??0:0)}:undefined);
+    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!immersiveDouyin||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(immersiveDouyin)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;if(resourceAttempt&&resourceRetry===resourceAttempt){cancelResourceRetry();setError('');props.onError?.('');}setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
   };
   const reload=async(manual:boolean,cause:unknown={code:'source_expired'})=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
@@ -374,6 +414,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     // Native prepare settles after retry() returns. Keep its one-shot budget
     // until a frame plays, or the user explicitly retries a new operation.
     if (retrying||disposed||!props.active) return;
+    if(resourceRetry?.source===props.source){
+      if(resourceRetry.timer){
+        stopResourceTimer();
+        prepare(true,resourceRetry);
+      }
+      return;
+    }
     networkRetriedSource=automaticNetworkRetry?props.source:undefined;
     if(failedMove){
       retrying=true;const move=failedMove,from=props.source;setError("");
@@ -400,6 +447,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(!props.active)return;
       if(props.onReload&&videoSessionOwner!==sessionOwner){videoSessionOwner=sessionOwner;resumeAfterLifecycle=true;}
       if(videoSessionOwner!==sessionOwner)return;
+      if(resourceRetry?.source===props.source){armResourceRetry();return;}
       if(props.onReload){
         generation++;pollTimer?.cancel();
         const desiredResume=resumeAfterLifecycle||['playing','buffering'].includes(state()?.state??'');
@@ -430,6 +478,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return;
     }
     if(lifecycleSuspended)return;lifecycleSuspended=true;
+    stopResourceTimer();
     if(props.source.backgroundPlayback||videoSessionOwner!==sessionOwner){if(usingSessions()&&videoSessionOwner===sessionOwner)sessionPool!.retainNeighbours([]);return;}
     if(props.onReload){cancelReload();reloadResume=checkpointPosition;}
     captureFrame();resumeAfterLifecycle=resumeAutoplay??(resumeAfterLifecycle||autoplayAllowed&&(!ready()||['playing','buffering','preparing'].includes(state()?.state??'')));autoplayAllowed=false;autoAdvance.cancel();
@@ -500,16 +549,20 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let backwardTarget:DouyinPreparedSource|undefined,backwardWarm:Promise<DouyinPreparedSource|undefined>|undefined;
   let degradingSessions=false,neighborRevision=0,forwardResolved=false,forwardWarm:Promise<DouyinPreparedSource|undefined>|undefined,forwardTarget:DouyinPreparedSource|undefined;
   const cancelledSessionError=(value:unknown)=>/cancel|stale|abort/i.test(String((value as {code?:unknown}|null)?.code??'')+' '+String(value));
-  const degradeSessions=async(value:unknown,stage:FailureStage='unknown')=>{
-    if(disposed||!props.active||videoSessionOwner!==sessionOwner)return;
-    if(!shouldFallbackFromVideoSessions(value)){if(!cancelledSessionError(value)){failed(value,false,stage);recoverPlaybackFailure(value);}return;}
-    if(!usingSessions()||degradingSessions||disposed)return;
+  const fallbackSessions=async()=>{
+    if(disposed||!props.active||videoSessionOwner!==sessionOwner||!usingSessions()||degradingSessions)return;
     degradingSessions=true;appLogger.w("VideoPlayer","videoSessions failed; falling back to legacy video");
     generation++;prepareOp?.cancel();pollTimer?.cancel();neighborRevision++;
     try{await sessionPool!.releaseAll();}catch(releaseError){appLogger.w("VideoPlayer","videoSessions cleanup failed");}
     if(disposed){degradingSessions=false;return;}
     batch(()=>{sessionCapacity="unavailable";setSessionsDisabled(true);preparedSource=undefined;forwardTarget=undefined;setReady(false);setState(null);degradingSessions=false;});
     if(props.active&&!networkPrompt()&&preparedSource!==props.source)untrack(prepare);
+  };
+  const degradeSessions=async(value:unknown,stage:FailureStage='unknown')=>{
+    if(disposed||!props.active||videoSessionOwner!==sessionOwner)return;
+    if(isResourceFailure(value)){failed(value,false,stage);return;}
+    if(!shouldFallbackFromVideoSessions(value)){if(!cancelledSessionError(value)){failed(value,false,stage);recoverPlaybackFailure(value);}return;}
+    await fallbackSessions();
   };
   const adjacentResolutions=new Map<string,{revision:number;key:string|undefined;pending:Promise<DouyinPreparedSource|undefined>}>();
   const previewAdjacent=(direction:"next"|"previous",revision:number,revealPoster=false,distance:1|2|3|4|5=1):Promise<DouyinPreparedSource|undefined>=>{
@@ -534,7 +587,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(target.queueIndex!==undefined&&target.anchorIndex!==undefined)sessionPool!.traceNeighbour(target.key,target.queueIndex,target.anchorIndex);
       await sessionPool!.prewarm(target,{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false,muted:true,retainKeyframe},direction==="next"?"next":"prev");
       return revision===neighborRevision&&usingSessions()&&sessionPool!.hasStandby(target.key)?target:undefined;
-    }catch(value){if(retainKeyframe)return;if(revision===neighborRevision&&resolutionRejected(value)){props.onRejectAdjacent?.(target,(value as {mirrorIndex?:number})?.mirrorIndex);return;}if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await degradeSessions(value);return revision===neighborRevision&&!disposed?target:undefined;}return;}
+    }catch(value){if(retainKeyframe)return;if(revision===neighborRevision&&resolutionRejected(value)){props.onRejectAdjacent?.(target,(value as {mirrorIndex?:number})?.mirrorIndex);return;}if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await fallbackSessions();return revision===neighborRevision&&!disposed?target:undefined;}return;}
   };
   const warmBackward=()=>{
     if(!usingSessions()||!sessionPool!.canPrewarmPreviousFrame||!props.onPrevious||!props.onPrepareAdjacent||

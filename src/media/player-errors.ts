@@ -1,4 +1,11 @@
 import type {BenchmarkFields,FailureCode,FailureStage} from '@podjs/framework/benchmark';
+
+export function videoResourceUnavailable(error:unknown):boolean {
+ const value=error as {code?:unknown;message?:unknown}|undefined;
+ return ['decoder_admission_deferred','resource_exhausted','decoder_limit','video_decoder_limit'].includes(String(value?.code??''))||
+   value?.message==='video_decoder_limit'||value?.message==='video_memory_budget_deferred';
+}
+
 /** Inspect messages only inside this boundary; output is a fixed enum, never text. */
 export function playerFailureCode(error:unknown):FailureCode{
  const e=error as {code?:unknown;message?:unknown;name?:unknown}|null,code=String(e?.code??''),text=String(e?.message??'');
@@ -9,7 +16,7 @@ export function playerFailureCode(error:unknown):FailureCode{
  if(/unknown_video_session/.test(text))return 'session_missing';
  if(/video_not_(ready|prewarmed)/.test(text))return 'not_ready';
  if(/video_surface/.test(text))return 'surface_error';
- if(/session_limit|decoder_limit|resource_exhausted|OutOfMemory/.test(code+' '+text))return 'resource_exhausted';
+ if(videoResourceUnavailable(error)||/session_limit|decoder_limit|resource_exhausted|OutOfMemory/.test(code+' '+text))return 'resource_exhausted';
  if(/playback_recovery_exhausted/.test(text))return 'recovery_exhausted';
  const domain:Record<string,FailureCode>={NOT_LOGGED_IN:'restricted',RATE_LIMITED:'restricted',TEMPORARILY_UNAVAILABLE:'not_ready',REQUEST_FAILED:'network_error',PARSE_FAILED:'prepare_failed',UNSUPPORTED:'prepare_failed',PLAYBACK_FAILED:'video_error'};
  if(Object.prototype.hasOwnProperty.call(domain,code))return domain[code]!;
