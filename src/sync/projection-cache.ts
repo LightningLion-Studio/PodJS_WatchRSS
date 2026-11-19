@@ -40,6 +40,7 @@ export class LibraryProjectionCache {
  async initialize(){if(this.ready)await this.ready;const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);if(cookie===this.cookie)return;this.ready=repositoryWork(this.diagnostic,'projection-install',()=>this.install()).then(async()=>{this.loaded.clear();this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);}).catch(e=>{this.ready=undefined;throw e;});await this.ready;}
  private async install(){
   await this.db.transaction([
+   {sql:'CREATE TABLE IF NOT EXISTS sync_projection_wire_ids(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,generation TEXT NOT NULL,stamp TEXT NOT NULL,article_id TEXT NOT NULL,native_id TEXT NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_header(scope TEXT PRIMARY KEY,generation TEXT NOT NULL,revision INTEGER NOT NULL,seq INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_rows(scope TEXT NOT NULL,generation TEXT NOT NULL,article_id TEXT NOT NULL,url TEXT NOT NULL,position INTEGER NOT NULL,source_item INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(scope,generation,article_id))'},
    {sql:'CREATE INDEX IF NOT EXISTS sync_projection_url ON sync_projection_rows(scope,generation,url)'},
@@ -115,6 +116,11 @@ export class LibraryProjectionCache {
   await this.db.transaction(statements);
  }
  async sequence(){await this.initialize();return Number((await this.db.query("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'),0) AS seq"))[0]!.seq);}
+ async onlyDerivedEvents(from:number,to:number){
+  const row=(await this.db.query(`SELECT count(*) AS n, max(seq) AS last
+   FROM sync_projection_events WHERE seq>? AND kind IN ('cacheUrl','cacheNone')`,[from]))[0];
+  return Number(row?.n)===to-from&&Number(row?.last)===to;
+ }
  async plan(scope:string,revision:number,bookMode:boolean):Promise<ProjectionPlan|undefined>{
   await this.initialize();const h=(await this.db.query('SELECT * FROM sync_projection_header WHERE scope=?',[scope]))[0];if(!h)return;
   const events=await querySyncPages(this.db,'SELECT seq,kind,old_url,new_url FROM sync_projection_events WHERE seq>? ORDER BY seq',[Number(h.seq)]);
@@ -141,10 +147,22 @@ export class LibraryProjectionCache {
   // backfilled, with the same revision guard used by normal publication.
   for(let at=0;at<backfill.length;at+=200)await this.db.transaction([revisionGuard(revision),...backfill.slice(at,at+200)]);
   for(const key of this.loaded.keys())if(key.startsWith(scope+'\0'))this.loaded.delete(key);this.loaded.set(scope+'\0'+[h.generation,h.revision,h.seq].join(':'),rows);}
+  const dirty=new Set(urls);
   const sources=new Set(events.filter(r=>r.kind==='source').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string') as string[]));
-  for(const r of rows)if(r.prepared.article.rssSourceUrl&&sources.has(r.prepared.article.rssSourceUrl)&&!urls.includes(r.prepared.article.url))urls.push(r.prepared.article.url);
-  if(urls.length>64)return;
-  return {generation:String(h.generation),revision:Number(h.revision),seq,rows,...(events.length?{urls,readingUrls:[...new Set(events.filter(r=>!['cacheUrl','cacheNone','source','none'].includes(String(r.kind))&&(!bookMode||!['bookUrl','bookBodyUrl'].includes(String(r.kind)))).flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))],bodyUrls:[...new Set(events.filter(r=>r.kind==='bodyUrl'||r.kind==='cacheUrl'||!bookMode&&r.kind==='bookBodyUrl').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))]}:{})};
+  if(sources.size)for(const {prepared:{article}} of rows){
+   const source=article.rssSourceUrl??(article.independentSaved?'watchrss://phone-imports':null);
+   if(source&&sources.has(source))dirty.add(article.url);
+  }
+  if(dirty.size>64)return;
+  if(dirty.size){
+   const marks=[...dirty].map(()=>'?').join(',');
+   // Body ownership may point at another physical URL. A partial rebuild
+   // cannot safely replace a clean manifest row with an affected body binding.
+   if((await this.db.query(`SELECT 1 FROM sync_projection_rows p LEFT JOIN articles a ON a.id=p.source_item
+    WHERE p.scope=? AND p.generation=? AND p.source_item>0 AND p.url NOT IN (${marks})
+    AND (a.id IS NULL OR COALESCE(a.link,a.dedup_key) IN (${marks})) LIMIT 1`,[scope,h.generation,...dirty,...dirty])).length)return;
+  }
+  return {generation:String(h.generation),revision:Number(h.revision),seq,rows,...(events.length?{urls:[...dirty],readingUrls:[...new Set(events.filter(r=>!['cacheUrl','cacheNone','source','none'].includes(String(r.kind))&&(!bookMode||!['bookUrl','bookBodyUrl'].includes(String(r.kind)))).flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))],bodyUrls:[...new Set(events.filter(r=>r.kind==='bodyUrl'||r.kind==='cacheUrl'||!bookMode&&r.kind==='bookBodyUrl').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))]}:{})};
  }
  async full(prepared:readonly PreparedArticle[]):Promise<PreparedArticle[]>{return cpuWorkAsync('projection-rebuild','items',prepared.length,async()=>{
   const groups=new Map<string,{p:PreparedArticle;ref:{scope:string;generation:string;id:string;sourceItem:number}}[]>();

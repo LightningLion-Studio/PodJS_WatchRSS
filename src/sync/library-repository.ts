@@ -208,15 +208,17 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   throw new LibrarySnapshotBusyError();
   });
  }
- private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
+ private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void,legacyCloud=false):Promise<T>{
   await playbackWork.wait(check);
-  idleHit(48);if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
+  idleHit(48);if(!canonical&&legacyCloud)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
   const id=await this.migrate();trace('repository.migrate');
   const contention=new ManifestContention(this.db,()=>this.ports.text.yieldTurn?.()??this.db.query('SELECT 1'),fields=>this.report(fields));
+  let quickRetry=false;
   for(let attempt=0;attempt<3;attempt++){
-   if(attempt)await contention.settle(attempt,check);
+   if(attempt&&!quickRetry)await contention.settle(attempt,check);
+   quickRetry=false;
    check?.();let revision=await libraryRevision(this.db);const projectionSeq=await this.projection.sequence();
    try{
     let cached=this.snapshotCache;
@@ -230,23 +232,37 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
      const preparedRevision=await libraryRevision(this.db);
      if(preparedRevision!==revision)plan=await this.projection.plan(scope,preparedRevision,bookMode);
      revision=preparedRevision;
-     this.local.restoreReusableBodies(plan?.rows.filter(r=>!plan?.bodyUrls?.includes(r.prepared.article.url))??[],async p=>(await this.projection.full([p]))[0]!);
-     if(plan)this.local.restoreProjectionBindings(new Map(plan.rows.filter(r=>!plan?.urls?.includes(r.prepared.article.url)).map(r=>[r.prepared.article.articleId,r.sourceItem])));
+     const dirty=new Set(plan?.urls),dirtyBodies=new Set(plan?.bodyUrls);
+     this.local.restoreReusableBodies(plan?.rows.filter(r=>dirty.has(r.prepared.article.url)&&!dirtyBodies.has(r.prepared.article.url))??[],async p=>(await this.projection.full([p]))[0]!);
+     if(plan)this.local.restoreProjectionBindings(new Map(plan.rows.filter(r=>!dirty.has(r.prepared.article.url)).map(r=>[r.prepared.article.articleId,r.sourceItem])));
      const observedSeq=plan?.seq??await this.projection.sequence();
      let articles:readonly PreparedArticle[],changedIds:Set<string>|undefined;
      if(plan&&plan.urls===undefined){articles=plan.rows.map(r=>r.prepared);changedIds=new Set();}
      else if(plan){
-      const dirty=new Set(plan.urls),old=plan.rows.map(r=>r.prepared),changed=await this.local.snapshot(true,canonical,bookMode,check,plan.urls);
+      const old=plan.rows.map(r=>r.prepared),changed=await this.local.snapshot(true,canonical,bookMode,check,plan.urls,false,!canonical);
       const kept=old.filter(p=>!dirty.has(p.article.url)),keptIds=new Set(kept.map(p=>p.article.articleId));
-      if(changed.some(p=>keptIds.has(p.article.articleId))){plan=undefined;articles=await this.local.snapshot(true,canonical,bookMode,check);}
-      else{changedIds=new Set([...old.filter(p=>dirty.has(p.article.url)).map(p=>p.article.articleId),...changed.map(p=>p.article.articleId)]);articles=[...kept,...changed];}
+      const oldDirty=old.filter(p=>dirty.has(p.article.url)),oldIds=new Set(oldDirty.map(p=>p.article.articleId));
+      const changedKeys=new Set(changed.map(p=>p.article.articleId));
+      const unsafe=changed.some(p=>keptIds.has(p.article.articleId)||!dirty.has(p.article.url))||
+       (!canonical&&(new Set(oldDirty.map(p=>p.article.url)).size!==dirty.size||oldIds.size!==changedKeys.size||[...oldIds].some(id=>!changedKeys.has(id))));
+      if(unsafe){
+       plan=undefined;this.local.restoreReusableBodies([]);
+       articles=await this.local.snapshot(true,canonical,bookMode,check);
+      }else{changedIds=new Set([...oldIds,...changedKeys]);articles=[...kept,...changed];}
      }else articles=await this.local.snapshot(true,canonical,bookMode,check);
      trace('repository.articles');
      const bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
      await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),scope,changedIds,await this.needsProjectionSeed());trace('repository.fingerprints');
      if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
      if(!plan||plan.urls!==undefined)await this.projection.publish(scope,revision,articles,this.local.projectionBindings(),plan,plan?.urls,observedSeq,generation);
-     if(await this.projection.sequence()!==observedSeq){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,observedSeq,'projection');continue;}
+     const afterSeq=await this.projection.sequence();
+     if(afterSeq!==observedSeq){
+      // Derived cache writes can change the manifest's content witness. Read
+      // the dirty plan again immediately once; use normal contention backoff
+      // when source mutations or an incomplete event journal are involved.
+      quickRetry=attempt===0&&await this.projection.onlyDerivedEvents(observedSeq,afterSeq);
+      this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,observedSeq,'projection');continue;
+     }
      this.report({stage:'repository.projection',cached:plan?1:0,dirtyUrls:plan?.urls?.length??0,articles:articles.length});
      cached={canonical,bookMode,revision,projectionSeq:observedSeq,articles,sources};this.snapshotCache=cached;
     }
@@ -282,13 +298,27 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean){return this.run(async()=>this.sources.merge(sources,remote,await this.migrate(),authoritative));}
  prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>{return this.run(()=>this.perf.time("window.total",()=>this.snapshot(async(articles,sources,id)=>{
    const manifests=await this.wireManifests(articles,peer);const window=await this.sequence.prepareWindow(peer,id,manifests,async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq,{snapshotReconciled:true});
-   window.projectionGeneration=this.projectionGeneration;
+   window.projectionGeneration=this.projectionGeneration;window.fullRssSources=sources;
    if(await this.changedIdentityMode(peer))return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'articleIdentityChanged'};
    if(!(await this.db.query('SELECT peer FROM sync_fast_library_baseline WHERE peer=? AND generation=?',[peer,this.projectionGeneration])).length)return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'projectionChanged'};
    return window.fullSnapshot?window:{...window,...await this.echo.filter(peer,window.articleManifest,window.rssSources)};
   },!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer),check)).finally(()=>this.perf.flush("window.perf")));}
  private async wireManifests(articles:readonly PreparedArticle[],peer:string){return this.perf.time("snapshot.wireManifests",()=>this.wireManifestsImpl(articles,peer));}
- private async wireManifestsImpl(articles:readonly PreparedArticle[],peer:string){if(!this.peerCanonical.get(peer))return articles.map(a=>a.manifest);const identities=await this.local.cloudRssIdentitiesForUrls([...new Set(articles.filter(p=>p.article.rssSourceUrl&&!isImportedContentUrl(p.article.rssSourceUrl)).map(p=>p.article.url))]),counts=new Map<string,number>();for(const r of identities)counts.set(r.nativeArticleId,(counts.get(r.nativeArticleId)??0)+1);const byId=new Map<string,typeof identities>();for(const r of identities){const rows=byId.get(r.articleId)??[];rows.push(r);byId.set(r.articleId,rows);}return articles.map(p=>{const rows=byId.get(p.article.articleId)??[],legacy=[...new Set(rows.flatMap(r=>[r.localArticleId,...(counts.get(r.nativeArticleId)===1?[r.nativeArticleId]:[])]))].filter(id=>id!==p.article.articleId);return legacy.length?{...p.manifest,legacyArticleIds:legacy}:p.manifest;});}
+ private async wireManifestsImpl(articles:readonly PreparedArticle[],peer:string){
+  if(!this.peerCanonical.get(peer))return articles.map(a=>a.manifest);
+  const urls=[...new Set(articles.filter(p=>p.article.rssSourceUrl&&!isImportedContentUrl(p.article.rssSourceUrl)).map(p=>p.article.url))];
+  const identities=await this.local.wireRssIdentitiesForUrls(urls,this.projectionGeneration!);
+  const counts=new Map<string,number>(),byId=new Map<string,typeof identities>();
+  for(const row of identities){
+   counts.set(row.nativeArticleId,(counts.get(row.nativeArticleId)??0)+1);
+   const group=byId.get(row.articleId)??[];group.push(row);byId.set(row.articleId,group);
+  }
+  return articles.map(p=>{
+   const rows=byId.get(p.article.articleId);if(!rows)return p.manifest;
+   const legacy=[...new Set(rows.flatMap(r=>[r.localArticleId,...(counts.get(r.nativeArticleId)===1?[r.nativeArticleId]:[])]))].filter(id=>id!==p.article.articleId);
+   return legacy.length?{...p.manifest,legacyArticleIds:legacy}:p.manifest;
+  });
+ }
 
  exportSources(peer?:string,check?:()=>void){return this.run(()=>this.snapshot(async(_a,sources)=>sources,!!this.peerCanonical.get(peer??''),!!this.peerBooks.get(peer??''),check));}
  receiveArticle(entry:ReceivedArticle,remote:string,authoritative:boolean,receipt?:ReceiptBoundary,binary?:{staged:StagedArticleBody|null}){return this.run(()=>this.perf.time('receive.total',async()=>{await this.perf.time('receive.migrate',()=>this.migrate());if(!binary&&!this.projectionGeneration)await this.prepareFastProjection();const mapped=await this.perf.time('receive.bookMapping',async()=>this.books?.mapping(entry.article.articleId,entry.article.url));if(mapped){const book=(await this.books!.states()).find(b=>b.bookId===mapped.bookId);if(book&&(book.deleted||book.deletedChapters.includes(mapped.chapterIndex))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,...receipt.after('retainedLocal')]);}return 0;}}let target;
@@ -427,7 +457,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const pendingPrivateArticleIds=exported.filter(a=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return !a.deleted&&(a.independentSaved||a.favoriteSaved||a.watchLaterSaved||isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl))&&m&&(bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)&&!Number(m.body_ready);}).map(a=>a.articleId);
   const project=(rows:ExportedArticle[])=>rows.map(cloudIdentity).filter((a):a is ExportedArticle=>!!a);
   return {articles:project(exported.map(origin).map(savedState).map(normalize)),sources:await this.cloudSourcesForExport(sources,device),stateArticles:project([...states.values()].map(savedState).map(normalize)),pendingPrivateBodies:pendingPrivateArticleIds.length>0,pendingPrivateArticleIds:pendingPrivateArticleIds.map(id=>byNative.get(id)?.articleId??id)};
- },canonical,!!this.books,check);}));}
+ },canonical,!!this.books,check,true);}));}
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void){return this.run(async()=>{
   await this.cloudState();const id=await this.migrate();const publicUrls=articles.filter(a=>a.rssSourceUrl&&!isImportedContentUrl(a.rssSourceUrl)&&!isLocalOnlyRssSource(a.rssSourceUrl)).map(a=>a.url),identities=publicUrls.length?await this.local.cloudRssIdentitiesForUrls(publicUrls,check,await this.local.cloudReadingItemIds(await Promise.all(articles.map(a=>this.ports.codec.sha256(utf8Encode(a.articleId)))),check)):[];let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
   const protectedIds=new Set((await querySyncPages(this.db,'SELECT article_id FROM article_register_state ORDER BY article_id')).map(r=>String(r.article_id)));

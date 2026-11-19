@@ -139,7 +139,7 @@ test('warm imported library rebuilds only the edited row and invalidates equal-l
   let encodes=0;const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async a=>{encodes++;return codec.encode(a);}}});
   await repo.cursor('phone');encodes=0;await repo.cursor('phone');expect(encodes).toBe(0);
   await f.db.execute("UPDATE articles SET title='one edit',fetched_at=fetched_at+1 WHERE id=2");
-  await repo.cursor('phone');expect(encodes).toBe(1); // only the edited local chapter is rebuilt
+  await repo.cursor('phone');expect(encodes).toBe(0); // the metadata edit retains the verified body summary
   encodes=0;const before=await repo.prepareWindow('phone',0);
   await f.db.execute("UPDATE article_original_chunks SET body='original B' WHERE article_id=3");
   const after=await repo.prepareWindow('phone',0);expect(encodes).toBe(1);
@@ -251,5 +251,26 @@ test('P6 article body adapter reads the verified v1 cache using native and canon
   const page=await f.repo.cloudRestoreMetadata();expect(page.articles).toHaveLength(1);expect(page.articles[0].articleId).not.toBe(f.id);
   const canonical=await f.repo.cloudArticleBody(page.articles[0].articleId);expect(canonical?.article.contentText).toBe('body');expect(canonical?.manifest.bodyHash).toBe(native?.manifest.bodyHash);expect((await f.repo.cloudArticleBody(f.id))?.article.contentText).toBe('body');
   expect(await f.repo.cloudArticleBody('missing')).toBeUndefined();
+ }finally{f.sql.close();}
+});
+
+test('legacy wire projection reuses body summaries after restart and rebuilds on journal loss',async()=>{
+ const f=await setup();
+ try{
+  await stableWindow(f);
+  let encodes=0;
+  const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async b=>{encodes++;return codec.encode(b);}}});
+  const warm=await repo.prepareWindow('phone',0);
+  expect(encodes).toBe(0);
+  await f.db.execute("UPDATE channels SET title='Renamed imports' WHERE id=1");
+  const renamed=await repo.prepareWindow('phone',0);
+  expect(renamed.fullArticleManifest[0]!.metadataHash).not.toBe(warm.fullArticleManifest[0]!.metadataHash);
+  expect(renamed.fullArticleManifest[0]!.bodyHash).toBe(warm.fullArticleManifest[0]!.bodyHash);
+  expect(encodes).toBe(0);
+  await f.db.execute("UPDATE articles SET content='updated after journal loss' WHERE id=1");
+  await f.db.execute('DELETE FROM sync_projection_events');
+  const rebuilt=await repo.prepareWindow('phone',0);
+  expect(rebuilt.fullArticleManifest[0]!.bodyHash).not.toBe(warm.fullArticleManifest[0]!.bodyHash);
+  expect(await f.db.query('SELECT * FROM sync_peer_state')).toEqual([]);
  }finally{f.sql.close();}
 });
