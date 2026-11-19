@@ -13,12 +13,14 @@ import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
 import {readerBodyState} from '../reader/body-state.ts';
+import {useMinuteClock} from './minute-clock.ts';
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {captureActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
 import {startupActivityNavigation} from '../navigation/startup-navigation.ts';
 import {InformationActivity} from '../navigation/information-activity.ts';
 import {RouteActivityProvider} from './route-activity.tsx';
+import { afterPaint } from "@podjs/framework/render";
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 import {readHomeChannelSnapshot,writeHomeChannelSnapshot} from "./home-snapshot.ts";
 import {debugGate} from '../debug/host.ts';
@@ -168,7 +170,10 @@ export default function WatchRSS(props: {
   // Only the host's task-scoped Bundle can resume navigation. Durable KV
   // checkpoints and legacy last-screen records are not launch instructions.
   const activityEntries=startupActivityNavigation(activityStateHub.read(),debugGate.allowed);
+  const startupNeedsChannels=(activityEntries?.length??0)<=1||!!activityEntries?.some(entry=>entry.channelId);
   const [resumeReady, setResumeReady] = createSignal(false);
+  let startupDisposed=false;
+  onCleanup(()=>{startupDisposed=true;});
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
   const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
@@ -212,6 +217,10 @@ export default function WatchRSS(props: {
   };
   let motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
+  // Keep the previous route mounted for restoration. Paint it when a back swipe reveals it.
+  const backUnderlay = createMemo(() =>
+    backOffset() > 0 && page() !== "video" ? stack().at(-2) : undefined
+  );
   const [backRotation, setBackRotation] = createSignal(0);
   const backTranslation = createMemo(() => backOffset() === 0 ? { x: 0, y: 0 } : rotateVector(backOffset(), 0, backRotation()));
   function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
@@ -261,8 +270,12 @@ export default function WatchRSS(props: {
       setBackOffset(0);
     });
     motion.reset();
-    if (leaving.page === "search" && leaving.channelId)
-      void loadFeedArticles(leaving.channelId, feedVisibleCount());
+    const destination=current();
+    if (destination.page==="articles"&&destination.channelId&&
+        (leaving.page==="search"||currentQuery.channelId!==destination.channelId)) {
+      const limit=Number(routeMemory(destination).retained.feedCount)||12;
+      void loadFeedArticles(destination.channelId,limit,true);
+    }
     if (autoRemoveItem) void removeSaved(autoRemoveItem);
     else if (page() === "saved" || page() === "watch-later")
       void loadSaved(page() === "saved" ? "favorite" : "watchLater");
@@ -389,7 +402,7 @@ export default function WatchRSS(props: {
       articles().some(item => item.channelId === entry.channelId);
   };
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [loading, setLoading] = createSignal(!homeSnapshot),
+  const [loading, setLoading] = createSignal(startupNeedsChannels&&!homeSnapshot),
     [busy, setBusy] = createSignal(false),
     [homeRefreshing, setHomeRefreshing] = createSignal(false),
     [errorMessage, setError] = createSignal("");
@@ -706,10 +719,7 @@ export default function WatchRSS(props: {
   },()=>previewOpenPending&&motion.phase==="idle"&&!!previewState());
   createEffect(() => setReaderPreviewVisible(page() === "reader-preview"));
   onCleanup(() => setReaderPreviewVisible(false));
-  const [presetClock, setPresetClock] = createSignal(new Date());
-  let presetClockTimer:ReturnType<typeof delay>|undefined,presetClockDisposed=false;
-  const tickPresetClock=()=>{if(presetClockDisposed)return;presetClockTimer=delay(60000-Date.now()%60000);void presetClockTimer.result.then(()=>{if(presetClockDisposed)return;if(presetState()?.selection.mode==="SYSTEM")setPresetClock(new Date());tickPresetClock();},()=>{});};
-  tickPresetClock();onCleanup(()=>{presetClockDisposed=true;presetClockTimer?.cancel();});
+  const presetClock = useMinuteClock(() => foreground() && presetState()?.selection.mode === "SYSTEM");
   const readerPreset = createMemo(() =>
     presetState()
       ? activeReaderPreset(presetState()!, presetClock())
@@ -734,20 +744,21 @@ export default function WatchRSS(props: {
   };
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
-  async function loadChannels() {idleHit(5);
-    // Keep showing the current list (e.g. the startup snapshot) while refreshing it.
-    if (!channels().length) setLoading(true);
-    setError("");
+  async function loadChannels(foregroundLoad=true) {idleHit(5);
+    // Keep the startup snapshot visible and leave a restored page's state alone.
+    if(foregroundLoad){
+      if(!channels().length)setLoading(true);
+      setError("");
+    }
     try {
       const list = await props.services.listChannels();
       traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
-      startupFirstScreen();
     } catch (e) {
-      setError(String(e));
+      if(foregroundLoad||page()==="home")setError(String(e));
     } finally {
-      setLoading(false);
+      if(foregroundLoad)setLoading(false);
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
@@ -806,8 +817,8 @@ export default function WatchRSS(props: {
   async function restoreStartupNavigation() {
     const baseline=stack();let owned=baseline;
     try {
-      await loadChannels();
-      if(stack()!==baseline)return;
+      if(startupNeedsChannels)await loadChannels();
+      if(startupDisposed||stack()!==baseline)return;
       if(activityEntries){
         const entries=await resolveActivityNavigation(activityEntries,{
           hasChannel:id=>channels().some(channel=>channel.id===id),article:id=>props.services.getArticle(id),
@@ -815,22 +826,43 @@ export default function WatchRSS(props: {
         });
         for(const entry of entries)await informationActivity.restore(entry);
         if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
-        if(stack()!==baseline)return;owned=entries;
+        if(startupDisposed||stack()!==baseline)return;
+        owned=entries;
         batch(()=>{setStack(entries);const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);if(lastReader)setArticle(lastReader.readerArticle!);});
-        const feed=[...entries].reverse().find(entry=>entry.page==='articles');
-        if(feed?.channelId)await loadFeedArticles(feed.channelId,Number(routeMemory(feed).retained.feedCount)||12,true);
-        const saved=[...entries].reverse().find(entry=>entry.page==='saved'||entry.page==='watch-later');
-        if(saved)await loadSaved(saved.page==='saved'?'favorite':'watchLater');
-        const search=entries.at(-1);
-        if(search?.page==='search'&&search.channelId){const draft=routeMemory(search).retained.query;if(typeof draft==='string')await searchChannelArticles(search.channelId,draft);}
-        if(stack()!==entries)return;
+        const destination=entries.at(-1);
+        if(destination?.page==='articles'&&destination.channelId)
+          await loadFeedArticles(destination.channelId,Number(routeMemory(destination).retained.feedCount)||12,true);
+        if(destination?.page==='saved'||destination?.page==='watch-later')
+          await loadSaved(destination.page==='saved'?'favorite':'watchLater');
+        if(destination?.page==='search'&&destination.channelId){
+          const draft=routeMemory(destination).retained.query;
+          if(typeof draft==='string')await searchChannelArticles(destination.channelId,draft);
+        }
       }
     } catch (error) {
-      if(stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
+      if(!startupDisposed&&stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
     } finally {
-      setResumeReady(true);
+      if(!startupDisposed){
+        setResumeReady(true);
+        if(!startupNeedsChannels)void loadChannels(false);
+      }
     }
   }
+  let firstScreenSignaled=false;
+  createEffect(()=>{
+    const route=current();
+    if(firstScreenSignaled||(!resumeReady()&&!(homeSnapshot&&route.page==="home")))return;
+    const ready=()=>{
+      firstScreenSignaled=true;
+      startupMark(`firstScreen.route.${route.page}`);
+      startupFirstScreen();
+    };
+    if(route.page==="home"){ready();return;}
+    const paint=afterPaint();
+    let active=true;
+    onCleanup(()=>{active=false;paint.cancel();});
+    void paint.result.catch(()=>{}).then(()=>{if(active)ready();});
+  });
   function loadMoreFeedArticles() {
     const channelId = current().channelId;
     if (
@@ -1309,7 +1341,7 @@ export default function WatchRSS(props: {
       updateFeedWhenSettled();
     });
     onCleanup(unsubscribe);
-    if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
+    if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1 });});
@@ -1548,12 +1580,7 @@ export default function WatchRSS(props: {
               ? -2 * width
               : 0,
           translateY: active() ? backTranslation().y : 0,
-          opacity:
-            current().page === "video" && !active()
-              ? 0
-              : stack().indexOf(entry) >= stack().length - 2
-                ? 1
-                : 0,
+          opacity: active() || backUnderlay() === entry ? 1 : 0,
         }}
       >
         <Show when={!selfTitled()}>

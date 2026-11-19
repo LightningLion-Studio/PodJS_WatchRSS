@@ -325,7 +325,7 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       props.onNavigate({ name: "player", awemeId: current.awemeId });
     } catch (error) { setError(String(error)); }
   };
-  const preset = () => props.preset ?? defaultReaderPreset();
+  const preset = createMemo(() => props.preset ?? defaultReaderPreset());
   // Native DouyinDetailActivity renders the article DetailContent: reader title, then the blocks,
   // then the reader's favorite / share circles. Favorite uses the persistent local saved store.
   const favoriteController = new DouyinFavoriteController(props.client, props.awemeId, next => setSaved(next));
@@ -348,10 +348,11 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       </Show>
     </View>}>
     {value => {
-      const blocks = () => douyinDetailBlocks(value());
+      const blocks = createMemo(() => douyinDetailBlocks(value()));
+      const body = createMemo(() => blocks().slice(1));
       const title = () => { const first = blocks()[0]; return first?.type === "text" ? first.text : "抖音视频"; };
       return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false} keepAwake={props.readerKeepAwake}
-        articleId={`douyin:${props.awemeId}`} title={title()} blocks={blocks().slice(1)} message={error() || notice()}
+        articleId={`douyin:${props.awemeId}`} title={title()} blocks={body()} message={error() || notice()}
         favorite={favorite} onPlay={() => void play()} onFavorite={() => void toggleFavorite()} onShare={share}
         onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })} />;
     }}

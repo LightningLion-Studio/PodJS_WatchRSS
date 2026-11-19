@@ -104,20 +104,38 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   const targets=douyinProxyWindow(plan.items,plan.anchor,mode,cfg.enabled?cfg.ahead:6).slice(0,limit);
   const headers=await headersForOwner();if(own!==generation)return;
   // Foreground resolution stays independent: one rejected neighbour cannot block its prepare.
-  const prepared:{id:string;target:Target}[]=[];
+  const prepared=new Map<string,{target:Target;url:string;mirror?:string}>();
+  let lastWindow:[string,Target][]|undefined,lastBitrate:number|undefined;
   const publish=async(foregroundBitrate:number)=>{
-   const resolved=new Map(prepared.map(x=>[x.id,x.target])),window=targets.map(item=>({id:item.awemeId,target:resolved.get(item.awemeId)??published.get(item.awemeId)})).filter((x):x is {id:string;target:Target}=>!!x.target);
-   await mediaPrefixCache.window(window.map(x=>x.target),foregroundBitrate).result;
-   if(own===generation){published.clear();for(const x of window)published.set(x.id,x.target);}
+   const next:[string,Target][]=[];
+   for(const {awemeId} of targets){
+    const target=prepared.get(awemeId)?.target??published.get(awemeId);
+    if(target)next.push([awemeId,target]);
+   }
+   const previous=lastWindow;
+   if(previous&&lastBitrate===foregroundBitrate&&previous.length===next.length&&next.every(([,target],i)=>target===previous[i]![1]))return;
+   await mediaPrefixCache.window(next.map(([,target])=>target),foregroundBitrate).result;
+   if(own===generation){
+    published.clear();for(const [id,target] of next)published.set(id,target);
+    lastWindow=next;lastBitrate=foregroundBitrate;
+   }
   };
   let foregroundBitrate=mode==='active'?selectPreferredDouyinVariant(targets[0]?.variants??[])?.bitrate??0:0;
-  const targetFor=(item:DouyinItem,uri:string,stocked=false):Target=>{
-   const itemToken=`p${++token}`,bitrate=(item.variants??[]).find(v=>v.playUrl===item.playUrl)?.bitrate??0;
-   const registration=registered.get(item.awemeId);
-   results.bind({id:item.awemeId,itemToken,generation:own,uri,
-    url:registration?.uri===uri?registration.playUrl:item.playUrl,
-    mirror:registration?.uri===uri?registration.mirrors[0]:undefined});
-   return {uri,itemToken,generation:own,preStore:cfg.enabled,prefetchBytes:stocked||mode==='active'&&item.awemeId===plan?.anchor?0:douyinPrefetchBytes(undefined,item.durationMs,0,bitrate),captureBytes:douyinPreviewBytes(undefined,item.durationMs,bitrate)};
+  const prepareTarget=(item:DouyinItem,uri:string,stocked=false)=>{
+   const id=item.awemeId,bitrate=(item.variants??[]).find(v=>v.playUrl===item.playUrl)?.bitrate??0;
+   const prefetchBytes=stocked||mode==='active'&&id===plan?.anchor?0:douyinPrefetchBytes(undefined,item.durationMs,0,bitrate);
+   const captureBytes=douyinPreviewBytes(undefined,item.durationMs,bitrate);
+   const registration=registered.get(id);
+   const url=registration?.uri===uri?registration.playUrl:item.playUrl;
+   const mirror=registration?.uri===uri?registration.mirrors[0]:undefined;
+   const prior=prepared.get(id);
+   // Native results carry this token. Keep it until the source or byte policy changes.
+   if(prior&&prior.target.uri===uri&&prior.url===url&&prior.mirror===mirror&&
+      prior.target.prefetchBytes===prefetchBytes&&prior.target.captureBytes===captureBytes)return false;
+   const itemToken=`p${++token}`;
+   results.bind({id,itemToken,generation:own,uri,url,mirror});
+   prepared.set(id,{url,mirror,target:{uri,itemToken,generation:own,preStore:cfg.enabled,prefetchBytes,captureBytes}});
+   return true;
   };
   // A reverse gesture can return to a decoded source outside the last window.
   // Publish known, still-authorized registrations before serial stock/resolution
@@ -127,9 +145,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   for(const item of targets){
    const known=registered.get(item.awemeId),selected=preserveSelectedDouyinItem(item);
    if(known&&known.authorization===authorization&&known.headersKey===headersKey&&known.playUrl===selected.playUrl&&known.audioUrl===douyinPlaybackAudio(selected)&&sameMirrors(known.mirrors,douyinPlaybackMirrors(selected))&&Date.now()<known.expires)
-    prepared.push({id:item.awemeId,target:targetFor(selected,known.uri)});
+    prepareTarget(selected,known.uri);
   }
-  if(prepared.length)await publish(foregroundBitrate);
+  if(prepared.size)await publish(foregroundBitrate);
   for(const item of targets){
    if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
    // Backward entries register existing sources only. They never request detail.
@@ -139,15 +157,12 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    // Background expiry never triggers a feed request. Foreground resolution owns bootstrap refresh.
    if(!stocked&&douyinMediaExpiry(preserveSelectedDouyinItem(item).playUrl,Date.now())<=Date.now())continue;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
-   if(!result.ok){published.delete(item.awemeId);const seeded=prepared.findIndex(value=>value.id===item.awemeId);if(seeded>=0)prepared.splice(seeded,1);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
+   if(!result.ok){published.delete(item.awemeId);prepared.delete(item.awemeId);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
    const uri=stocked??await register(result.data,headers,()=>own===generation,true);if(own!==generation)return;if(!uri)continue;
    const source=sources.get(uri)??result.data;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(source.variants??[]).find(v=>v.playUrl===source.playUrl)?.bitrate??0;
-   const target=targetFor(source,uri,!!stocked),existing=prepared.findIndex(value=>value.id===item.awemeId);
-   if(existing<0)prepared.push({id:item.awemeId,target});else prepared[existing]={id:item.awemeId,target};
-   if(own!==generation)return;
-   // Preserve still-wanted transfers while publishing newly resolved sources.
-   await publish(foregroundBitrate);
+   // Publish new sources immediately without resending unchanged seeded targets.
+   if(prepareTarget(source,uri,!!stocked)||lastBitrate!==foregroundBitrate)await publish(foregroundBitrate);
   }
   if(own===generation){await publish(foregroundBitrate);stock?.offer?.(targets,plan?.anchor);await stats();}
  };

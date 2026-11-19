@@ -27,3 +27,17 @@ test('imported text releases old windows while retaining geometry and reloading 
  expect(doc.text(0)).toBe(text(0));expect(doc.layout().height).toBe(before);expect(reads.filter(i=>i===0)).toHaveLength(2);
  doc.close();expect(doc.text(0)).toBeUndefined();
 });
+test('a 128 MiB import shares one empty block across unloaded chunks',async()=>{
+ const chunkBytes=16*1024,chunkCount=8192;
+ const doc=new ImportedReaderDocument({marker:'local',chunkCount,chunkBytes,byteLength:chunkBytes*chunkCount},
+  async index=>'chunk '+index,async block=>layoutContent([block],180,14,s=>s.length*7),()=>{});
+ const before=doc.blocks();
+ expect(before).toHaveLength(chunkCount);
+ expect(new Set(before).size).toBe(1);
+ await doc.ensure(chunkCount-1);
+ const after=doc.blocks();
+ expect(new Set(after).size).toBe(2);
+ expect(before.at(-1)).toEqual({type:'text',style:'body',text:''});
+ expect(after.at(-1)).toEqual({type:'text',style:'body',text:'chunk 8191'});
+ doc.close();
+});

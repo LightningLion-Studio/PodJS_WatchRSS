@@ -90,7 +90,8 @@ function ReaderScreenImpl(props:{
  let disposed=false,autoRequested=false;
  createEffect(()=>{if(novel()||!props.llmEnabled||!props.llmAutoSummarize||autoRequested)return;void props.services.hasSummaryAccount().then(ready=>{if(!disposed&&ready&&props.llmEnabled&&props.llmAutoSummarize&&!autoRequested){autoRequested=true;setExpanded(true);void session.start();}}).catch(props.onError);});
  onCleanup(()=>{disposed=true;session.dispose();});
- onFrame(()=>{if(loading()&&props.active)setRotation((Date.now()%1200)/1200*360);});
+ const animatingSummary = () => props.active && loading();
+ onFrame(() => { if (animatingSummary()) setRotation((Date.now() % 1200) / 1200 * 360); }, animatingSummary);
  const toggleSummary=()=>{setExpanded(value=>!value);if(expanded()&&(summary().status==="idle"||summary().status==="error"))void session.start();};
  const summaryText=()=>summaryDisplayText(summary());
  const summaryLines=createMemo(()=>measuredLines(summaryText(),chromeWidth()-36,text=>getOps().measureText(text,1)));

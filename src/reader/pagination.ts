@@ -59,15 +59,18 @@ export function* paginateBookSteps(blocks:readonly ContentBlock[],options:Pagina
   }
   const text=block.text.replace(/\r\n?/g,'\n'),font=options.preset?presetContentFont(options.preset,block.style):{...contentFont(options.fontSize,block.style),tracking:0,textAlign:0};
   const lineHeight=font.lineHeight;
-  // Retain original UTF-16 positions for imported chunk checkpoints.
-  const raw:number[]=[];for(let i=0;i<block.text.length;i++){raw.push(i);if(block.text[i]==='\r'&&block.text[i+1]==='\n')i++;}raw.push(block.text.length);
+  // Progress addresses the original UTF-16 text. Output rows advance in
+  // order, so only the next removed CR and the accumulated shift are needed.
+  let nextPair=block.text.indexOf('\r\n'),removed=0;
   const units=text.split(/(\n)/).flatMap(part=>part==='\n'?['\n']:breakUnits(part));
   let unit=0,position=0,paragraphEnd=units.indexOf("\n"),lastCount=8;
   if(paragraphEnd<0)paragraphEnd=units.length;
   const measure=(value:string)=>options.measure(value,font.fontSlot)*font.scale+(font.tracking?Math.max(0,graphemes(value).length-1)*font.tracking:0);
   if(page?.lines.length)y+=6;
   while(unit<units.length){
-   if(!page||y+lineHeight>height-34)newPage(anchor('body',character+position,blockIndex,raw[position]??position));
+   let sourceStart=position+removed;
+   while(nextPair>=0&&nextPair<sourceStart){removed++;sourceStart++;nextPair=block.text.indexOf('\r\n',nextPair+2);}
+   if(!page||y+lineHeight>height-34)newPage(anchor('body',character+position,blockIndex,sourceStart));
    let bounds=circleLineBounds(width,height,y,lineHeight,round);
    // A tall font can make the first polar chord too narrow. Move down to a usable chord.
    const first=graphemes(units[unit]!)[0]??'';
@@ -92,7 +95,7 @@ export function* paginateBookSteps(blocks:readonly ContentBlock[],options:Pagina
     if(unit===paragraphEnd&&units[unit]==='\n'){unit++;consumed++;}
    }
    if(unit>paragraphEnd){paragraphEnd=units.indexOf('\n',unit);if(paragraphEnd<0)paragraphEnd=units.length;}
-   const row:ReaderRow={kind:'text',text:line,blockIndex,sourceStart:raw[position]??position,character:character+position,top:y,height:lineHeight,gap:0,...font,lineHeight};
+   const row:ReaderRow={kind:'text',text:line,blockIndex,sourceStart,character:character+position,top:y,height:lineHeight,gap:0,...font,lineHeight};
    page!.lines.push({row,left:bounds.left,top:y,width:bounds.width});position+=consumed;y+=lineHeight;yield;
   }
   character+=text.length+1;

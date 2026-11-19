@@ -20,7 +20,11 @@ mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{
  for(const key of ['onDown','onMove','onUp','onCancel','onTap','onLongPress','onPanStart','onPanMove','onPanEnd'])if(options[key])handle[key]=(c?:Record<string,unknown>)=>options[key](contact({frames:key==='onPanEnd'?6:0,...c}));
  gestures.push(handle);return {dispose(){}};
 }}));
-mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(text:string)=>text.length*8})}));
+let trackTimeWidths=false,timeWidthReads=0;
+mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(text:string,slot:number)=>{
+ if(trackTimeWidths&&slot===19)timeWidthReads++;
+ return text.length*8;
+}})}));
 let occludingHit:any=null;
 mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,resolveTouchHit:()=>occludingHit,pressNode(){}}));
 const frames:Array<()=>void>=[];mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void){frames.push(fn);}}));
@@ -1131,6 +1135,34 @@ test('GEMINI scaled picture controls and playback overlays share the tween pivot
  }finally{Date.now=savedNow;}
 });
 
+test('playback control layout reuses unchanged time label widths across native state pushes',async()=>{
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'rss',title:'local',url:'file:///fixture.mp4'},width:233,height:233,active:true,offset:0,round:true});});
+ await flush();
+ trackTimeWidths=true;timeWidthReads=0;
+ try{
+  current={...state('playing'),positionMs:1100,durationMs:240000};
+  jankStateChanged(current);
+  const visible=nodes(root);
+  const elapsed=visible.find(node=>node.kind==='Text'&&node.props.children==='0:01');
+  const duration=visible.find(node=>node.kind==='Text'&&node.props.children==='4:00');
+  const bar=visible.find(node=>node.kind==='View'&&node.props.class?.includes('bg-[#ff6700]'));
+  expect(elapsed).toBeDefined();expect(duration).toBeDefined();expect(bar).toBeDefined();
+  for(let n=0;n<10;n++){
+   const positionMs=1100+n*50;
+   current={...current,positionMs};
+   jankStateChanged(current);
+   expect(elapsed!.props.style.width).toBe(32);expect(duration!.props.style.width).toBe(32);
+   expect(bar!.props.style.width).toBeCloseTo(positionMs/240000*106,5);
+  }
+  expect(timeWidthReads).toBe(2);
+  jankStateChanged({...current,positionMs:3600000,durationMs:7200000});
+  expect(elapsed!.props.children).toBe('1:00:00');
+  expect(duration!.props.children).toBe('2:00:00');
+  expect(elapsed!.props.style.width).toBe(56);expect(duration!.props.style.width).toBe(56);
+  expect(timeWidthReads).toBe(4);
+ }finally{trackTimeWidths=false;}
+});
+
 test('256 MB keeps a pixel-only reverse neighbour and presents it on the first down move',async()=>{
  const globals=globalThis as typeof globalThis & {pod?:{memoryBudgetBytes?:()=>number}};
  const savedPod=globals.pod,savedRelease=sessionPort.release;
@@ -1182,4 +1214,43 @@ test('256 MB keeps a pixel-only reverse neighbour and presents it on the first d
   sessionPort.release=savedRelease;
   globals.pod=savedPod;
  }
+});
+
+test('PERFVIDEO cached preview disappears when selected playback fails',async()=>{
+ initial='available';
+ heldPrepare=Promise.reject({code:'decode_error'});
+ const source={platform:'douyin' as const,immersive:true,awemeId:'failed-preview',url:'local/fixture',title:'fixture',
+  previewFrame:{entryId:'failed-preview',frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/fixture.jpg',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}}};
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true});});
+ await flush();
+ const visible=nodes(root);
+ expect(visible.some(n=>n.kind==='Text'&&n.props.children==='重试')).toBe(true);
+ const previewCount=visible.filter(n=>n.kind==='Poster').length;
+ console.info('PERFVIDEO preview count over failure',previewCount);
+ expect(previewCount).toBe(0);
+});
+
+test('PERFVIDEO reports the real frame for its native generation after cached pixels',async()=>{
+ const globals=globalThis as typeof globalThis & {pod?:{benchmark?:(line:string)=>number}};
+ const saved=globals.pod,rows:any[]=[];
+ globals.pod={...saved,benchmark:line=>{rows.push(JSON.parse(line));return 17;}};
+ try{
+  initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,sourceGeneration:71};
+  heldPrepare=new Promise(()=>{});
+  let presented=0;
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,startupSeq:17,url:'file:///mock.mp4',title:'mock'},width:233,height:233,active:true,offset:0,round:true,onFirstFrame:()=>presented++});});
+  await flush();
+  const emit=(frame:Record<string,unknown>)=>{for(const listener of frameEvents)listener({...current,...frame});};
+  const live=()=>rows.filter(row=>row.startup_stage==='playback_frame_adopted');
+  emit({hasCachedFirstFrame:true,presented:true});await flush();
+  expect(presented).toBe(1);expect(live()).toHaveLength(0);
+  emit({sourceGeneration:70,hasRenderedFirstFrame:true});await flush();expect(live()).toHaveLength(0);
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:true});await flush();expect(live()).toHaveLength(0);
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:false});await flush();
+  emit({hasRenderedFirstFrame:true,hasCachedFirstFrame:false});await flush();
+  console.info('PERFVIDEO actual-frame receipts',live().length);
+  expect(live()).toHaveLength(1);
+  expect(live()[0]).toMatchObject({seq:17,source_generation:71});
+  expect(presented).toBe(1);
+ }finally{globals.pod=saved;}
 });

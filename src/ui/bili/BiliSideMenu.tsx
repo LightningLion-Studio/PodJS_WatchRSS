@@ -20,7 +20,7 @@ export function BiliSideMenu(props: { width: number; height: number; active: () 
     const part = Math.min(1, (Date.now() - animation.start) / 220), eased = 1 - (1 - part) ** 3;
     setOffset(animation.from + (animation.to - animation.from) * eased);
     if (part >= 1) animation = null;
-  });
+  }, () => animation !== null);
   const show = () => { setOpen(true); animate(0); };
   const hide = () => { setOpen(false); animate(1); };
   createGesture({ region: { rect: () => !open() && props.active() ? { x: props.width - 44, y: 0, w: 44, h: props.height } : null }, axis: "x", panSlop: 8,

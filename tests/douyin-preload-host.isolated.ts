@@ -423,3 +423,19 @@ test('NOPLAY invalidating one failed foreground preserves the registered next so
  const count=registrations.length;expect(await host.playback(b as any,{})).toBe(next);expect(registrations).toHaveLength(count);
  host.stop();
 });
+
+test('unchanged authorized prefix targets publish one native window on a repeated selection',async()=>{
+ windows=[];registrations=[];
+ const local={resolvePlayback:async(_id:string,options:any)=>({ok:true,data:options.feedItem}),buildPlaybackHeaders:async()=>({})};
+ const owner={},host=createHostDouyinPreload(local as any);
+ host.allowBluetooth(true,owner);
+ try{
+  host.start(owner,items as any,'a','active');await flush();
+  const cold=windows.length,first=windows.at(-1).items;
+  host.start(owner,items as any,'a','active');await flush();
+  const warm=windows.slice(cold),last=warm.at(-1).items;
+  expect(last.map((x:any)=>x.uri)).toEqual(first.map((x:any)=>x.uri));
+  expect(last.every((x:any)=>x.generation!==first[0].generation)).toBe(true);
+  expect({cold,warm:warm.length}).toEqual({cold:4,warm:1});
+ }finally{host.stop(owner);}
+});

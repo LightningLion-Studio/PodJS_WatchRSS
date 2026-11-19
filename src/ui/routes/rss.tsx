@@ -209,6 +209,7 @@ export function RssRoutes(props: RssRoutesProps) {
             </Show>
             <Show when={props.page() === "channel-share"}>
               <ShareQrScreen
+                active={props.active}
                 width={props.width}
                 height={props.height}
                 title={selected().title}
@@ -302,6 +303,7 @@ export function RssRoutes(props: RssRoutesProps) {
       <Show when={props.page() === "rss-share" && props.article()}>
         {(selected) => (
           <ShareQrScreen
+            active={props.active}
             width={props.width}
             height={props.height}
             title={selected().title}

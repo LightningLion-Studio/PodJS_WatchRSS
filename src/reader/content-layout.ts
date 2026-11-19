@@ -6,7 +6,10 @@ import {lineStarts, type TextAnchor} from "./text-anchor.ts";
 import { resolvedReaderStyle, type ReaderPreset } from "./preset.ts";
 export interface ContentAnchor extends TextAnchor {mediaIndex?:number}
 export type ReaderRow = {top:number;height:number;gap:number;blockIndex:number;character:number;sourceStart?:number;nativeBaseline?:number;nativeParagraph?:TextParagraphLine} & ({kind:"text";text:string;fontSlot:number;scale:number;color:string;lineHeight:number;tracking?:number;textAlign?:number;textOffsetY?:number}|{kind:"image"|"video";block:Exclude<ContentBlock,{type:"text"}>});
-export interface ContentLayout {rows:ReaderRow[];height:number;textLength:number}
+export type ReaderRows=Pick<readonly ReaderRow[],"length"|"at">;
+export interface ContentLayout {rows:ReaderRow[];indexedRows?:ReaderRows;height:number;textLength:number}
+/** Imported books can provide random access without materializing the legacy row array. */
+export function contentRows(layout:ContentLayout):ReaderRows {return layout.indexedRows??layout.rows;}
 /** Uses existing baked atlases; fractional scaling preserves requested geometry. */
 export function contentFont(size:number,style:ContentStyle){
  const target=size*(style==="title"?1.55:style==="subtitle"?1.12:style==="code"?.9:1);
@@ -97,21 +100,34 @@ export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,
  }
  return {rows,height:top,textLength:Math.max(0,character-1)};
 }
-export function rowAtOffset(rows:readonly {top:number;height:number}[],offset:number):number {
- let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>>1;if(rows[mid].top+rows[mid].height<=offset)lo=mid+1;else hi=mid;}return Math.min(lo,Math.max(0,rows.length-1));
+export function rowAtOffset(rows:Pick<readonly {top:number;height:number}[],"length"|"at">,offset:number):number {
+ let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>>1,row=rows.at(mid)!;if(row.top+row.height<=offset)lo=mid+1;else hi=mid;}return Math.min(lo,Math.max(0,rows.length-1));
 }
 export function contentAnchorAt(layout:ContentLayout,offset:number):ContentAnchor {
- const row=layout.rows[rowAtOffset(layout.rows,Math.max(0,offset))];if(!row)return {character:0,fraction:0};
+ const rows=contentRows(layout),row=rows.at(rowAtOffset(rows,Math.max(0,offset)));if(!row)return {character:0,fraction:0};
  const fraction=Math.max(0,Math.min(.999,(offset-row.top-row.gap)/Math.max(1,row.height-row.gap)));
  return {character:row.character,fraction,...(row.kind!=="text"?{mediaIndex:row.blockIndex}:{})};
 }
 export function offsetForContentAnchor(layout:ContentLayout,anchor:ContentAnchor,maximum:number):number {
- let row=anchor.mediaIndex===undefined?undefined:layout.rows.find(r=>r.kind!=="text"&&r.blockIndex===anchor.mediaIndex);
+ const rows=contentRows(layout);
+ let row:ReaderRow|undefined;
+ if(anchor.mediaIndex!==undefined){
+  let low=0,high=rows.length;
+  while(low<high){const mid=(low+high)>>>1;if(rows.at(mid)!.blockIndex<anchor.mediaIndex)low=mid+1;else high=mid;}
+  for(let i=low;i<rows.length;i++){
+   const candidate=rows.at(i)!;
+   if(candidate.blockIndex!==anchor.mediaIndex)break;
+   if(candidate.kind!=="text"){row=candidate;break;}
+  }
+ }
  if(!row){
-  let lo=0,hi=layout.rows.length;
-  while(lo<hi){const mid=(lo+hi)>>>1;if(layout.rows[mid]!.character<=anchor.character)lo=mid+1;else hi=mid;}
-  for(let i=Math.max(0,lo-1);i>=0;i--)if(layout.rows[i]!.kind==="text"){row=layout.rows[i];break;}
-  if(!row)row=layout.rows.find(candidate=>candidate.kind==="text");
+  let lo=0,hi=rows.length;
+  while(lo<hi){const mid=(lo+hi)>>>1;if(rows.at(mid)!.character<=anchor.character)lo=mid+1;else hi=mid;}
+  for(let i=lo-1;i>=0;i--){
+   const candidate=rows.at(i)!;
+   if(candidate.kind==="text"){row=candidate;break;}
+  }
+  if(!row)for(let i=0;i<rows.length;i++){const candidate=rows.at(i)!;if(candidate.kind==="text"){row=candidate;break;}}
  }
  if(!row)return 0;
  return Math.max(0,Math.min(maximum,row.top+row.gap+Math.max(0,Math.min(.999,anchor.fraction))*(row.height-row.gap)));

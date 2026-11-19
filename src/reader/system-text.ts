@@ -20,6 +20,7 @@ export function requiresReaderSystemText(text:string,preset?:ReaderPreset,style:
 }
 
 /** Exact line texture geometry shared by visible rows and adjacent-page preparation. */
-export function readerTextLineOptions(row:ReaderRow & {kind:"text"},style:ContentStyle,fontSize:number,width:number,pixelScale:number,preset?:ReaderPreset,metrics?:AtlasLineMetrics,resolveFont?:ReaderFontResolver,profile:"compose"|"preview"="compose",heightExtraPx=0):SystemTextLineOptions {
- return {...systemTextOptions(row,style,fontSize,width,pixelScale,preset,metrics,resolveFont,profile),heightPx:Math.min(1024,Math.ceil(row.lineHeight*pixelScale)+heightExtraPx)};
+export function readerTextLineOptions(row:ReaderRow & {kind:"text"},style:ContentStyle,fontSize:number,width:number,pixelScale:number,preset?:ReaderPreset,metrics?:AtlasLineMetrics,resolveFont?:ReaderFontResolver,profile:"compose"|"preview"="compose",heightExtraPx=0,geometryRevision?: number):SystemTextLineOptions {
+ const options=systemTextOptions(row,style,fontSize,width,pixelScale,preset,metrics,resolveFont,profile);
+ return {...options,...(geometryRevision===undefined?{}:{fontRevision:JSON.stringify([options.fontRevision,geometryRevision])}),heightPx:Math.min(1024,Math.ceil(row.lineHeight*pixelScale)+heightExtraPx)};
 }

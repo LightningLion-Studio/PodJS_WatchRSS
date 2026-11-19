@@ -5,8 +5,11 @@ export interface BookFiles {
  write(parts:AsyncIterable<string>,maxBytes:number):Promise<BookFileInfo>;
  writeBytes(bytes:Uint8Array,checkpoint?:FileCheckpoint,bookId?:string):Promise<BookFileInfo>;
  publish(info:BookFileInfo,bookId:string):Promise<BookFileInfo>;
+ /** Adopt a verified, owned native restore output on the same filesystem. */
+ adopt?(info:BookFileInfo,bookId:string):Promise<BookFileInfo>;
  stat(path:string):Promise<{exists:boolean;size:number}>;
  hash(path:string):Promise<{size:number;sha256:string}>;
+ readForInstall?(path:string,offset:number,maxBytes:number):Promise<{size:number;bytes:Uint8Array}>;
  read(path:string,offset:number,maxBytes:number):Promise<{size:number;bytes:Uint8Array}>;
  lines(path:string):AsyncIterable<string>;
  combine(paths:readonly string[],maxBytes:number):Promise<BookFileInfo>;

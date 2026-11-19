@@ -1,13 +1,12 @@
 import {tcp,byteStreams} from '@podjs/framework/services';
 import {createSignal,createMemo,createEffect,onCleanup,Show} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
-import {onFrame} from '@pocketjs/framework/lifecycle';
 import {getOps} from '@pocketjs/framework/host';
 import {RemoteInputServer} from '../remote-input/server.ts';
 import {ConfigPairingSession} from '../tts/config-pairing.ts';
 import {serveTtsConfigHttp} from '../tts/config-http.ts';
 import {TtsConfigStore} from '../tts/config-store.ts';
-import {RemoteInputQr} from './RemoteInputScreen.tsx';
+import {RemoteInputQr,useInputQrTransition} from './RemoteInputScreen.tsx';
 import {DownloadPhoneAppDialog} from './DownloadPhoneAppDialog.tsx';
 import {watchUiLines} from './text-layout.ts';
 
@@ -16,8 +15,7 @@ const hint='请使用手机版扫描下方二维码';
 const downloadPrompt=`下载手机端App以完成${title}`;
 export function TtsConfigScreen(props:{width:number;height:number;active:()=>boolean;onSaved:()=>void;onDismiss:()=>void;onError:(message:string)=>void;ref?:(value:{onRootBack:()=>boolean})=>void}){
  const [qr,setQr]=createSignal(''),[started,setStarted]=createSignal(false),[unavailable,setUnavailable]=createSignal(false),[failure,setFailure]=createSignal(false),[saved,setSaved]=createSignal(false),[download,setDownload]=createSignal(false);
- const [transition,setTransition]=createSignal(0),opened=Date.now();
- onFrame(()=>{const next=Math.max(0,Math.min(1,(Date.now()-opened-3000)/1000));if(next!==transition())setTransition(next);});
+ const transition=useInputQrTransition(props.active);
  createEffect(()=>{
   if(!props.active())return;
   let alive=true,server:RemoteInputServer|undefined,pairing:ConfigPairingSession|undefined;

@@ -1,10 +1,22 @@
 import {test,expect,mock} from 'bun:test';
 let online=true,feed=0,prepares=0,registered:any[]=[],stored:any[]=[],config:any,prepareGate:(()=>Promise<void>)|undefined,registrationGate:(()=>Promise<void>)|undefined,operationCancels=0;
+let verifiedLists=0,verifiedLookups=0;
+let listGate:(()=>Promise<void>)|undefined,lookupGate:((key:string)=>Promise<void>|undefined)|undefined;
+const listStock=()=>{
+ verifiedLists++;
+ const gate=listGate?.(),items=stored.slice();
+ return gate?{result:gate.then(()=>({items})),cancel(){}}:value({items});
+};
+const lookupStock=(key:string)=>{
+ verifiedLookups++;
+ const gate=lookupGate?.(key),item=stored.find(row=>row.key===key);
+ return gate?{result:gate.then(()=>({item})),cancel(){}}:value({item});
+};
 const value=(v:any)=>({result:Promise.resolve(v),cancel(){}});
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}}}));
 mock.module('@podjs/framework/services',()=>({delay:()=>({result:new Promise(()=>{}),cancel(){}}),discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
 mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,decodableDouyinItem:async(v:any)=>v,VideoPlaybackTrace:class{event(){}},registerVideoResolution(){}}));
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{remove:()=>value(undefined),register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{remove:(key:string)=>{stored=stored.filter(v=>v.key!==key);return value(undefined);},configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{remove:()=>value(undefined),register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{remove:(key:string)=>{stored=stored.filter(v=>v.key!==key);return value(undefined);},configure:(c:any)=>{config=c;return value(undefined);},list:listStock,lookup:lookupStock,prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
 const {createHostDouyinStock}=await import('../src/douyin/stock-host.ts');
 test('complete stock uses browsing candidates, survives restart offline, and never reads expired URLs',async()=>{
  const client={stockAuthorizationScope:async()=> 'fixture-scope',isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({Cookie:'private-cookie'}),fetchFeedPage:async()=>{feed++;throw Error('extra feed forbidden');}};
@@ -110,4 +122,119 @@ test('RVRESCAP-07 cancels the active 1080 stock transfer and stores the 480 repl
   expect(registered.map(values=>values[1])).toEqual([high.playUrl,safe.playUrl]);
   expect(stored.map(value=>value.metadata.width)).toEqual([480]);
   host.suspend();
+});
+
+
+test('one verified inventory serves concurrent and serial misses, while hits and changed authorizations are rechecked',async()=>{
+ const asset=(id:string,scope:string)=>({key:scope+'-'+id,uri:'file:///'+scope+'/'+id+'.mp4',
+  metadata:{awemeId:id,description:'fixture',authorName:'fixture',durationMs:1000,stockAuthorization:scope},
+  audioTracks:1,videoTracks:1,frame:{available:true}});
+ let scope='owner-a';
+ const host=createHostDouyinStock({stockAuthorizationScope:async()=>scope} as any);
+ stored=[asset('shared',scope),asset('b',scope),asset('c',scope)];
+ verifiedLists=0;verifiedLookups=0;
+ const misses=Array.from({length:20},(_,i)=>'absent-'+i);
+ for(const id of misses.slice(0,10))expect(await host.playbackReady(id)).toBeUndefined();
+ expect(await Promise.all(misses.slice(10).map(id=>host.lookup(id)))).toEqual(Array(10).fill(undefined));
+ expect(verifiedLists).toBe(1);
+ expect((await host.ready('shared'))?.uri).toBe('file:///owner-a/shared.mp4');
+ stored=stored.filter(value=>value.metadata.awemeId!=='shared');
+ expect(await host.playbackReady('shared')).toBeUndefined();
+ expect(verifiedLookups).toBe(2);
+
+ scope='owner-b';
+ stored.push(asset('shared',scope));
+ expect(await host.lookup('shared')).toBe('file:///owner-b/shared.mp4');
+ expect(await host.lookup('b')).toBeUndefined();
+ expect(verifiedLists).toBe(2);
+
+ host.suspend();
+ stored.push(asset('new',scope));
+ const readsBefore=verifiedLists;
+ const requested=['new','missing-one','missing-two'].map(id=>host.lookup(id));
+ expect(await Promise.all(requested)).toEqual(['file:///owner-b/new.mp4',undefined,undefined]);
+ expect(verifiedLists-readsBefore).toBe(1);
+});
+
+test('a newly completed prepare is visible after a miss in the same stock generation',async()=>{
+ online=true;stored=[];
+ let release!:()=>void,started=false;
+ prepareGate=()=>{prepareGate=undefined;started=true;return new Promise<void>(resolve=>release=resolve);};
+ const client={stockAuthorizationScope:async()=>'owner',isLoggedIn:async()=>true,
+  listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinStock(client as any);
+ host.offer!([{awemeId:'next',description:'fixture',authorName:'fixture',durationMs:1000,
+  playUrl:'https://fixture.invalid/next',variants:[]}] as any);
+ const work=host.resume();
+ for(let i=0;!started&&i<100;i++)await Promise.resolve();
+ expect(started).toBe(true);
+ expect(await host.lookup('next')).toBeUndefined();
+ release();await work;
+ expect(await host.lookup('next')).toBe('file:///complete/next.mp4');
+ host.suspend();
+});
+
+
+function manualGate(){
+ let entered!:()=>void,release!:()=>void;
+ const reached=new Promise<void>(resolve=>entered=resolve);
+ const resume=new Promise<void>(resolve=>release=resolve);
+ return {reached,release,wait(){entered();return resume;}};
+}
+
+for(const late of ['lookup','list'] as const)test('a late '+late+' cannot replace a newer rendition in the same authorization and epoch',async()=>{
+ const scope='owner',oldKey='asset-a',freshUri='file:///complete/x.mp4';
+ stored=[{key:oldKey,uri:'file:///old.mp4',metadata:{awemeId:'x',description:'old',authorName:'fixture',
+  durationMs:1000,stockAuthorization:scope,width:240,height:420},frame:{available:true},
+  audioTracks:1,videoTracks:1,watched:false,bytes:1000}];
+ online=true;
+ const client={stockAuthorizationScope:async()=>scope,isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinStock(client as any),preparing=manualGate(),reading=manualGate();
+ prepareGate=()=>{prepareGate=undefined;return preparing.wait();};
+ try{
+  const playUrl='https://fixture.invalid/480';
+  host.offer!([{awemeId:'x',description:'new',authorName:'fixture',playUrl,durationMs:1000,
+   variants:[{playUrl,codec:'h264',width:480,height:854,bitrate:200000}]}] as any);
+  const writing=host.resume();await preparing.reached;
+  if(late==='lookup')lookupGate=key=>{if(key===oldKey){lookupGate=undefined;return reading.wait();}};
+  else listGate=()=>{listGate=undefined;return reading.wait();};
+  const older=late==='lookup'?host.lookup('x'):host.restore();
+  await reading.reached;
+  preparing.release();await writing;
+  expect(await host.lookup('x')).toBe(freshUri);
+  if(late==='list')stored.reverse();
+  reading.release();
+  const result=await older;
+  expect(Array.isArray(result)?result.map(item=>item.playUrl):result).toEqual(late==='list'?[freshUri]:freshUri);
+  expect(await host.lookup('x')).toBe(freshUri);
+  stored=stored.filter(row=>row.key!==oldKey);
+  expect(await host.lookup('x')).toBe(freshUri);
+ }finally{
+  lookupGate=undefined;listGate=undefined;prepareGate=undefined;reading.release();preparing.release();host.suspend();
+ }
+});
+
+test('an old lookup and inventory cannot publish after the authorized owner changes',async()=>{
+ const entry=(scope:string)=>({key:scope,uri:'file:///'+scope+'.mp4',metadata:{awemeId:'x',description:scope,authorName:'fixture',
+  durationMs:1000,stockAuthorization:scope},frame:{available:true},audioTracks:1,videoTracks:1,watched:false,bytes:1000});
+ let scope='old',changeAuth:(state:string)=>void=()=>{};
+ const host=createHostDouyinStock({stockAuthorizationScope:async()=>scope,listWatchedIds:async()=>[],
+  subscribeAuth:(listener:typeof changeAuth)=>{changeAuth=listener;}} as any);
+ stored=[entry(scope)];
+ expect(await host.lookup('x')).toBe('file:///old.mp4');
+ const lookup=manualGate(),list=manualGate();
+ lookupGate=key=>{if(key==='old'){lookupGate=undefined;return lookup.wait();}};
+ listGate=()=>{listGate=undefined;return list.wait();};
+ try{
+  const oldLookup=host.lookup('x'),oldList=host.restore();
+  await Promise.all([lookup.reached,list.reached]);
+  scope='new';changeAuth('unknown');stored.push(entry(scope));
+  expect(await host.lookup('x')).toBe('file:///new.mp4');
+  lookup.release();list.release();
+  expect(await oldLookup).toBeUndefined();
+  expect(await oldList).toEqual([]);
+  expect(await host.lookup('x')).toBe('file:///new.mp4');
+ }finally{
+  lookupGate=undefined;listGate=undefined;lookup.release();list.release();host.suspend();
+ }
 });

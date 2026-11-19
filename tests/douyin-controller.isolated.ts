@@ -23,9 +23,17 @@ mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let adjacentPreview:((item:DouyinItem,uri:string)=>unknown)|undefined;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
 mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async(item:DouyinItem,uri:string)=>adjacentPreview?.(item,uri),sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,playbackResolved:async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>{expect(current()).toBe(true);return proxyOverride?proxyOverride(item,headers):item.playUrl;},lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
-mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
+let debugAllowed = false, debugTicks = 0;
+const debugContexts: string[][] = [];
+const frameObservers: {run: () => void; needsFrame: () => boolean}[] = [];
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{
+ get allowed(){ return debugAllowed; },
+ playbackUrl:(_id:string,url:string)=>url,
+ updateContext(current:string,next:string){ debugContexts.push([current,next]); },
+ tick:async()=>{ debugTicks++; }
+}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
-mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
+mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(run:()=>void,needsFrame:()=>boolean){frameObservers.push({run,needsFrame});}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
 mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
 const entryTimers:Array<{ms:number;fire:()=>void}>=[];
@@ -35,6 +43,7 @@ const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateStorage;publish?:(source:PlaybackSource|undefined)=>void}){
+ frameObservers.length=0;debugContexts.length=0;debugTicks=0;
  entryTimers.length=0;optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;adjacentPreview=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
@@ -1079,4 +1088,68 @@ test('manual reload publishes fresh detail in a new managed source at the curren
  expect(details).toBe(1);expect(registrations).toBe(1);
  expect(entry.queue!.snapshot().item?.awemeId).toBe(a.awemeId);
  expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'podjs-media-cache://play/fresh',resumePositionMs:321,bypassCache:false});
+});
+
+test('idle release video requests no guest frames and debug playback still sees the current and next items', async()=>{
+ for (const enabled of [false,true]) {
+  debugAllowed=enabled;
+  try {
+   const f=fixture();
+   const playlist=Array.from({length:40},(_,index)=>item(String(index)));
+   const selected=playlist[2]!;
+   f.controller.douyinPlay({item:selected,playback:selected,playlist,hasMore:false,immersive:true});
+   await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+   const queue=f.stack().at(-1)!.queue!;
+   const original=queue.snapshot.bind(queue);
+   let copies=0, requests=0;
+   queue.snapshot=()=>{copies++;return original();};
+   for(let frame=0;frame<600;frame++) {
+    if(frameObservers.some(observer=>observer.needsFrame()))requests++;
+    for(const observer of frameObservers)observer.run();
+   }
+   const expected = enabled ? 600 : 0;
+   expect({requests,copies,debugTicks}).toEqual({requests:expected,copies:0,debugTicks:expected});
+   if(enabled)expect(debugContexts.at(-1)).toEqual(['2','3']);
+   else expect(debugContexts).toHaveLength(0);
+  } finally {debugAllowed=false;}
+ }
+});
+
+test('PERFVIDEO foreground publishes while an optional entry probe is still blocked',async()=>{
+ const f=fixture(false,()=>({prime:()=>{throw Error('unexpected prime');},releaseAll:async()=>{}})),a=item('slow-prime');
+ await f.controller.douyinNavigate({name:'entry'});
+ let release!:()=>void,calls=0,now=0,publishedAt:number|undefined;
+ readyOverride=()=>++calls===1?new Promise(resolve=>release=()=>resolve(undefined)):Promise.resolve(undefined);
+ const warm=f.controller.primeDouyinEntry(f.stack().at(-1)!,{},[a],null,41);
+ client.buildPlaybackHeaders=async()=>({});
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,entrySeq:41,onSourcePublished:()=>{publishedAt=now;}});
+ const opening=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ for(let i=0;i<80;i++)await Promise.resolve();
+ const publishedBeforeRelease=publishedAt;
+ now=1500;release();await warm;await opening;
+ console.info('PERFVIDEO entry source publication fixture ms',publishedAt);
+ expect(publishedBeforeRelease).toBe(0);
+ expect(f.source().url).toBe(a.playUrl);
+ expect(f.requests()).toBe(0);
+});
+
+test('PERFVIDEO reverse paging uses a verified bundle while the redundant preview read is blocked',async()=>{
+ const f=fixture(),a=item('reverse-a'),b=item('reverse-b');
+ const url='file:///mock/a.mp4';
+ f.controller.douyinPlay({item:b,playback:b,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:b.awemeId});
+ const entry=f.stack().at(-1)!;
+ const frame={available:true,kind:'actual_frame',path:'video-frames/reverse.jpg',width:320,height:180};
+ readyOverride=async()=>({item:a,url,previewFrame:{entryId:a.awemeId,frame}});
+ localPaths.set(a.awemeId,url);
+ let release:undefined|((value:unknown)=>void),now=0,preparedAt:number|undefined;
+ adjacentPreview=()=>new Promise(resolve=>release=resolve);
+ const warming=f.controller.prepareDouyinAdjacent(entry,'previous').then(result=>{preparedAt=now;return result;});
+ for(let n=0;n<80;n++)await Promise.resolve();
+ const before=preparedAt;now=600;release?.({entryId:a.awemeId,frame});
+ const prepared=await warming;
+ console.info('PERFVIDEO reverse prepared fixture ms',preparedAt);
+ expect(before).toBe(0);
+ expect(prepared?.source).toMatchObject({url,previewFrame:{entryId:a.awemeId,frame}});
+ expect(f.requests()).toBe(0);
 });

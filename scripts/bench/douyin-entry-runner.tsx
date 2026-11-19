@@ -1,4 +1,5 @@
 import WatchRSS from '../../src/ui/screen.tsx';
+import {INITIAL_DISCLOSURE_KEY} from '../../src/announcement/platform.ts';
 import {activityStateHub} from '../../src/navigation/activity-host.ts';
 import {render} from '@pocketjs/framework';
 import {rootMirror,setStyleResolver} from '@pocketjs/framework/renderer';
@@ -9,6 +10,7 @@ const nativeGet=g.pod.kvGet,nativeSet=g.pod.kvSet,nativeApply=g.pod.kvApply,nati
 const values=new Map<string,string>(),events:any[]=[],pending=new Map<number,any>();
 const writes:{phase:string;units:number}[]=[],counts:Record<string,number>={},spans:any[]=[];
 let phase='home',tick=0,clock=0,nodeId=1,stop:()=>void;
+let publishedActivity: {saved:Record<string,any>}|undefined;
 Date.now=()=>1791378000000+clock;
 // Deterministic lifecycle durations; CPU spans use native __benchNow separately.
 g.performance={now:()=>clock};
@@ -17,6 +19,8 @@ const channels=[{id:'douyin',title:'抖音',url:'builtin:douyin',count:0,unread:
 const item=(i:number)=>({awemeId:String(i+1),description:'synthetic '+i,playUrl:'https://fixture.invalid/'+i,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[],opaque:'x'.repeat(4500)});
 const snapshot=(count:number)=>({items:Array.from({length:count},(_,i)=>item(i)),anchorAwemeId:'1',cursor:null,hasMore:false,savedAtMillis:1,resolved:{}});
 seed('synthetic.unrelated','x'.repeat(830000));seed('watchrss.home.channels.v1',channels);
+// This scenario measures a returning user. First-use notices intercept BACK until acknowledged.
+seed(INITIAL_DISCLOSURE_KEY,true);seed('watchrss.transparency.douyin_disclosure_v1',true);
 seed('watchrss.douyin.original-content',g.__entryOriginal);
 seed(FEED_KEY,JSON.stringify(snapshot(40)));seed(RECENT_KEY,JSON.stringify(snapshot(4)));seed(QUEUE_KEY,JSON.stringify(snapshot(40)));
 function stagedApply(encoded:string){writes.push({phase,units:encoded.length});if(nativeApply)return nativeApply(encoded);const next=new Map(values);for(const row of JSON.parse(encoded)){if(row.op==='set')next.set(row.key,JSON.stringify(row.value));else next.delete(row.key);}values.clear();for(const [k,v]of next)values.set(k,v);return 0;}
@@ -30,6 +34,7 @@ Object.assign(g.pod,{
  takeEvents:()=>events.length?JSON.stringify(events.splice(0)):undefined,
  emit:(line:string)=>{const r=JSON.parse(line);if(r.t==='diagnostic.serviceWork'){spans.push({phase,completion:g.__entryMethod??'frame',...r});return;}if(r.t==='service.cancel'){pending.delete(r.id);return;}if(r.t!=='service.request')return;
  const {id,method,args}=r;counts[method]=(counts[method]??0)+1;let value:any=null;
+ if(method==='app.activityState.write')publishedActivity=args;
  if(method==='runtime.delay'){pending.set(id,{at:clock+args.milliseconds,method,id,ok:true,value});return;}
  if(method==='secure.get')value={exists:args.key==='douyin.cookie',...(args.key==='douyin.cookie'?{value:'sessionid='+ 'x'.repeat(4800)}:{})};
  else if(method==='text.environment')value={density:2,fontScale:1,spValuesPx:[]};
@@ -53,7 +58,8 @@ g.__benchPump=()=>{
  if(tick===150){assert(JSON.stringify(pages())===JSON.stringify(['home','douyin']),'entry route missing');phase='back';events.push({t:'back'});}
  if(tick===230){assert(JSON.stringify(pages())===JSON.stringify(['home']),'BACK restoration differs');
  const get=(key:string)=>JSON.parse(nativeGet?nativeGet(key):values.get(key)!);
- const resume=get('watchrss.resume-state.v1');assert(resume.kind==='home'&&resume.version===1,'durable resume changed');
+ const resume=publishedActivity?.saved['watchrss.content-activity'];
+ assert(resume?.version===1&&resume.entries.length===1&&resume.entries[0].page==='home','host Activity did not receive the restored home route');
  const days=JSON.parse(get('watchrss.sync.account-telemetry.v1'));
  assert(days.reduce((n:number,d:any)=>n+(d.screenOpenCounts.DouyinEntryActivity??0),0)===1,'entry telemetry changed');
  assert(g.__entryTracing||spans.length===0,'default-off tracing emitted');

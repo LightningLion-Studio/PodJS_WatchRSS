@@ -63,6 +63,13 @@ export class DouyinPlaybackQueue {
   // until a resolved selection makes room, without losing the retry anchor.
   private ahead:DouyinItem[]=[];
   private queued(){return this.ahead.length?[...this.items,...this.ahead]:this.items;}
+  private get queuedCount(){return this.items.length+this.ahead.length;}
+  private findQueued(id:string){
+    const index=this.items.findIndex(item=>item.awemeId===id);
+    if(index>=0)return index;
+    const aheadIndex=this.ahead.findIndex(item=>item.awemeId===id);
+    return aheadIndex<0?-1:this.items.length+aheadIndex;
+  }
   private queuedItem(index:number){return index<this.items.length?this.items[index]:this.ahead[index-this.items.length];}
   private replaceQueued(index:number,item:DouyinItem){if(index<this.items.length)this.items[index]=item;else this.ahead[index-this.items.length]=item;}
   private removeQueued(index:number){if(index<this.items.length)this.items.splice(index,1);else this.ahead.splice(index-this.items.length,1);}
@@ -70,7 +77,10 @@ export class DouyinPlaybackQueue {
     const items=this.queued(),start=Math.min(index,Math.max(0,items.length-this.limit));
     return {items:items.slice(start,start+this.limit),ahead:items.slice(start+this.limit),index:index-start};
   }
-  private select(index:number){const window=this.windowAt(index);this.items=window.items;this.ahead=window.ahead;this.index=window.index;}
+  private select(index:number){
+    if(!this.ahead.length){this.index=index;return;}
+    const window=this.windowAt(index);this.items=window.items;this.ahead=window.ahead;this.index=window.index;
+  }
   private emptyPages=0;
   private retryAt=0;
   private autoFailures=0;
@@ -85,18 +95,21 @@ export class DouyinPlaybackQueue {
     this.index=Math.max(0,this.items.findIndex(x=>x.awemeId===selected));
     this.cursor=options.cursor?.trim()||null;this.hasMore=!this.fixedSources&&options.hasMore===true;
   }
+  get selectedIndex(){return this.index;}
+  /** Relative lookup in the published window. Pending feed pages are private until selection. */
+  itemAtOffset(offset=0):DouyinItem|undefined{return this.items[this.index+offset];}
   snapshot():Omit<DouyinPlaybackQueueState,"item">&{item:DouyinItem|null}{return {item:this.items[this.index]??null,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore};}
   /** Actual session-local removal set; native reason/count/timestamps are not recorded here. */
   /** Foreground reloads ignore metadata-only changes to other queue items. */
   playbackGeneration(){return this.generation-this.neighbourMutations;}
   diagnostics(){return {index:this.index,itemCount:this.items.length,hasMore:this.hasMore,generation:this.generation,previewGeneration:this.previewGeneration,quarantinedAwemeIds:[...this.quarantined]};}
-  refreshPrefetchItem(id:string,item:DouyinItem):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0)return false;if(target!==this.index)this.neighbourMutations++;this.generation++;this.previewGeneration++;this.replaceQueued(target,applyPreferredDouyinPlayback(item));return true;}
+  refreshPrefetchItem(id:string,item:DouyinItem):boolean{const target=this.findQueued(id);if(target<0)return false;if(target!==this.index)this.neighbourMutations++;this.generation++;this.previewGeneration++;this.replaceQueued(target,applyPreferredDouyinPlayback(item));return true;}
   /** Recheck selection synchronously: a pending neighbour may have become foreground. */
-  quarantinePrefetch(id:string):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0||target===this.index)return false;this.neighbourMutations++;this.generation++;this.previewGeneration++;this.quarantined.add(id);this.removeQueued(target);if(target<this.index)this.index--;return true;}
+  quarantinePrefetch(id:string):boolean{const target=this.findQueued(id);if(target<0||target===this.index)return false;this.neighbourMutations++;this.generation++;this.previewGeneration++;this.quarantined.add(id);this.removeQueued(target);if(target<this.index)this.index--;return true;}
   updateCurrentUrl(url:string){const current=this.items[this.index];if(current&&url.trim())this.items[this.index]={...current,playUrl:url};}
   /** A failed transport registration must not move the anchor away from the still selected source. */
   restoreSelection(awemeId:string):boolean{
-    const index=this.queued().findIndex(item=>item.awemeId===awemeId);if(index<0)return false;
+    const index=this.findQueued(awemeId);if(index<0)return false;
     this.cancel();this.select(index);return true;
   }
   cancel(){this.generation++;this.previewGeneration++;}
@@ -131,16 +144,16 @@ export class DouyinPlaybackQueue {
     const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction][distance-1]&&nav===this.generation;
     if(distance>2){
       const target=this.index+(direction==='next'?distance:-distance);
-      if(target<0||target>=this.queued().length)return {ok:false,code:'UNSUPPORTED',message:'没有邻域视频'};
+      if(target<0||target>=this.queuedCount)return {ok:false,code:'UNSUPPORTED',message:'没有邻域视频'};
       // Far speculation never fetches another feed page or an item detail.
       return this.resolvePreviewAt(target,current);
     }
     if(distance===2){
       const anchor=this.items[this.index]?.awemeId;
-      if(direction==='next'&&this.index+2>=this.queued().length&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
+      if(direction==='next'&&this.index+2>=this.queuedCount&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
       if(!current()||this.items[this.index]?.awemeId!==anchor)return cancelled();
       const target=this.index+(direction==='next'?2:-2);
-      if(target<0||target>=this.queued().length)return {ok:false,code:'UNSUPPORTED',message:'没有跨项视频'};
+      if(target<0||target>=this.queuedCount)return {ok:false,code:'UNSUPPORTED',message:'没有跨项视频'};
       return this.resolvePreviewAt(target,current);
     }
     if(direction==='previous'){
@@ -152,7 +165,7 @@ export class DouyinPlaybackQueue {
   /** Keep enough metadata ahead for normal paging; transport remains coalesced.
    * This does not resolve detail, allocate a decoder or move the selection. */
   async fillAhead(minimum=8):Promise<void>{
-    if(this.fixedSources||!this.hasMore||this.queued().length-this.index-1>=Math.max(2,Math.min(16,minimum))||Date.now()<this.retryAt)return;
+    if(this.fixedSources||!this.hasMore||this.queuedCount-this.index-1>=Math.max(2,Math.min(16,minimum))||Date.now()<this.retryAt)return;
     await this.loadPage();
   }
   private preservesItem(code:string){return ['NOT_LOGGED_IN','CANCELLED','REQUEST_FAILED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'].includes(code);}
@@ -162,7 +175,7 @@ export class DouyinPlaybackQueue {
     const cursor=this.cursor,anchor=this.items[this.index]?.awemeId;
     const work=(async():Promise<DouyinResult<null>>=>{
       // Repeated duplicate pages retry later, then refresh the feed, never mark it exhausted.
-      const trace=benchmark.begin('pool_stage',{pool_stage:'refill_start',queue_index:this.queued().length,anchor_index:this.index});
+      const trace=benchmark.begin('pool_stage',{pool_stage:'refill_start',queue_index:this.queuedCount,anchor_index:this.index});
       const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12,deferPersistence:true})
         .catch(()=>({ok:false as const,code:'REQUEST_FAILED' as const,message:formatDouyinError('REQUEST_FAILED')}));
       benchmark.mark('pool_stage',trace,{pool_stage:'refill_end',queue_index:page.ok?page.data.items.length:0,anchor_index:this.index});
@@ -196,9 +209,9 @@ export class DouyinPlaybackQueue {
     if(Date.now()<this.retryAt)return {ok:false,code:'TEMPORARILY_UNAVAILABLE',message:'稍后重试',retryAfterMs:this.retryAt-Date.now()};
     let lastFailure:DouyinResult<DouyinPlaybackQueueState>={ok:false,code:'UNSUPPORTED',message:'已经是最后一个视频'};
     for(let attempt=0;attempt<Math.max(1,Math.min(3,maxCandidates));attempt++){
-      if(this.index+1>=this.queued().length&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
+      if(this.index+1>=this.queuedCount&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
       const target=this.index+1;
-      if(target>=this.queued().length)return lastFailure;
+      if(target>=this.queuedCount)return lastFailure;
       const result=await resolve(target);
       if(!current()&&!result.ok)return cancelled();if(result.ok)return result;
       if(this.preservesItem(result.code))return result;
@@ -210,13 +223,13 @@ export class DouyinPlaybackQueue {
    * Advancing the generation fences all older resolutions and previews. */
   selectIntent(direction:"next"|"previous",distance:1|2=1):DouyinResult<DouyinPlaybackQueueState>{
     const target=this.index+(direction==='next'?distance:-distance);
-    const clamped=Math.max(0,Math.min(this.queued().length-1,target));
+    const clamped=Math.max(0,Math.min(this.queuedCount-1,target));
     if(clamped===this.index)return {ok:false,code:'UNSUPPORTED',message:'没有相邻视频'};
     return this.commitPreview(this.queuedItem(clamped)!.awemeId);
   }
   /** Commit only the item previously resolved for a pager promotion. */
   commitPreview(awemeId:string):DouyinResult<DouyinPlaybackQueueState>{
-    const target=this.queued().findIndex(item=>item.awemeId===awemeId);this.previewGeneration++;this.generation++;
+    const target=this.findQueued(awemeId);this.previewGeneration++;this.generation++;
     if(target<0)return {ok:false,code:"CANCELLED",message:"预加载视频已失效"};
     this.select(target);const item=this.items[this.index]!;
     return {ok:true,data:{item,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore},source:"feed-cache"};
@@ -268,7 +281,7 @@ export class DouyinPlaybackQueue {
     const candidate=this.queuedItem(target);if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
     const resolved:DouyinResult<DouyinItem>=this.fixedSources||await this.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId,{feedItem:candidate,allowDetail:false});
     if(!current())return cancelled();
-    target=this.queued().findIndex(item=>item.awemeId===candidate.awemeId);
+    target=this.findQueued(candidate.awemeId);
     if(target<0||target===this.index)return cancelled();if(!resolved.ok)return resolved;
     this.replaceQueued(target,resolved.data);const window=this.windowAt(target);
     return {ok:true,data:{item:resolved.data,playlist:window.items,index:window.index,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};

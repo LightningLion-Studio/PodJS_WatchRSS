@@ -224,7 +224,7 @@ T-1201 Audio: `player_visible` may carry `audio_gain_milli` (0..1000, actual Med
 
 T-1201 MUTESYNC: `player_visible` additionally accepts `system_index`, `system_max` (integers 0..1024), and `system_muted` (boolean). These are active STREAM_MUSIC readbacks. The overlay derives its rounded percentage from index/max. For clients that do not opt in to system-silent policy, `audio_gain_milli` remains 1000 for an active video. A system mute no longer produces a private zero-gain `player_audio_applied` receipt. Prewarm silencing disables its audio track and never changes system mute.
 
-`startup_stage` carries only a closed `startup_stage` enum and optional decoder `duration_ms`. Native uptime and seq correlate input, source, persistence, surface, decoder, and first frame. `home_first_frame` is a real native HWUI commit; it is distinct from guest home construction. Process start uses Android Process.getStartUptimeMillis, never host wall time.
+`startup_stage` carries a closed stage name and numeric timing and generation fields. Native uptime and seq correlate input, source, persistence, surface, decoder, and first frame. `candidate_start` marks entry or paging selection. `candidate_ready` carries the guest playback generation when the selected source enters preparation. `playback_frame_adopted` carries the guest and native generations when the player accepts a real decoded frame after any cached preview. `home_first_frame` is a real native HWUI commit; it is distinct from guest home construction. Process start uses Android Process.getStartUptimeMillis, never host wall time.
 
 The `stock_saved` startup stage carries `slots=0..3`, the saved stock metadata count. It is readiness bookkeeping, not a decoded playback frame or a cache-hit proof. Actual first-frame cache counters remain required.
 
@@ -235,13 +235,25 @@ Cold prepare substages (native uptime, same entry seq): `prepare_admitted` after
 `player_paused`: native-only session diagnostic. Emits after playWhenReady becomes false, with matching action/source generation and backend=player. Native uptime is the event clock. This does not prove mixer/PCM silence and does not replace previous_audio_stopped.
 
 `prepare_stage` is native-only diagnostic evidence. Identity is `(pid, seq,
-source_generation)`. A prewarm uses its `prewarm_requested` seq. Stages are
+source_generation, slot_ordinal)`. A prewarm uses its `prewarm_requested` seq. Stages are
 `start`, `dispatched`, `network_open`, `network_start`, `network_first_byte`,
 `network_end`, `decoder_configured`, `format_ready`, `first_frame`, `timeout`,
-`cancel`, `adopt`, `retire`, `release`. `network_bytes` and `position_bytes` are
-bounded numeric counters; `surface_ready` is boolean; `playback_state` is 1..4.
+`cancel`, `adopt`, `retire`, `release`, `cache_first_byte`,
+`codec_admission_wait`, `codec_admission_denied`, `codec_factory`,
+`codec_factory_failed`, `admission_deferred`, `admission_retry`,
+`admission_exhausted`. The foreground sequence matches the startup or swipe.
+`generation` links the native prepare to the guest playback generation when
+the guest initiated it. `ttfb_ms` measures upstream open to first byte.
+Factory durations exclude codec admission. `decoder_configured` is the Media3
+initialization callback and can include admission. The legacy player logs
+the Media3 duration plus admission retry events. `network_bytes` and
+`position_bytes` are bounded numeric counters. `surface_ready` is boolean.
+`playback_state` is 1..4.
 `is_prewarm` describes the original prepare, including after adoption. This event
 never substitutes for decoded-and-presented `incoming_first_frame` proof.
+For a cached handoff, `swap_stage=live_frame_latched` marks the commit of the
+live texture that replaces the cached pixels. Use the same swipe seq and check
+the destination source generation.
 
 
 ### Reverse-boundary release reasons (T-DYLOSS)

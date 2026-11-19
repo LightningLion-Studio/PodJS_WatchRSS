@@ -22,7 +22,7 @@ function PictureStrip(props: { pictures: NonNullable<NonNullable<BiliComment['co
   let node: NodeMirror | undefined;
   const scroll = createScroller({ max: () => Math.max(0, props.pictures.length * 100 - props.width) });
   createGesture({ region: { node: () => node }, axis: 'x', onDown: () => scroll.stop(), onPanStart: () => scroll.beginDrag(), onPanMove: c => scroll.drag(-c.fdx), onPanEnd: c => scroll.endDrag(-c.vx), onCancel: () => { if (scroll.state() === 'tracking') scroll.endDrag(0); } });
-  onFrame(() => scroll.step()); onCleanup(() => scroll.stop());
+  onFrame(() => scroll.step(), () => scroll.state() !== "idle"); onCleanup(() => scroll.stop());
   return <View ref={value => node = value} class="relative overflow-hidden" style={{ width: props.width, height: 100 }}>
     <View class="absolute top-[0] left-[0]" style={{ width: props.pictures.length * 100, height: 100, translateX: -scroll.offset() }}>
       {props.pictures.map((picture, index) => <View class="absolute top-[0] rounded-[8] overflow-hidden" style={{ insetL: index * 100, width: 92, height: 100 }}>{picture.url ? <RemoteImage url={remoteUrl(picture.url)} cacheBucket="bili-preview" width={92} height={100} fit="cover" /> : null}</View>)}
