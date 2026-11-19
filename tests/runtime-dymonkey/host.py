@@ -26,7 +26,7 @@ def font_metrics(_, size, _bold, _density, result):
 def font_glyph(_, text, length, size, _bold, width, height, _baseline, density,
                advance, xoff, yoff, pixels, _length):
     # Model a cold device font cache. Use one synthetic monochrome glyph.
-    if length and 0x4E00 <= text[0] < 0x4E00 + 3600:
+    if length and (0x4E00 <= text[0] < 0x4E00 + 3600 or 0xA000 <= text[0] < 0xA000 + 1100):
         sleep(0.0005)
     advance[0], xoff[0], yoff[0] = size, 0, 0
     row_bytes = width * density * 4
@@ -70,6 +70,8 @@ class DrawList(c.Structure):
 
 
 class Host:
+    prepare_ms = 136
+
     def __init__(self, library, package):
         self.lib = c.CDLL(str(library))
         ptr, string, length = c.c_void_p, c.c_char_p, c.c_size_t
@@ -168,7 +170,7 @@ class Host:
                 raise RuntimeError("unexpected media source")
             self.counters["prepare"] += 1
             self.media.update(state="buffering", hasRenderedFirstFrame=False, positionMs=0)
-            self.pending[ident] = (self.now + 136, True)
+            self.pending[ident] = (self.now + self.prepare_ms, True)
             self.max_decoders = max(self.max_decoders, 1)  # legacy synthetic port
         elif method in ("video.play", "video.pause", "video.retire", "video.stop"):
             action = method.split(".")[1]
@@ -244,11 +246,14 @@ class Host:
     def tap(self, x, y):
         self.touch_path([(x, y)])
 
-    def touch_path(self, points):
+    def approve_path(self, points):
         # Approve the full path before emitting a contact. The fixture rejects
         # on both a reserved rectangle and the live render-tree hit.
         for x, y in points:
             self.command("point", x=x, y=y)
+
+    def touch_path(self, points):
+        self.approve_path(points)
         for point in points:
             self.frame(point=point)
         self.frame()

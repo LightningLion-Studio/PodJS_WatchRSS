@@ -36,6 +36,9 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
 flock "$lock" capmem 16G unshare --user --map-current-user --net \
   python3 -B "$APP/tests/runtime-dymonkey/monkey.py" \
   --lib "$lib" --package "$package" --seed 50641 --steps 512 --out "$EVIDENCE/seed-50641.json"
+flock "$lock" capmem 16G unshare --user --map-current-user --net \
+  python3 -B "$APP/tests/runtime-dymonkey/monkey.py" --detail \
+  --lib "$lib" --package "$package" --seed 50641 --steps 96 --out "$EVIDENCE/detail-50641.json"
 ```
 
 - The runner sends a fixed set of input actions. The fixture checks every
@@ -48,6 +51,11 @@ flock "$lock" capmem 16G unshare --user --map-current-user --net \
 - Every 16 steps the runner opens the panel, scrolls, dismisses it with
   Back, toggles playback and checks that crown input reaches the volume
   port. The runner checks raster output and process PSS at each step.
+- The detail profile shuffles scenarios for opening during rotation and
+  loading, long cold descriptions, repeated arrow taps, alternating taps
+  and swipes, and pressing Back during a held opening swipe. Each scenario
+  checks scrolling, Back and re-entry. The saved sequence identifies the
+  detail profile for replay.
 - The parent enforces a five-second progress deadline. A guest frame
   over one second also fails. On failure the JSON contains the seed,
   original steps and a replay sequence. The reducer removes chunks and

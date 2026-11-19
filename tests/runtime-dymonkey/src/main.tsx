@@ -16,9 +16,13 @@ const emit = (value: Record<string, unknown>) => pod.emit(JSON.stringify(value))
 
 const caption = "清晨六点，从江边出发，沿着旧城墙一路骑到山脚。这里记录了早餐店、修车师傅和初夏的海风。";
 const coldDescription = Array.from({ length: 3600 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join("");
+// Yi letters form one word under the line breaker's generic letter rule.
+const coldWord = Array.from({ length: 1100 }, (_, i) => String.fromCodePoint(0xa000 + i)).join("").repeat(4);
+const descriptions = [caption, caption.repeat(2), caption.repeat(3), caption.repeat(4),
+  caption.repeat(5), caption.repeat(6), coldWord, coldDescription];
 const feed: PlaybackSource[] = Array.from({ length: 8 }, (_, index) => ({
   awemeId: `fixture-${index}`, platform: "douyin", immersive: true,
-  title: `离线视频 ${index}`, author: "本地测试", description: index === 7 ? coldDescription : caption.repeat(index + 1),
+  title: `离线视频 ${index}`, author: "本地测试", description: descriptions[index],
   url: `file:///fixture-${index}.mp4`, digitalCrownVolume: true,
 }));
 

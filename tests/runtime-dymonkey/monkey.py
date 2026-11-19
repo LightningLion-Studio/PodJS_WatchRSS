@@ -14,6 +14,10 @@ KINDS = (
     "up", "down", "rotate", "sidebar_open", "sidebar_close", "crown_up",
     "crown_down", "play_pause", "back", "reenter", "screen_cycle", "background_cycle",
 )
+DETAIL_KINDS = (
+    "detail_cold", "detail_loading", "detail_rotating", "detail_tap_burst",
+    "detail_alternate", "detail_back_held",
+)
 QUARTERS = {0, 90, 180, 270}
 FORBIDDEN = ("like", "follow", "comment", "favorite", "share", "login", "logout")
 PROBE_EVERY = 16
@@ -29,6 +33,14 @@ def generate(seed, steps):
                      ["reenter", 0], ["up", 0], ["background_cycle", 5]])
     return (required + [[rng.choice(KINDS), rng.choice((0, 0, 1, 2, 4, 10, 20))]
                         for _ in range(max(0, steps - len(required)))])[:steps]
+
+
+def generate_detail(seed, steps):
+    rng = random.Random(seed)
+    order = list(DETAIL_KINDS)
+    rng.shuffle(order)
+    order.extend(rng.choices(DETAIL_KINDS, k=max(0, steps - len(order))))
+    return [[kind, rng.randrange(5)] for kind in order[:steps]]
 
 
 def require(value, message):
@@ -141,6 +153,96 @@ class Monkey:
                     maxFrameMs=round(h.max_frame_ms, 2))
 
 
+class DetailMonkey(Monkey):
+    LEFT = [(174, 116), (127, 116), (66, 116)]
+    SCROLL = [(116, 166), (116, 116), (116, 66)]
+
+    def arrow(self):
+        self.host.tap(*rotated((208, 116), self.host.state["rotation"]))
+
+    def dismiss(self):
+        h = self.host
+        h.back()
+        h.wait(15)
+        require(h.state["entered"] and not h.state["panel"], "Back failed to dismiss detail")
+
+    def step(self, kind, delay):
+        h = self.host
+        if not h.state["arrow"]:
+            h.wait(90)  # The periodic crown probe can leave the volume capsule visible.
+        angle = h.state["rotation"]
+        self.angles.add(round(angle) % 360)
+        require(h.state["entered"] and h.state["arrow"], "player detail entry unavailable")
+        left = [rotated(p, angle) for p in self.LEFT]
+        if kind == "detail_cold":
+            # The second-last fixture contains thousands of contiguous cold letters.
+            while h.state["index"] != 6:
+                before = h.state["index"]
+                path = self.SCROLL if (6 - before) % 8 <= 4 else reversed(self.SCROLL)
+                h.touch_path([rotated(p, angle) for p in path])
+                h.wait(50)
+                require(h.state["index"] != before, "failed to reach long description")
+            h.touch_path(left)
+        elif kind == "detail_loading":
+            h.back()
+            require(not h.state["entered"], "player did not exit before loading case")
+            h.command("enter")
+            h.wait(2)
+            require(h.media["state"] == "buffering", "loading case missed mock prepare")
+            h.touch_path(self.LEFT)
+            require(h.media["state"] == "buffering" and h.state["panel"], "detail did not open during loading")
+            self.interleaved += 1
+        elif kind == "detail_rotating":
+            h.tap(*rotated((163, 29), angle))
+            h.wait(5)
+            left = [rotated(p, angle + 90) for p in self.LEFT]
+            h.approve_path(left)
+            require(angle < h.state["rotation"] < angle + 90, "detail input missed rotation")
+            for point in left:
+                h.frame(point=point)
+            h.frame()
+            self.interleaved += 1
+        elif kind == "detail_tap_burst":
+            for _ in range(4):
+                self.arrow()
+        elif kind == "detail_alternate":
+            self.arrow()
+            h.touch_path(left)
+            h.wait(15)
+            require(h.state["panel"], "tap then swipe lost detail")
+            self.dismiss()
+            h.touch_path(left)
+            self.arrow()
+        elif kind == "detail_back_held":
+            held = [rotated(p, angle) for p in [(168, 116), (135, 116), (110, 116), (92, 116), (71, 116)]]
+            h.approve_path(held)
+            for point in held[:2]:
+                h.frame(point=point)
+            require(h.state["panel"], "held swipe did not begin opening detail")
+            h.event(t="back")
+            for point in held[2:]:
+                h.frame(point=point)
+            h.frame()
+            h.wait(15)
+            require(h.state["entered"] and not h.state["panel"], "release reopened detail after Back")
+            self.arrow()
+
+        h.wait(15 + delay)
+        require(h.state["panel"], "detail did not open")
+        before = h.sample()
+        h.touch_path([rotated(p, h.state["rotation"]) for p in self.SCROLL])
+        h.wait(5)
+        require(h.state["panel"] and h.sample() != before, "detail did not scroll")
+        self.dismiss()
+        self.arrow()
+        h.wait(15)
+        require(h.state["panel"], "detail did not reopen")
+        self.dismiss()
+        self.coverage.add(kind)
+        # The loading case can otherwise leave a prepare reply pending.
+        h.wait(10)
+
+
 def emit(kind, **kwargs):
     print(json.dumps(dict(kind=kind, **kwargs)), flush=True)
 
@@ -179,8 +281,11 @@ def worker(config):
             guard_checks(config)
             return
         with Host(config.lib, config.package) as host:
-            host.wait()
-            monkey = Monkey(host)
+            if config.detail:
+                host.prepare_ms = 680
+            host.wait(50 if config.detail else 20)
+            monkey = DetailMonkey(host) if config.detail else Monkey(host)
+            allowed = DETAIL_KINDS if config.detail else KINDS
             if not actions:
                 stage = "probe"
                 monkey.probe()
@@ -188,7 +293,7 @@ def worker(config):
                 stage = kind
                 emit("step", index=index, action=kind, frames=delay, state=host.state,
                      mediaState=host.media["state"])
-                require(kind in KINDS and type(delay) is int and 0 <= delay <= 20, "action outside input allowlist")
+                require(kind in allowed and type(delay) is int and 0 <= delay <= 20, "action outside input allowlist")
                 monkey.step(kind, delay)
                 stage = "sample"
                 host.sample()
@@ -206,6 +311,8 @@ def execute(config, actions):
            "--package", str(config.package)]
     if config.guards:
         cmd.append("--guards")
+    if config.detail:
+        cmd.append("--detail")
     with subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0) as child:
         child.stdin.write(json.dumps(actions).encode())
         child.stdin.close()
@@ -259,6 +366,7 @@ def main():
     parser.add_argument("--replay", type=Path, help="Replay the minimized failure from a saved JSON result")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--guards", action="store_true")
+    parser.add_argument("--detail", action="store_true", help="Exercise consecutive detail entry, scroll, Back and re-entry")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     config = parser.parse_args()
     if config.worker:
@@ -269,10 +377,14 @@ def main():
     if not 0 <= config.steps <= 10000:
         parser.error("--steps must be in 0..10000")
     case = json.loads(config.replay.read_text()) if config.replay else None
+    config.detail = config.detail or bool(case and case.get("profile") == "detail")
     seed = case["seed"] if case else config.seed
-    actions = case["minimal"] if case else [] if config.guards else generate(seed, config.steps)
+    make_actions = generate_detail if config.detail else generate
+    actions = case["minimal"] if case else [] if config.guards else make_actions(seed, config.steps)
     events = execute(config, actions)
     result = dict(seed=seed, actions=actions, events=events)
+    if config.detail:
+        result["profile"] = "detail"
     failure = events[-1]
     config.out.write_text(json.dumps(result, indent=2) + "\n")
     if "forbidden Monkey input:" in failure.get("error", ""):
