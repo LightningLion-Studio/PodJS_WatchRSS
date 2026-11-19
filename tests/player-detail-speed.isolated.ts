@@ -57,7 +57,7 @@ test('the detail crown retains the low-volume cap and returns to the player on c
  panelProps.slide.close();expect(f.handle.canSwipeBack()).toBe(true);expect(f.handle.onCrown(1)).toBe(true);await flush();expect(writes.length).toBe(count+1);
 });
 test('the entry arrow is centred on scaled round screens',async()=>{
- const f=mount(466,466);await flush();f.visit();expect(arrowProps.scale).toBe(2);expect(arrowProps.left).toBe(0);expect(arrowProps.top).toBe(0);
+ const f=mount(466,466);await flush();f.visit();expect(arrowProps.scale).toBe(2);expect(arrowProps.left+233/2).toBe(466/2);expect(arrowProps.top+233/2).toBe(466/2);
 });
 
 test('late volume reply cannot replace a new source or its progress',async()=>{

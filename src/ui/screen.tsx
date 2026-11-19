@@ -4,7 +4,7 @@ import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer} 
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from '../cloud/status.ts';
 import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
-import {playerGesture} from "./player-gestures.ts";
+import {playerGesture,rotateVector} from "./player-gestures.ts";
 import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
 import {backStackSize,usesImmersiveBackObserver} from '../navigation/back-target.ts';
 import {idleHit} from '../diagnostics/idle-counters';
@@ -211,12 +211,14 @@ export default function WatchRSS(props: {
         `Reader progress ${context} flush timed out after ${outcome.timeoutMs}ms; continuing`,
       );
   };
-  const motion = new BackMotion(width);
+  let motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
   // Keep the previous route mounted for restoration. Paint it when a back swipe reveals it.
   const backUnderlay = createMemo(() =>
     backOffset() > 0 && page() !== "video" ? stack().at(-2) : undefined
   );
+  const [backRotation, setBackRotation] = createSignal(0);
+  const backTranslation = createMemo(() => backOffset() === 0 ? { x: 0, y: 0 } : rotateVector(backOffset(), 0, backRotation()));
   function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
   function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
@@ -295,7 +297,17 @@ export default function WatchRSS(props: {
   let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
   const playerRotation=()=>current().player?.gestureRotation?.()??0;
   const playerViewport=()=>({x:0,y:0,w:width,h:height});
+  let backPointerRotation = 0;
+  const rememberBackRotation = () => { if (motion.phase === "idle") backPointerRotation = playerRotation(); };
+  const beginBack = (dx: number) => {
+    const axis = rotateVector(1, 0, backPointerRotation);
+    const extent = Math.min(width / Math.abs(axis.x), height / Math.abs(axis.y));
+    motion = new BackMotion(extent);
+    motion.begin(dx);
+    batch(() => { setBackRotation(backPointerRotation); setBackOffset(motion.offset); });
+  };
   createGesture(playerGesture({
+    onDown: rememberBackRotation,
     region: {
       rect: () =>
         stack().length > 1 &&
@@ -316,8 +328,7 @@ export default function WatchRSS(props: {
       const side = c.dx < 0 ? current().player?.sideSwipe : undefined;
       if (side?.begin()) { sideSwipe = side; side.move(c.dx); return; }
       current().list?.scroller.stop();
-      motion.begin(c.dx);
-      setBackOffset(motion.offset);
+      beginBack(c.dx);
     },
     onPanMove: (c) => {
       if (sideSwipe) { sideSwipe.move(c.dx); return; }
@@ -333,15 +344,19 @@ export default function WatchRSS(props: {
       if (motion.phase === "dragging") motion.release(0, Date.now(), true);
     },
   },playerRotation,playerViewport));
-  createGesture(playerGesture(rightSwipeBack({rect:()=>
+  const backObserver = rightSwipeBack({rect:()=>
     stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
-    start(dx){motion.begin(dx);setBackOffset(motion.offset);},
+    start:beginBack,
     move(dx){motion.move(dx);setBackOffset(motion.offset);},
     end(velocity){if(motion.phase==="dragging")motion.release(velocity,Date.now());},
     cancel(){if(motion.phase==="dragging")motion.release(0,Date.now(),true);},
-  }),playerRotation,playerViewport));
+  });
+  createGesture(playerGesture({
+    ...backObserver,
+    onDown(c) { rememberBackRotation(); backObserver.onDown?.(c); },
+  },playerRotation,playerViewport));
   onFrame(() => {
     if (motion.phase !== "settling") return;
     const result = motion.tick(Date.now());
@@ -1530,10 +1545,11 @@ export default function WatchRSS(props: {
         }
         style={{
           translateX: active()
-            ? backOffset()
+            ? backTranslation().x
             : current().page === "video"
               ? -2 * width
               : 0,
+          translateY: active() ? backTranslation().y : 0,
           opacity: active() || backUnderlay() === entry ? 1 : 0,
         }}
       >
@@ -1678,6 +1694,7 @@ export default function WatchRSS(props: {
               height={height}
               round={metrics.shape === "round"}
               backOffset={backOffset}
+              backTranslation={backTranslation}
               services={props.services}
               channels={channels}
               playingSource={playingSource}
@@ -1856,7 +1873,7 @@ export default function WatchRSS(props: {
         <NetworkRecoveryLayer network={ownerChoiceNetwork} width={width} height={height} round={metrics.shape==='round'}/>
       </Show>
       <Show when={recoveryEnabled(current())}>
-        <NetworkRecoveryLayer network={networkFor(current())} width={width} height={height} round={metrics.shape==='round'}/>
+        <NetworkRecoveryLayer network={networkFor(current())} width={width} height={height} round={metrics.shape==='round'} rotation={playerRotation()}/>
       </Show>
     </View>
   );

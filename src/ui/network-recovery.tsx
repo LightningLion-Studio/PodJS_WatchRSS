@@ -25,11 +25,11 @@ export function NetworkRecoveryProvider(props:{network:NetworkRecovery;active:()
  onCleanup(()=>props.network.dispose());
  return <Context.Provider value={props.network}>{props.children}</Context.Provider>;
 }
-export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean}){
+export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
  const [revision,setRevision]=createSignal(0);
  createEffect(()=>{const network=props.network;onCleanup(network.subscribe(()=>setRevision(n=>n+1)));setRevision(n=>n+1);});
  const blocking=()=>{revision();return props.network.blocking;};
  const bluetooth=()=>{revision();return props.network.bluetooth;};
- return <><Show when={blocking()}><NetworkUnavailableOverlay width={props.width} height={props.height} round={props.round} status={(revision(),props.network.overlayStatus)} onRetry={()=>void props.network.retry()}/></Show>
+ return <><Show when={blocking()}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={(revision(),props.network.overlayStatus)} onRetry={()=>void props.network.retry()}/></Show>
   <Show when={bluetooth()}><NetworkBluetoothNotice width={props.width} height={props.height} onDismiss={()=>props.network.dismissBluetooth()}/></Show></>;
 }

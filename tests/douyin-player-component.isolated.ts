@@ -843,10 +843,10 @@ for(const useSessions of [false,true])test(`DYZOOM rotation sends destination ge
  const realNow=Date.now;let now=1000;Date.now=()=>now;
  try {
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/a.mp4',title:'a'},width:233,height:200,active:true,offset:0,round:true});});await flush();
-  for(const target of [90,180,270,360]) {
+  for(const [from,target] of [[0,90],[90,180],[180,270],[270,0]]) {
    transforms.length=0;
    const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));button!.props.onPress();await flush();
-   expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(target-90);
+   expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(from);
    for(let i=0;i<21;i++){now+=15;frames.forEach(fn=>fn());await flush();}
    expect(transforms.length).toBeGreaterThan(2);expect(transforms.every(v=>v.scaleRotationDeg===target)).toBe(true);expect(transforms.at(-1).rotationDeg).toBe(target);
   }
@@ -937,20 +937,21 @@ test('NOPLAY terminal-only displacement commits one page without inventing a two
 });
 
 const rotatedSwipes = [
- {angle:0, width:233, height:200, up:[0,-1]},
- {angle:90, width:233, height:200, up:[1,0]},
- {angle:180, width:233, height:200, up:[0,1]},
- {angle:270, width:233, height:200, up:[-1,0]},
+ {angle:0, turns:0, width:233, height:200, up:[0,-1]},
+ {angle:90, turns:1, width:233, height:200, up:[1,0]},
+ {angle:180, turns:2, width:233, height:200, up:[0,1]},
+ {angle:270, turns:3, width:233, height:200, up:[-1,0]},
+ {angle:0, turns:4, width:233, height:200, up:[0,-1]},
 ] as const;
 
-for(const useSessions of [false,true])for(const {angle,width,height,up} of rotatedSwipes)
+for(const [immersive,useSessions] of [[true,false],[true,true],[false,false]] as const)for(const {angle,turns,width,height,up} of rotatedSwipes)
 for(const direction of ['next','previous'] as const){
- test(`DYROTATE ${angle}° ${direction} keeps the rotation sessions=${useSessions}`,async()=>{
+ test(`DYROTATE ${angle}° after ${turns} turns ${direction} keeps the rotation immersive=${immersive} sessions=${useSessions}`,async()=>{
   sessionsCapable=useSessions;decoderLimit=3;initial='available';gestures.length=0;
   sessionCalls.length=0;sessionStates.clear();boundsCalls.length=0;prepares=[];
   const savedNow=Date.now;let now=1000;Date.now=()=>now;
   try{
-   const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+   const source=(id:string)=>({platform:'douyin' as const,immersive,awemeId:id,url:'managed/'+id,title:id});
    const adjacent={next:source('b'),previous:source('z')};
    let selection:string|undefined;
    let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
@@ -970,7 +971,7 @@ for(const direction of ['next','previous'] as const){
    await flush();await flush();
    const rotateButton=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children)
     .some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));
-   for(let step=0;step<angle/90;step++){
+   for(let step=0;step<turns;step++){
     rotateButton!.props.onPress();await flush();now+=300;frames.forEach(fn=>fn());await flush();
    }
    const sign=direction==='next'?1:-1;
@@ -985,6 +986,9 @@ for(const direction of ['next','previous'] as const){
    else{
     expect(dragBounds.translateX).toBeCloseTo(dx);
     expect(dragBounds.translateY).toBeCloseTo(dy);
+    expect(dragBounds.pagerOffset.x).toBeCloseTo(dx);
+    expect(dragBounds.pagerOffset.y).toBeCloseTo(dy);
+    expect(dragBounds.roundClip).toEqual({cx:width/2,cy:height/2,radius:height/2});
    }
    expect(handle.gestureRotation()).toBe(angle);
    const replacement=useSessions?sessionCalls.find(c=>c.method==='promote'):prepares.at(-1);
@@ -1027,6 +1031,92 @@ test('DYROTATE switching during a rotation tween uses its destination on both su
   gesture.onUp({dx,dy});gesture.onPanEnd({dx,dy});await flush();await flush();
   expect(sessionCalls.find(c=>c.method==='promote')?.transform?.rotationDeg).toBe(90);
   now+=300;frames.forEach(fn=>fn());await flush();expect(handle.gestureRotation()).toBe(90);
+ }finally{Date.now=savedNow;}
+});
+
+for(const useSessions of [false,true])for(const {angle:start,up} of rotatedSwipes.slice(0,3)){
+ test(`DYROT2 cancelled outgoing transform preserves the latest angle from ${start}° sessions=${useSessions}`,async()=>{
+  initial='available';sessionsCapable=useSessions;decoderLimit=3;gestures.length=0;sessionCalls.length=0;sessionStates.clear();
+  const savedTransform=video.setTransform,savedSessionTransform=sessionPort.setTransform,savedNow=Date.now;
+  let now=1000;Date.now=()=>now;
+  const angles:number[]=[];
+  let block=false,rejectOld!:(error:unknown)=>void;
+  const record=async(options?:any)=>{
+   if(block){block=false;await new Promise<void>((_,reject)=>{rejectOld=reject;});}
+   angles.push(options.rotationDeg);
+  };
+  video.setTransform=record;
+  sessionPort.setTransform=async(id:string,options?:any)=>{
+   if(sessionValue(id).presented)await record(options);
+   return sessionValue(id);
+  };
+  try{
+   const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+   const next=source('b');
+   let selected='a';
+   let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+   const root=createRoot(dispose=>{
+    stops.push(dispose);
+    const [activeSource,setSource]=createSignal(source('a'));
+    return VideoPlayerScreen({get source(){return activeSource();},width:233,height:233,round:true,active:true,offset:0,
+     ref:value=>{handle=value;},onNext:()=>{},onPrepareAdjacent:async()=>({key:'b',source:next}),
+     onSelectTarget:(_direction,_distance,prepared)=>{
+      selected='b';setSource((prepared?.source??next) as ReturnType<typeof source>);
+     }});
+   });
+   await flush();await flush();
+   const rotate=()=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children)
+    .some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'))!.props.onPress();
+   const settle=async()=>{now+=320;frames.forEach(fn=>fn());await flush();};
+   for(let i=0;i<start;i+=90){rotate();await settle();}
+   expect(angles.at(-1)).toBe(start);
+   block=true;rotate();await flush();
+   const swipe={dx:up[0]*100,dy:up[1]*100,vx:up[0]*500,vy:up[1]*500};
+   const gesture=gestures[0];
+   gesture.onDown();gesture.onPanStart(swipe);gesture.onPanMove(swipe);await flush();
+   gesture.onUp(swipe);gesture.onPanEnd(swipe);await flush();await flush();
+   expect(selected).toBe('b');expect(handle.gestureRotation()).toBe(start+90);
+   if(useSessions)expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);
+   rotate();await settle();
+   const latest=(start+180)%360;
+   expect(handle.gestureRotation()%360).toBe(latest);
+   rejectOld({code:'cancelled'});await flush();
+   expect(angles.at(-1)).toBe(latest);
+  }finally{
+   video.setTransform=savedTransform;sessionPort.setTransform=savedSessionTransform;Date.now=savedNow;
+  }
+ });
+}
+
+test('GEMINI scaled picture controls and playback overlays share the tween pivot',async()=>{
+ initial='available';prepares=[];current=state('idle');
+ const savedNow=Date.now;let now=1000;Date.now=()=>now;
+ try{
+  let handle!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+   source:{platform:'douyin',url:'file:///mock.mp4',title:'mock'},
+   width:466,height:466,active:true,offset:0,round:false,ref:value=>{handle=value;},onNext:()=>{},
+   onPrepareAdjacent:async()=>undefined,
+  });});
+  await flush();
+  const findIcon=(icon:string)=>nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&
+   nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));
+  findIcon('loop-off')!.props.onPress();
+  current={...state('buffering'),buffered:false};await flush();
+  const contains=(node:Node,predicate:(node:Node)=>boolean)=>nodes(node.props.children).some(predicate);
+  for(let turn=0;turn<4;turn++){
+   findIcon('rotate')!.props.onPress();
+   for(const delta of [60,240]){
+    now+=delta;frames.forEach(fn=>fn());await flush();
+    const visible=nodes(root),angle=handle.gestureRotation();
+    const controls=visible.find(n=>n.props.style?.scale===2&&contains(n,c=>c.props.debugName==='VideoPlayerRotate'));
+    expect(controls?.props.style).toMatchObject({insetL:116.5,insetT:116.5,width:233,height:233,rotate:angle});
+    const overlays=visible.find(n=>n.props.style?.rotate===angle&&
+     contains(n,c=>c.kind==='Text'&&c.props.children==='单视频循环')&&
+     contains(n,c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-loading.svg'));
+    expect(overlays?.props.style).toMatchObject({rotate:angle});
+   }
+  }
  }finally{Date.now=savedNow;}
 });
 

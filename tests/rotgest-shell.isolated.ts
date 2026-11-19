@@ -40,9 +40,10 @@ const navigation=await import('../src/navigation/activity-navigation.ts');
 // Seed an already-live video route; this test is not a process-death restore.
 mock.module('../src/navigation/startup-navigation.ts',()=>({startupActivityNavigation:navigation.restoreActivityNavigation}));
 const platform=process.env.ROTGEST_PLATFORM as 'rss'|'bili'|'douyin',initialAngle=Number(process.env.ROTGEST_ANGLE);
-let angle=initialAngle,panel:any;const selected:string[]=[],panelPages:number[]=[];
+let angle=initialAngle,panel:any,readBackTranslation:()=>{x:number;y:number};const selected:string[]=[],panelPages:number[]=[];
 mock.module('../src/ui/routes/media.tsx',()=>({MediaRoutes(p:any){
  if(p.page()!=='video')return null;
+ readBackTranslation=()=>p.backTranslation?.()??{x:p.backOffset(),y:0};
  panel=createDetailSlide(()=>233);p.entry.playback={platform,immersive:platform==='douyin',title:'synthetic local player'};
  p.entry.player={onCrown(){return true;},gestureRotation:()=>angle,canSwipeBack:()=>!panel.shown(),sideSwipe:{begin(){if(panel.shown())return false;panel.begin();return true;},move:panel.move,end:panel.end,cancel:panel.cancel}};
  const viewport=()=>({x:0,y:0,w:233,h:233});
@@ -79,6 +80,12 @@ test(`production shell ${platform} ${initialAngle}: next, rotated detail and loc
   await swipe(140,0,angle);expect(panel.shown()).toBe(false);expect(state()).toEqual(['home','articles','video']);
   await swipe(60,-80,angle);expect(state()).toEqual(['home','articles','video']);expect(selected).toEqual(['next']);
   await swipe(0,-110,angle);expect(selected).toEqual(['next','next']);expect(state()).toEqual(['home','articles','video']);
-  await swipe(70,0,angle,true);expect(state()).toEqual(platform==='douyin'?['home']:['home','articles']);
+  const r=angle*Math.PI/180,x=Math.cos(r),y=Math.sin(r);
+  await tick([[116-35*x,116-35*y]]);angle=0;
+  await tick([[116,116]]);await tick([[116+35*x,116+35*y]]);
+  const offset=readBackTranslation();expect(Math.hypot(offset.x,offset.y)).toBeGreaterThan(0);
+  expect(offset.x/Math.hypot(offset.x,offset.y)).toBeCloseTo(x,5);
+  expect(offset.y/Math.hypot(offset.x,offset.y)).toBeCloseTo(y,5);
+  await tick();await settle();expect(state()).toEqual(platform==='douyin'?['home']:['home','articles']);
  }finally{stop();}
 });
