@@ -77,26 +77,28 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   onCleanup(()=>loopHintTimer?.cancel());
   createEffect(()=>{const platform=props.source.platform;if(props.active)setLoopModeState(loopPreferences.load(platform,loopModes()));});
   const emitCheckpoint=(kind:"ready"|"pause_or_exit"|"error"|"ended",positionMs:number,durationMs:number)=>{const value=viewing.checkpoint(positionMs,durationMs);props.onCheckpoint?.(kind,value.positionMs,value.durationMs);};
-  const saveablePlayer=props.source.platform==='douyin'&&props.source.immersive===true;
+  const immersiveDouyin=props.source.platform==='douyin'&&props.source.immersive===true;
   const [state, setState] = createSignal<ExtendedVideoState | null>(null), [error, setError] = createSignal("");
   createEffect(()=>{if(props.active&&workForeground()&&!error()){const release=playbackWork.hold();onCleanup(release);}});
   createEffect(()=>{
     const source=props.source.platform==='bili'?'bilibili':props.source.platform==='douyin'?'douyin':undefined;
     props.onPlaybackActiveChanged?.(source,!!source&&props.active&&state()?.state==='playing'&&!state()?.isBuffering&&!error());
   });
-  const [ready, setReady] = createSignal(false), [controlsVisible, setControlsVisible] = restoredSignal('saved','player-controls',true,booleanState,saveablePlayer);
-  const [mode, setMode] = restoredSignal<PlayerScaleMode>('saved','player-scale',"standard",(v):v is PlayerScaleMode=>v==='standard'||v==='expanded'||v==='shrunk',saveablePlayer), [rotation, setRotation] = createSignal(0);
+  const [ready, setReady] = createSignal(false), [controlsVisible, setControlsVisible] = restoredSignal('saved','player-controls',true,booleanState,immersiveDouyin);
+  const [mode, setMode] = restoredSignal<PlayerScaleMode>('saved','player-scale',"standard",(v):v is PlayerScaleMode=>v==='standard'||v==='expanded'||v==='shrunk',immersiveDouyin);
+  // This component remains mounted as the immersive route changes its source.
+  const [rotation, setRotation] = createSignal(0);
   const [displayRotation, setDisplayRotation] = createSignal(0), [pan, setPan] = createSignal(0), [volumeVisible, setVolumeVisible] = createSignal(false), [loadingRotation, setLoadingRotation] = createSignal(0);
   const animationDiagnostics=new PlayerAnimationDiagnostics(line=>{if(props.source.platform==='douyin')appLogger.i('DouyinAnimation',line);},()=>Date.now());
   onCleanup(()=>animationDiagnostics.close());
   // Retain the saved preference for activity snapshot compatibility; it no longer gates playback.
-  const [allowBluetooth] = restoredSignal('saved','player-bluetooth',false,booleanState,saveablePlayer);
+  const [allowBluetooth] = restoredSignal('saved','player-bluetooth',false,booleanState,immersiveDouyin);
   const [networkFailure, setNetworkFailure] = createSignal(false);
   const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;direction:DouyinPagerDirection}|null>(null),[dragAxis,setDragAxis]=createSignal<DouyinPagerDirection|undefined>(),[handoff,setHandoff]=createSignal(false),[firstFrame,setFirstFrame]=createSignal(false),[nativeDrag,setNativeDrag]=createSignal(false),[spinnerDue,setSpinnerDue]=createSignal(false);
   let benchmarkSeq=0,benchmarkGeneration=1,lastBenchmarkHeartbeat=0;
   let pendingBenchmark:VideoBenchmarkAction|undefined,pendingBenchmarkSource:PlaybackSource|undefined;
   const frameWait=new VideoFirstFrameWait(Date.now,1000);frameWait.reset();
-  const [startLimitConsumed,setStartLimitConsumed]=restoredSignal('saved','player-start-limit-consumed',false,booleanState,saveablePlayer);
+  const [startLimitConsumed,setStartLimitConsumed]=restoredSignal('saved','player-start-limit-consumed',false,booleanState,immersiveDouyin);
   const sessionCapable=shouldUseDouyinVideoSessions(props.source,hasCapability("media.video.sessions"));
   const sessionPool=sessionCapable?(props.initialPool??new DouyinVideoSessionPool()):undefined;
   const usingSessions=()=>!!sessionPool&&!sessionsDisabled();
@@ -150,13 +152,31 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let surface: NodeMirror | undefined, rotationFrom = 0, rotationTo = 0, rotationStarted = 0, panningStart = 0, panVelocity = 0, panFrameAt = Date.now();
   let transformRunning = false, transformDirty = false, seekRunning = false, desiredSeek = 0, volumeRunning = false, volumeDirty = false, virtualVolume: number | undefined, observedVolume: number | undefined, crownGuard: CrownVolumeGuardState = { lastEventMs: Number.NEGATIVE_INFINITY };
   const top = () => props.top ?? 0, screenHeight = () => props.height + top();
-  // The clip stays the screen circle, expressed in the shifted surface's local coordinates.
-  // Without prewarmed sessions the one surface follows the drag like a native pager page, then hides until the next item's first frame.
-  const dragOffsetY = () => { if (usingSessions()&&nativeDrag()) return 0; const axis = dragAxis(); return axis === "up" ? -dragProgress() * props.height : axis === "down" ? dragProgress() * props.height : 0; };
-  const bounds = () => ({ x: 0, y: top(), width: props.width, height: props.height, translateX: props.offset, translateY: dragOffsetY(), visible: props.active && !handoff(), roundClip: props.round ? { cx: props.width / 2, cy: screenHeight() / 2 - top(), radius: Math.min(props.width, screenHeight()) / 2 } : undefined });
+  const pagerRotation = () => immersiveDouyin ? rotation() : 0;
+  const pagerLength = () => pagerRotation() % 180 === 0 ? props.height : props.width;
+  const dragOffset = createMemo(() => {
+    const direction = dragAxis();
+    if (!direction || usingSessions() && nativeDrag()) return {x:0,y:0};
+    const distance = dragProgress() * pagerLength();
+    return rotateVector(0, direction === "up" ? -distance : distance, pagerRotation());
+  });
+  const restingBounds = () => ({ x: 0, y: top(), width: props.width, height: props.height, translateX: props.offset, translateY: 0, visible: props.active && !handoff(), roundClip: props.round ? { cx: props.width / 2, cy: screenHeight() / 2 - top(), radius: Math.min(props.width, screenHeight()) / 2 } : undefined });
+  const bounds = () => {
+    const base = restingBounds(), offset = dragOffset();
+    // The single surface moves under a circular clip fixed to the screen.
+    return {...base, translateX:base.translateX+offset.x, translateY:offset.y,
+      roundClip:base.roundClip && {...base.roundClip,cx:base.roundClip.cx-offset.x}};
+  };
+  const prepareTransform = () => ({scaleMode:mode(),rotationDeg:displayRotation(),scaleRotationDeg:rotation(),panX:0,panY:0});
+  const finishRotation = (reason: string) => {
+    if (!rotationStarted) return;
+    rotationStarted = 0;
+    setDisplayRotation(rotation());
+    animationDiagnostics.end('rotation',reason);
+  };
   let crownDirection: -1|1 = 1;
   const media={
-    prepare:(options:VideoPrepare)=>{options={...options,respectSilentMode:true};return usingSessions()?sessionPool!.prepare(sessionSource(props.source),{...options,transform:{scaleMode:mode(),rotationDeg:displayRotation(),scaleRotationDeg:rotation(),panX:0,panY:0}}):video.prepare(options);},
+    prepare:(options:VideoPrepare)=>{options={...options,respectSilentMode:true};return usingSessions()?sessionPool!.prepare(sessionSource(props.source),{...options,transform:prepareTransform()}):video.prepare(immersiveDouyin?{...options,transform:prepareTransform()}:options);},
     retire:(handoff=false)=>usingSessions()?sessionPool!.retire(handoff):video.retire(handoff),
     play:()=>usingSessions()?sessionPool!.play():video.play(),pause:(action?:VideoBenchmarkAction,handoff=false)=>usingSessions()?sessionPool!.pause(action,handoff):video.pause(handoff),
     seek:(positionMs:number)=>usingSessions()?sessionPool!.seek(positionMs):video.seek(positionMs),
@@ -270,11 +290,11 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if(sessionPool&&sessionCapacity==="checking")return;
     if(props.onReload&&!usingSessions())retiredNativeGeneration=Math.max(retiredNativeGeneration,state()?.sourceGeneration??-1);
-    resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&resumeAutoplay!==false&&(source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;preparingState=undefined;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!saveablePlayer)setMode("standard");animationDiagnostics.end('rotation','source-change');setRotation(0);setDisplayRotation(0);setPan(0);rotationStarted=0;panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;if(douyinSourceNeedsInternet(source.url??source.videoUrl))network.requestStarted();const op=media.prepare({...source,...(source.platform==='douyin'?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}:{}),...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...bounds(),visible:props.active,translateY:0},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});
+    resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&resumeAutoplay!==false&&(source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;preparingState=undefined;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!immersiveDouyin){setMode("standard");setRotation(0);}finishRotation('source-change');setDisplayRotation(rotation());setPan(0);panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;if(douyinSourceNeedsInternet(source.url??source.videoUrl))network.requestStarted();const op=media.prepare({...source,...(source.platform==='douyin'?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}:{}),...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...restingBounds(),visible:props.active},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});
     if(props.onReload||Number.isFinite(source.recoveryDeadlineMs)&&!recoveredSources.has(props.source))recoveryDeadline.arm(props.onReload?20_000:source.recoveryDeadlineMs!-Date.now(),delay,
       ()=>!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner&&!state()?.hasRenderedFirstFrame,
       ()=>{generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});failed({code:'timeout'});},source.platform==='douyin'&&props.onReload?{maxMs:120_000,read:()=>Math.max(state()?.metrics?.bytesLoaded??0,preparingState?.generation===ownGeneration?preparingState.value.metrics?.bytesLoaded??0:0)}:undefined);
-    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!saveablePlayer||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(saveablePlayer)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
+    if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!immersiveDouyin||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(immersiveDouyin)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
   };
   const reload=async(manual:boolean,cause:unknown={code:'source_expired'})=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
@@ -392,7 +412,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let updating = false, dirty = false;
   const stripOwnsBounds=()=>usingSessions()&&nativeDrag()&&props.active&&props.offset===0&&!handoff();
   const syncBounds = async () => { if(stripOwnsBounds())return; if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; if(stripOwnsBounds())break; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
-  createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
+  createEffect(() => { props.offset; props.active; dragOffset(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
   const toggle = async () => { try { const pausing = state()?.state === "playing",own=generation;if(props.onReload){autoplayAllowed=!pausing;resumeAfterLifecycle=false;}const next = await (pausing ? media.pause() : media.play());if(disposed||own!==generation||videoSessionOwner!==sessionOwner)return;setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
   let seekSource: PlaybackSource | undefined, seekGeneration = -1;
   const seekTo = async (delta: number) => {
@@ -424,7 +444,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
     finally { seekRunning = false; }
   };
-  const rotate = () => { animationDiagnostics.begin('rotation',mode(),rotation()+90); rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now();setMotion(true); void requestTransform(); };
+  const rotate = () => {
+    if (immersiveDouyin && (dragDirection || dragSettling)) return;
+    rotationFrom = displayRotation();
+    rotationTo = rotation() + 90;
+    animationDiagnostics.begin('rotation',mode(),rotationTo);
+    setRotation(rotationTo);
+    rotationStarted = Date.now();
+    setMotion(true);
+    void requestTransform();
+  };
   const changeMode = () => { animationDiagnostics.begin('scale',nextScaleMode(mode()),rotation()); panVelocity = 0; setMode(nextScaleMode(mode())); setPan(0);setMotion(true); void requestTransform(); };
   const backgroundTap = () => { if (tapTimer) { tapTimer.cancel(); tapTimer = undefined; void toggle(); return; } tapTimer = delay(280); void tapTimer.result.then(() => { tapTimer = undefined; setControlsVisible(value => !value); }).catch(() => {}); };
   let backwardTarget:DouyinPreparedSource|undefined,backwardWarm:Promise<DouyinPreparedSource|undefined>|undefined;
@@ -501,6 +530,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let deferredPan:DeferredDrag|undefined,drainingDeferred=false,replayingDeferred=false;
   const deferredDrags:DeferredDrag[]=[];
   const clearDrag=()=>{animationDiagnostics.end('swipe');setNativeDrag(false);dragDirection=undefined;setDragAxis(undefined);dragTarget=undefined;dragTargetPromise=undefined;dragSettling=false;setDragPoster(null);setDragProgress(0);};
+  let pagerPointerRotation: number | undefined;
+  const transitionPages = (progress: number, direction: DouyinPagerDirection, action?: VideoBenchmarkAction) =>
+    sessionPool!.transition(progress,direction,restingBounds(),action,immersiveDouyin?pagerRotation():undefined);
   const ensureDragTarget=(direction:DouyinPagerDirection,revision:number)=>{
     const queueDirection:"next"|"previous"=direction==="up"?"next":"previous";
     const poster=props.onAdjacentPoster?.(queueDirection);if(poster&&!props.source.immersive)setDragPoster({url:poster,direction});
@@ -515,7 +547,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const pending=(direction==="up"?forwardWarm:backwardWarm)??prepareAdjacent(queueDirection,ownNeighbor,true);
     return pending.then(target=>{
       if(revision!==dragRevision||direction!==dragDirection||ownNeighbor!==neighborRevision)return;
-      dragTarget=target;if(target&&usingSessions()){sessionPool!.selectStandby(target.key);setNativeDrag(true);setDragPoster(null);void sessionPool!.transition(dragProgress(),direction,bounds()).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});}return target;
+      dragTarget=target;if(target&&usingSessions()){sessionPool!.selectStandby(target.key);setNativeDrag(true);setDragPoster(null);void transitionPages(dragProgress(),direction).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});}return target;
     });
   };
   const beginDouyinDrag=(distanceY=0,measured=false)=>{
@@ -523,7 +555,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!props.onSelectTarget&&!replayingDeferred&&(dragSettling||deferredDrags.length||drainingDeferred)){
       deferredPan={distanceY,velocityY:0,cancel:false,seq:measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0};return;
     }
-    if(measured)sessionPool?.beginDrag();else sessionPool?.endDrag();
+    // The recognizer retains the displayed angle sampled at touch-down. If it
+    // differs from the destination, use its already-mapped progress for this drag.
+    const pointerTracksPager = !immersiveDouyin || (pagerPointerRotation ?? displayRotation()) % 360 === pagerRotation() % 360;
+    if(immersiveDouyin && rotationStarted){
+      finishRotation('swipe');
+      void requestTransform();
+    }
+    if(measured && pointerTracksPager)sessionPool?.beginDrag();else sessionPool?.endDrag();
     if(props.onSelectTarget)clearDrag();
     benchmarkSeq=measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0;
     animationDiagnostics.begin('swipe',mode(),rotation());
@@ -535,19 +574,19 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const moveDouyinDrag=(distanceY:number)=>{
     if(deferredPan&&!replayingDeferred){deferredPan.distanceY=distanceY;return;}
     if(props.source.platform!=="douyin"||dragSettling||distanceY===0)return;
-    const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,props.height),revision=dragRevision;
+    const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,pagerLength()),revision=dragRevision;
     setDragProgress(progress);
     if(direction!==dragDirection){setNativeDrag(false);dragDirection=direction;setDragAxis(direction);dragTarget=undefined;dragTargetPromise=ensureDragTarget(direction,revision);}
     if(usingSessions()&&dragTarget&&sessionPool!.selectStandby(dragTarget.key,true)){setNativeDrag(true);setDragPoster(null);
-      void sessionPool!.transition(progress,direction,bounds()).catch(value=>{if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);});
+      void transitionPages(progress,direction).catch(value=>{if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);});
     }
   };
   const animateDouyinTransition=async(revision:number,direction:DouyinPagerDirection,to:0|1)=>{
     const from=dragProgress(),started=Date.now(),duration=douyinPagerSettleDuration(to);
-    if(from===to){if(usingSessions()&&nativeDrag()&&to===0)await sessionPool!.transition(to,direction,bounds(),pendingBenchmark);return revision===dragRevision&&!disposed;}
+    if(from===to){if(usingSessions()&&nativeDrag()&&to===0)await transitionPages(to,direction,pendingBenchmark);return revision===dragRevision&&!disposed;}
     while(true){
       const elapsed=Date.now()-started,next=douyinPagerSettleProgress(from,to,elapsed);setDragProgress(next);
-      if(usingSessions()&&nativeDrag()&&!(to===1&&elapsed>=duration))await sessionPool!.transition(next,direction,bounds(),to===0&&elapsed>=duration?pendingBenchmark:undefined);
+      if(usingSessions()&&nativeDrag()&&!(to===1&&elapsed>=duration))await transitionPages(next,direction,to===0&&elapsed>=duration?pendingBenchmark:undefined);
       if(revision!==dragRevision||disposed)return false;
       if(elapsed>=duration)break;await delay(16).result;
     }
@@ -556,7 +595,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const finishDouyinDrag=async(velocityY:number,forceCancel=false,replayed?:DeferredDrag,cancelReason:"cancelled"|"network_prompt"="cancelled")=>{
     if(deferredPan&&!replayed){
       const queued=deferredPan;deferredPan=undefined;queued.velocityY=velocityY;queued.cancel=forceCancel;
-      const direction=queued.distanceY<0?'up':'down',progress=douyinPagerProgress(queued.distanceY,props.height);
+      const direction=queued.distanceY<0?'up':'down',progress=douyinPagerProgress(queued.distanceY,pagerLength());
       const boundary=props.canSelectTarget?.(direction==='up'?'next':'previous')===false;
       const settles=!forceCancel&&!boundary&&!!(direction==='up'?props.onNext:props.onPrevious)&&shouldSettleDouyinPager(progress,velocityY,direction);
       const delta=settles?douyinPagerDelta(progress,velocityY,direction):0;
@@ -603,7 +642,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         if(decoded&&props.source===decoded.source){
           const action=pendingBenchmark;pendingBenchmark=undefined;
           autoplayAllowed=props.active&&lifecycle()==='active';
-          const op=sessionPool!.prepare(decoded,{...decoded.source,respectSilentMode:true,loop:loopMode()==='single',bounds:{...bounds(),translateY:0,visible:props.active},autoplay:autoplayAllowed,...(action?{benchmark:action}:{})} as VideoPrepare);
+          const op=sessionPool!.prepare(decoded,{...decoded.source,respectSilentMode:true,loop:loopMode()==='single',bounds:{...restingBounds(),visible:props.active},transform:prepareTransform(),autoplay:autoplayAllowed,...(action?{benchmark:action}:{})} as VideoPrepare);
           prepareOp=op;setHandoff(false);setFirstFrame(true);setReady(true);setError('');setSpinnerDue(false);clearDrag();
           // The cover stays absent. Native independently requires the decoded,
           // latched target and a real commit; this acknowledgement is not proof.
@@ -682,7 +721,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(usingSessions()&&target&&sessionPool!.hasStandby(target.key)){
         const ownGeneration=++generation;pollTimer?.cancel();
         sessionPool!.selectStandby(target.key);
-        const promoted=await sessionPool!.promote(direction,bounds(),props.active&&lifecycle()==="active",pendingBenchmark,followingKeys);
+        const promoted=await sessionPool!.promote(direction,restingBounds(),props.active&&lifecycle()==="active",pendingBenchmark,followingKeys,prepareTransform());
         if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
         // Install ownership BEFORE publishing the reactive source. Publication
         // must not schedule another prepare/release of the surface on screen.
@@ -725,7 +764,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     return !!target||!!props.onAdjacentKey?.('next');
   },async current=>{
     if(!current()||disposed||!props.active||lifecycle()!=="active"||videoSessionOwner!==sessionOwner||dragSettling||dragDirection)return;
-    beginDouyinDrag();moveDouyinDrag(-props.height);await finishDouyinDrag(-125);
+    beginDouyinDrag();moveDouyinDrag(-pagerLength());await finishDouyinDrag(-125);
   });
   // The capability probe can leave a pool object behind while playback uses
   // the legacy host. Release the backend that actually owns playback.
@@ -750,7 +789,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const surfaceGesture = createGesture(playerGesture({ region: { node: () => detailShown() || props.source.platform==='douyin'&&props.source.immersive ? undefined : surface, rect: () => props.active && props.offset === 0 && !detailShown() ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
-    onDown: () => { panVelocity = 0; }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
+    onDown: () => { panVelocity = 0; pagerPointerRotation=displayRotation(); }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
     onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(douyinPagerReleaseVelocity(contact),!!networkPrompt(),undefined,"network_prompt");return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now();setMotion(true); } props.onPanStateChange?.(pan(), range().range); },
     onCancel:()=>{if(props.source.platform==="douyin")void finishDouyinDrag(0,true);}
   },displayRotation,playerViewport));
@@ -826,7 +865,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   });
   // Detail & playback-control panel: opened by the edge arrow or a right-to-left drag.
   let detail: PlayerDetailHandle | undefined;
-  const slide = createDetailSlide(() => props.width);
+  const detailViewport = createMemo(() => {
+    const width = props.width, height = screenHeight();
+    const diameter = Math.min(width, height);
+    return props.round
+      ? { x: (width - diameter) / 2, y: (height - diameter) / 2, width: diameter, height: diameter, radius: diameter / 2 }
+      : { x: 0, y: 0, width, height, radius: 0 };
+  });
+  const slide = createDetailSlide(() => detailViewport().width);
   const detailShown = slide.shown;
   createEffect(()=>{
     const value=state(),source=props.source,own=generation;
@@ -851,7 +897,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     shellState:async()=>{if(disposed||!props.active||videoSessionOwner!==sessionOwner||!ready())throw new ShellCommandError('not_ready');return {...await media.state(),reloadCount,loopModeIndex:loopMode()==='off'?0:loopMode()==='single'?1:2,loopModeCount:loopModes().length,gestureReady:props.active&&props.offset===0&&!detailShown(),gestureOffset:Number.isFinite(props.offset)?props.offset:0,gestureDetailShown:detailShown(),gestureLifecycleActive:lifecycle()==='active',gestureRotation:displayRotation()};},
     shellPlaying:async playing=>{if(disposed||!props.active||videoSessionOwner!==sessionOwner||!ready())throw new ShellCommandError('not_ready');const own=generation;autoplayAllowed=playing;resumeAfterLifecycle=false;const next=await(playing?media.play():media.pause());if(disposed||own!==generation||videoSessionOwner!==sessionOwner)throw new ShellCommandError('unavailable');setState(next);if(!playing)emitCheckpoint('pause_or_exit',next.positionMs,next.durationMs);},
     invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward().catch(()=>{});},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,gestureRotation:displayRotation,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; if (props.source.platform === "douyin") return true; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
-    sideSwipe: { begin: () => { if (!canOpenDetail()) return false; slide.begin(); return true; }, move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
+    sideSwipe: { begin: () => canOpenDetail() && !detailShown() && slide.begin(), move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
   onCleanup(() => { bufferedStall.cancel();recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   // Round screens: while the crown capsule shows, control rows in the (rotatable) layer move off it or leave it blank.
   const layerQuarter = () => ((Math.round(displayRotation() / 90) * 90) % 360 + 360) % 360;
@@ -907,16 +953,23 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       <Show when={Number.isFinite(state()?.durationMs)&&(state()?.durationMs??0)>0}><Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><Show when={timelineProgress()>0}><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{width:timelineProgress()}} /></Show><View class="absolute top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" style={{insetL:Math.max(0,Math.min(barWidth()-4,timelineProgress()-2))}} /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text></Show>
       <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
-    <Show when={props.active && controlsVisible() && !error() && !networkPrompt() && !detailShown() && !(props.round && volumeVisible())}><PlayerDetailArrow left={uiLeft()} top={uiTop()} scale={uiScale()} onOpen={() => { if (canOpenDetail()) slide.open(); }} /></Show>
+    <Show when={props.active && controlsVisible() && !error() && !networkPrompt() && !detailShown() && !(props.round && volumeVisible())}><PlayerDetailArrow left={uiLeft()} top={uiTop()} scale={uiScale()} rotation={displayRotation()} round={props.round} onOpen={() => { if (canOpenDetail()) slide.open(); }} /></Show>
     <Show when={volumeVisible() && props.round && !detailShown()}><VolumeArcCapsule width={props.width} height={props.height} percent={volumePercent()} muted={state()?.muted === true} /></Show>
     <Show when={volumeVisible() && !props.round}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{volumePercent()}%</Text></View></Show>
     <Show when={(props.round || !volumeVisible()) && loopHint()}>{hint => <View class="absolute left-[52] right-[52] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-base leading-[20] text-white">{hint()}</Text></View>}</Show>
-    <Show when={detailShown()}><View class="absolute left-[0]" style={{ insetT: -top(), width: props.width, height: screenHeight() }}>
-      <PlayerDetailPanel width={props.width} height={screenHeight()} slide={slide} ref={value => detail = value}
-        title={() => props.source.title} author={() => props.source.author} description={() => props.source.description} cover={detailCover}
-        positionMs={() => state()?.positionMs ?? 0} durationMs={() => state()?.durationMs ?? 0} seekable={prepared} onSeek={delta => void seekTo(delta)}
-        volumePercent={volumePercent} muted={() => state()?.muted === true} onVolume={(steps, crown) => { if (crown) { const direction = normalizedRelativeAxisStep(steps); if (direction && props.active) crownVolume(direction); } else stepVolume(steps); }}
-        speed={() => speedSupported() ? speedTarget() : undefined} onSpeed={changeSpeed} />
+    <Show when={detailShown()}><View class="absolute overflow-hidden" style={{
+      insetL: detailViewport().x, insetT: detailViewport().y - top(), width: detailViewport().width,
+      height: detailViewport().height, radius: detailViewport().radius,
+    }}>
+      <View debugName="PlayerDetailPicture" class="absolute left-[0] top-[0]" style={{
+        width: detailViewport().width, height: detailViewport().height, rotate: displayRotation(), originX: 0, originY: 0,
+      }}>
+        <PlayerDetailPanel width={detailViewport().width} height={detailViewport().height} rotation={displayRotation} slide={slide} ref={value => detail = value}
+          title={() => props.source.title} author={() => props.source.author} description={() => props.source.description} cover={detailCover}
+          positionMs={() => state()?.positionMs ?? 0} durationMs={() => state()?.durationMs ?? 0} seekable={prepared} onSeek={delta => void seekTo(delta)}
+          volumePercent={volumePercent} muted={() => state()?.muted === true} onVolume={(steps, crown) => { if (crown) { const direction = normalizedRelativeAxisStep(steps); if (direction && props.active) crownVolume(direction); } else stepVolume(steps); }}
+          speed={() => speedSupported() ? speedTarget() : undefined} onSpeed={changeSpeed} />
+      </View>
     </View></Show>
   </View>;
 }

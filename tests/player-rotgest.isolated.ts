@@ -19,7 +19,7 @@ let panelProps:any,arrowProps:any;
 mock.module('../src/ui/PlayerDetailPanel.tsx',()=>({
  PlayerDetailArrow:(props:any)=>{arrowProps=props;return null;},
  PlayerDetailPanel:(props:any)=>{panelProps=props;props.ref?.({crown(){}});return null;},
- createDetailSlide:()=>{const [shown,set]=createSignal(false);return {shown,x:()=>shown()?0:233,begin(){},move(){set(true);},end(){},reset(){set(false);},open(){set(true);},close(){set(false);}};},
+ createDetailSlide:()=>{const [shown,set]=createSignal(false);return {shown,x:()=>shown()?0:233,begin(){return true;},move(){set(true);},end(){},reset(){set(false);},open(){set(true);},close(){set(false);}};},
 }));
 let phase='active',listener:(phase:string)=>void=()=>{},prepared=0;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>false,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:(delta:number)=>Math.sign(delta)}));
@@ -92,6 +92,22 @@ test('review: actual display angle at down survives the rest of the rotation twe
 for(const angle of [90,180,270])test(`review: real source replacement after down retains angle ${angle}`,async()=>{
  const f=mount('douyin',angle);await flush();f.rotate();await flush();const r=angle*Math.PI/180;
  const c={id:1,x:100,y:100,startX:100,startY:100,dx:110*Math.sin(r),dy:-110*Math.cos(r),fdx:0,fdy:0,vx:650*Math.sin(r),vy:-650*Math.cos(r)};
- const g=gestures.find(g=>g.onTap&&g.onPanEnd);g.onDown(c);f.replaceSource();await flush();expect(f.handle.gestureRotation()).toBe(0);
+ const g=gestures.find(g=>g.onTap&&g.onPanEnd);g.onDown(c);f.replaceSource();await flush();expect(f.handle.gestureRotation()).toBe(angle);
  g.onPanStart(c);g.onPanMove(c);g.onUp?.(c);g.onPanEnd(c);await flush();expect(f.selected).toEqual(['next']);
+});
+
+test('detail picture layer follows the video throughout an unfinished rotation',async()=>{
+ const f=mount('douyin',0);await flush();
+ f.rotateStep();f.tick(60);await flush();
+ expect(f.handle.sideSwipe.begin()).toBe(true);f.handle.sideSwipe.move(-100);
+ const layer=()=>nodes(f.tree).find(node=>node.props.debugName==='PlayerDetailPicture');
+ for(const elapsed of [0,40,70,180]){
+  if(elapsed)f.tick(elapsed);
+  await flush();
+  expect(layer()?.props.style.rotate).toBe(transforms.at(-1).rotationDeg);
+  expect(panelProps.rotation()).toBe(f.handle.gestureRotation());
+ }
+ expect(layer()?.props.style.rotate).toBe(90);
+ panelProps.slide.close();
+ expect(f.handle.gestureRotation()).toBe(90);
 });

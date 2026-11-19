@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ABOUT, ABOUT_MAX_CHARS, aboutLines, CANVAS, chordWidth, columnLayout, CONTROL, controlCentreOffset, controlRects, controlRow, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, INFO, INFO_HEIGHT, infoLayout, infoRects, insideCanvasCircle, pillFill, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
+import { ABOUT, ABOUT_MAX_CHARS, aboutLineIterator, CANVAS, chordWidth, columnLayout, CONTROL, controlCentreOffset, controlRects, controlRow, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, INFO, INFO_HEIGHT, infoLayout, infoRects, insideCanvasCircle, pillFill, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
 import { holdStepCount, seekHoldStep } from "../src/ui/video-player.ts";
 import { volumeArcLayout, volumeArcOutline } from "../src/ui/volume-arc.ts";
 
@@ -51,7 +51,7 @@ describe("player detail layout stays inside the round screen", () => {
     expect(layout.descriptionMore).toBe(true);
     expect(infoLayout({ title: "标题", description: "一句话简介", hasCover: true }, measure).descriptionMore).toBe(false);
     for (const text of [longCjk, longLatin, "短简介"]) {
-      const lines = aboutLines(text, measure);
+      const lines = Array.from(aboutLineIterator(text, measure));
       expect(lines.length).toBeGreaterThan(0);
       for (const line of lines) expect(measure(line, ABOUT.slot)).toBeLessThanOrEqual(ABOUT.width + 1e-6);
       expect(lines.at(-1)!.endsWith("…")).toBe(false);
@@ -90,6 +90,16 @@ describe("player detail layout stays inside the round screen", () => {
     expect(insideCanvasCircle(ENTRY_ARROW.tab)).toBe(true);
     expect(insideCanvasCircle(ENTRY_ARROW.icon)).toBe(true);
   });
+  test("the round touch target contains the tab and icon with all corners inside the circle", () => {
+    const { roundHit: hit, tab, icon } = ENTRY_ARROW;
+    expect(insideCanvasCircle(hit)).toBe(true);
+    for (const rect of [tab, icon]) {
+      expect(rect.x).toBeGreaterThanOrEqual(hit.x);
+      expect(rect.y).toBeGreaterThanOrEqual(hit.y);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(hit.x + hit.width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(hit.y + hit.height);
+    }
+  });
   test("the entry arrow does not touch the crown volume capsule", () => {
     const tab = ENTRY_ARROW.tab;
     for (const p of volumeArcOutline(volumeArcLayout(CANVAS)))
@@ -127,9 +137,9 @@ describe("player detail values", () => {
 });
 
 test('the complete description remains readable past 400 characters',()=>{
- const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证',lines=aboutLines(text,measure);
+ const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证',lines=Array.from(aboutLineIterator(text,measure));
  for(const line of lines)expect(measure(line,ABOUT.slot)).toBeLessThanOrEqual(ABOUT.width);
  expect(lines.join('')).toBe(text);expect(lines.length).toBeGreaterThan(20);
- const long='甲'.repeat(ABOUT_MAX_CHARS-10)+'结束标记';expect(aboutLines(long,measure).join('')).toBe(long);
- const over=aboutLines('乙'.repeat(ABOUT_MAX_CHARS+5),measure).join('');expect(over.endsWith('…')).toBe(true);expect(Array.from(over)).toHaveLength(ABOUT_MAX_CHARS+1);
+ const long='甲'.repeat(ABOUT_MAX_CHARS-10)+'结束标记';expect(Array.from(aboutLineIterator(long,measure)).join('')).toBe(long);
+ const over=Array.from(aboutLineIterator('乙'.repeat(ABOUT_MAX_CHARS+5),measure)).join('');expect(over.endsWith('…')).toBe(true);expect(Array.from(over)).toHaveLength(ABOUT_MAX_CHARS+1);
 });

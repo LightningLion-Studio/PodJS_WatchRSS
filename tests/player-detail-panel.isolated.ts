@@ -3,7 +3,7 @@ import {createMemo,createRenderEffect,createRoot,createSignal,onCleanup} from 's
 const frames:{fn:()=>void;needs:()=>boolean}[]=[],gestures:any[]=[],backs=new Set<()=>boolean>();
 let time=1000;const clock=Date.now;Date.now=()=>time;
 mock.module('@pocketjs/framework/components',()=>Object.fromEntries(['View','Text','Image'].map(kind=>[kind,(props:any)=>{const children=createMemo(()=>props.children);const node={kind,props:new Proxy(props,{get(target,key){return key==='children'?children():target[key];}})};props.ref?.(node);return node;}])));
-mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gestures.push(options);onCleanup(()=>gestures.splice(gestures.indexOf(options),1));return{dispose(){options.onCancel?.();}};}}));
+mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gestures.push(options);onCleanup(()=>gestures.splice(gestures.indexOf(options),1));return{dispose(){options.onCancel?.({id:1});}};}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:any,needs=()=>true){const entry={fn,needs};frames.push(entry);onCleanup(()=>frames.splice(frames.indexOf(entry),1));}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string)=>Array.from(text).length*12})}));
 mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
@@ -29,12 +29,30 @@ test('crown scrolls continuously until a pill is selected, and deselect or pan r
  f.find('PlayerDetail-speed-value').props.onPress();f.handle.crown(12000);expect(f.speeds).toEqual([1.25]);
 });
 test('cancelled dismiss stays open and system back restores the player',()=>{
- const f=mount(),dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({dx:100});dismiss.onPanMove({dx:180});dismiss.onCancel();f.tick();expect(f.slide.x()).toBe(0);
+ const f=mount(),dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({id:1,dx:100});dismiss.onPanMove({id:1,dx:180});dismiss.onCancel({id:1});f.tick();expect(f.slide.x()).toBe(0);
  expect([...backs][0]()).toBe(true);f.tick();expect(f.slide.shown()).toBe(false);
 });
 test('cancelled open stays closed and a new open remains usable',()=>{
  Date.now=()=>time;let slide:any;createRoot(stop=>{stops.push(stop);slide=createDetailSlide(()=>233);});
  slide.begin();slide.move(-180);slide.cancel();time+=300;frames.forEach(f=>f.fn());expect(slide.shown()).toBe(false);slide.open();time+=300;frames.forEach(f=>f.fn());expect(slide.x()).toBe(0);
+});
+test('system Back dismisses a panel while the opening finger is still held',()=>{
+ const f=mount();f.slide.reset();f.slide.begin();f.slide.move(-33);
+ expect([...backs][0]()).toBe(true);
+ f.slide.move(-120);f.slide.end(-500);f.tick();
+ expect(f.slide.shown()).toBe(false);
+ f.slide.open();f.tick();expect(f.slide.shown()).toBe(true);
+});
+test('a dismissing finger can bring the panel back from off-screen',()=>{
+ const f=mount(),dismiss=gestures.find(g=>g.axis==='x');
+ dismiss.onPanStart({id:1,dx:80});
+ dismiss.onPanMove({id:1,dx:233});
+ expect(f.slide.x()).toBe(233);
+ expect(f.slide.shown()).toBe(true);
+ dismiss.onCancel({id:2});
+ dismiss.onPanMove({id:1,dx:40});
+ dismiss.onPanEnd({id:1,vx:0});
+ f.tick();expect(f.slide.x()).toBe(0);
 });
 test('panel steppers repeat only until disabled or scope disposal',()=>{
  const f=mount();const plus=f.find('PlayerDetail-progress-plus'),hold=gestures.find(g=>g.region?.node?.()===plus);hold.onLongPress();frames.slice().forEach(f=>f.fn());expect(f.seeks).toEqual([4000]);f.disable();f.tick();expect(f.seeks).toEqual([4000]);stops.pop()!();expect(frames).toHaveLength(0);
@@ -57,7 +75,7 @@ test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
  Date.now=()=>time;let slide:any,stopPanel!:()=>void;
  createRoot(stop=>{stops.push(stop);slide=createDetailSlide(()=>233);});slide.open();time+=300;frames.slice().forEach(f=>f.fn());
  createRoot(stop=>{stopPanel=stop;PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>undefined,cover:()=>undefined,positionMs:()=>0,durationMs:()=>1000,seekable:()=>true,onSeek(){},volumePercent:()=>20,muted:()=>false,onVolume(){},speed:()=>1,onSpeed(){}});});
- const dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({dx:100});slide.reset();stopPanel();time+=300;frames.slice().forEach(f=>f.fn());expect(slide.shown()).toBe(false);
+ const dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({id:1,dx:100});slide.reset();stopPanel();time+=300;frames.slice().forEach(f=>f.fn());expect(slide.shown()).toBe(false);
 });
 test('settled detail panels request no frames',()=>{
  const f=mount();expect(frames.some(e=>e.needs())).toBe(false);f.handle.crown(15000);expect(frames.some(e=>e.needs())).toBe(true);f.tick();expect(frames.some(e=>e.needs())).toBe(false);

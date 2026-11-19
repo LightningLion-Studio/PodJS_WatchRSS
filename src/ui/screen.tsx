@@ -377,7 +377,13 @@ export default function WatchRSS(props: {
   const [loading, setLoading] = createSignal(!homeSnapshot),
     [busy, setBusy] = createSignal(false),
     [homeRefreshing, setHomeRefreshing] = createSignal(false),
-    [error, setError] = createSignal("");
+    [errorMessage, setError] = createSignal("");
+  const error = createMemo(() => {
+    const message = errorMessage();
+    // A rejected async handler can report a QuickJS allocation failure after
+    // the host turn has already requested reclamation. Keep the player usable.
+    return message === "InternalError: out of memory" || message === "out of memory" ? "" : message;
+  });
   const {
     savedEntries,
     savedUndo,

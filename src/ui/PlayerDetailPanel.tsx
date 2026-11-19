@@ -1,15 +1,16 @@
-import { createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
+import { batch, createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import { createGesture } from "@pocketjs/framework/gesture";
+import { createGesture, type GestureOptions } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import * as watch from "@podjs/framework/watch";
 import { RemoteImage } from "./RemoteImage.tsx";
+import { playerGesture } from "./player-gestures.ts";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutLines, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutHeight, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220;
@@ -17,35 +18,65 @@ const SLIDE_MS = 220;
 const CROWN_PX = 4;
 /** Height of the top and bottom fades over the scrolling column, in canvas units. */
 const EDGE_FADE = 28;
+const ABOUT_LINES_PER_FRAME = 2;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
-export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): void; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
+export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): boolean; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
 export function createDetailSlide(width: () => number, onSettled?: (open: boolean) => void): DetailSlide {
   const [x, setX] = createSignal(width());
-  const [animating,setAnimating]=createSignal(false);
-  let from = 0, to = 0, started = 0, base = 0;
-  const animate = (target: number) => { from = x(); to = target; started = Date.now(); setAnimating(from !== to); if (!animating()) onSettled?.(target === 0); };
-  createRenderEffect(()=>{if(!animating())return;onFrame(() => {
+  const [animating, setAnimating] = createSignal(false);
+  const [dragBase, setDragBase] = createSignal<number>();
+  let from = 0, to = 0, started = 0;
+  const animate = (target: number) => batch(() => {
+    // A late move, release or cancel from the interrupted finger must not
+    // replace an explicit Back or reopen the panel after a route reset.
+    setDragBase();
+    if (animating() && to === target) return;
+    from = x();
+    to = target;
+    started = Date.now();
+    setAnimating(from !== to);
+    if (!animating()) onSettled?.(target === 0);
+  });
+  onFrame(() => {
+    if (!animating()) return;
     const t = (Date.now() - started) / SLIDE_MS;
-    setX(from + (to - from) * ease(t));
-    if (t >= 1) { setAnimating(false); setX(to); onSettled?.(to === 0); }
-  });});
+    if (t < 1) setX(from + (to - from) * ease(t));
+    else batch(() => { setAnimating(false); setX(to); onSettled?.(to === 0); });
+  }, animating);
   return {
-    x, shown: () => x() < width(),
+    // Keep the dismiss recognizer alive if the held finger drags all the way
+    // off-screen. It must still be able to reverse or receive the release.
+    x, shown: () => x() < width() || (dragBase() ?? width()) < width(),
     open: () => animate(0), close: () => animate(width()),
-    begin: () => { setAnimating(false); base = x(); },
-    move: dx => setX(Math.max(0, Math.min(width(), base + dx))),
-    end: vx => { const w = width(), opening = base >= w; animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0)); },
-    cancel: () => animate(base >= width() ? width() : 0),
-    reset: () => { setAnimating(false); setX(width()); },
+    begin: () => {
+      if (dragBase() !== undefined) return false;
+      batch(() => { setDragBase(x()); setAnimating(false); });
+      return true;
+    },
+    move: dx => {
+      const base = dragBase();
+      if (base !== undefined) setX(Math.max(0, Math.min(width(), base + dx)));
+    },
+    end: vx => {
+      const base = dragBase();
+      if (base === undefined) return;
+      const w = width(), opening = base >= w;
+      animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0));
+    },
+    cancel: () => {
+      const base = dragBase();
+      if (base !== undefined) animate(base >= width() ? width() : 0);
+    },
+    reset: () => batch(() => { setDragBase(); setAnimating(false); setX(width()); }),
   };
 }
 
 type Control = "progress" | "volume" | "speed";
 export interface PlayerDetailHandle { crown(delta: number): void }
 export interface PlayerDetailProps {
-  width: number; height: number; slide: DetailSlide;
+  width: number; height: number; slide: DetailSlide; rotation?: Accessor<number>;
   title: () => string; author: () => string | undefined; description: () => string | undefined;
   cover: () => { url: string; bucket?: "bili-preview"; portrait: boolean } | undefined;
   positionMs: () => number; durationMs: () => number; seekable: () => boolean; onSeek: (deltaMs: number) => void;
@@ -56,15 +87,16 @@ export interface PlayerDetailProps {
 }
 
 /** Inward-pointing tab at the player's right edge; opens the detail panel. Canvas coordinates. */
-export function PlayerDetailArrow(props: { left: number; top: number; scale: number; onOpen: () => void }) {
-  const t = ENTRY_ARROW;
-  // The pressable hit area is the parent, so taps on the tab or icon walk up to it.
-  return <View debugName="PlayerDetailArrow" class="absolute" style={{ insetL: props.left, insetT: props.top, width: CANVAS, height: CANVAS, scale: props.scale, originX: 0, originY: 0 }}>
-    <View accessibilityLabel="详情与播放控制" accessibilityRole="button" focusable onPress={props.onOpen} class="absolute bg-[#00000002]" style={{ insetL: t.hit.x, insetT: t.hit.y, width: t.hit.width, height: t.hit.height }}>
-      <View class="absolute rounded-[8] bg-[#000000a6]" style={{ insetL: t.tab.x - t.hit.x, insetT: t.tab.y - t.hit.y, width: t.tab.width, height: t.tab.height }}>
+export function PlayerDetailArrow(props: { left: number; top: number; scale: number; rotation: number; round: boolean; onOpen: () => void }) {
+  const { tab, icon } = ENTRY_ARROW;
+  const hit = () => props.round ? ENTRY_ARROW.roundHit : ENTRY_ARROW.hit;
+  // Rotate the parent of both the ink and the pressable hit area about the picture centre.
+  return <View debugName="PlayerDetailArrow" class="absolute" style={{ insetL: props.left, insetT: props.top, width: CANVAS, height: CANVAS, scale: props.scale, rotate: props.rotation, originX: 0, originY: 0 }}>
+    <View accessibilityLabel="详情与播放控制" accessibilityRole="button" focusable onPress={props.onOpen} class="absolute bg-[#00000002]" style={box(hit())}>
+      <View class="absolute rounded-[8] bg-[#000000a6]" style={{ insetL: tab.x - hit().x, insetT: tab.y - hit().y, width: tab.width, height: tab.height }}>
         <View class="absolute inset-0 rounded-[8] bg-[#ffffff26]" />
       </View>
-      <Image src="../assets/icons/player-detail-open.svg" class="absolute" style={{ insetL: t.icon.x - t.hit.x, insetT: t.icon.y - t.hit.y, width: t.icon.width, height: t.icon.height }} />
+      <Image src="../assets/icons/player-detail-open.svg" class="absolute" style={{ insetL: icon.x - hit().x, insetT: icon.y - hit().y, width: icon.width, height: icon.height }} />
     </View>
   </View>;
 }
@@ -81,13 +113,41 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   });
   const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
-  // The info block shows what fits; the full description follows it when it did not fit whole.
-  const about = createMemo(() => info().descriptionMore ? aboutLines(description(), measure) : []);
+  const fullDescription = createMemo(() => info().descriptionMore ? description() : "");
+  const [about, setAbout] = createSignal<string[]>([]);
+  let aboutJob: { iterator: Generator<string>; lines: string[] } | undefined;
   const controls = createMemo<Control[]>(() => ["progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
   const column = createMemo(() => columnLayout(about().length, controls().length));
   const [selected, setSelected] = createSignal<Control>();
   const scroller = createScroller({ max: () => column().max, extent: () => CANVAS });
   onFrame(() => scroller.step(), () => scroller.state() !== "idle");
+  // Font measurement may rasterize cold system glyphs synchronously. Keep the
+  // entry frame and input responsive while wrapping the optional full text.
+  createEffect(() => {
+    const text = fullDescription();
+    setAbout([]);
+    aboutJob = text ? { iterator: aboutLineIterator(text, measure), lines: [] } : undefined;
+  });
+  onFrame(() => {
+    const job = aboutJob;
+    if (!job) return;
+    for (let i = 0; i < ABOUT_LINES_PER_FRAME; i++) {
+      const next = job.iterator.next();
+      if (!next.done) {
+        job.lines.push(next.value);
+        continue;
+      }
+      aboutJob = undefined;
+      batch(() => {
+        setAbout(job.lines);
+        // Keep an in-use control row in place when the text is inserted above it.
+        if (selected() || Math.max(scroller.offset(), scroller.intent()) >= INFO_HEIGHT - CANVAS / 2) {
+          scroller.rebase(aboutHeight(job.lines.length));
+        }
+      });
+      return;
+    }
+  }, () => !!aboutJob);
 
   createEffect(() => { description(); untrack(() => { scroller.scrollTo(0, { immediate: true }); setSelected(); }); });
   // Capabilities may disappear while a source is being replaced: drop a vanished
@@ -119,7 +179,10 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
 
   let root: NodeMirror | undefined;
   const toCanvas = (px: number) => px / scale();
-  const pager = createGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
+  const viewport = () => ({ x: 0, y: 0, w: props.width, h: props.height });
+  const createPanelGesture = (options: GestureOptions) =>
+    createGesture(props.rotation ? playerGesture(options, props.rotation, viewport) : options);
+  const pager = createPanelGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
     // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
     onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
@@ -128,17 +191,29 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     onPanEnd: contact => scroller.endDrag(-toCanvas(contact.vy)),
     onCancel: () => scroller.endDrag(0),
   });
-  // Left-to-right drags slide the panel back off the player; right-to-left drags are ignored.
-  let closing = false;
-  const dismiss = createGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
-    onPanStart: contact => { closing = contact.dx > 0; if (closing) { props.slide.begin(); props.slide.move(contact.dx); } },
-    onPanMove: contact => { if (closing) props.slide.move(contact.dx); },
-    onPanEnd: contact => { if (closing) props.slide.end(contact.vx); closing = false; },
-    onCancel: () => { if (closing) props.slide.cancel(); closing = false; },
+  // A rightward drag in picture coordinates slides the panel off the player.
+  let closing: number | undefined;
+  const dismiss = createPanelGesture({ region: { node: () => root }, axis: "x", panSlop: 8,
+    onPanStart: contact => {
+      if (contact.dx <= 0 || !props.slide.begin()) return;
+      closing = contact.id;
+      props.slide.move(contact.dx);
+    },
+    onPanMove: contact => { if (closing === contact.id) props.slide.move(contact.dx); },
+    onPanEnd: contact => {
+      if (closing !== contact.id) return;
+      closing = undefined;
+      props.slide.end(contact.vx);
+    },
+    onCancel: contact => {
+      if (closing !== contact.id) return;
+      closing = undefined;
+      props.slide.cancel();
+    },
   });
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
-  onCleanup(() => { closing = false; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
+  onCleanup(() => { closing = undefined; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
 
 
   const InfoPage = () => <>

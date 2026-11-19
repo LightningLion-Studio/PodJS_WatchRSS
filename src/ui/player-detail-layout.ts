@@ -1,4 +1,4 @@
-import { measuredLines, type TextMeasurer } from "../reader/measured-text.ts";
+import { layoutUiText, layoutUiTextLines, measuredLines, type TextMeasurer } from "@podjs/framework/text-lines";
 
 // Player detail panel geometry. Everything is laid out on the player's 233-unit
 // canvas (half of the 466 px round reference) and scaled to the screen, so every
@@ -56,7 +56,7 @@ export function flowLines(text: string, widths: readonly number[], measure: Text
   let rest = Array.from(text).slice(0, 400).join("").trim();
   for (let i = 0; i < widths.length && rest; i++) {
     const width = Math.max(1, widths[i]!), last = i === widths.length - 1;
-    const line = measuredLines(rest, width, measure, last ? 1 : Infinity)[0] ?? "";
+    const line = (last ? measuredLines(rest, width, measure, 1) : layoutUiText(rest, { width, measure, maxLines: 1 }))[0] ?? "";
     if (!line) break;
     lines.push(line);
     rest = last ? "" : rest.slice(line.length).trimStart();
@@ -110,7 +110,7 @@ export function infoLayout(meta: DetailMeta, measure: (text: string, slot: numbe
     return { layout, fits: height <= INFO.bottom - INFO.top && infoRects(layout).every(r => insideCanvasCircle(r)) };
   };
   // Measure how many lines each text needs at its widest, then shrink until the stack fits.
-  const need = (text: string, slot: number, max: number) => text ? Math.min(max, measuredLines(text, INFO.title.maxWidth, measureSlot(slot), max).length) : 0;
+  const need = (text: string, slot: number, max: number) => text ? layoutUiText(text, { width: INFO.title.maxWidth, measure: measureSlot(slot), maxLines: max }).length : 0;
   let titleLines = need(title, INFO.title.slot, maxTitle), descriptionLines = need(description, INFO.description.slot, maxDescription);
   for (;;) {
     const result = plan(titleLines, descriptionLines);
@@ -136,9 +136,9 @@ export const ABOUT = { slot: 1, size: 14, lineHeight: 20, width: 184, caption: 1
 /** Longest description laid out, in code points; beyond it the text ends with an ellipsis. */
 export const ABOUT_MAX_CHARS = 20_000;
 /** Every line of the description at the column width. Bounded so a pathological body stays cheap. */
-export function aboutLines(text: string, measure: (text: string, slot: number) => number): string[] {
+export function* aboutLineIterator(text: string, measure: (text: string, slot: number) => number): Generator<string> {
   const chars = Array.from(clean(text)), body = chars.length > ABOUT_MAX_CHARS ? chars.slice(0, ABOUT_MAX_CHARS).join("") + "…" : chars.join("");
-  return body ? measuredLines(body, ABOUT.width, value => measure(value, ABOUT.slot)) : [];
+  if (body) yield* layoutUiTextLines(body, { width: ABOUT.width, measure: value => measure(value, ABOUT.slot) });
 }
 export const aboutHeight = (lines: number) => lines ? ABOUT.caption + ABOUT.captionGap + lines * ABOUT.lineHeight + ABOUT.gap : 0;
 
@@ -189,8 +189,15 @@ export const controlCentreOffset = (layout: { controls: number; max: number }, i
 
 // ---- entry arrow ---------------------------------------------------------------------------
 
-/** The inward-pointing tab at the right edge of the player, and its larger touch target. */
-export const ENTRY_ARROW = { tab: { x: 207, y: 96.5, width: 16, height: 40 }, icon: { x: 205, y: 106.5, width: 20, height: 20 }, hit: { x: 189, y: 84.5, width: 40, height: 64 } } as const;
+const entryHit = { x: 189, y: 84.5, width: 40, height: 64 };
+const roundHitWidth = C + chordWidth(entryHit.y, entryHit.y + entryHit.height) / 2 - entryHit.x;
+/** The inward-pointing tab and its touch target, in picture coordinates. */
+export const ENTRY_ARROW = {
+  tab: { x: 207, y: 96.5, width: 16, height: 40 },
+  icon: { x: 205, y: 106.5, width: 20, height: 20 },
+  hit: entryHit,
+  roundHit: { ...entryHit, width: Math.min(entryHit.width, roundHitWidth) },
+} as const;
 
 // ---- value steps ---------------------------------------------------------------------------
 
