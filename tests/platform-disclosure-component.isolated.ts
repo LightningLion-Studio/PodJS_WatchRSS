@@ -174,7 +174,7 @@ test('an offline RSS refresh keeps the cached Home channels selectable and shows
 
  expect(refreshes).toBe(1);
  expect(text()).not.toContain('互联网可用状态');
- expect(text()).toContain('RSS refresh offline');
+ expect(text().replace(/\s/g,'')).toContain('RSSrefreshoffline');
  expect(text()).not.toContain('正在刷新全部…');
  expect(homeList().input.inputActive()).toBe(true);
  confirm(cached.title+'，');
@@ -212,7 +212,7 @@ for(const hasCache of [true,false])test(`offline single-channel pull refresh ${h
  expect({
   overlay:text().includes('互联网可用状态'),
   refreshIndicator:text().includes('正在刷新中...'),
-  localError:text().includes('Channel refresh offline'),
+  localError:text().replace(/\s/g,'').includes('Channelrefreshoffline'),
  }).toEqual({overlay:!hasCache,refreshIndicator:!hasCache,localError:hasCache});
  if(hasCache){
   let card=connected().find(node=>texts.get(node.id)?.startsWith('Article'));

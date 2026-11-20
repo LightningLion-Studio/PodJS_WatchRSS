@@ -11,8 +11,7 @@ import { isDouyinPageUrl } from "../../reader/media.ts";
 import {validatedDouyinPlaybackItem} from '../../douyin/playback-source.ts';
 import {douyinMediaNetworkDeadline} from '../../douyin/media-expiry.ts';
 import {isDouyinRetryableFailure} from '../../douyin/errors.ts';
-import {measuredLines} from '../../reader/measured-text.ts';
-import {getOps} from '@pocketjs/framework/host';
+import {layoutAtlasText} from '@podjs/framework/atlas-text';
 import {appLogger} from '../../logs/app-logger.ts';
 import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
@@ -435,9 +434,14 @@ function HistoryScreen(props: DouyinScreenProps) {
     ...(history().length?[button("清空历史",async()=>{await props.client.clearHistory();await refresh();})]:[]),
     ...history().map(entry=>({height:64,render:()=>{
       const {item,watchedAtMillis}=entry,width=props.width-60;
-      const title=measuredLines(itemTitle(item),width,text=>getOps().measureText(text,18),1);
-      const summary=measuredLines(`${item.authorName||"未知作者"} · ${new Date(watchedAtMillis).toLocaleString()}`,width,text=>getOps().measureText(text,0),2);
-      return <View onPress={()=>void openDetail(item).catch(error=>setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{title.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summary.join("\n")}</Text></View>;
+      const description=itemTitle(item);
+      const metadata=`${item.authorName||"未知作者"} · ${new Date(watchedAtMillis).toLocaleString()}`;
+      const title=layoutAtlasText(description,{width,fontSlot:2,lineHeight:20,maxLines:1});
+      const summary=layoutAtlasText(metadata,{width,fontSlot:0,lineHeight:14,maxLines:2});
+      return <View onPress={()=>void openDetail(item).catch(error=>setError(String(error)))} focusable accessibilityRole="button" accessibilityLabel={`${description}，${metadata}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21]">
+        <Text class="absolute left-[12] top-[9] overflow-hidden text-base leading-[20] text-[#f5f5f5]" style={title.style}>{title.lines.join("\n")}</Text>
+        <Text class="absolute left-[12] top-[35] overflow-hidden text-xs leading-[14] text-[#b6b6b6]" style={summary.style}>{summary.lines.join("\n")}</Text>
+      </View>;
     }})),
     ...(!history().length?statusCard(error()?"读取失败":"暂无播放历史",error()||"播放过的视频会显示在这里"):[]),
   ]);

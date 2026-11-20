@@ -1,3 +1,5 @@
+import {layoutAtlasText} from '@podjs/framework/atlas-text';
+import {logTextEntries} from './log-text-entries.tsx';
 import {takeover} from "@podjs/framework/services";
 import { Show, createSignal, onMount } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
@@ -53,25 +55,33 @@ export function LogUploadHistoryScreen(props: {
       <Text class="text-base leading-[22] text-[#f5f5f5]">{label}</Text>
     </View>,
   });
+  const padding=18;
+  const textRows=(text:string,height:number)=>logTextEntries(text,props.width-2*padding,height);
   const entries = (): ScrollEntry[] => [
-    row("已上传日志", 40),
+    ...textRows("已上传日志", 40),
     row("迁移诊断回执",50,()=>{void takeover.openSupport().catch(()=>setMessage("迁移诊断回执暂不可用，请稍后重试。"));}),
-    ...(message() ? [row(message(), 70)] : []),
-    ...(error() ? [row(`删除失败：${error()}`, 70)] : []),
-    ...receipts().map(receipt => ({
-      height: 98,
-      render: () => <View class="absolute inset-0 rounded-[26] bg-[#292929]">
-        <Text class="absolute left-[12] top-[10] text-[17px] leading-[21] text-[#f5f5f5]">取件码：{receipt.code}</Text>
-        <Text class="absolute left-[12] top-[35] right-[12] text-[11px] leading-[15] text-[#bdbdbd]">上传：{receipt.createdAt}</Text>
-        <Text class="absolute left-[12] top-[53] right-[12] text-[11px] leading-[15] text-[#bdbdbd]">到期：{receipt.expiresAt}</Text>
-        <View onPress={() => setSelected(receipt)} focusable class="absolute right-[8] bottom-[6] h-[30] w-[70] rounded-[18] bg-[#414141] items-center justify-center active:scale-96"><Text class="text-[13px] text-[#ffb4ab]">删除</Text></View>
-      </View>,
-    })),
+    ...(message() ? textRows(message(), 70) : []),
+    ...(error() ? textRows(`删除失败：${error()}`, 70) : []),
+    ...receipts().map(receipt => {
+      const width=props.width-2*padding-24;
+      const date=(value:string)=>layoutAtlasText(value,{width,fontSlot:20,lineHeight:15});
+      const created=date(`上传：${receipt.createdAt}`), expires=date(`到期：${receipt.expiresAt}`);
+      const expiresTop=38+created.style.height, height=expiresTop+expires.style.height+36;
+      return {
+        height,
+        render:()=> <View class="absolute inset-0 rounded-[26] bg-[#292929]">
+          <Text class="absolute left-[12] top-[10] text-[17px] leading-[21] text-[#f5f5f5]">取件码：{receipt.code}</Text>
+          <Text class="absolute left-[12] top-[35] overflow-hidden text-[11px] leading-[15] text-[#bdbdbd]" style={created.style}>{created.lines.join("\n")}</Text>
+          <Text class="absolute left-[12] overflow-hidden text-[11px] leading-[15] text-[#bdbdbd]" style={{...expires.style,insetT:expiresTop}}>{expires.lines.join("\n")}</Text>
+          <View onPress={() => setSelected(receipt)} focusable class="absolute right-[8] bottom-[6] h-[30] w-[70] rounded-[18] bg-[#414141] items-center justify-center active:scale-96"><Text class="text-[13px] text-[#ffb4ab]">删除</Text></View>
+        </View>,
+      };
+    }),
     ...(message().startsWith("读取失败") ? [row("重新读取", 50, () => void load())] : []),
   ];
 
   return <>
-    <ScrollEntries height={props.height} entries={entries()} padding={18} gap={7} inputActive={() => !selected() && !busy() && (props.active?.() ?? true)} accessibilityLabel="已上传日志" />
+    <ScrollEntries height={props.height} entries={entries()} padding={padding} gap={7} inputActive={() => !selected() && !busy() && (props.active?.() ?? true)} accessibilityLabel="已上传日志" />
     <Show when={selected()}>{receipt => <DeleteConfirmDialog width={props.width} height={props.height} title="删除已上传日志" message={`确认删除取件码 ${receipt().code} 对应的加密日志？删除后不可恢复。`} busy={busy()} onCancel={() => setSelected(undefined)} onConfirm={() => void remove()} />}</Show>
   </>;
 }

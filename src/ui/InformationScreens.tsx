@@ -6,6 +6,7 @@ import { Text, View } from "@pocketjs/framework/components";
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import {getDisplayMetrics, hasCapability} from '@podjs/framework/watch';
 import {hostOperation,systemSettings,textLayout, type TextLayoutOptions} from '@podjs/framework/services';
+import {layoutAtlasText} from "@podjs/framework/atlas-text";
 import {SystemTextLine, type SystemTextLineOptions} from '@podjs/framework/text';
 import {fetchLegalDocument} from "../onboarding/legal-document.ts";
 import {createScroller, type Scroller} from "@pocketjs/framework/kinetics";
@@ -13,6 +14,7 @@ import {onFrame} from '@pocketjs/framework/lifecycle';
 import type {ReaderPreset} from "../reader/preset.ts";
 import type {ReaderFontResolver} from "../reader/font-assets.ts";
 import type {ReaderBackgroundSnapshot} from "../reader/background-assets.ts";
+import {chunkLines} from "./round-rows.tsx";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { GROUP_NUMBER, GROUP_URL, informationText } from "./information-data.ts";
 import { SafeQrScreen } from "./SafeQrScreen.tsx";
@@ -35,18 +37,42 @@ export interface InformationSnapshot {
 }
 export type InformationRestorationEvent = 'document-mounted'|'document-unmounted'|'candidate-consumed'|'loading-committed'|'response-applied';
 export type InformationRef = (value: { scroller: Scroller;snapshot?:()=>InformationSnapshot }) => void;
-export interface InformationScreenProps { height: number; width?: number; preset:ReaderPreset; fonts:ReaderFontResolver; backgroundSnapshot:ReaderBackgroundSnapshot; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
+export interface InformationScreenProps { height: number; width?: number; preset:ReaderPreset; fonts:ReaderFontResolver; backgroundSnapshot:ReaderBackgroundSnapshot; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => Promise<void> | void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
 
 const button = (label: string, onPress?: () => void): ScrollEntry => ({ height: 52, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[30] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></View> });
 const aboutEntry = (label: string, summary: string, onPress: () => void): ScrollEntry => ({ height: 70, render: () => <View class="absolute inset-0"><View onPress={onPress} focusable class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[30] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></View><Text class="absolute left-[10] top-[56] text-xs leading-[14] text-[#b6b6b6]">{summary}</Text></View> });
 const title = (label: string): ScrollEntry => ({ height: 34, render: () => <View class="absolute inset-0 items-center justify-center"><Text class="text-[21px] leading-[26] text-[#f5f5f5]">{label}</Text></View> });
 
-function wrap(text: string, width = 42): string[] { const max = Math.max(12, width); return text.split("\n").flatMap(line => { const out: string[] = []; let current = "", units = 0; for (const ch of line) { const cost = /[\u0000-\u00ff]/.test(ch) ? 6.5 : 13; if (current && units + cost > max) { out.push(current); current = ""; units = 0; } current += ch; units += cost; } if (current || !out.length) out.push(current); return out; }); }
-function textEntries(content: string, width?: number): ScrollEntry[] { return content.split(/\n\s*\n/).flatMap(p => { const lines = wrap(p.trim(), width); return [{ height: Math.max(24, lines.length * 18 + 8), render: () => <View class="absolute inset-0"><Text class="absolute inset-0 text-[13px] leading-[18] text-[#e5e5e5]">{lines.join("\n")}</Text></View> }]; }); }
+function textEntries(content:string,width:number):ScrollEntry[] {
+  const lineHeight=18;
+  return content.split(/\n\s*\n/).flatMap(paragraph=>{
+    const {lines,style}=layoutAtlasText(paragraph.trim(),{width,fontSlot:21,lineHeight});
+    return chunkLines(lines,lineHeight,width,8).map(chunk=>{
+      const textHeight=chunk.length*lineHeight;
+      return {height:Math.max(24,textHeight+8),render:()=> <View class="absolute inset-0">
+        <Text class="absolute left-[0] top-[0] overflow-hidden text-[13px] leading-[18] text-[#e5e5e5]"
+          style={{...style,height:textHeight}}>{chunk.join("\n")}</Text>
+      </View>};
+    });
+  });
+}
 
 export function InformationScreen(props: InformationScreenProps) {
   const network=useNetworkRecovery();
-  const open = (url: string) => props.onOpenUrl?.(url);
+  const [externalUnavailable,setExternalUnavailable]=createSignal(false);
+  let openingGroupLink=false;
+  const openGroupLink=async()=>{
+    if(openingGroupLink||externalUnavailable())return;
+    openingGroupLink=true;
+    try {
+      await props.onOpenUrl?.(GROUP_URL);
+    } catch {
+      setExternalUnavailable(true);
+    } finally {
+      openingGroupLink=false;
+    }
+  };
+  const groupAction=()=>props.onOpenUrl&&hasCapability("system.browser")&&!externalUnavailable();
   const restored = untrack(() => props.restoredState ?? props.restoredBackground);
   const retainedUnderlying = untrack(() => props.restoreMode === 'retained-underlying' || !props.restoredState && !!props.restoredBackground);
   const metrics = getDisplayMetrics(), pixelScale = metrics.physicalWidth / metrics.logicalWidth;
@@ -148,7 +174,7 @@ export function InformationScreen(props: InformationScreenProps) {
     case "collaborators": result = [title("协作者名单"), ...[ ["闪电狮", "前端开发", "S"], ["林海阔", "前端开发", "L"], ["Nicolas", "设计师", "N"] ].map(([name, role, initial]) => ({ height: 60, render: () => <View class="absolute inset-0 rounded-[30] bg-[#2a2a2a]"><View class="absolute left-[9] top-[9] w-[42] h-[42] rounded-full bg-[#454545] items-center justify-center"><Text class="text-xs text-white">{initial}</Text></View><Text class="absolute left-[61] top-[12] text-sm text-white">{name}</Text><Text class="absolute left-[61] top-[34] text-xs text-[#b6b6b6]">{role}</Text></View> }))]; break;
     case "contact-developer": result = [title("联系开发者"), button("加群", () => props.onNavigate("join-group")), button("上传日志", () => props.onNavigate("log-upload-privacy")), button("管理已上传日志", props.onManageLogs)]; break;
     case "join-group": result = []; break;
-    case "log-upload-privacy": result = [title("日志上传重要信息"), ...textEntries(informationText.logUploadPrivacy, props.width ? props.width - 36 : 42), button(props.onUploadLogs ? "同意并开始上传" : "上传日志（暂不可用）", props.onUploadLogs), button("暂不上传", props.onDeclineLogs), button("管理已上传日志", props.onManageLogs)]; break;
+    case "log-upload-privacy": result = [title("日志上传重要信息"), ...textEntries(informationText.logUploadPrivacy, (props.width ?? 233) - 36), button(props.onUploadLogs ? "同意并开始上传" : "上传日志（暂不可用）", props.onUploadLogs), button("暂不上传", props.onDeclineLogs), button("管理已上传日志", props.onManageLogs)]; break;
     default: result = [];
   } return result; });
   return <View class="absolute inset-0" accessibilityHidden={!(props.active?.() ?? true)}><Show when={props.page === 'beian'} fallback={
@@ -170,7 +196,8 @@ export function InformationScreen(props: InformationScreenProps) {
         </Show>
       </Show>
     }>
-      <SafeQrScreen width={props.width ?? 233} height={props.height} title="加入 QQ 群" value={GROUP_URL} status={`群号 ${GROUP_NUMBER}`} actionLabel="链接" onAction={() => open(GROUP_URL)}
+      <SafeQrScreen width={props.width ?? 233} height={props.height} title="加入 QQ 群" value={GROUP_URL} status={`用手机 QQ 扫码\n群号 ${GROUP_NUMBER}`}
+        actionLabel={groupAction() ? "链接" : undefined} onAction={groupAction() ? () => void openGroupLink() : undefined}
         accessibilityLabel={`加群页面。扫描二维码加入QQ群，群号：${GROUP_NUMBER}。`}
         qrAccessibilityLabel="QQ群二维码，扫描后可在手机上加入群聊"
         titleAccessibilityLabel="标题：加入 QQ 群"

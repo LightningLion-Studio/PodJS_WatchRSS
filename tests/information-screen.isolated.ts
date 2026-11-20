@@ -10,7 +10,7 @@ import type {InformationListAnchor} from "../src/ui/information-anchor.ts";
 import type {InformationDocumentHandle, InformationDocumentProps} from "../src/ui/InformationDocument.tsx";
 import type {InformationRef, InformationScreenProps, InformationSnapshot} from "../src/ui/InformationScreens.tsx";
 import {defaultReaderPreset} from "../src/reader/preset.ts";
-import {informationText} from "../src/ui/information-data.ts";
+import {GROUP_NUMBER,GROUP_URL,informationText} from "../src/ui/information-data.ts";
 import {NetworkRecovery} from "../src/network/recovery.ts";
 import {NetworkRecoveryContext} from "../src/network/context.ts";
 
@@ -41,9 +41,10 @@ const element = (kind: string) => (props: Element["props"]): Element => {
 mock.module("@pocketjs/framework/renderer", () => ({createComponent, mergeProps, memo: createMemo, effect: createRenderEffect}));
 mock.module("@pocketjs/framework/components", () => ({View: element("View"), Text: element("Text")}));
 mock.module("@podjs/framework/text", () => ({SystemTextLine: element("SystemTextLine")}));
+let externalBrowser=false;
 mock.module("@podjs/framework/watch", () => ({
   getDisplayMetrics: () => ({logicalWidth: 233, logicalHeight: 233, physicalWidth: 466, physicalHeight: 466, density: 1.75}),
-  hasCapability: (name: string) => ["text.environment", "text.layout", "text.raster"].includes(name),
+  hasCapability: (name: string) => name==="system.browser" ? externalBrowser : ["text.environment", "text.layout", "text.raster"].includes(name),
 }));
 mock.module("../src/ui/ScrollEntries.tsx", () => ({ScrollEntries: element("ScrollEntries")}));
 mock.module("../src/ui/SafeQrScreen.tsx", () => ({SafeQrScreen: element("SafeQrScreen")}));
@@ -119,6 +120,7 @@ mock.module("../src/ui/InformationDocument.tsx", () => ({InformationDocument: (p
 const {InformationScreen} = await import("../src/ui/InformationScreens.tsx");
 const disposers: Array<() => void> = [];
 afterEach(() => {
+  externalBrowser=false;
   while (disposers.length) disposers.pop()!();
   documents.length = 0; requests.length = 0; nativeRequests.length = 0; nativeMeasurements.length = 0; settingsCalls=0;settingsPending=undefined;settingsFailure=undefined;hostRequests.length=0;
 });
@@ -172,6 +174,39 @@ function retry(mounted: ReturnType<typeof mount>) {
   expect(control, "visible retry control").toBeDefined();
   (control!.props.onPress as () => void)();
 }
+
+test("QQ group works with no host browser capability", () => {
+  let attempts=0;
+  const mounted=mount({page:"join-group",onOpenUrl:()=>{attempts++;}});
+  const qr=mounted.nodes().find(node=>node.kind==="SafeQrScreen")!;
+  expect(qr.props.value).toBe(GROUP_URL);
+  expect(qr.props.status).toBe(`用手机 QQ 扫码\n群号 ${GROUP_NUMBER}`);
+  expect(qr.props.onAction).toBeUndefined();
+  expect(attempts).toBe(0);
+});
+
+test("QQ group keeps the link after success and keeps the QR after Android refuses it", async () => {
+  externalBrowser=true;
+  const attempts:string[]=[];
+  let unavailable=false;
+  const mounted=mount({page:"join-group",onOpenUrl:async url=>{
+    attempts.push(url);
+    if(unavailable)throw Error("no_browser_handler");
+  }});
+  const qr=()=>mounted.nodes().find(node=>node.kind==="SafeQrScreen")!;
+  (qr().props.onAction as ()=>void)();
+  await settle();
+  expect(attempts).toEqual([GROUP_URL]);
+  expect(qr().props.onAction).toBeFunction();
+  unavailable=true;
+  (qr().props.onAction as ()=>void)();
+  await settle();
+  expect(attempts).toEqual([GROUP_URL,GROUP_URL]);
+  expect(qr().props.onAction).toBeUndefined();
+  expect(qr().props.value).toBe(GROUP_URL);
+  expect(qr().props.status).toContain(GROUP_NUMBER);
+  expect(hostRequests).toEqual([]);
+});
 
 test("remote loading shows a black spinner without a title, list or success document", async () => {
   const mounted = mount();

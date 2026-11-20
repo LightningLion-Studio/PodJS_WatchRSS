@@ -119,6 +119,7 @@ import { MediaRoutes } from "./routes/media.tsx";
 import { createMediaRouteController } from "./routes/media-controller.ts";
 import { NotesRoutes } from "./routes/notes.tsx";
 import { ReaderRoutes } from "./routes/reader.tsx";
+import {TopNotice} from "@podjs/framework/watch-ui";
 import {readerControlViewport} from "../reader/viewport.ts";
 import { RssRoutes } from "./routes/rss.tsx";
 import { SavedRoutes } from "./routes/saved.tsx";
@@ -1557,7 +1558,6 @@ export default function WatchRSS(props: {
     const entryPage = () => entry.page;
     const active = () => current() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
-    const noticeFrame = createMemo(()=>readerControlViewport(width,height,metrics.shape==='round',entryPage()==='reader'&&settings().readerPageMode));
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
@@ -1587,16 +1587,6 @@ export default function WatchRSS(props: {
           <View class="absolute left-[12] right-[12] top-[8] h-[30] items-center justify-center">
             <Text class="text-lg text-white">{routeTitle(entryPage())}</Text>
           </View>
-        </Show>
-        <Show when={error()}>
-          <View class="absolute h-[28] z-10 overflow-hidden rounded-[8] bg-[#4b2030] items-center justify-center" style={{insetL:noticeFrame().left+12,insetR:noticeFrame().left+12,insetT:noticeFrame().top+38}}>
-            <Text class="text-xs text-[#ffd5dc]" style={{width:noticeFrame().width-24}}>{error()}</Text>
-          </View>
-        </Show>
-        <Show when={busy()}>
-          <Text class="absolute text-xs text-[#45d6a7]" style={{insetR:noticeFrame().left+14,insetT:noticeFrame().top+18}}>
-            处理中
-          </Text>
         </Show>
         <View
           class={
@@ -1813,7 +1803,7 @@ export default function WatchRSS(props: {
               setPage={setPage}
               openInformation={informationNavigate}
               addRecommendation={addRecommendation}
-              openUrl={openUrl}
+              openUrl={(url) => openBrowserUrl(url,"information",readerPreset())}
             />
             <PhoneRoutes
               entry={entry}
@@ -1880,6 +1870,7 @@ export default function WatchRSS(props: {
     );
   };
 
+  const noticeFrame=createMemo(()=>readerControlViewport(width,height,metrics.shape==="round",page()==="reader"&&settings().readerPageMode));
   return (
     <View
       class={
@@ -1890,6 +1881,13 @@ export default function WatchRSS(props: {
       style={{ width, height }}
     >
       <For each={stack()}>{renderPage}</For>
+      <TopNotice message={error()} width={width} height={height} round={metrics.shape==="round"}
+        top={noticeFrame().top+38} maxWidth={noticeFrame().width-24} background="#4b2030" color="#ffd5dc" />
+      <Show when={busy()}>
+        <Text class="absolute z-10 text-xs text-center text-[#45d6a7]" style={{insetL:noticeFrame().left,width:noticeFrame().width,insetT:noticeFrame().top+18}}>
+          处理中
+        </Text>
+      </Show>
       <PlayerLoadingIndicator width={width} height={height} visible={foreground()&&videoLoading()} phase="fetching"/>
       <ReadAloudFloatingBubble
         width={width}
