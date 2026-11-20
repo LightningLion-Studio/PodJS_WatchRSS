@@ -1,6 +1,9 @@
 import {unhex} from '@podjs/framework/crypto';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
-import type {WatchAccountIdentity} from '../account/store';
+import type {WatchAccountIdentity,WatchAccountStore} from '../account/store';
+import type {SqlLibrarySessionRepository} from '../sync/library-repository';
+import type {AfterReadingAck} from '../books/reading-delta';
+import type {JsonObject} from '../sync/protocol';
 import type {CloudHostRequest} from '../cloud/host-ports';
 import {readCloudSecure} from '../cloud/secure-read';
 import {ProjectionGate,SYNC_V2_PRODUCT} from './gate';
@@ -26,6 +29,19 @@ export type LocalTransferWrite=(input:LocalTransferInput)=>Promise<void>;
 export type BoundLocalTransferIntake=<T>(apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>;
 export type LocalTransferIntake=<T>(account:WatchAccountIdentity|null,deviceId:string,apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>;
 export type NoteAssetIntake=(input:{cursor:string;logicalId:string;body:LegacyBodySource},apply:()=>Promise<void>)=>Promise<void>;
+
+/** Order v1 book writes through the same account and writer leases as B2 and C. */
+export function watchBookSyncAction(
+ getRepository:()=>Promise<Pick<SqlLibrarySessionRepository,'syncBooks'|'deviceId'>>,
+ accountStore:Pick<WatchAccountStore,'withLibraryAccount'>&{read():Promise<WatchAccountIdentity|null>},
+ intake:LocalTransferIntake,
+){
+ return async(request:JsonObject,session?:object,afterAck?:AfterReadingAck)=>{
+  const repository=await getRepository(),account=await accountStore.read();
+  if(!SYNC_V2_PRODUCT.syncV2||!account||['pull','readingSummary','readingCommit'].includes(String(request.phase)))return repository.syncBooks(request,session,afterAck);
+  return accountStore.withLibraryAccount(account,async()=>intake(account,await repository.deviceId(),protect=>repository.syncBooks(request,session,afterAck,protect)));
+ };
+}
 
 export function noteAssetIntake(intake:BoundLocalTransferIntake,version:1|2,peer:string,check:()=>void):NoteAssetIntake{
  return (input,apply)=>intake(async protect=>{

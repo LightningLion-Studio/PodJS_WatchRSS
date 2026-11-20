@@ -45,10 +45,17 @@ export class BookSyncActions {
   requireThat(request.phase==='body'&&typeof request.packageSha256==='string'&&hex.test(request.packageSha256)&&typeof request.fingerprint==='string'&&hex.test(request.fingerprint)&&integer(request.byteCount,1,BOOK_MAX_PACKAGE_BYTES)&&integer(request.chunkCount,1)&&request.chunkCount===Math.ceil(Number(request.byteCount)/BOOK_CHUNK_SIZE)&&integer(request.chunkIndex,0,Number(request.chunkCount)-1)&&typeof request.dataBase64==='string'&&request.dataBase64.length<=87384);
   const row=(await this.db.query('SELECT fingerprint FROM sync_books WHERE book_id=?',[id as string]))[0];requireThat(row?.fingerprint===request.fingerprint);const data=base64ToBytes(request.dataBase64 as string),expected=Math.min(BOOK_CHUNK_SIZE,Number(request.byteCount)-Number(request.chunkIndex)*BOOK_CHUNK_SIZE);requireThat(data.length===expected&&bytesToBase64(data)===request.dataBase64);
   const key=[id as string,request.packageSha256 as string] as const,index=Number(request.chunkIndex);
+  const protectPackage=async(file:BookFileInfo)=>{
+   if(!check)return;
+   const state=await this.store.transferState(key[0]);
+   requireThat(state&&!state.deleted&&state.fingerprint===request.fingerprint);
+   await protect([{kind:'book',logicalId:key[0],value:state!}],file);
+  };
   const committed=await this.store.package(key[0]);
   if(committed&&committed.sha256===key[1]&&committed.size===request.byteCount){
    const old=await this.store.ports.files.read(committed.path,index*BOOK_CHUNK_SIZE,expected);
    requireThat(old.bytes.length===data.length&&old.bytes.every((v,i)=>v===data[i]));
+   await protectPackage(committed);
    const parts=await querySyncPages(this.db,'SELECT path FROM sync_book_parts WHERE book_id=? AND package_sha256=? ORDER BY chunk_index',key);
    await this.discard(key,parts,true);
    return {...base,received:true,complete:true,applied:0};
@@ -81,10 +88,7 @@ export class BookSyncActions {
    let applied:number;
    try{
     requireThat(info.size===request.byteCount&&info.sha256===key[1]);
-    if(check){
-     const state=await this.store.transferState(key[0]);requireThat(state&&state.fingerprint===request.fingerprint);
-     await protect([{kind:'book',logicalId:key[0],value:state!}],info);
-    }
+    await protectPackage(info);
     applied=await this.store.installPackage(info,key[0]);
    }
    catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false);throw error;}

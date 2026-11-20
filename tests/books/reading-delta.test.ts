@@ -1,3 +1,4 @@
+import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
 import {fixture as bareFixture} from '../sync/ble-v2-fixture';
 import {BOOK_SCHEMA} from '../../src/books/schema';
 import {BOOK_READING_SCHEMA} from '../../src/books/reading-schema';
@@ -98,3 +99,28 @@ test('production v5 startup migrates an installed R44 database atomically withou
  await initializeSchema(db);expect(await db.query('PRAGMA user_version')).toEqual([{user_version:SCHEMA_VERSION}]);expect(await db.query('SELECT state_json FROM sync_book_reading_history')).toEqual([{state_json:JSON.stringify(s)}]);expect(await db.query('SELECT state_json FROM sync_book_reading')).toEqual([{state_json:JSON.stringify(s)}]);expect(await db.query('SELECT * FROM sync_book_display_dirty')).toEqual([]);
  const changes=(sql.query('SELECT total_changes() n').get() as {n:number}).n;await initializeSchema(db);expect((sql.query('SELECT total_changes() n').get() as {n:number}).n).toBe(changes);
  }finally{sql.close();}});
+
+
+test('v1 reading replay after rollback is protected and cannot commit the old window cursor',async()=>{
+ const f=await peers();
+ try{
+  const [account,deviceId]=[{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000'] as const;
+  const guard=await localTransferIntakeFixture(f.w.db,account,deviceId),actions=new BookSyncActions(f.w.db,f.w.store),session={};
+  await f.p.store.mergeReading(state(1,{sourceDeviceId:'phone'}));
+  const remote=await f.phone.summary();
+  const open=await actions.apply(request('readingSummary',{summary:remote,knownRemote:null,ackedLocalSeq:0}),session);
+  const delta=request('readingDelta',{windowId:open.windowId,batchIndex:0,after:0,entries:await f.phone.entries(0,remote.seq),done:true});
+  const receive=()=>guard.intake(account,deviceId,check=>actions.apply(delta,session,undefined,check));
+  expect(await receive()).toMatchObject({success:true,applied:1});
+  expect(await receive()).toMatchObject({success:true,applied:0});
+  await guard.rollback();
+  await expect(receive()).rejects.toThrow('BUSINESS_REJECTED');
+  const keys=(await guard.store.readState()).pendingChoice?.inboxKeys;
+  expect(keys).toHaveLength(1);
+  expect((await guard.store.legacyChoiceEntry(keys![0]!)).entry.applied).toBe(false);
+  const jobs:(()=>Promise<void>)[]=[];
+  await expect(actions.apply(request('readingCommit',{windowId:open.windowId,receivedSeq:(open.summary as ReadingSummary).seq,sentSeq:remote.seq,mergedRoot:remote.root}),session,job=>jobs.push(job))).rejects.toThrow('book_reading_window_invalid');
+  expect(jobs).toHaveLength(0);
+  expect(await f.w.db.query('SELECT * FROM sync_book_reading_peers')).toEqual([]);
+ }finally{f.close();}
+});

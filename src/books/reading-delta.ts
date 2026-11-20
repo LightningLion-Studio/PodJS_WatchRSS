@@ -57,7 +57,13 @@ export class BookReadingDelta {
   const w=this.windows.get(session);requireThat(w&&w.peer===peer&&request.windowId===w.id);const window=w!;
   if(request.phase==='readingDelta'){
    requireThat(!window.equal&&safe(request.batchIndex)&&safe(request.after)&&Array.isArray(request.entries)&&request.entries.length<=100&&typeof request.done==='boolean');
-   const signature=canonical(request);if(request.batchIndex===window.batch-1&&window.last?.signature===signature)return {...window.last.response,applied:0};
+   const signature=canonical(request);
+   if(request.batchIndex===window.batch-1&&window.last?.signature===signature){
+    // The previous receipt predates any rollback observed since this batch.
+    try{await protect?.((request.entries as unknown as ReadingEntry[]).map(e=>e.state));}
+    catch(error){this.windows.delete(session);throw error;}
+    return {...window.last.response,applied:0};
+   }
    requireThat(request.batchIndex===window.batch&&request.after===window.outAfter&&(!window.done||request.done===true&&(request.entries as unknown[]).length===0));
    let last=window.remoteLast;const entries=request.entries as unknown as ReadingEntry[];for(const e of entries){requireThat(e&&safe(e.seq)&&e.seq>last&&e.seq<=window.remote.seq);validateBookReading(e.state);last=e.seq;}
    const reading=entries.map(e=>e.state);await protect?.(reading);

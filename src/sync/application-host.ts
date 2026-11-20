@@ -9,8 +9,7 @@ import {localTransferActivity} from './local-transfer';
 import {ResumeApplicationService} from './library-resume/host';
 import {ResumeStore} from './library-resume/store';
 import {VerifiedChunkStore} from '@podjs/framework/verified-chunk-store';
-import {SYNC_V2_PRODUCT} from '../sync-v2/gate';
-import {watchLocalTransferIntake} from '../sync-v2/local-transfer-intake';
+import {watchBookSyncAction,watchLocalTransferIntake} from '../sync-v2/local-transfer-intake';
 import {secureCallsite} from '../cloud/secure-callsite';
 import {updateLibraryProgress,updateLibraryBytes} from './progress.ts';
 import {foregroundRequestFilter,BluetoothActionPolicy} from './action-policy.ts';
@@ -53,11 +52,7 @@ export function startApplicationForegroundSync(){
  const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
  const accountTelemetry=usageTelemetry;
  const intake=watchLocalTransferIntake(db,<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result);
- const applyBooks:NonNullable<Parameters<typeof createApplicationActionHandler>[0]['books']>['apply']=async(request,session,afterAck)=>{
-  const repository=await getLibrarySyncRepository(),account=await summaryAccountStore.read();
-  if(!SYNC_V2_PRODUCT.syncV2||!account||['pull','readingSummary','readingCommit'].includes(String(request.phase)))return repository.syncBooks(request,session,afterAck);
-  return summaryAccountStore.withLibraryAccount(account,async()=>intake(account,await repository.deviceId(),check=>repository.syncBooks(request,session,afterAck,check)));
- };
+ const applyBooks=watchBookSyncAction(getLibrarySyncRepository,summaryAccountStore,intake);
  const resume=new ResumeApplicationService({assetHost:<T>(method:string,args:Record<string,unknown>)=>method==='file.read'?fileChunks.readBytes(String(args.path),Number(args.offset),Number(args.maxBytes)) as Promise<T>:hostOperation<T>(method,args).result,store:new ResumeStore(db),chunks:new VerifiedChunkStore(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,hasByteBridge()?<T>(method:string,args:Record<string,unknown>,bytes:Uint8Array)=>byteHostOperation<T>(method,args,bytes).result:undefined),account:summaryAccountStore,repository:getLibrarySyncRepository,
   intake,localPermission:()=>!disposed&&lifecycle()==='active'&&hasCapability('data.files.resumable')&&hasCapability('runtime.timer'),
   randomId:async()=>Array.from(base64ToBytes((await hostOperation<{bytesBase64:string}>('crypto.random',{bytes:16}).result).bytesBase64),b=>b.toString(16).padStart(2,'0')).join(''),

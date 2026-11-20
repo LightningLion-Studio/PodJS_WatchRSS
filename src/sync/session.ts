@@ -220,7 +220,10 @@ export class LibrarySyncSession {
     // multi-frame replies; small actions retain the ordinary response deadline.
     const ack=await this.ack((pending||legacySubset)&&!this.checkpointed&&Number(response.batchCount)>1?120000:0);let libraryApplied=false;
     if(pending&&ack?.success&&ack.applied){this.check();try{await this.repository.markSuccess(pending);this.check();libraryApplied=true;this.log.event("library.peerState.mark.success",{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});}catch(error){this.log.event("library.peerState.mark.failed",{message:"<redacted>"},"E");throw error;}}
-    else if(legacySubset||request.action==='syncBooks')libraryApplied=!!(response.success&&ack?.success&&ack.applied);
+    else if(legacySubset||request.action==='syncBooks'){
+     const stagedBook=request.action==='syncBooks'&&request.phase==='body'&&response.complete!==true;
+     libraryApplied=!stagedBook&&!!(response.success&&ack?.success&&ack.applied);
+    }
     else if(pending)this.log.event("library.peerState.mark.skipped",{ackSuccess:ack?.success??null,ackApplied:ack?.applied??null,localSeqMax:pending.localSeqToInclusive,remoteSeqPendingAck:pending.remoteSeqToInclusive},"W");
     if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount'){await this.options.resume?.accountConfirmed(request,this.actionContext);await this.options.binary?.accountConfirmed(request,this.actionContext);}if(!legacySubset)this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
