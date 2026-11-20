@@ -26,7 +26,7 @@ export function InformationDocumentFixture() {
   const content = caseName === 'static' ? reference.staticBody : reference.rolesBody;
   const preset = defaultReaderPreset();
   const state = {assets: {fonts: [], backgrounds: [], deletions: []}};
-  const fonts = readerFontResolver(state), backgroundSnapshot = {state, revision: 0};
+  const fonts = readerFontResolver(state);
   const errors: string[] = [];
   const initialTextStatus = systemTextResourceStatus();
   const run = Number(record(kv.get(RESULT)).run ?? 0) + 1;
@@ -131,7 +131,7 @@ export function InformationDocumentFixture() {
 
   return <Show when={checkpoint()}>{saved => <InformationDocument title={title} content={content}
     width={metrics.logicalWidth} height={metrics.logicalHeight} preset={preset} fonts={fonts}
-    backgroundSnapshot={backgroundSnapshot} active={() => true} accessibilityLabel="协议对照正文"
+    active={() => true} accessibilityLabel="协议对照正文"
     restoredScrollOffsetPx={saved().scrollOffsetPx} ref={value => { handle = value; }}
     onBeian={() => { throw Error('Fixture must not activate the footer'); }}
     onLayoutError={error => errors.push(String(error))}/>}</Show>;
