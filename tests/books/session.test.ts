@@ -67,6 +67,7 @@ for(const rollbackAt of ['never','manifest','last chunk'] as const)test('Sync v2
    expect(lastBook.response).toMatchObject({success:true,complete:true});
    expect(lastBook.libraryApplied).toBe(true);
    expect((await repo.books!.package(id))?.sha256).toBe(info.sha256);
+   expect(await repo.cloudBookWitness(id,state)).toEqual({sha256:info.sha256,size:info.size});
    expect((await guard.store.readState()).pendingChoice).toBeNull();
   }else{
    expect(lastBook.response).toMatchObject({success:false,message:'BUSINESS_REJECTED'});

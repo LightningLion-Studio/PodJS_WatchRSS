@@ -91,7 +91,7 @@ for(const kind of ['asset','book'] as const)test(`RVNOTES2-02 ${kind} full recei
  const wire=memoryBodyHttp(p);await wire.http.upload(p.descriptor,async h=>p.objects.get(h)!);expect(wire.puts()).toBeGreaterThan(1);
  const channel=()=>new WatchBodyChannel({http:wire.http,scope,projection:projection as any,crypto:snapshotCrypto,signer,approved,author:async()=>({deviceId:author,alias:'key'}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:{read:async p=>cache.get(p),writeAtomic:async(p,b)=>{cache.set(p,b.slice());}},root:'r2',repository:repo,check:async()=>{},yieldControl:async()=>{yields++;}});
  expect(raw.length).toBeGreaterThan(262144);expect(await channel().sync()).toEqual({pending:0,errors:[]});expect(installs).toBe(1);expect(local).toEqual(raw);expect(hash(local!)).toBe(hash(raw));expect(yields).toBe(Math.ceil(raw.length/262144)-1);
- expect(await channel().sync()).toEqual({pending:0,errors:[]});expect(installs).toBe(1);expect(wire.reserves()).toBe(1);expect(local).toEqual(raw);expect(yields).toBe(2*(Math.ceil(raw.length/262144)-1));
+ expect(await channel().sync()).toEqual({pending:0,errors:[]});expect(installs).toBe(1);expect(wire.reserves()).toBe(1);expect(local).toEqual(raw);expect(yields).toBe(Math.ceil(raw.length/262144)-1);
 },60000);
 
 for(const kind of ['asset','book'] as const)test(`RVNOTES2-01 live ${kind} cannot borrow a deleted body's empty descriptor`,async()=>{

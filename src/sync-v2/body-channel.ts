@@ -7,11 +7,12 @@ import type {WatchProjectionStore} from './store';
 import {fromWire} from './business';
 import {canonical,digest,jsonBytes,parseCanonicalJson,type Scope} from './protocol';
 import {BodyChannelHttp} from './body-channel-http';
-import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind,type LocalBodyWitness} from './body-channel-codec';
+import {prepareCarrier,openCarrier,verifyCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind} from './body-channel-codec';
 import type {BodyResolver} from './publisher';
 import {SyncV2Error} from './http';
 import {businessBodyWitness,sameIndependentIdentity,tombstoneBodyDescription} from './body-binding';
 import type {BookState} from '../books/protocol';
+type LocalBodyWitness={size:number;sha256:string};
 export interface BodyChannelRepository {
  /** Hashes an installed, validated package without loading it into the guest. */
  readBookWitness?(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>):Promise<LocalBodyWitness|undefined>;
@@ -100,67 +101,81 @@ export class WatchBodyChannel {
   if(value.deleted)throw Error('body_revision_changed');await this.current(entry,anchor);
   const path=this.o.root+'/'+binding.entityKey+'/'+binding.bodyRevision,retry=await this.o.files.read(path+'/retry.json');
   if(retry){const v=parseCanonicalJson(retry);if(typeof v.code!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(v.code)||!Number.isSafeInteger(v.until)||v.attempts!==undefined&&(!Number.isSafeInteger(v.attempts)||v.attempts<0||v.attempts>32))throw Error('invalid_schema');if(v.until>this.now())throw new BodyRetryDeferred(v.code);}
-  const readBookWitness=kind==='book'?this.o.repository.readBookWitness:undefined;
-  const readWitness=readBookWitness?()=>readBookWitness.call(this.o.repository,id,value as BookState):undefined;
-  let raw:Uint8Array|undefined,local:LocalBodyWitness|undefined;
-  if(readWitness)local=await readWitness();
-  else {
-   raw=await this.o.repository.read(kind,id);
-   if(raw){
-    await this.o.repository.validate(kind,id,value,raw);
-    local={sha256:sha256Hex(raw),size:raw.length};
-   }
-  }
-  if(local){
-   if(local.size>64*1024*1024)throw Error('body_channel_capacity_pending');
-   if(carrierBodyRevision(kind,row.entityKey,local.sha256)!==row.bodyRevision)throw Error('body_revision_changed');
-   // A matching local original only needs the authenticated carrier manifest.
-   let cursor='';for(;;){const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
-    for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,local);}catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;continue;}
-     if(readWitness){
-      const latest=await readWitness();
-      if(latest?.sha256!==local.sha256||latest.size!==local.size)throw Error('body_revision_changed');
-     }else{
-      const latest=await this.o.repository.read(kind,id);
-      if(!latest||latest.length!==local.size||sha256Hex(latest)!==local.sha256)throw Error('body_revision_changed');
-     }
-     await this.current(entry,anchor);return;}
-    if(page.nextAfter===null)break;cursor=page.nextAfter;
-   }
-   if(!raw){
+  const readLocal=async()=>{
+   let raw:Uint8Array|undefined,witness:LocalBodyWitness|undefined;
+   if(kind==='book'&&this.o.repository.readBookWitness){
+    witness=await this.o.repository.readBookWitness(id,value as BookState);
+   }else{
     raw=await this.o.repository.read(kind,id);
-    if(!raw||raw.length!==local.size||sha256Hex(raw)!==local.sha256)throw Error('body_revision_changed');
-    await this.o.repository.validate(kind,id,value,raw);
-   }
-   let descriptor:Carrier|undefined;const key=await this.o.currentKey();
-   try{
-    const journal=await this.o.files.read(path+'/pending.json');
-    if(journal){const candidate=parseCanonicalJson(journal) as Carrier;if(canonical(candidate.body.anchor)===canonical(anchor)&&candidate.body.keyVersion===key.version)descriptor=candidate;}
-    if(!descriptor){
-     const author=await this.o.author(),prepared=await prepareCarrier({crypto:this.o.crypto,signer:this.o.signer,alias:author.alias,authorDeviceId:author.deviceId,scope:this.o.scope,anchor,binding,key:key.key,keyVersion:key.version,objects:[{name:bodyObjectName(kind,id),bytes:raw,compress:false}]});
-     for(const [hash,data]of prepared.objects)await this.o.files.writeAtomic(path+'/'+hash,data);
-     descriptor=prepared.descriptor;await this.o.files.writeAtomic(path+'/pending.json',jsonBytes(descriptor));
+    if(raw){
+     await this.o.repository.validate(kind,id,value,raw);
+     witness={sha256:sha256Hex(raw),size:raw.length};
     }
-   }finally{key.key.fill(0);}
-   await this.current(entry,anchor);await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);if(!b)throw Error('closure_incomplete');return b;});await this.current(entry,anchor);return;
+   }
+   if(!witness)return;
+   if(witness.size>64*1024*1024)throw Error('body_channel_capacity_pending');
+   if(carrierBodyRevision(kind,row.entityKey,witness.sha256)!==row.bodyRevision)throw Error('body_revision_changed');
+   return {witness,raw};
+  };
+  let local=await readLocal(),cursor='',last:unknown;
+  for(;;){
+   const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
+   // A v1 commit can finish while the control request is in flight.
+   local??=await readLocal();
+   for(const c of page.carriers){
+    try{
+     if(local){
+      // The signed ready descriptor is a backup check. The authenticated row
+      // and our installed bytes already satisfy the local download need.
+      await verifyCarrier(c.descriptor,this.o.scope,binding,this.o.signer,await this.carrierPublicKey(c.descriptor));
+     }else{
+      await this.receive(entry,anchor,c.descriptor,path);
+     }
+    }catch(error){
+     last=error;
+     if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;
+     continue;
+    }
+    if(local){
+     const latest=await readLocal();
+     if(latest?.witness.sha256!==local.witness.sha256||latest.witness.size!==local.witness.size)throw Error('body_revision_changed');
+     await this.current(entry,anchor);
+    }
+    return;
+   }
+   if(page.nextAfter===null)break;
+   cursor=page.nextAfter;
   }
-  let cursor='',last:unknown;for(;;){const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
-   for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path);return;}catch(error){last=error;if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
-   if(page.nextAfter===null)break;cursor=page.nextAfter;
-  }throw last??Error('body_channel_pending');
+  if(last||!local)throw last??Error('body_channel_pending');
+  let raw=local.raw;
+  if(!raw){
+   raw=await this.o.repository.read(kind,id);
+   if(!raw||raw.length!==local.witness.size||sha256Hex(raw)!==local.witness.sha256)throw Error('body_revision_changed');
+   await this.o.repository.validate(kind,id,value,raw);
+  }
+  let descriptor:Carrier|undefined;const key=await this.o.currentKey();
+  try{
+   const journal=await this.o.files.read(path+'/pending.json');
+   if(journal){const candidate=parseCanonicalJson(journal) as Carrier;if(canonical(candidate.body.anchor)===canonical(anchor)&&candidate.body.keyVersion===key.version)descriptor=candidate;}
+   if(!descriptor){
+    const author=await this.o.author(),prepared=await prepareCarrier({crypto:this.o.crypto,signer:this.o.signer,alias:author.alias,authorDeviceId:author.deviceId,scope:this.o.scope,anchor,binding,key:key.key,keyVersion:key.version,objects:[{name:bodyObjectName(kind,id),bytes:raw,compress:false}]});
+    for(const [hash,data]of prepared.objects)await this.o.files.writeAtomic(path+'/'+hash,data);
+    descriptor=prepared.descriptor;await this.o.files.writeAtomic(path+'/pending.json',jsonBytes(descriptor));
+   }
+  }finally{key.key.fill(0);}
+  await this.current(entry,anchor);await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);if(!b)throw Error('closure_incomplete');return b;});await this.current(entry,anchor);return;
  }
- private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,local?:LocalBodyWitness){
-  const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId},key=await this.o.approved(descriptor.body.authorDeviceId);
+ private async carrierPublicKey(descriptor:Carrier){
+  const key=await this.o.approved(descriptor.body.authorDeviceId);
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,local,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
-  if(!decoded)return;
+  return key.publicKey;
+ }
+ private async receive(entry:any,anchor:any,descriptor:Carrier,path:string){
+  const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId};
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
   await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
   const incomingHash=sha256Hex(raw);
-  if(local){
-   if(local.sha256!==incomingHash||local.size!==raw.length)throw Error('hash_mismatch');
-   return;
-  }
   // If Bluetooth finished while the carrier was in flight, retain its bytes.
   await this.current(entry,anchor);
   const old=await this.o.repository.read(binding.kind,binding.logicalId);

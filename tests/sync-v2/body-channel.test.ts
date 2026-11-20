@@ -1,4 +1,7 @@
 import {test,expect} from 'bun:test';
+import {NoteAssetReceiver} from '../../src/sync/note-assets';
+import {createNoteAssetReader} from '../../src/notes/cloud-assets';
+import {bookId,bookFingerprint,chapterHash} from '../../src/books/protocol';
 import {crypto as snapshotCrypto,key} from '../cloud/k2-crypto';
 import {crypto as signer,publicBytes} from './p2-fixture';
 import {b64} from '../../src/sync-v2/wire';
@@ -19,6 +22,29 @@ async function prepared(kind:'asset'|'book'='asset',raw=new Uint8Array(180000).f
  return {...await prepareCarrier({crypto:snapshotCrypto,signer,alias:'key',authorDeviceId:author,scope,anchor,binding,key:key.slice(),keyVersion:1,objects:[{name:bodyObjectName(kind,logicalId),bytes:raw,compress:false}]}),binding,raw};
 }
 const files=()=>{const map=new Map<string,Uint8Array>();return {map,read:async(p:string)=>map.get(p),writeAtomic:async(p:string,b:Uint8Array)=>{map.set(p,b.slice());},append:async(p:string,b:Uint8Array,at:number)=>{const old=map.get(p)??new Uint8Array();if(old.length!==at)throw Error('offset_conflict');const next=new Uint8Array(at+b.length);next.set(old);next.set(b,at);map.set(p,next);}};};
+function v1AssetFiles(){
+ const contents=new Map<string,Uint8Array>();
+ const read=(path:string)=>{const raw=contents.get(path);if(!raw)throw Error('missing test asset');return raw;};
+ const stat=async(path:string)=>({file:contents.has(path),size:contents.get(path)?.length??0});
+ const hash=async(path:string)=>{const raw=read(path);return {sha256:sha256Hex(raw),size:raw.length};};
+ const receiver=new NoteAssetReceiver({
+  stat,hash,remove:async path=>{contents.delete(path);},
+  write:async(path,data)=>{const raw=new Uint8Array(Buffer.from(data,'base64'));contents.set(path,raw);return {size:raw.length};},
+  append:async(path,data,offset)=>{expect(read(path).length).toBe(offset);const raw=new Uint8Array(Buffer.concat([read(path),Buffer.from(data,'base64')]));contents.set(path,raw);return {size:raw.length};},
+  commit:async(path,target,size,digest)=>{
+   expect(await hash(path)).toEqual({size,sha256:digest});contents.set(target,read(path));contents.delete(path);
+  },
+ });
+ const readAsset=createNoteAssetReader(async<T>(method:string,args:Record<string,unknown>)=>{
+  const path=String(args.path);
+  if(method==='file.stat')return await stat(path) as T;
+  if(method==='file.hash')return await hash(path) as T;
+  const raw=read(path),offset=Number(args.offset);
+  if(method==='file.read')return {offset,size:raw.length,dataBase64:Buffer.from(raw.subarray(offset,offset+Number(args.maxBytes))).toString('base64')} as T;
+  throw Error('unexpected file request');
+ });
+ return {contents,receiver,readAsset};
+}
 function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'}){
  const descriptors=new Map<string,Carrier>(),objects=new Map<string,Uint8Array>(),ready=new Set<string>(),calls:any[]=[];let failOnce=false,closed=false,failReadOnce=false;
  const json=(v:any,status=200)=>({status,headers:{},body:jsonBytes({version:1,purpose:'p6-body.v1',scope,...v})});
@@ -44,11 +70,26 @@ function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'}){
 for(const kind of ['asset','book'] as const)test('carrier '+kind+' signs and roundtrips exact bytes through v1 ciphertext envelopes',async()=>{
  const p=await prepared(kind),out=await openCarrier({descriptor:p.descriptor,scope,binding:p.binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>key.slice(),read:async h=>p.objects.get(h)!});expect(out.get(bodyObjectName(kind,p.binding.logicalId))).toEqual(p.raw);
 });
-for(const kind of ['asset','book'] as const)test('matching local '+kind+' authenticates the carrier without fetching body chunks',async()=>{
- const {default:book}=await import('../fixtures/cli-single-txt-book.json');
+for(const kind of ['asset','book'] as const)test('matching local '+kind+' uses only the ready carrier list',async()=>{
+ const {default:fixture}=await import('../fixtures/cli-single-txt-book.json');
+ let book={...fixture};
+ if(kind==='book'){
+  const [header,line]=fixture.packageUtf8.split('\n'),chapter={...JSON.parse(line!),contentText:''};
+  const encode=(value:string)=>new TextEncoder().encode(value),sha=async(raw:Uint8Array)=>sha256Hex(raw);
+  const empty=encode(header+'\n'+JSON.stringify(chapter)+'\n').length;
+  chapter.contentText='x'.repeat(8*1024*1024-empty);
+  const fingerprint=await bookFingerprint([await chapterHash(1,chapter.title,chapter.contentText,sha)],sha);
+  book={...fixture,fingerprint,bookId:await bookId(fingerprint,sha),packageUtf8:header+'\n'+JSON.stringify(chapter)+'\n'};
+ }
  const p=kind==='book'?await prepared(kind,new TextEncoder().encode(book.packageUtf8),book.bookId):await prepared(kind),b=backend();
+ if(kind==='book')expect(p.raw.length).toBe(8*1024*1024);
  await b.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
  const identity=p.binding.logicalId;
+ const assetFiles=v1AssetFiles(),assetPath='notes/assets/'+identity;
+ const receiveV1Asset=async()=>{
+  expect(await assetFiles.receiver.apply({action:'syncNoteAsset',version:1,storageKey:identity,sha256:sha256Hex(p.raw),chunkIndex:0,chunkCount:1,data:Buffer.from(p.raw).toString('base64')})).toMatchObject({success:true,complete:true});
+ };
+ if(kind==='asset')await receiveV1Asset();
  const state={updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0};
  const wire=toWire(kind,kind==='asset'?{...state,assetId:identity,mime:'image/png',originalFilename:identity}:{...state,bookId:identity,fingerprint:book.fingerprint,sourceUrl:book.sourceUrl,title:'Book',chapterCount:1,kind:'txt',deletedChapters:[],deletionClock:0});
  const entry={
@@ -59,28 +100,47 @@ for(const kind of ['asset','book'] as const)test('matching local '+kind+' authen
  let pendingChoice=false;
  const projection={readState:async()=>({pendingChoice,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
  let witnessReads=0,replaceOnRecheck=false;
- const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
+ const channel=(http=b.http())=>new WatchBodyChannel({http,scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
   ...(kind==='book'?{readBookWitness:async()=>({sha256:++witnessReads===2&&replaceOnRecheck?'f'.repeat(64):sha256Hex(p.raw),size:p.raw.length})}:{}),
-  read:async()=>{if(kind==='book')throw Error('unexpected full book read');return p.raw;},
+  read:async()=>{if(kind==='book')throw Error('unexpected full book read');return assetFiles.contents.has(assetPath)?assetFiles.readAsset(identity):undefined;},
   validate:async()=>{},install:async()=>{throw Error('unexpected install');},
  },check:async()=>{}});
  const before=b.calls.length;
- expect(await channel.sync()).toEqual({pending:0,errors:[]});
- const reads=b.calls.slice(before).filter(call=>call.url.includes('/objects/'));
- expect(reads).toHaveLength(1);
- expect(reads[0]!.url).toContain(p.descriptor.body.manifest.sha256);
+ expect(await channel().sync()).toEqual({pending:0,errors:[]});
+ expect(await channel().sync()).toEqual({pending:0,errors:[]});
+ const calls=b.calls.slice(before);
+ expect(calls).toHaveLength(2);
+ for(const call of calls){
+  expect(call.method).toBe('GET');
+  expect(call.url).toContain('/carriers?');
+ }
  const complete=b.calls.length;
  pendingChoice=true;
- expect(await channel.hasWork()).toBe(false);
- expect(await channel.sync()).toEqual({pending:0,errors:[]});
+ expect(await channel().hasWork()).toBe(false);
+ expect(await channel().sync()).toEqual({pending:0,errors:[]});
  expect(b.calls).toHaveLength(complete);
  pendingChoice=false;
  if(kind==='book'){
   witnessReads=0;replaceOnRecheck=true;
-  expect(await channel.sync()).toEqual({pending:1,errors:['body_revision_changed']});
-  expect(b.calls.slice(before).filter(call=>call.url.includes('/objects/'))).toHaveLength(1);
+  expect(await channel().sync()).toEqual({pending:1,errors:['body_revision_changed']});
+ }else{
+  assetFiles.contents.delete(assetPath);
+  const http=b.http(),list=http.list.bind(http);
+  http.list=async(...args)=>{const page=await list(...args);await receiveV1Asset();return page;};
+  expect(await channel(http).sync()).toEqual({pending:0,errors:[]});
+  const {carrierId}=p.descriptor.body;
+  b.descriptors.set(carrierId,{...p.descriptor,signature:b64(new Uint8Array(64))});
+  expect(await channel().sync()).toEqual({pending:1,errors:['signature_invalid']});
+  expect(await assetFiles.readAsset(identity)).toEqual(p.raw);
+  const changed=p.raw.slice();changed[0]^=1;
+  assetFiles.contents.set(assetPath,changed);
+  const beforeMismatch=b.calls.length;
+  expect(await channel().sync()).toEqual({pending:1,errors:['body_revision_changed']});
+  expect(b.calls).toHaveLength(beforeMismatch);
+  expect(await assetFiles.readAsset(identity)).toEqual(changed);
  }
-});
+ expect(b.calls.slice(before).every(call=>call.method==='GET'&&call.url.includes('/carriers?'))).toBe(true);
+},30000);
 test('upload resumes a lost response from server offsets and does not republish ready carrier',async()=>{
  const p=await prepared(),b=backend();b.losePart();await expect(b.http().upload(p.descriptor,async h=>p.objects.get(h)!)).rejects.toThrow('lost part response');const count=b.calls.filter(c=>c.method==='PUT').length;await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);expect(b.ready.has(p.descriptor.body.carrierId)).toBe(true);expect(b.calls.filter(c=>c.method==='PUT').slice(count).every(c=>!c.url.endsWith('/parts/0')||!c.url.includes(p.descriptor.body.manifest.sha256))).toBe(true);
  const puts=b.calls.filter(c=>c.method==='PUT').length;await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);expect(b.calls.filter(c=>c.method==='PUT')).toHaveLength(puts);
@@ -160,6 +220,10 @@ test('product publishes authoritative note/asset state despite closed body_write
  let opened:Awaited<ReturnType<typeof openApplicationSyncV2>>=null;try{
   opened=await openApplicationSyncV2(f.options);expect(opened).not.toBeNull();expect(f.server.account.revision).toBe('1');expect((await f.db.query('SELECT asset_id FROM memo_assets'))[0]!.asset_id).toBe('image.png');expect(opened!.bodyError()).toBe('body_channel_write_disabled');expect((await opened!.ui.snapshot()).errorCode).toBe('body_channel_write_disabled');expect(bodyRequests.filter(r=>r.method==='POST')).toHaveLength(1);expect(bodyRequests.some(r=>r.method==='PUT')).toBe(false);expect(await f.options.repository.cloudNoteAsset('image.png')).toEqual(source);
   carrierBackend.open();await opened!.sync();expect(opened!.bodyError()).toBeNull();expect((await opened!.ui.snapshot()).errorCode).toBeNull();expect(carrierBackend.ready.size).toBe(1);
+  const afterBackup=bodyRequests.length;
+  await opened!.sync();
+  expect(bodyRequests.slice(afterBackup).every(r=>r.method==='GET'&&r.url.includes('/carriers?'))).toBe(true);
+  expect(carrierBackend.ready.size).toBe(1);
   const descriptor=[...carrierBackend.descriptors.values()][0]!,binding={kind:'asset' as const,logicalId:'image.png',entityKey:descriptor.body.entityKey,bodyRevision:descriptor.body.bodyRevision};
   const restored=await openCarrier({descriptor,scope,binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>await f.options.keys.accountKey(),read:async h=>carrierBackend.objects.get(h)!});expect(restored.get('notes/assets/image.png')).toEqual(source);
  }finally{await opened?.close();f.db.close();}
