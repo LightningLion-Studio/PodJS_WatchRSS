@@ -7,7 +7,7 @@ import type {SqlBookStore} from './store';
 import {validateBookReading,type BookReading} from './protocol';
 import {readingLeafHash,readingBookRoot,readingRoot,validateReadingSummary,type ReadingSummary,type ReadingEntry} from './reading-hash';
 export type AfterReadingAck=(commit:()=>Promise<void>)=>void;
-interface Window {id:string;peer:string;local:ReadingSummary;remote:ReadingSummary;from:number;remoteFrom:number;entries:ReadingEntry[];outAfter:number;remoteLast:number;done:boolean;batch:number;equal:boolean;last?:{signature:string;response:JsonObject}}
+interface Window {readingFence?:string;id:string;peer:string;local:ReadingSummary;remote:ReadingSummary;from:number;remoteFrom:number;entries:ReadingEntry[];outAfter:number;remoteLast:number;done:boolean;batch:number;equal:boolean;last?:{signature:string;response:JsonObject}}
 const safe=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
 const requireThat=(yes:unknown)=>{if(!yes)throw Error('book_reading_window_invalid');};
 /** One physical-session window; only the final transport applied ACK publishes cursors. */
@@ -38,7 +38,7 @@ export class BookReadingDelta {
   throw Error('book_reading_changed_repeatedly');
  }
  async entries(from:number,to:number):Promise<ReadingEntry[]>{return (await querySyncPages(this.db,'SELECT h.seq,h.state_json FROM sync_book_reading_history h WHERE h.seq>? AND h.seq<=? AND NOT EXISTS(SELECT 1 FROM sync_book_reading_history newer WHERE newer.book_id=h.book_id AND newer.chapter_index=h.chapter_index AND newer.seq>h.seq AND newer.seq<=?) ORDER BY h.seq',[from,to,to])).map(r=>({seq:Number(r.seq),state:JSON.parse(String(r.state_json))}));}
- async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck,protect?:(reading:readonly BookReading[])=>Promise<void>):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck,protect?:(reading:readonly BookReading[])=>Promise<void>,check?:()=>void,readingFence?:string):Promise<JsonObject>{
   const peer=String(request.deviceId),base={success:true,action:'syncBooks',version:1,phase:request.phase};
   if(request.phase==='readingSummary'){
    validateReadingSummary(request.summary);requireThat(safe(request.ackedLocalSeq));const remote=request.summary,local=await this.summary(),known=request.knownRemote as {epoch:string;seq:number}|null;
@@ -51,7 +51,7 @@ export class BookReadingDelta {
    if(!equal&&(from>=local.seq&&remoteFrom>=remote.seq)){from=0;remoteFrom=0;}
    if(!equal&&sameEpoch){if(from>=local.seq&&p!.root!==local.root)from=0;if(remoteFrom>=remote.seq&&p!.root!==remote.root)remoteFrom=0;}
    const entries=equal?[]:await this.entries(from,local.seq),id=local.epoch+'-'+(++this.serial);
-   this.windows.set(session,{id,peer,local,remote,from,remoteFrom,entries,outAfter:0,remoteLast:remoteFrom,done:equal,batch:0,equal});
+   this.windows.set(session,{id,peer,readingFence,local,remote,from,remoteFrom,entries,outAfter:0,remoteLast:remoteFrom,done:equal,batch:0,equal});
    return {...base,windowId:id,summary:local,fromSeq:from,remoteFromSeq:remoteFrom,equal};
   }
   const w=this.windows.get(session);requireThat(w&&w.peer===peer&&request.windowId===w.id);const window=w!;
@@ -67,14 +67,15 @@ export class BookReadingDelta {
    requireThat(request.batchIndex===window.batch&&request.after===window.outAfter&&(!window.done||request.done===true&&(request.entries as unknown[]).length===0));
    let last=window.remoteLast;const entries=request.entries as unknown as ReadingEntry[];for(const e of entries){requireThat(e&&safe(e.seq)&&e.seq>last&&e.seq<=window.remote.seq);validateBookReading(e.state);last=e.seq;}
    const reading=entries.map(e=>e.state);await protect?.(reading);
-   const applied=await this.store.mergeReadingBatch(reading),after=request.after as number,states=window.entries.slice(after,after+100),nextAfter=after+states.length;
+   const applied=await this.store.mergeReadingBatch(reading,{check}),after=request.after as number,states=window.entries.slice(after,after+100),nextAfter=after+states.length;
    const response={...base,windowId:window.id,entries:states,nextAfter,hasMore:nextAfter<window.entries.length,applied};window.remoteLast=last;window.done=request.done===true;window.outAfter=nextAfter;window.batch++;window.last={signature,response};return response;
   }
   requireThat(request.phase==='readingCommit'&&window.done&&window.outAfter===window.entries.length&&request.receivedSeq===window.local.seq&&request.sentSeq===window.remote.seq&&typeof request.mergedRoot==='string'&&!!afterAck);
-  const merged=await this.summary();requireThat(merged.epoch===window.local.epoch);
+  if(readingFence!==window.readingFence){this.windows.delete(session);throw Error('BUSINESS_REJECTED');}
+  const merged=await this.summary();check?.();requireThat(merged.epoch===window.local.epoch);
   if(merged.root!==request.mergedRoot)return {...base,windowId:window.id,committed:false,retry:true,summary:merged,applied:0};
   afterAck!(async()=>{const now=(await this.db.query('SELECT epoch FROM sync_book_reading_meta WHERE id=1'))[0];requireThat(now?.epoch===window.local.epoch);
-   await this.db.execute('INSERT INTO sync_book_reading_peers(peer,local_epoch,local_seq,remote_epoch,remote_seq,root) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_book_reading_meta WHERE id=1 AND epoch=?) ON CONFLICT(peer) DO UPDATE SET local_epoch=excluded.local_epoch,local_seq=excluded.local_seq,remote_epoch=excluded.remote_epoch,remote_seq=excluded.remote_seq,root=excluded.root',[peer,window.local.epoch,window.local.seq,window.remote.epoch,window.remote.seq,merged.root,window.local.epoch]);
+   check?.();await this.db.execute('INSERT INTO sync_book_reading_peers(peer,local_epoch,local_seq,remote_epoch,remote_seq,root) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_book_reading_meta WHERE id=1 AND epoch=?) ON CONFLICT(peer) DO UPDATE SET local_epoch=excluded.local_epoch,local_seq=excluded.local_seq,remote_epoch=excluded.remote_epoch,remote_seq=excluded.remote_seq,root=excluded.root',[peer,window.local.epoch,window.local.seq,window.remote.epoch,window.remote.seq,merged.root,window.local.epoch]);
   });return {...base,windowId:window.id,committed:true,root:merged.root,applied:0};
  }
 }

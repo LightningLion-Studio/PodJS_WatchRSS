@@ -7,7 +7,7 @@ export interface BookFiles {
  publish(info:BookFileInfo,bookId:string):Promise<BookFileInfo>;
  /** Adopt a verified, owned native restore output on the same filesystem. */
  adopt?(info:BookFileInfo,bookId:string):Promise<BookFileInfo>;
- stat(path:string):Promise<{exists:boolean;size:number}>;
+ stat(path:string):Promise<{exists:boolean;size:number;changeToken?:string}>;
  hash(path:string):Promise<{size:number;sha256:string}>;
  readForInstall?(path:string,offset:number,maxBytes:number):Promise<{size:number;bytes:Uint8Array}>;
  read(path:string,offset:number,maxBytes:number):Promise<{size:number;bytes:Uint8Array}>;

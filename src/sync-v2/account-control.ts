@@ -171,7 +171,7 @@ export class WatchAccountControl {
   try{
    const incoming=await this.o.store.legacyChoiceEntry(key);if(incoming.entry.route!=='pendingChoice')throw Error('choice_stale');p.local=await this.legacyOverlay(p.local,incoming.entry,p.cloud);p.legacyKey=key;p.legacyHash=digest(incoming);
    let can=false;
-   if(!incoming.entry.transferBody)try{p.legacyMerge=await this.o.store.equivalentLegacy().planLegacyMerge(key);can=true;}catch(error){if((error as Error).message!=='merge_not_safe')throw error;}
+   if(!incoming.entry.transferBody&&incoming.entry.wire===undefined)try{p.legacyMerge=await this.o.store.equivalentLegacy().planLegacyMerge(key);can=true;}catch(error){if((error as Error).message!=='merge_not_safe')throw error;}
    const local=new Map(p.local.map(r=>[r.entityKey,r])),cloud=new Map(p.cloud.map(r=>[r.entityKey,r]));
    const side=(r:RecordRow|undefined,other:RecordRow|undefined)=>{
     const candidate=(r??other)?.candidate,meta=candidate?.meta.payload;
@@ -273,6 +273,7 @@ export class WatchAccountControl {
  private async choose(proof:object,requestId:string,merge:boolean){
   await this.gate('choice');const {p,s}=await this.checked(proof);if(s.cloud?.pendingPublish||s.cloud?.pendingCloudChoice)throw Error('publication_pending');if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(merge&&p.legacyKey){if(!p.legacyMerge)throw Object.assign(Error('merge_unavailable'),{reason:'missing_base'});const result=await this.o.store.equivalentLegacy().resolveLegacyMerge(p.legacyKey,p.legacyMerge);await this.closePreview(proof);return result;}let rows=p.local;
   const legacy=p.legacyKey?(await this.o.store.legacyChoiceEntry(p.legacyKey)).entry:null,ref=legacy?.transferBody as LegacyBodyRef|undefined;
+  if(legacy?.wire!==undefined)throw Error('closure_incomplete');
   if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud,await this.o.store.editBases(s));if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
    rows=p.mergedRows!;if(!rows)throw Error('merge_unavailable');
   }

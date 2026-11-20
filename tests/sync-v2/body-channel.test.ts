@@ -28,7 +28,7 @@ function v1AssetFiles(){
  const stat=async(path:string)=>({file:contents.has(path),size:contents.get(path)?.length??0});
  const hash=async(path:string)=>{const raw=read(path);return {sha256:sha256Hex(raw),size:raw.length};};
  const receiver=new NoteAssetReceiver({
-  stat,hash,remove:async path=>{contents.delete(path);},
+  stat,hash,readBytes:async(path,at,size)=>{const raw=read(path);return {size:raw.length,bytes:raw.slice(at,at+size)};},remove:async path=>{contents.delete(path);},
   write:async(path,data)=>{const raw=new Uint8Array(Buffer.from(data,'base64'));contents.set(path,raw);return {size:raw.length};},
   append:async(path,data,offset)=>{expect(read(path).length).toBe(offset);const raw=new Uint8Array(Buffer.concat([read(path),Buffer.from(data,'base64')]));contents.set(path,raw);return {size:raw.length};},
   commit:async(path,target,size,digest)=>{
@@ -135,8 +135,8 @@ for(const kind of ['asset','book'] as const)test('matching local '+kind+' uses o
   const changed=p.raw.slice();changed[0]^=1;
   assetFiles.contents.set(assetPath,changed);
   const beforeMismatch=b.calls.length;
-  expect(await channel().sync()).toEqual({pending:1,errors:['body_revision_changed']});
-  expect(b.calls).toHaveLength(beforeMismatch);
+  expect(await channel().sync()).toEqual({pending:1,errors:['signature_invalid']});
+  expect(b.calls).toHaveLength(beforeMismatch+1);
   expect(await assetFiles.readAsset(identity)).toEqual(changed);
  }
  expect(b.calls.slice(before).every(call=>call.method==='GET'&&call.url.includes('/carriers?'))).toBe(true);
@@ -267,9 +267,10 @@ function conditionalAssetHost(race:boolean){
   if(method==='file.delete'){map.delete(a.path);return {deleted:true} as T;}throw Error(method);
  };return {host,map,injected:()=>injected};
 }
-for(const mode of ['cloud','local'] as const)test('RVPODNOTES-01 '+mode+' final commit competition preserves both files and records a conflict',async()=>{
+for(const mode of ['cloud','local','existing different original'] as const)test((mode==='existing different original'?'FIX1':'RVPODNOTES-01')+' '+mode+' preserves both attachment versions and records a conflict',async()=>{
  const {createNoteAssetWriter}=await import('../../src/notes/cloud-assets'),{NoteAssetReceiver}=await import('../../src/sync/note-assets');
- const p=await prepared('asset',new Uint8Array([1,2,3])),f=conditionalAssetHost(true),writer=createNoteAssetWriter(f.host);
+ const p=await prepared('asset',new Uint8Array([1,2,3])),f=conditionalAssetHost(mode!=='existing different original'),writer=createNoteAssetWriter(f.host);
+ if(mode==='existing different original')f.map.set('notes/assets/image.png',new Uint8Array([9,8,7]));
  if(mode==='local'){
   const receiver=new NoteAssetReceiver({stat:path=>f.host('file.stat',{path}),hash:path=>f.host('file.hash',{path}),remove:async path=>{await f.host('file.delete',{path});},write:(path,dataBase64)=>f.host('file.write',{path,dataBase64}),append:(path,dataBase64,expectedOffset)=>f.host('file.write',{path,dataBase64,append:true,expectedOffset}),commit:(path,target,expectedSize,expectedSha256,expectedTargetSha256)=>f.host('file.commit',{path,target,expectedSize,expectedSha256,expectedTargetSha256})});
   await expect(receiver.apply({version:1,storageKey:'image.png',sha256:sha256Hex(p.raw),chunkCount:1,chunkIndex:0,data:Buffer.from(p.raw).toString('base64')})).rejects.toThrow('note_asset_conflict');
@@ -279,7 +280,7 @@ for(const mode of ['cloud','local'] as const)test('RVPODNOTES-01 '+mode+' final 
   const channel=new WatchBodyChannel({http:{list:async()=>({carriers:[{descriptor:p.descriptor}],nextAfter:null}),download:async(_id:string,h:string)=>p.objects.get(h)} as any,scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'test',repository:{read:async()=>f.map.get('notes/assets/image.png'),validate:async()=>{},install:async(_k,id,raw,expected)=>{await writer(id,raw,expected);}},check:async()=>{}});
   expect(await channel.sync()).toEqual({pending:1,errors:['note_asset_conflict']});
  }
- expect(f.injected()).toBe(true);expect(f.map.get('notes/assets/image.png')).toEqual(new Uint8Array([9,8,7]));
+ expect(f.injected()).toBe(mode!=='existing different original');expect(f.map.get('notes/assets/image.png')).toEqual(new Uint8Array([9,8,7]));
  const path='notes/asset-conflicts/'+sha256Hex(new TextEncoder().encode('image.png'))+'-'+sha256Hex(p.raw)+'.bin';expect(f.map.get(path)).toEqual(p.raw);expect(JSON.parse(new TextDecoder().decode(f.map.get(path+'.json')))).toMatchObject({storageKey:'image.png',incomingSha256:sha256Hex(p.raw),retainedPath:path});
 });
 
@@ -341,4 +342,103 @@ test('RVPODNOTES-02 missing new original holds only that entity and never invent
   const state=await f.store.readState();expect(await f.store.cloudRow(state.cloud.current.treeRoot,entity)).toBeNull();expect(await f.store.readCandidate(entity)).not.toBeNull();expect(state.hasUnsentEdits).toBe(true);expect(pending).toEqual(['body_channel_source_missing']);expect(await f.store.cloudRow(state.cloud.current.treeRoot,entityKey(idKey,scope.repoId,'note','n'))).not.toBeNull();
   original=new Uint8Array([1,2,3]);await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},'b'.repeat(32));await publisher.flush();await reader.pull(server.window());const resumed=await f.store.readState();expect((await f.store.cloudRow(resumed.cloud.current.treeRoot,entity)).row.bodyRevision).toBe(carrierBodyRevision('asset',entity,sha256Hex(original)));expect(resumed.hasUnsentEdits).toBe(false);
  }finally{f.db.close();}
+});
+
+
+for(const expire of [false,true])test('FIX1 final D1 local proof '+(expire?'rechecks the deadline':'detects file replacement after cloud row validation'),async()=>{
+ const p=await prepared(),b=backend();
+ await b.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
+ const logicalId=p.binding.logicalId;
+ const wire=toWire('asset',{assetId:logicalId,mime:'image/png',originalFilename:logicalId,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0});
+ const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId,payload:wire.meta},state:{payload:wire.state}};
+ let local=p.raw,reads=0,validation=0,pendingChoice=false,failRead=false,installs=0;let now=1;
+ const changed=p.raw.slice();changed[0]^=1;
+ const projection={
+  readState:async()=>({pendingChoice,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),
+  cloudRows:async(_root:string,after:string)=>after?[]:[entry],
+  cloudRow:async()=>{if(++validation===2&&!expire)local=changed;return entry;},
+ };
+ const channel=()=>new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
+  read:async()=>{if(++reads===2&&expire)now=3;if(failRead)throw Error('file_replaced');return local;},
+  validate:async()=>{},install:async()=>{installs++;},
+ },check:async()=>{}});
+ const start=b.calls.length;
+ const first=await channel().sync(2),calls=b.calls.slice(start).map(call=>new URL(call.url).pathname);
+ expect(first).toEqual({pending:1,errors:[expire?'window_expired':'body_revision_changed']});
+ expect(validation).toBe(2);expect(reads).toBe(2);
+ expect(calls).toHaveLength(1);expect(calls[0]).toEndWith('/carriers');expect(installs).toBe(0);
+ if(expire)return;
+ const beforeFailure=b.calls.length;failRead=true;
+ const second=await channel().sync();
+ expect(second).toEqual({pending:1,errors:['file_replaced']});
+ expect(b.calls.slice(beforeFailure).some(call=>/\/objects\//.test(new URL(call.url).pathname))).toBe(true);
+ expect(installs).toBe(0);expect(local).toBe(changed);
+});
+
+test('FIX1 rollback v1 attachment archives exact bytes before refusing publication',async()=>{
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const {bookFixture}=await import('../books/fixture');
+ const {localTransferIntakeFixture}=await import('../helpers/local-transfer-intake');
+ const f=await bookFixture();
+ try{
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000');
+  await guard.rollback();
+  const before=await guard.store.readState();
+  const asset=v1AssetFiles(),body=new Uint8Array([65,66,67]);
+  let notifications=0;
+  const handler=createApplicationActionHandler({
+   notes:{initialize:async()=>{},merge:async()=>0,allIncludingDeleted:async()=>[]},
+   legacyIntake:apply=>guard.intake(guard.account,guard.deviceId,apply),
+   deviceId:async()=>guard.deviceId,notesChanged:()=>{notifications++;},noteAssets:asset.receiver,
+  });
+  const result=await handler({action:'syncNoteAsset',version:1,storageKey:'review.png',sha256:sha256Hex(body),chunkIndex:0,chunkCount:1,data:Buffer.from(body).toString('base64')});
+  const after=await guard.store.readState(),target=asset.contents.get('notes/assets/review.png');
+  expect(before.account?.generation).not.toBe('0');expect(result).toMatchObject({success:false,message:'BUSINESS_REJECTED'});expect(target).toBeUndefined();
+  expect(notifications).toBe(0);expect(after.pendingChoice?.inboxKeys).toHaveLength(1);
+  const {entry}=await guard.store.legacyChoiceEntry(after.pendingChoice!.inboxKeys[0]!);
+  const restored:number[]=[];
+  await guard.store.legacyBodies.verify(entry.transferBody,async bytes=>{restored.push(...bytes);});
+  expect(restored).toEqual([...body]);
+ }finally{f.sql.close();}
+});
+
+
+test('FIX1 D1 rejects a signed carrier whose keyVersion is unavailable',async()=>{
+ const p=await prepared(),b=backend(),body=p.descriptor.body;
+ const unsupported=await prepareCarrier({
+  crypto:snapshotCrypto,signer,alias:'key',authorDeviceId:author,scope,anchor,
+  binding:p.binding,key:key.slice(),keyVersion:2,objects:[{name:bodyObjectName('asset',p.binding.logicalId),bytes:p.raw,compress:false}],
+ });
+ await b.http().upload(unsupported.descriptor,async hash=>unsupported.objects.get(hash)!);
+ const logicalId=p.binding.logicalId;
+ const wire=toWire('asset',{assetId:logicalId,mime:'image/png',originalFilename:logicalId,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0});
+ const entry={row:{entityKey:p.binding.entityKey,bodyRevision:body.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId,payload:wire.meta},state:{payload:wire.state}};
+ const projection={
+  readState:async()=>({pendingChoice:null,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),
+  cloudRows:async(_root:string,after:string)=>after?[]:[entry],cloudRow:async()=>entry,
+ };
+ let keyChecks=0;
+ const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async v=>{keyChecks++;if(v!==1)throw Error('key_unavailable');return key.slice();},currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
+  read:async()=>p.raw,validate:async()=>{},install:async()=>{throw Error('unexpected install');},
+ },check:async()=>{}});
+ const start=b.calls.length;
+ const result=await channel.sync(),calls=b.calls.slice(start).map(call=>new URL(call.url).pathname);
+ expect(result).toEqual({pending:1,errors:['key_unavailable']});expect(keyChecks).toBe(1);expect(calls.every(path=>path.endsWith('/carriers'))).toBe(true);
+});
+
+test('FIX1 legacy inbox archives 64 KiB blocks in bounded transactions',async()=>{
+ const {WatchLegacyBody,LEGACY_BODY_SCHEMA}=await import('../../src/sync-v2/legacy-body');
+ const sql=new SqlFixture(),raw=new Uint8Array(65536*9+11).fill(13);
+ try{
+  await sql.transaction([{sql:LEGACY_BODY_SCHEMA}]);
+  const batches:number[]=[];
+  const archive=new WatchLegacyBody({
+   query:sql.query.bind(sql),
+   transaction:async statements=>{batches.push(statements.length);await sql.transaction(statements);},
+  },{seal:async(_aad,value)=>JSON.stringify(value),open:async(_aad,sealed)=>JSON.parse(sealed)},'test');
+  const ref={owner:'c'.repeat(64),size:raw.length,sha256:sha256Hex(raw)};
+  await archive.stage(ref,{...ref,read:async(offset,size)=>raw.slice(offset,offset+size)},()=>{});
+  expect(batches).toEqual([4,4,2]);
+  await archive.verify(ref,async(part,offset)=>{expect(part).toEqual(raw.subarray(offset,offset+part.length));});
+ }finally{sql.close();}
 });

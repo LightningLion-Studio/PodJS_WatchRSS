@@ -124,3 +124,35 @@ test('v1 reading replay after rollback is protected and cannot commit the old wi
   expect(await f.w.db.query('SELECT * FROM sync_book_reading_peers')).toEqual([]);
  }finally{f.close();}
 });
+
+
+for(const rollbackAt of ['commit','ack','account change'] as const)test('FIX1 v1 reading fence at '+rollbackAt,async()=>{
+ const f=await peers();
+ try{
+  const account={backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'};
+  const deviceId='22000000-0000-0000-0000-000000000000';
+  const guard=await localTransferIntakeFixture(f.w.db,account,deviceId);
+  const actions=new BookSyncActions(f.w.db,f.w.store),session={};
+  const {watchBookSyncAction}=await import('../../src/sync-v2/local-transfer-intake');
+  let currentAccount=account;
+  const apply=watchBookSyncAction(async()=>({syncBooks:actions.apply.bind(actions),deviceId:async()=>deviceId}),{
+   read:async()=>currentAccount,withLibraryAccount:async(_account,run)=>run(),
+  },guard.intake);
+  await f.p.store.mergeReading(state(1,{sourceDeviceId:'phone'}));
+  const remote=await f.phone.summary();
+  const open=await apply(request('readingSummary',{summary:remote,knownRemote:null,ackedLocalSeq:0}),session);
+  expect(await apply(request('readingDelta',{windowId:open.windowId,batchIndex:0,after:0,entries:await f.phone.entries(0,remote.seq),done:true}),session)).toMatchObject({success:true,applied:1});
+  if(rollbackAt==='commit')await guard.rollback();
+  const jobs:(()=>Promise<void>)[]=[];
+  const commit=apply(request('readingCommit',{windowId:open.windowId,receivedSeq:(open.summary as ReadingSummary).seq,sentSeq:remote.seq,mergedRoot:remote.root}),session,job=>jobs.push(job));
+  if(rollbackAt==='commit'){
+   await expect(commit).rejects.toThrow('BUSINESS_REJECTED');expect(jobs).toHaveLength(0);
+  }else{
+   expect(await commit).toMatchObject({committed:true});expect(jobs).toHaveLength(1);
+   if(rollbackAt==='ack')await guard.rollback();
+   else currentAccount={...account,userId:'12000000-0000-0000-0000-000000000000'};
+   await expect(jobs[0]!()).rejects.toThrow(rollbackAt==='ack'?'BUSINESS_REJECTED':'AUTH_REVOKED');
+  }
+  expect(await f.w.db.query('SELECT peer,remote_seq FROM sync_book_reading_peers')).toEqual([]);
+ }finally{f.close();}
+});

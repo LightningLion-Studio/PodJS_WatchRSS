@@ -1,3 +1,8 @@
+import {knownRecordValue} from '../cloud/compatibility';
+import {normalizeSourceUrl} from './source-store';
+import {bytesToBase64} from '@podjs/framework/bytes';
+import {applyLegacyTransfer,type BoundLocalTransferIntake} from '../sync-v2/local-transfer-intake';
+import {SYNC_V2_PRODUCT} from '../sync-v2/gate';
 import {rejectionTitle} from '../debug/book-rejections';
 import {iterateRequestItems,type SyncHistory,type SyncTrace} from '../debug/sync-diagnostics';
 import {checkedStateRoots,checkedStateReceipts,checkedProjectionVersions,type AckedStateVector} from '@podjs/framework/acked-state-vector';
@@ -70,7 +75,7 @@ export interface LibrarySessionOptions {
  onSessionClosed?:(results:readonly SessionActionResult[])=>void;
  capabilities?:ProbeCapabilities;
  watchCapabilities?:JsonObject;
- handleAction?:((request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>;domainVectors?:DomainVectorProvider};
+ handleAction?:((request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>;domainVectors?:DomainVectorProvider;legacyIntake?:BoundLocalTransferIntake};
  offerIpEndpoint?:(descriptor:JsonObject)=>Promise<boolean>;
  initialRequestTimeoutMs?:number;
  responseAckTimeoutMs?:number;
@@ -189,7 +194,7 @@ export class LibrarySyncSession {
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
       const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;legacySubset=exchange.legacySubset;
      }catch(error){
-      this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
+      this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:(error as Error).message==='BUSINESS_REJECTED'?'BUSINESS_REJECTED':busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
       try{await this.write(response);}catch{this.log.event('library.errorResponse.write.failed',{},'W');}this.aborting=true;this.log.event("server.exchange.aborted",{persistentSession:persistent,completedActions:results.length,elapsedMs:this.log.elapsed()});this.status({phase:'error',message:String(response.message)});results.push({request,response,ack:null,libraryApplied:false});return results;
      }
     }else{
@@ -221,7 +226,7 @@ export class LibrarySyncSession {
     const ack=await this.ack((pending||legacySubset)&&!this.checkpointed&&Number(response.batchCount)>1?120000:0);let libraryApplied=false;
     if(pending&&ack?.success&&ack.applied){this.check();try{await this.repository.markSuccess(pending);this.check();libraryApplied=true;this.log.event("library.peerState.mark.success",{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});}catch(error){this.log.event("library.peerState.mark.failed",{message:"<redacted>"},"E");throw error;}}
     else if(legacySubset||request.action==='syncBooks'){
-     const stagedBook=request.action==='syncBooks'&&request.phase==='body'&&response.complete!==true;
+     const stagedBook=SYNC_V2_PRODUCT.syncV2&&request.action==='syncBooks'&&request.phase==='body'&&response.complete!==true;
      libraryApplied=!stagedBook&&!!(response.success&&ack?.success&&ack.applied);
     }
     else if(pending)this.log.event("library.peerState.mark.skipped",{ackSuccess:ack?.success??null,ackApplied:ack?.applied??null,localSeqMax:pending.localSeqToInclusive,remoteSeqPendingAck:pending.remoteSeqToInclusive},"W");
@@ -258,7 +263,9 @@ export class LibrarySyncSession {
   const legacySubset=remoteRange.fallbackReason==='binarySubset'&&this.options.binary?.acceptsLegacySubset?.(peer,this.actionContext)===true;
   if(legacySubset&&(mode!=='merge'||remoteRange.fromSeqExclusive!==0||remoteRange.toSeqInclusive!==0||remoteRange.fullSnapshot||remoteCursor.lastRemoteSeqApplied!==0||remoteCursor.lastLocalSeqAckedByPeer!==0||!bool(request.forceFull)))throw Error('CAPABILITY_MISMATCH');
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
-  let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>this.repository.mergeSources(sources,peer,false)):0;this.check();
+  const intake=this.options.handleAction?.legacyIntake,check=()=>this.check();
+  const sourceRecords=sources.map(value=>{const url=normalizeSourceUrl(value.url);return {kind:'source' as const,logicalId:url,value:{...value,url}};});
+  let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>applyLegacyTransfer(intake,peer,'mergeSources',sourceRecords,()=>this.repository.mergeSources(sources,peer,false),check)):0;this.check();
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
   const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied,()=>this.check()));this.check();
   const force=bool(request.forceFull),full=force||mode!=='merge'||!bool(request.supportsChangeSequences)||optLong(request.version)<8;
@@ -270,9 +277,25 @@ export class LibrarySyncSession {
   let manifest={...this.extensionCapabilities(),...buildManifestResponse(localId,window.articleManifest,selected,window.rssSources,sourcesApplied,window,this.now,this.persistentSession&&this.peerCapabilities.supportsDomainFastPathV2===true&&this.extensionCapabilities().supportsDomainFastPathV2===true)};if(accepted)manifest={...manifest,...persistentFields};if(this.checkpointed)manifest={...manifest,[LIBRARY_CHECKPOINT_FEATURE]:true};
   for(const frame of bool(request.supportsManifestBatches)?buildManifestFrames(manifest):[manifest])await this.write(frame);
   this.status({phase:'receiving'});let applied=0;
-  const receiver=new ArticleBatchReceiver(selected,async entry=>{this.check();if(!source)applied+=await this.repository.receiveArticle(entry,peer,target);this.check();},{ignoreIncoming:source,flushCompleteArticles:this.checkpointed});
+  const receiver=new ArticleBatchReceiver(selected,async entry=>{
+   check();if(source)return;
+   const apply=()=>this.repository.receiveArticle(entry,peer,target);
+   if(!intake||!SYNC_V2_PRODUCT.syncV2){applied+=await apply();return;}
+   // The cloud row cannot attest a v1 body's delta, article alias, or
+   // book-chapter rewrite. Save the received form before resolving any of them.
+   const {article,body}=entry,wire=()=>({operation:'receiveArticle',target,article,body:{...body,chunks:body.chunks.map(chunk=>({...chunk,bytes:bytesToBase64(chunk.bytes)}))}});
+   applied+=await applyLegacyTransfer(intake,peer,'receiveArticle',[{kind:'article',logicalId:article.articleId,value:knownRecordValue('article',article)}],apply,check,wire);
+   check();
+  },{ignoreIncoming:source,flushCompleteArticles:this.checkpointed});
   let receipt,mergeMs=0;do{const incoming=await this.read(180000),mergeStart=this.monotonic();receipt=await receiver.consume(incoming);this.status({phase:'receiving',receivedArticles:receiver.committedArticles});mergeMs+=this.monotonic()-mergeStart;if(this.checkpointed&&incoming.libraryCheckpoint===true){if(!receiver.checkpointReady)throw new Error('Library checkpoint splits an incomplete article');await this.write(libraryBatchAck('phoneToWatch',Number(incoming.batchIndex??0),receiver.committedArticles));this.log.event('library.batch.applied',{confirmedArticles:receiver.committedArticles,batchIndex:Number(incoming.batchIndex??0)});}}while(!receipt);receiver.finish();this.log.event("library.articles.parsed",{incomingArticles:receipt.receivedArticles});this.log.event("library.articles.merged",{incomingArticles:receipt.receivedArticles,articlesApplied:applied,chunked:true,elapsedMs:Math.max(0,Math.round(mergeMs))});
-  if(target){sourcesApplied=await this.repository.mergeSources(sources,peer,true);this.check();this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});await this.repository.finalizeSnapshot(remoteManifest.map(a=>a.articleId),[...sources.map(s=>s.url),'watchrss://phone-imports'],peer);this.check();}
+  if(target){
+   await applyLegacyTransfer(intake,peer,'replaceSnapshot',sourceRecords,async()=>{
+    sourcesApplied=await this.repository.mergeSources(sources,peer,true);check();
+    this.log.event('library.sources.merged',{incomingSources:sources.length,sourcesApplied});
+    await this.repository.finalizeSnapshot(remoteManifest.map(a=>a.articleId),[...sources.map(s=>s.url),'watchrss://phone-imports'],peer);
+   },check,()=>({operation:'replaceSnapshot',manifest:remoteManifest}));
+   check();
+  }
   this.status({phase:'sending',receivedArticles:receipt.receivedArticles});
   const outgoing=await this.timed('library.bodies.materialized',()=>this.repository.exportRequested(receipt.bodyRequests,peer));this.check();
   this.log.event("library.response.articles.exported",{bodyRequests:receipt.bodyRequests.length,outgoingArticles:outgoing.length});

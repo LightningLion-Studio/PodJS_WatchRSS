@@ -37,6 +37,7 @@ export function independentBodyResolver(repository:BodyChannelRepository,fallbac
  }catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','body_channel_source_missing'].includes((error as Error).message))throw error;if(same)return keep();onPending?.((error as Error).message==='body_channel_capacity_pending'?'body_channel_capacity_pending':'body_channel_source_missing');throw Error('body_channel_source_missing');}
 };}
 class BodyRetryDeferred extends Error {}
+const fatalBodyCheck=(code:string)=>['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale','window_expired','AUTH_REVOKED'].includes(code);
 /** Every source comes from an already authenticated current account tree.
  * Carrier success never advances a business ACK or rewrites a v2 row. */
 export class WatchBodyChannel {
@@ -78,13 +79,13 @@ export class WatchBodyChannel {
    }after=page.at(-1).row.entityKey;
   }
  }
- async sync(){
+ async sync(expiresAtMillis?:number){
   await this.o.check();const state=await this.o.projection.readState(),head=state.cloud?.current;
   if(state.pendingChoice||!state.account||head?.commitOid!==state.account.oid)return {pending:0,errors:[] as string[]};
   const anchor={commitOid:state.account.oid,revision:state.account.revision,rollbackGeneration:state.account.generation};let after='',pending=0;const errors:string[]=[];
   for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)break;
    for(const entry of page){if(!['book','asset'].includes(entry.meta.kind)||entry.row.deleted||entry.row.recipeOid)continue;
-    try{await this.syncEntry(entry,anchor);const retry=this.retryPath(entry),old=await this.o.files.read(retry);if(old)await this.o.files.writeAtomic(retry,jsonBytes({version:1,code:'none',until:0,attempts:0}));}
+    try{await this.syncEntry(entry,anchor,expiresAtMillis);}
     catch(error){await this.o.check();pending++;const code=String((error as Error).message);
      if(error instanceof SyncV2Error&&error.retryable){
       const path=this.retryPath(entry),old=await this.o.files.read(path),previous=old?parseCanonicalJson(old):null;
@@ -96,9 +97,10 @@ export class WatchBodyChannel {
   }return {pending,errors};
  }
  private retryPath(entry:any){return this.o.root+'/'+entry.row.entityKey+'/'+entry.row.bodyRevision+'/retry.json';}
- private async syncEntry(entry:any,anchor:any){
+ private async syncEntry(entry:any,anchor:any,expiresAtMillis?:number){
+  const checkWindow=()=>{if(expiresAtMillis!==undefined&&this.now()>expiresAtMillis)throw Error('window_expired');};
   const {meta,row}=entry,kind=meta.kind as BodyKind,id=meta.logicalId,binding:BodyBinding={kind,logicalId:id,entityKey:row.entityKey,bodyRevision:row.bodyRevision},value=fromWire(kind,meta.payload,entry.state.payload);
-  if(value.deleted)throw Error('body_revision_changed');await this.current(entry,anchor);
+  if(value.deleted)throw Error('body_revision_changed');checkWindow();await this.current(entry,anchor);checkWindow();
   const path=this.o.root+'/'+binding.entityKey+'/'+binding.bodyRevision,retry=await this.o.files.read(path+'/retry.json');
   if(retry){const v=parseCanonicalJson(retry);if(typeof v.code!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(v.code)||!Number.isSafeInteger(v.until)||v.attempts!==undefined&&(!Number.isSafeInteger(v.attempts)||v.attempts<0||v.attempts>32))throw Error('invalid_schema');if(v.until>this.now())throw new BodyRetryDeferred(v.code);}
   const readLocal=async()=>{
@@ -117,36 +119,47 @@ export class WatchBodyChannel {
    if(carrierBodyRevision(kind,row.entityKey,witness.sha256)!==row.bodyRevision)throw Error('body_revision_changed');
    return {witness,raw};
   };
-  let local=await readLocal(),cursor='',last:unknown;
+  let localFailure:unknown;
+  const clearRetry=async()=>{if(retry)await this.o.files.writeAtomic(this.retryPath(entry),jsonBytes({version:1,code:'none',until:0,attempts:0}));};
+  const findLocal=async()=>{
+   try{return await readLocal();}
+   catch(error){
+    const code=(error as Error).message;if(fatalBodyCheck(code)||code==='body_channel_capacity_pending')throw error;
+    localFailure=error;
+   }
+  };
+  let local=await findLocal(),cursor='',last:unknown;
   for(;;){
-   const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
+   checkWindow();const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
    // A v1 commit can finish while the control request is in flight.
-   local??=await readLocal();
+   checkWindow();local??=await findLocal();checkWindow();
    for(const c of page.carriers){
     try{
      if(local){
       // The signed ready descriptor is a backup check. The authenticated row
       // and our installed bytes already satisfy the local download need.
       await verifyCarrier(c.descriptor,this.o.scope,binding,this.o.signer,await this.carrierPublicKey(c.descriptor));
+      const key=await this.o.key(c.descriptor.body.keyVersion);
+      try{if(key.length!==32)throw Error('key_unavailable');}finally{key.fill(0);}
      }else{
-      await this.receive(entry,anchor,c.descriptor,path);
+      await this.receive(entry,anchor,c.descriptor,path,checkWindow);
      }
     }catch(error){
      last=error;
-     if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;
+     if(fatalBodyCheck((error as Error).message))throw error;
      continue;
     }
+    await clearRetry();
     if(local){
-     const latest=await readLocal();
+     await this.current(entry,anchor);checkWindow();const latest=await readLocal();checkWindow();
      if(latest?.witness.sha256!==local.witness.sha256||latest.witness.size!==local.witness.size)throw Error('body_revision_changed');
-     await this.current(entry,anchor);
     }
     return;
    }
    if(page.nextAfter===null)break;
    cursor=page.nextAfter;
   }
-  if(last||!local)throw last??Error('body_channel_pending');
+  if(last||!local)throw last??localFailure??Error('body_channel_pending');
   let raw=local.raw;
   if(!raw){
    raw=await this.o.repository.read(kind,id);
@@ -163,24 +176,26 @@ export class WatchBodyChannel {
     descriptor=prepared.descriptor;await this.o.files.writeAtomic(path+'/pending.json',jsonBytes(descriptor));
    }
   }finally{key.key.fill(0);}
-  await this.current(entry,anchor);await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);if(!b)throw Error('closure_incomplete');return b;});await this.current(entry,anchor);return;
+  await this.current(entry,anchor);checkWindow();await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);checkWindow();if(!b)throw Error('closure_incomplete');return b;});await clearRetry();await this.current(entry,anchor);checkWindow();
  }
  private async carrierPublicKey(descriptor:Carrier){
   const key=await this.o.approved(descriptor.body.authorDeviceId);
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
   return key.publicKey;
  }
- private async receive(entry:any,anchor:any,descriptor:Carrier,path:string){
+ private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,checkWindow:()=>void){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId};
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:(hash,size)=>{checkWindow();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
   await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
   const incomingHash=sha256Hex(raw);
   // If Bluetooth finished while the carrier was in flight, retain its bytes.
   await this.current(entry,anchor);
   const old=await this.o.repository.read(binding.kind,binding.logicalId);
-  if(old&&sha256Hex(old)===incomingHash){await this.current(entry,anchor);return;}
+  checkWindow();
+  if(old&&sha256Hex(old)===incomingHash)return;
   if(binding.kind==='book'&&old)throw Error('body_revision_changed');
-  await this.o.repository.install(binding.kind,binding.logicalId,raw,null);await this.current(entry,anchor);
+  await this.current(entry,anchor);checkWindow();
+  await this.o.repository.install(binding.kind,binding.logicalId,raw,null);await this.current(entry,anchor);checkWindow();
  }
 }

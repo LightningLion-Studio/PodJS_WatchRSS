@@ -18,24 +18,25 @@ export class BookSyncActions {
  private delta:BookReadingDelta;
  private partsReady?:Promise<void>;
  constructor(private db:SqlDatabase,private store:SqlBookStore){this.delta=new BookReadingDelta(db,store);}
- async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck,check?:LocalTransferWrite):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck,check?:LocalTransferWrite,cancel?:()=>void,readingFence?:string):Promise<JsonObject>{
   requireThat(request.version===1&&typeof request.deviceId==='string'&&request.deviceId.length>0&&request.deviceId.length<=512);
   const base={success:true,action:'syncBooks',version:1,phase:request.phase};
   const protect=async(records:SourceRecord[],file?:BookFileInfo)=>{
-   if(!check||!records.length)return;
+   cancel?.();if(!check||!records.length)return;
    const body=file?{size:file.size,sha256:file.sha256,read:async(offset:number,length:number)=>(await this.store.ports.files.read(file.path,offset,length)).bytes}:undefined;
-   await check({version:14,peer:String(request.deviceId),cursor:digest(['syncBooks',request.phase,canonicalLegacy(records),file?.sha256??null]),records,body});
+   await check({version:14,peer:String(request.deviceId),cursor:digest(['syncBooks',request.phase,canonicalLegacy(records),file?.sha256??null]),records,body,check:cancel});
+   cancel?.();
   };
   const protectReading=(reading:readonly BookReading[])=>protect(reading.map(value=>({kind:'book-reading',logicalId:value.bookId+':'+value.chapterIndex,value})));
-  if(['readingSummary','readingDelta','readingCommit'].includes(String(request.phase)))return this.delta.apply(request,session,afterAck,protectReading);
+  if(['readingSummary','readingDelta','readingCommit'].includes(String(request.phase)))return this.delta.apply(request,session,afterAck,protectReading,cancel,readingFence);
   if(request.phase==='manifest'){
    requireThat(Array.isArray(request.books)&&request.books.length<=100000);const incoming:BookState[]=[];const ids=new Set<string>();for(const raw of request.books as unknown[]){const value=await validateBook(raw,this.store.ports.sha256);requireThat(!ids.has(value.bookId)&&typeof (raw as JsonObject).contentAvailable==='boolean');ids.add(value.bookId);incoming.push(value);}
    await protect(incoming.map(value=>({kind:'book',logicalId:value.bookId,value})));
-   this.pages.delete(session);await this.store.registerLocal(incoming);let applied=0;for(const s of incoming)applied+=await this.store.merge(s);const books=await this.store.manifests(),missingBookIds:string[]=[];for(let i=0;i<incoming.length;i++){const s=incoming[i]!;if(!s.deleted&&(request.books as JsonObject[])[i]!.contentAvailable===true&&!await this.store.package(s.bookId))missingBookIds.push(s.bookId);}
+   this.pages.delete(session);await this.store.registerLocal(incoming,cancel);let applied=0;for(const s of incoming)applied+=await this.store.merge(s,cancel);const books=await this.store.manifests(),missingBookIds:string[]=[];for(let i=0;i<incoming.length;i++){const s=incoming[i]!;if(!s.deleted&&(request.books as JsonObject[])[i]!.contentAvailable===true&&!await this.store.package(s.bookId))missingBookIds.push(s.bookId);}
    return {...base,deviceId:await this.store.ports.deviceId(),books,missingBookIds,applied};
   }
   if(request.phase==='reading'){
-   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);await protectReading(request.states as BookReading[]);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading();const applied=await this.store.mergeReadingBatch(request.states as BookReading[]);if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
+   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);await protectReading(request.states as BookReading[]);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading();const applied=await this.store.mergeReadingBatch(request.states as BookReading[],{check:cancel});if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
   }
   const id=request.bookId;requireThat(typeof id==='string'&&hex.test(id));
   if(request.phase==='pull'){
@@ -74,7 +75,7 @@ export class BookSyncActions {
   }else{
    const part=await this.store.ports.files.writeBytes(data);
    try{
-    await this.db.transaction([{sql:'INSERT INTO sync_book_parts(book_id,package_sha256,fingerprint,byte_count,chunk_count,chunk_index,path) VALUES(?,?,?,?,?,?,?)',
+    cancel?.();await this.db.transaction([{sql:'INSERT INTO sync_book_parts(book_id,package_sha256,fingerprint,byte_count,chunk_count,chunk_index,path) VALUES(?,?,?,?,?,?,?)',
      params:[...key,request.fingerprint,request.byteCount,request.chunkCount,index,part.path]}]);
    }catch(error){await this.store.ports.files.remove(part.path);throw error;}
    received=Number((await this.db.query('SELECT received FROM sync_book_part_receipts WHERE book_id=? AND package_sha256=?',key))[0]?.received);
@@ -89,7 +90,7 @@ export class BookSyncActions {
    try{
     requireThat(info.size===request.byteCount&&info.sha256===key[1]);
     await protectPackage(info);
-    applied=await this.store.installPackage(info,key[0]);
+    applied=await this.store.installPackage(info,key[0],undefined,false,cancel);
    }
    catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false);throw error;}
    await this.discard(key,parts,true);

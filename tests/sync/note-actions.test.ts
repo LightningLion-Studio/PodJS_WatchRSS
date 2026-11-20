@@ -32,3 +32,30 @@ test('framed persistent session routes notes and continues after a rejected acti
   const result=await session.run();expect(result).toHaveLength(3);expect(result[0].ack?.applied).toBe(true);expect(written[0]).toMatchObject({action:'syncNotes',success:true,applied:1,persistentSessionAccepted:true});expect(written[1]).toMatchObject({success:false});expect(written[2]).toMatchObject({action:'syncSession',success:true});expect(await f.repo.list()).toHaveLength(1);expect(closed).toBe(true);
  }finally{f.raw.close();}
 });
+
+test('FIX1 rollback v1 note and tombstone go into the keyed inbox',async()=>{
+ const {fixture}=await import('./ble-v2-fixture');
+ const {MemoRepository}=await import('../../src/notes/repository');
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const {localTransferIntakeFixture}=await import('../helpers/local-transfer-intake');
+ const f=await fixture();
+ try{
+  const deviceId='22000000-0000-0000-0000-000000000000';
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},deviceId);
+  const notes=new MemoRepository(f.db,deviceId);
+  await guard.rollback();
+  let changed=0;
+  const handler=createApplicationActionHandler({
+   legacyIntake:apply=>guard.intake(guard.account,deviceId,apply),notes,deviceId:async()=>deviceId,notesChanged:()=>{changed++;},
+  });
+  const live={noteId:'new-note',title:'New',markdown:'본문',updatedAt:100,createdAt:100,modifiedBy:'phone',deleted:false};
+  const deleted={...live,noteId:'deleted-note',deleted:true,deletedAt:100};
+  const request={action:'syncNotes',version:1,deviceId:'phone',notes:[live,deleted]};
+  for(let i=0;i<2;i++)expect(await handler(request)).toMatchObject({success:false,message:'BUSINESS_REJECTED',errorCode:'BUSINESS_REJECTED'});
+  expect(changed).toBe(0);expect(await notes.allIncludingDeleted()).toEqual([]);
+  const pending=(await guard.store.readState()).pendingChoice;
+  expect(pending?.inboxKeys).toHaveLength(1);
+  const {entry}=await guard.store.legacyChoiceEntry(pending!.inboxKeys[0]!);
+  expect(Object.values(JSON.parse(entry.body))).toEqual(expect.arrayContaining([expect.objectContaining(live),expect.objectContaining(deleted)]));
+ }finally{f.sql.close();}
+});

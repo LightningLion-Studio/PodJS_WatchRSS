@@ -99,3 +99,68 @@ test('an authenticated split v14 exchange confirms only its own work and leaves 
  expect(marks).toBe(0);
  expect(phases.at(-1)).toBe('handoff');
 });
+
+for(const kind of ['source','article','alias','book chapter','replacement'] as const)test('FIX1 rollback protects v1 '+kind+' before the repository write',async()=>{
+ const {bookFixture,seedChapters}=await import('../books/fixture');
+ const {localTransferIntakeFixture}=await import('../helpers/local-transfer-intake');
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const {SqlLibrarySessionRepository}=await import('../../src/sync/library-repository');
+ const {prepareArticle}=await import('../../src/sync/article-export');
+ const {article,sha}=await import('./ble-v2-fixture');
+ const f=await bookFixture();
+ try{
+  const peer='phone',deviceId='22000000-0000-0000-0000-000000000000';
+  await f.db.execute('UPDATE sync_local_identity SET device_id=? WHERE id=1',[deviceId]);
+  const guard=await localTransferIntakeFixture(f.db,{userId:'11000000-0000-0000-0000-000000000000',backendBaseUrl:'https://fixture.invalid'},deviceId);
+  const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:f.files});
+  const feed='https://example.com/rss',url='https://example.com/article',alias=sha('phone-alias');
+  let payload=article({rssSourceUrl:feed,rssSourceTitle:'Feed',url,articleId:sha(url)});
+  if(kind==='alias'){
+   const initial=await f.packet(article({url,rssSourceUrl:feed,rssSourceTitle:'Feed',articleId:alias}));
+   await repo.receiveArticle(initial,peer,false);
+   payload={...payload,legacyArticleIds:[alias]};
+  }
+  if(kind==='replacement'||kind==='book chapter'){
+   const source='https://watchrss.local/import-txt-novel/fix1-guard';
+   await seedChapters(f,source,[{title:'Retained',contentText:'Existing chapter',contentHtml:null}]);
+   const {mappings}=await repo.cloudBooks();
+   if(kind==='book chapter'){
+    expect(mappings).toHaveLength(1);
+    payload=article({url:mappings[0]!.url,articleId:mappings[0]!.articleId,title:'Remote chapter'});
+   }
+  }
+  await repo.prepareWindow(peer,0);
+  await guard.rollback();
+  const readBusiness=async()=>Promise.all(['articles','channels','sync_article_ids','sync_article_aliases','sync_book_aliases','sync_source_states','sync_peer_state'].map(table=>f.db.query('SELECT * FROM '+table)));
+  const before=await readBusiness();
+  const articleFrame=kind!=='source'&&kind!=='replacement';
+  const prepared=articleFrame?await prepareArticle(payload,f.codec):null;
+  const frames:JsonObject[]=[
+   {action:'syncLibrary',phase:'manifest',version:14,deviceId:peer,supportsChunkedBodies:true,supportsRssCanonicalIds:kind==='alias',supportsBookSyncV1:kind==='book chapter',libraryMode:kind==='replacement'?'phoneToWatchReplace':'merge',
+    rssSources:kind==='source'?[{url:feed,title:'Remote RSS',updatedAt:10,sourceDeviceId:peer}]:[],
+    articleManifest:prepared?[prepared.manifest]:[]},
+   {action:'syncLibrary',phase:'articles',version:14,batchIndex:0,batchCount:1,articles:prepared?[{
+    ...prepared.article,body:{bodyHash:prepared.manifest.bodyHash,bodyByteCount:prepared.manifest.bodyByteCount,chunkSize:prepared.manifest.chunkSize,chunkHashes:prepared.manifest.chunkHashes,
+     chunks:[{index:0,hash:prepared.manifest.chunkHashes[0],data:Buffer.from(prepared.encodedBody!).toString('base64')}]},
+   }]:[],bodyRequests:[]},
+   {action:'ack',phase:'applied',success:true,applied:true},
+  ];
+  const handleAction=createApplicationActionHandler({
+   legacyIntake:apply=>guard.intake(guard.account,deviceId,apply),deviceId:async()=>deviceId,
+   notes:{initialize:async()=>{},allIncludingDeleted:async()=>[],merge:async()=>0},notesChanged:()=>{},
+  });
+  const sent:JsonObject[]=[];
+  const result=await new LibrarySyncSession({readFrame:async()=>frames.shift()!,writeFrame:async frame=>{sent.push(frame);},close:async()=>{}},repo,{handleAction}).run();
+  expect(result[0]).toMatchObject({response:{success:false,message:'BUSINESS_REJECTED',errorCode:'BUSINESS_REJECTED'},libraryApplied:false,ack:null});
+  expect(await readBusiness()).toEqual(before);
+  const pending=(await guard.store.readState()).pendingChoice;
+  expect(pending?.inboxKeys).toHaveLength(1);
+  const {entry}=await guard.store.legacyChoiceEntry(pending!.inboxKeys[0]!);
+  expect(entry.entityKeys).toHaveLength(kind==='replacement'?0:1);
+  if(kind==='replacement')expect(JSON.parse(entry.wire)).toEqual({operation:'replaceSnapshot',manifest:[]});
+  if(prepared){
+   expect(JSON.parse(entry.wire).body.chunks[0].bytes).toBe(Buffer.from(prepared.encodedBody!).toString('base64'));
+   if(kind==='alias')expect(JSON.parse(entry.wire).article.legacyArticleIds).toEqual([alias]);
+  }
+ }finally{f.sql.close();}
+});

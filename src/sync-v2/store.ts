@@ -508,12 +508,18 @@ export class WatchProjectionStore {
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
- /** Local transport has no proof about the rollback's affected set. The
-  * account writer lease orders this check and the caller's business commit. */
+ /** Captured while holding the account and writer leases. */
+ async localReadingFence(){
+  const state=await this.persistedState();
+  if(state.pendingChoice)throw Error('BUSINESS_REJECTED');
+  return canonical([this.scopeKey,state.rollbackGeneration]);
+ }
+ /** The local transport has no proof about the rollback's affected set. The
+  * writer lease orders this check and the caller's business commit. */
  async protectLocalInput(input:LocalTransferInput):Promise<boolean>{
   const state=await this.persistedState();
   if(legacyInputRoute(state,[],null)==='normal'&&!state.pendingChoice)return false;
-  if(!state.pendingChoice&&await this.sameCurrentTransfer(state,input))return false;
+  if(input.wire===undefined&&!state.pendingChoice&&await this.sameCurrentTransfer(state,input))return false;
   const body:Record<string,unknown>={},identitiesByEntity:Record<string,{kind:Kind;logicalId:string}>={};
   for(const {kind,logicalId,value} of input.records){
    const id=this.entityKeyFor(kind,logicalId);
@@ -524,7 +530,7 @@ export class WatchProjectionStore {
    await this.db.transaction([{sql:LEGACY_BODY_SCHEMA},this.legacyBodies.discardIncomplete()]);
    await input.reserveBody?.(input.body.size);
   }
-  await this.receiveLegacy({peer:input.peer,version:input.version,cursor:input.cursor,body,identitiesByEntity,entityKeys:Object.keys(body),localTransfer:true},null,{source:input.body,check:input.check});
+  await this.receiveLegacy({peer:input.peer,version:input.version,cursor:typeof input.cursor==='string'?input.cursor:input.cursor(),body,identitiesByEntity,entityKeys:Object.keys(body),localTransfer:true,...(input.wire===undefined?{}:{wire:input.wire()})},null,{source:input.body,check:input.check});
   return true;
  }
  private async sameCurrentTransfer(state:SyncState,input:LocalTransferInput){
@@ -534,13 +540,14 @@ export class WatchProjectionStore {
    const id=this.entityKeyFor(kind,logicalId),cloud=await this.cloudRow(current.treeRoot,id);
    if(!cloud||cloud.unopenable||cloud.meta.kind!==kind||cloud.meta.logicalId!==logicalId)return false;
    if(kind==='asset'&&input.body&&input.records.length===1)return !cloud.row.deleted&&carrierBodyRevision('asset',id,input.body.sha256)===cloud.row.bodyRevision;
-   if(canonical(toWire(kind,value))!==canonical({meta:cloud.meta.payload,state:cloud.state.payload}))return false;
+   let incoming;try{incoming=toWire(kind,value);}catch{return false;}
+   if(canonical(incoming)!==canonical({meta:cloud.meta.payload,state:cloud.state.payload}))return false;
    if(input.body&&(input.records.length!==1||kind!=='book'||carrierBodyRevision('book',id,input.body.sha256)!==cloud.row.bodyRevision))return false;
   }
   return true;
  }
  /** No business apply or ACK. Legacy data is an encrypted shadow journal. */
- async receiveLegacy(input:{peer:string;version:1|2|13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>;localTransfer?:true},affected:string[]|null,transfer?:{source?:LegacyBodySource;check?:()=>void}){
+ async receiveLegacy(input:{peer:string;version:1|2|13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>;localTransfer?:true;wire?:string},affected:string[]|null,transfer?:{source?:LegacyBodySource;check?:()=>void}){
   const state=await this.readState();nextD64(state.stateVersion);const inboxKey=canonical([input.peer,input.version,input.cursor]),body=canonicalLegacy(input.body);
   const source=transfer?.source,check=transfer?.check??(()=>{}),retained={...input,body,bodyEncoding:'legacy-json',...(source?{transferBody:{size:source.size,sha256:source.sha256}}:{})};
   const hash=legacyInputHash(retained),old=(await this.db.query('SELECT input_hash FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0];

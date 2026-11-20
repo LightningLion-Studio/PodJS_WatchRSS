@@ -6,6 +6,7 @@ import type {LocalCipher} from './store';
 import {BOOK_MAX_PACKAGE_BYTES} from '../books/protocol';
 
 const BLOCK_BYTES=65536;
+const BLOCKS_PER_TRANSACTION=4;
 export const LEGACY_BODY_SCHEMA='CREATE TABLE IF NOT EXISTS syncv2_legacy_body(scope TEXT NOT NULL,owner TEXT NOT NULL,block INTEGER NOT NULL,body TEXT NOT NULL,live INTEGER NOT NULL DEFAULT 0 CHECK(live IN (0,1)),PRIMARY KEY(scope,owner,block))';
 
 export interface LegacyBodySource {
@@ -32,15 +33,17 @@ export class WatchLegacyBody {
   return Math.max(1,Math.ceil(ref.size/BLOCK_BYTES));
  }
  async stage(ref:LegacyBodyRef,source:LegacyBodySource,check:()=>void){
-  const count=this.count(ref),hash=new ContentSha256();
+  const count=this.count(ref),hash=new ContentSha256(),batch:Statement[]=[];
   for(let block=0;block<count;block++){
    check();
    const length=Math.min(BLOCK_BYTES,ref.size-block*BLOCK_BYTES),part=length?await source.read(block*BLOCK_BYTES,length):new Uint8Array();
    if(part.length!==length)throw Error('closure_incomplete');
    hash.update(part);
    const sealed=await this.cipher.seal(this.aad(ref,block),{bytes:encodeBase64(part)});
-   check();
-   await this.db.transaction([{sql:'INSERT INTO syncv2_legacy_body(scope,owner,block,body) VALUES(?,?,?,?)',params:[this.scope,ref.owner,block,sealed]}]);
+   batch.push({sql:'INSERT INTO syncv2_legacy_body(scope,owner,block,body) VALUES(?,?,?,?)',params:[this.scope,ref.owner,block,sealed]});
+   if(batch.length===BLOCKS_PER_TRANSACTION||block===count-1){
+    check();await this.db.transaction(batch.splice(0));
+   }
   }
   if(hash.finish()!==ref.sha256)throw Error('hash_mismatch');
  }

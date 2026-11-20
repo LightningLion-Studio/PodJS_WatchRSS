@@ -20,7 +20,15 @@ export class WatchAccountStore {
   invalidate():void { this.changed(); }
   /** Resume-library commits share the existing cross-guest account mutation
    * lease. Logout/replacement cannot cross the final SQL commit boundary. */
-  withLibraryAccount<T>(expected:Pick<WatchAccountState,'userId'|'backendBaseUrl'>,run:()=>Promise<T>):Promise<T>{return this.change(async()=>{const current=await this.read();if(!current||current.userId!==expected.userId||current.backendBaseUrl!==expected.backendBaseUrl)throw Error('AUTH_REVOKED');await this.assertLibraryOwner(current);return run();});}
+  withLibraryAccount<T>(expected:WatchAccountIdentity|null,run:()=>Promise<T>):Promise<T>{return this.change(async()=>{
+    const current=await this.read();
+    if(expected===null){if(current)throw Error('AUTH_REVOKED');}
+    else {
+      if(!current||current.userId!==expected.userId||current.backendBaseUrl!==expected.backendBaseUrl)throw Error('AUTH_REVOKED');
+      await this.assertLibraryOwner(current);
+    }
+    return run();
+  });}
   async read(): Promise<WatchAccountState | null> { const raw = await this.storage.get(this.key); if (!raw) return null; try { const j = JSON.parse(raw); const state: WatchAccountState = { userId: String(j.userId || "").trim(), phoneMasked: String(j.phoneMasked || "").trim(), installId: String(j.installId || "").trim(), watchDeviceToken: String(j.watchAccessToken || j.watchDeviceToken || "").trim(), tokenExpiresAtMillis: Number(j.accessTokenExpiresAtMillis || j.tokenExpiresAtMillis || 0), watchRefreshToken: String(j.watchRefreshToken || "").trim(), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAtMillis || 0), backendBaseUrl: String(j.backendBaseUrl || "").trim(), posthogHost: String(j.posthogHost || "").trim(), posthogProjectApiKey: String(j.posthogProjectApiKey || "").trim(), entitlement: entitlement(j.entitlement), telemetryConfig: telemetry(j.telemetryConfig), updatedAtMillis: Number(j.updatedAtMillis || 0) }; return state.userId && state.watchDeviceToken ? state : null; } catch (_) { return null; } }
   async assertLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>):Promise<void>{const key='watchrss.library.owner',owner=await this.storage.get(key),scope=JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]);if(owner&&owner!==scope)throw new LibraryOwnerMismatchError();if(!owner)await this.storage.set(key,scope);}
   /** Empty-library adoption is the only automatic ownership transfer. Probe

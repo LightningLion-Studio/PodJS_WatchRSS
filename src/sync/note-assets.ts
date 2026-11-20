@@ -1,3 +1,5 @@
+import {digest} from '../sync-v2/protocol';
+import type {NoteAssetIntake} from '../sync-v2/local-transfer-intake';
 import {retainAssetConflict} from '../notes/asset-conflict';
 import type {JsonObject} from './protocol.ts';
 import {wireFields} from './article-batches.ts';
@@ -8,6 +10,7 @@ export function parseNoteAssetInventory(value:unknown):NoteAssetInventory[]{
 }
 export interface NoteAssetFiles {
  stat(path:string):Promise<{file:boolean;size:number;modified?:number}>;
+ readBytes?(path:string,offset:number,length:number):Promise<{bytes:Uint8Array;size:number}>;
  hash(path:string):Promise<{sha256:string;size:number}>;
  remove(path:string):Promise<void>;
  write(path:string,dataBase64:string):Promise<{size:number}>;
@@ -25,15 +28,29 @@ export class NoteAssetReceiver {
   for(const r of rows){const path='notes/assets/'+r.storageKey;try{const stat=await this.files.stat(path);if(!stat.file||stat.size!==r.size)continue;const hash=await this.files.hash(path);const after=await this.files.stat(path);if(after.file&&after.size===r.size&&(stat.modified===undefined||after.modified===stat.modified)&&hash.size===r.size&&hash.sha256.toLowerCase()===r.sha256)verified.push(r);}catch{/* Missing or concurrently removed files are sent again. */}}
   return verified;
  }
- apply(request:JsonObject):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request));this.queue=job.catch(()=>{});return job;}
- private async receive(request:JsonObject):Promise<JsonObject>{
+ apply(request:JsonObject,intake?:NoteAssetIntake,check?:()=>void):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request,intake,check));this.queue=job.catch(()=>{});return job;}
+ private async receive(request:JsonObject,intake?:NoteAssetIntake,check?:()=>void):Promise<JsonObject>{
   if(wireFields.optInt(request,'version')!==1)throw new Error('不支持的备忘录图片同步版本');
   const key=required(request,'storageKey');if(key.length<1||key.length>160||!/^[A-Za-z0-9]/.test(key)||/[^A-Za-z0-9._-]/.test(key))throw new Error('备忘录图片文件名无效');
-  const digest=required(request,'sha256').toLowerCase();if(digest.length!==64||!/^[0-9a-f]{64}$/.test(digest))throw new Error('备忘录图片校验值无效');
+  const sha256=required(request,'sha256').toLowerCase();if(sha256.length!==64||!/^[0-9a-f]{64}$/.test(sha256))throw new Error('备忘录图片校验值无效');
   const index=wireFields.optInt(request,'chunkIndex',-1),count=wireFields.optInt(request,'chunkCount',-1);
   if(count<=0||index<0||index>=count)throw new Error('备忘录图片分块序号无效');
   const target='notes/assets/'+key,part='notes/assets/.'+key+'.part';
-  if((await this.files.stat(target)).file&&(await this.files.hash(target)).sha256.toLowerCase()===digest)return result(true,true);
+  const commit=async(path:string,size:number,apply:()=>Promise<void>)=>{
+   check?.();
+   if(!intake)return apply();
+   const body={size,sha256,read:async(offset:number,length:number)=>{
+    if(!this.files.readBytes)throw Error('LOCAL_IO');
+    const part=await this.files.readBytes(path,offset,length);
+    if(part.size!==size)throw Error('LOCAL_IO');
+    return part.bytes;
+   }};
+   await intake({logicalId:key,cursor:digest(['syncNoteAsset',key,sha256,size]),body},apply);
+  };
+  if((await this.files.stat(target)).file){
+   const current=await this.files.hash(target);
+   if(current.sha256.toLowerCase()===sha256){await commit(target,current.size,async()=>{});return result(true,true);}
+  }
   const offset=index*CHUNK_BYTES;
   if(index===0)await this.files.remove(part);
   else {const old=await this.files.stat(part);if(!old.file||old.size!==offset)throw new Error('备忘录图片分块顺序错误');}
@@ -48,7 +65,10 @@ export class NoteAssetReceiver {
    written+=bytes;if(value.size!==offset+written)throw new Error('备忘录图片写入不完整');at+=piece.length;
   }while(at<data.length);
   const complete=index===count-1;
-  if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==digest)throw new Error('备忘录图片校验失败');try{await this.files.commit(part,target,actual.size,digest,null);}catch(error){if(!String(error).includes('file_target_changed'))throw error;await retainAssetConflict(this.files,part,key,digest,actual.size,null);throw Error('note_asset_conflict');}}
+  if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==sha256)throw new Error('备忘录图片校验失败');await commit(part,actual.size,async()=>{
+   check?.();
+   try{await this.files.commit(part,target,actual.size,sha256,null);}catch(error){if(!String(error).includes('file_target_changed'))throw error;check?.();await retainAssetConflict(this.files,part,key,sha256,actual.size,null);throw Error('note_asset_conflict');}
+  });}
   return result(complete);
  }
 }

@@ -57,10 +57,11 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
  const {descriptor,crypto,binding}=options,b=descriptor.body;
  await verifyCarrier(descriptor,options.scope,binding,options.signer,options.publicKey);
  const read=async(hash:string,size:number)=>{const raw=await options.read(hash,size);if(raw.length!==size||sha256Hex(raw)!==hash)throw Error('hash_mismatch');return raw;};
- const manifest=await read(b.manifest.sha256,b.manifest.sizeBytes),uuid=carrierUuid(b.carrierId);
- if(manifest.length<51||b.sourceSnapshotId===null&&hex(manifest.subarray(0,7))!==hex(bytes('WRSSCM3')))throw Error('invalid_schema');
- const key=await options.key(b.keyVersion);if(key.length!==32)throw Error('key_unavailable');
+ const key=await options.key(b.keyVersion);
  try{
+  if(key.length!==32)throw Error('key_unavailable');
+  const manifest=await read(b.manifest.sha256,b.manifest.sizeBytes),uuid=carrierUuid(b.carrierId);
+  if(manifest.length<51||b.sourceSnapshotId===null&&hex(manifest.subarray(0,7))!==hex(bytes('WRSSCM3')))throw Error('invalid_schema');
   if(b.sourceSnapshotId!==null){
    // A frozen v1 manifest is a byte locator, never a business input. Only the
    // necessary body object is selected; all bundled state is ignored.

@@ -384,16 +384,29 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
 
  cloudBooks(check?:()=>void){return this.run(async()=>{await this.migrate();await this.books?.registerLocal([],check);return {books:await this.books?.states()??[],reading:await this.books?.readingStates()??[],mappings:await this.books?.mappings()??[]};});}
  mergeCloudBooks(books:readonly BookState[],reading:readonly BookReading[],check?:()=>void){return this.run(async()=>{await this.migrate();if(!this.books)throw Error('book_storage_unavailable');await this.books.prepareCloudMerge(books,reading,check);let applied=0;for(const b of books){check?.();applied+=await this.books.merge(b);}for(let at=0;at<reading.length;at+=100){check?.();applied+=await this.books.mergeReadingBatch(reading.slice(at,at+100));}return applied;});}
- cloudBookWitness(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>){return this.run(async()=>{
-  await this.migrate();
-  const books=this.books;if(!books)return;
-  const file=await books.package(id);if(!file)return;
-  const state=await books.transferState(id);
-  if(!state||state.deleted||state.bookId!==expected.bookId||state.fingerprint!==expected.fingerprint||state.chapterCount!==expected.chapterCount||state.instanceId!==expected.instanceId||compareLifecycleTokens(state.lifecycle,expected.lifecycle)!==0)throw Error('body_revision_changed');
-  const actual=await this.ports.bookFiles!.hash(file.path),current=await books.package(id);
-  if(actual.sha256!==file.sha256||actual.size!==file.size||current?.path!==file.path||current.sha256!==file.sha256||current.size!==file.size)throw Error('cloud_book_package_changed');
-  return actual;
- });}
+ private readonly cloudBookProofs=new Map<string,{token:string;sha256:string;size:number}>();
+ async cloudBookWitness(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>){
+  const binding=()=>this.run(async()=>{
+   await this.migrate();
+   const file=await this.books?.package(id);if(!file)return;
+   const state=await this.books!.transferState(id);
+   if(!state||state.deleted||state.bookId!==expected.bookId||state.fingerprint!==expected.fingerprint||state.chapterCount!==expected.chapterCount||state.instanceId!==expected.instanceId||compareLifecycleTokens(state.lifecycle,expected.lifecycle)!==0)throw Error('body_revision_changed');
+   return file;
+  });
+  const file=await binding();if(!file)return;
+  const files=this.ports.bookFiles!,before=await files.stat(file.path);
+  if(!before.exists||before.size!==file.size)throw Error('cloud_book_package_changed');
+  const cached=this.cloudBookProofs.get(file.path),token=before.changeToken;
+  const actual=token&&cached?.token===token&&cached.sha256===file.sha256&&cached.size===file.size?cached:await files.hash(file.path);
+  const current=await binding(),after=await files.stat(file.path);
+  if(actual.sha256!==file.sha256||actual.size!==file.size||current?.path!==file.path||current.sha256!==file.sha256||current.size!==file.size||!after.exists||after.size!==file.size||after.changeToken!==token)throw Error('cloud_book_package_changed');
+  if(token){
+   this.cloudBookProofs.delete(file.path);
+   if(this.cloudBookProofs.size>=32)this.cloudBookProofs.delete(this.cloudBookProofs.keys().next().value!);
+   this.cloudBookProofs.set(file.path,{token,sha256:actual.sha256,size:actual.size});
+  }
+  return {sha256:actual.sha256,size:actual.size};
+ }
  cloudBookPreview(id:string){return this.run(async()=>{
   await this.migrate();const file=await this.books?.package(id);if(!file)return;
   if(file.size>256*1024*1024)throw Error('cloud_book_capacity_pending');
@@ -647,5 +660,5 @@ export class SqlLibrarySessionRepository extends SqlLibraryCloudRepository {
   super(db,ports);
   if(this.books)this.bookActions=new BookSyncActions(this.db,this.books);
  }
- syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck,check?:import('../sync-v2/local-transfer-intake').LocalTransferWrite){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined,check);});}
+ syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck,check?:import('../sync-v2/local-transfer-intake').LocalTransferWrite,cancel?:()=>void,readingFence?:string){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined,check,cancel,readingFence);});}
 }
