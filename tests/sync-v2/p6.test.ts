@@ -23,7 +23,7 @@ test('P6-2 loopback only in debug/test builds',()=>{
  const http=new SyncV2Http({request:async()=>{throw Error('no io');}} as any,base,scope,async()=>{throw Error('no io');},false,undefined,false,false,false,false,{accountBaseUrl:base,allowLoopback:false});
  expect(http.prefix).toBe(base+'/functions/v1/sync/v2');expect(http.readOnly().prefix).toBe(http.prefix);
 });
-test('P6-10 product switch defaults off',()=>{expect(SYNC_V2_PRODUCT.syncV2).toBe(false);expect(Object.isFrozen(SYNC_V2_PRODUCT)).toBe(true);});
+test('P6-10 product switch defaults on',()=>{expect(SYNC_V2_PRODUCT.syncV2).toBe(true);expect(Object.isFrozen(SYNC_V2_PRODUCT)).toBe(true);});
 test('P6-6 trusted time advances monotonically and rejects rollback beyond 5 minutes',()=>{
  let mono=1000;const clock=new TrustedClock(()=>mono);expect(clock.now()).toBeNull();expect(()=>requireTrustedNow(clock)).toThrow('trusted_time_unavailable');
  expect(clock.observe(10_000_000)).toBe(true);mono+=2000;expect(clock.now()).toBe(10_002_000);
