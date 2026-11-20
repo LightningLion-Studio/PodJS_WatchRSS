@@ -59,6 +59,18 @@ function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateSto
  createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
  }};
 }
+test('DYFIRST explicit CDN expiry reaches same-video recovery before registering a source',async()=>{
+ const f=fixture(),selected={...item('expired-first'),playUrl:'https://fixture.invalid/old?x-expires=1000000000'};
+ let registrations=0;
+ proxyOverride=async value=>{registrations++;return value.playUrl;};
+ f.controller.douyinPlay({item:selected,playback:selected,playlist:[selected],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ expect(f.stack().at(-1)?.page).toBe('video');
+ expect(f.source()).toMatchObject({awemeId:selected.awemeId,previewOnly:true,preparationError:{code:'source_expired'}});
+ expect(registrations).toBe(0);
+ expect(f.requests()).toBe(0);
+});
+
 test('stock selection uses one validated URI/frame bundle and does not repeat slow native lookups',async()=>{
  const f=fixture(),a=item('a');let readyReads=0;
  client.buildPlaybackHeaders=async()=>{throw Error('redundant secure header read for restored capability');};

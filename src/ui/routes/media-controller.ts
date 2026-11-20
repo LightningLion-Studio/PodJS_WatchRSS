@@ -1,7 +1,8 @@
 import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
-import {reloadDouyinPlayback,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
+import {reloadDouyinPlayback,retryableDouyinSourceFailure,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
+import {douyinPlaybackAddressExpired} from '../../douyin/media-expiry.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
@@ -422,6 +423,9 @@ export function createMediaRouteController(
         // A restored native cache capability already owns authorized upstream headers.
         const bundle=await douyinPreload.readySource?.(request.item);
         const localUrl=bundle?.url??await douyinPreload.lookup(request.item.awemeId);
+        if(!localUrl&&request.immersive&&douyinPlaybackAddressExpired(request.playback)){
+          throw Object.assign(new Error('推荐播放地址已过期'),{code:'source_expired'});
+        }
         const headers=localUrl?{}:await douyinClient.buildPlaybackHeaders();
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'headers_ready'});
         const previewFrame=bundle?.previewFrame??(!douyinPreload.readySource?await douyinPreload.previewFrame(request.item):undefined);
@@ -459,7 +463,8 @@ export function createMediaRouteController(
         let source:PlaybackSource|undefined,initialRejection:unknown;
         try{source=await (deadline?Promise.race([pending,deadline.result.then(()=>undefined)]):pending);}
         catch(error){
-          if(!request?.immersive||!queue||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+          const resolutionLimited=douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT;
+          if(!request?.immersive||!queue||(!resolutionLimited&&!retryableDouyinSourceFailure(error)))throw error;
           initialRejection=error;
         }finally{deadline?.cancel();}
         if(!current())return;
@@ -467,7 +472,9 @@ export function createMediaRouteController(
           // Local queue metadata can enter even while cookie IO is blocked.
           // A preview-only source cannot open a network connection or decoder.
           stopDouyinEntry();
+          const resolutionLimited=douyinPlaybackFailure(initialRejection).code===DOUYIN_RESOLUTION_LIMIT;
           const waiting:PlaybackSource={platform:'douyin',immersive:true,previewOnly:true,startupSeq:request.entrySeq,awemeId:request.item.awemeId,...douyinDetail(request.item),
+            preparationError:resolutionLimited?undefined:initialRejection,
             releaseStartupPreview:request.releaseStartupPreview,posterUrl:request.item.coverUrl,...playbackPreferences(),backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${request.item.awemeId}`};
           if(!initialRejection)void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
           stage='backdrop';await openVideo(waiting,{queue,memory,douyinEntrySeq:request.entrySeq,videoTarget:{kind:'douyin',awemeId:route.awemeId,immersive:true}},current);
@@ -476,7 +483,7 @@ export function createMediaRouteController(
             opened=true;
             request.onSourcePublished?.(waiting);
             if(initialRejection){
-              await recoverDouyinVideo(entry,false,0,initialRejection,request.item.awemeId);
+              if(resolutionLimited)await recoverDouyinVideo(entry,false,0,initialRejection,request.item.awemeId);
               return;
             }
             void pending.then(ready=>{if(!selected())return;benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'source_ready'});entry.playback={...ready,previewOnly:false};dependencies.setPlayingSource(entry.playback);request.onSourcePublished?.(entry.playback);},error=>{
@@ -1101,8 +1108,10 @@ export function createMediaRouteController(
     if(entry.queue){
       const item=entry.queue.itemAtOffset();
       if(!item)throw new Error('Missing Douyin playback item');
-      const queue=entry.queue;let queueGeneration=queue.playbackGeneration();
-      const selected=()=>current()&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId&&queue.playbackGeneration()===queueGeneration;
+      const queue=entry.queue,authorization=douyinClient.playbackAuthorizationVersion();
+      let queueGeneration=queue.playbackGeneration();
+      const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
+        &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
       const previousItem=mode==='detail'&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
       const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
       if(mode!=='detail')await douyinPreload.invalidate(item.awemeId);

@@ -35,16 +35,17 @@ test('manual retry resolves the selected aweme through detail despite fresh feed
  const retries=f.requests.slice(1).map(request=>new NodeURL(request.url));
  expect(retries.map(url=>[url.pathname,url.searchParams.get('aweme_id')])).toEqual([['/aweme/v1/web/aweme/detail/','selected']]);
 });
-test('manual detail retry refuses the previous playback URL, its mirror and a mismatched aweme',async()=>{
+test('detail retry refuses the previous URL, its mirror, expired URLs and a mismatched aweme',async()=>{
  const f=fixture(),original=wire('selected'),oldMirror='https://fixture.invalid/old-mirror';
  original.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
  f.replies.push(response({aweme_list:[original]}));
  const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
  const item=page.data.items[0]!;
  const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
- f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}));
- for(let i=0;i<3;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
- expect(detailCount(f)).toBe(3);expect(f.requests).toHaveLength(4);
+ const expired=wire('selected');expired.video.bit_rate[0]!.play_addr.url_list=['https://fixture.invalid/new?x-expires=1000000000'];
+ f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}),response({aweme_detail:expired}));
+ for(let i=0;i<4;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+ expect(detailCount(f)).toBe(4);expect(f.requests).toHaveLength(5);
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));

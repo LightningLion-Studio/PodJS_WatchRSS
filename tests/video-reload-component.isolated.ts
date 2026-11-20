@@ -75,6 +75,58 @@ function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();stateEvents.forEach(fn=>fn(current));await flush();};
+const {DouyinClient}=await import('../src/douyin/client.ts');
+const {reloadDouyinPlayback}=await import('../src/douyin/reload-playback.ts');
+const {freshVideoSource}=await import('../src/media/reload-source.ts');
+
+for(const failure of ['none','source_expired','source_resolution'] as const)test(`DYFIRST mock feed first selection: ${failure}`,async()=>{
+ const id='first-video',oldUrl='https://fixture.invalid/old',freshUrl='https://fixture.invalid/fresh';
+ const requests:Array<{path:string;id:string|null}>=[];
+ const row=(url:string)=>({aweme_id:id,video:{play_addr:{url_list:[url]}}});
+ const client=new DouyinClient({
+  secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=synthetic':null,set:async()=>{},remove:async()=>{}},
+  signer:{sign:()=> 'synthetic'},
+  transport:{request:async request=>{
+   const url=new URL(request.url),path=url.pathname,detail=path.endsWith('/detail/');
+   requests.push({path,id:url.searchParams.get('aweme_id')});
+   const data=detail?{aweme_detail:row(freshUrl)}:{aweme_list:requests.length===1?[row(oldUrl)]:[]};
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify(data))};
+  }},
+ });
+ const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
+ if(!feed.ok)throw Error(feed.code);
+ const item=feed.data.items[0]!;
+ expect(item).toMatchObject({awemeId:id,playUrl:oldUrl});
+ const source={platform:'douyin' as const,immersive:true,awemeId:id,title:'fixture',
+  ...(failure==='source_resolution'?{previewOnly:true,preparationError:{code:'source_expired'}}:{url:item.playUrl}),
+ };
+ if(failure==='source_expired')nextError={code:'source_expired'};
+ const player=reloadMount(source,async(position,current,mode)=>{
+  const resolved=await reloadDouyinPlayback(client,id,current,item,mode as Parameters<typeof reloadDouyinPlayback>[4]);
+  if(resolved)player.publish(freshVideoSource(source,{url:resolved.item.playUrl,headers:resolved.headers},position));
+ });
+ await flush();await tick(351);
+ for(let n=0;n<5;n++){await Bun.sleep(1);await flush();}
+ const automatic=current.state==='playing';
+ const retryVisible=player.text().includes('重试');
+ const automaticRequests=requests.slice();
+ if(!automatic&&retryVisible){
+  player.retry();await flush();
+  for(let n=0;n<5;n++){await Bun.sleep(1);await flush();}
+ }
+ const preparedUrls=prepares.map(value=>value.url);
+ console.info('DYFIRST',JSON.stringify({failure,automatic,retryVisible,automaticRequests,requests,preparedUrls,state:current.state}));
+ expect(current.state).toBe('playing');
+ expect(automatic).toBe(true);
+ expect(retryVisible).toBe(false);
+ expect(automaticRequests).toEqual([
+  {path:'/aweme/v2/web/module/feed/',id:null},
+  ...(failure==='none'?[]:[{path:'/aweme/v1/web/aweme/detail/',id}]),
+ ]);
+ expect(preparedUrls).toEqual(failure==='none'?[oldUrl]:failure==='source_expired'?[oldUrl,freshUrl]:[freshUrl]);
+ expect(player.firstFrames()).toBe(1);
+});
+
 test('RELOAD manual failure forces new resolution, releases native state and restores position',async()=>{
  nextError={code:'restricted'};const f=reloadMount();await flush();f.retry();await flush();
  expect(retries).toBe(1);expect(legacyStops).toBeGreaterThan(0);expect(prepares.at(-1)).toMatchObject({url:'https://fixture/new',resumePositionMs:0,bypassCache:true});
@@ -382,11 +434,11 @@ test('NOPLAY reload attempts remain readable while the resolver has no native st
  await flush();await tick(351);expect(f.reloadAttempts()).toBe(1);await tick(20001);await tick(701);expect(f.reloadAttempts()).toBe(2);
 });
 
-test('NOPLAY only an automatic unexpired Douyin timeout may retry the current source',async()=>{
+test('NOPLAY a first timeout can reuse an unexpired source; an expired source requests detail',async()=>{
  for(const [expiry,reuse]of [[4102444800,true],[1000000000,false]]as const){
   nextError={code:'timeout'};let f:ReturnType<typeof reloadMount>;const flags:unknown[]=[];
   f=reloadMount({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/current?x-expires='+expiry,title:'fixture'},async(position,current,retryCurrent)=>{flags.push(retryCurrent);if(current())f.publish({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/valid',title:'fixture',resumePositionMs:position});});
-  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'feed']);
+  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'detail']);
  }
 });
 
