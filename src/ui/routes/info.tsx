@@ -24,9 +24,6 @@ interface InfoRoutesProps {
   foreground: () => boolean;
   width: number;
   height: number;
-  preset: () => InformationProps["preset"];
-  fonts: () => InformationProps["fonts"];
-  backgroundSnapshot: () => InformationProps["backgroundSnapshot"];
   setPage: SetPage;
   openInformation: (page: InformationPage) => void;
   addRecommendation: (channel: RecommendedChannel) => void;
@@ -57,9 +54,6 @@ export function InfoRoutes(props: InfoRoutesProps) {
         <InformationScreen
           width={props.width}
           height={props.height}
-          preset={props.preset()}
-          fonts={props.fonts()}
-          backgroundSnapshot={props.backgroundSnapshot()}
           active={() => props.active() && props.foreground()}
           page={props.entry.informationPage ?? "about"}
           onNavigate={props.openInformation}

@@ -36,7 +36,6 @@ mock.module("@pocketjs/framework/components", () => ({View: element("View"), Tex
 mock.module("@podjs/framework/text", () => ({SystemTextLine: element("SystemTextLine")}));
 mock.module("@pocketjs/framework/host", () => ({getOps: () => ({measureText: (text: string) => Array.from(text).length * 14})}));
 mock.module("../src/ui/ScrollEntries.tsx", () => ({ScrollEntries: element("ScrollEntries")}));
-mock.module("../src/ui/ReaderBackground.tsx", () => ({ReaderBackground: element("ReaderBackground")}));
 
 let environmentAvailable = true;
 let environmentScale = 1.3;
@@ -105,7 +104,7 @@ function props(overrides: Partial<InformationDocumentProps> = {}): InformationDo
   preset.title = {fontSizeSp: 21};
   return mergeProps({title, content: `${body}\n\n${quote}\n${code}`, width: 233, height: 233, preset,
     fonts: () => ({fontPath: "reader/fonts/custom.ttf", fontFaceIndex: 1}),
-    backgroundSnapshot: {state: {}, revision: 0}, onBeian() {}, active: () => true,
+    onBeian() {}, active: () => true,
   }, overrides);
 }
 
@@ -543,7 +542,7 @@ test("the component reveals its correctly configured scroll list only after pend
   expect(list.props).toMatchObject({height: 233, padding: 14, verticalPadding: 0, gap: 0, accessibilityLabel: "隐私政策"});
   expect(list.props.controller).toBe(handle.scroller);
   expect(handle.scrollOffsetPx()).toBe(900);
-  expect(nodes().find(({node}) => node.kind === "ReaderBackground")!.node.props.background).toBe(input.preset.background);
+  expect(nodes().find(({node}) => node.kind === "View")!.node.props.class).toContain("bg-black");
 });
 
 test("an unsupported text environment reports failure and keeps the component list absent", async () => {
