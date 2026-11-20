@@ -19,7 +19,7 @@ export const platformScope={title:'当前支持范围',paragraphs:[
  '只有明确标注‘需要手机版设备授权’的功能才与¥6有关；其余平台功能与这笔付款无关。']};
 export const accessBoundary={title:'手机版设备授权包',paragraphs:[
  '¥6主要用于小说、备忘录和手机与手表协同，不是哔哩哔哩或抖音会员，也不会提升播放速度或清晰度。',
- 'WatchRSS云会员与平台会员分别由WatchRSS和对应平台管理。']};
+ '腕上RSS云会员与平台会员分别由腕上RSS和对应平台管理。']};
 export type PlatformNoticeTarget={page:'oobe'|'home'}|{page:'bili'|'douyin';name:string}|{page:'video';platform:'bili'|'douyin'|'rss'}|{page:'account-status'};
 /** Modal route descriptor only: lead owns rendering, including dialog priority.
  * Create once per Activity/route, retain while returning from child pages. */

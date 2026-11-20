@@ -102,7 +102,7 @@ export function SpeechSettingsScreen(props: Props & {input?:(title:string,value:
     const keyed=engine!=="local"&&engine!=="backend_default";
     return [heading("朗读语音源"),
       ...row("当前引擎","",width,debugTtsEngines[engine],()=>setPicker(true)),
-      ...(engine==="backend_default"?[...detail(logged()?"账号已登录，使用 WatchRSS 提供的默认语音":"使用默认语音前请先登录")]:[]),
+      ...(engine==="backend_default"?[...detail(logged()?"账号已登录，使用腕上RSS提供的默认语音":"使用默认语音前请先登录")]:[]),
       ...(keyed?[
         ...row("音色",c?.voiceId?"":"默认",width,c?.voiceId||"默认",edit("voiceId","音色 ID")),
         ...row("模型","",width,c?.model||"默认",edit("model","模型")),

@@ -4,7 +4,7 @@
   "appId": "com.lightningstudio.watchrss.podjs",
   "versionName": "2.0.3-10",
   "versionCode": 1331,
-  "name": "腕上RSS · PodJS",
+  "name": "腕上RSS",
   "bytecode": {
     "stripSource": true
   },
