@@ -23,6 +23,28 @@ test('P6 product capsule receive → R0 → first snapshot → UI install → un
  try{expect(await product.start('account')).not.toBeNull();expect(ui).toBeDefined();expect(f.server.account.revision).toBe('1');expect(f.server.registrations).toHaveLength(1);expect((await ui.snapshot()).ownDeviceId).toBe(f.server.registrations[0].body.deviceId);expect((await f.db.query('SELECT count(*) n FROM memo_notes'))[0].n).toBe(1);expect(f.secrets.size).toBeGreaterThan(0);await product.stop();expect(ui).toBeUndefined();expect((await f.db.query('SELECT enabled FROM syncv2_control'))[0].enabled).toBe(0);await expect(product.start('account')).resolves.not.toBeNull();expect(f.server.account.revision).toBe('1');await product.stop();}finally{listener.stop(true);f.db.close();}
 });
 test('P6 product waits for creator without opening SQL projection when descriptor is absent',async()=>{const f=await fixture();try{f.server.present=false;const calls=f.db.calls;expect(await openApplicationSyncV2(f.options)).toBeNull();expect(f.db.calls).toBe(calls);expect(f.server.registrations).toHaveLength(0);}finally{f.db.close();}});
+test('a warm v2 round refreshes cached read admission before retrying a checkpoint',async()=>{
+ const f=await fixture();
+ const transport=f.options.transport;
+ let readable=true;
+ f.options.transport={async request(request){
+  const response=await transport.request(request);
+  if(!readable&&request.url.includes('/capabilities')&&response.status===200){
+   const value=parseCanonicalJson(response.body) as {flags:{read:boolean}};
+   value.flags.read=false;
+   return {...response,body:jsonBytes(value)};
+  }
+  return response;
+ }};
+ const opened=await openApplicationSyncV2(f.options);
+ try{
+  expect(opened).not.toBeNull();
+  readable=false;
+  await expect(opened!.sync()).rejects.toThrow('feature_disabled');
+  readable=true;
+  await expect(opened!.sync()).resolves.toEqual({completionError:null});
+ }finally{await opened?.close();f.db.close();}
+});
 test('P6 product session rejects old UI calls after logout',async()=>{const f=await fixture();try{const opened=await openApplicationSyncV2(f.options);await opened!.close();await expect(opened!.ui.syncNow()).rejects.toThrow('feature_disabled');}finally{f.db.close();}});
 
 test('P6-1 sealed reads resolve exact header version; missing key never decrypts',async()=>{

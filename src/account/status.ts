@@ -4,6 +4,7 @@ import type {WatchAccountState} from './types.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
+  v2Failure?:true;
   resultSequence?:number;
   accountRevision?:number;
   ownerChoiceRequired?:boolean;
@@ -29,6 +30,7 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
   const own = (cloud.accountId === undefined || cloud.accountId === userId)&&(!cloud.accountScope||cloud.accountScope===JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])) ? cloud : NEUTRAL_CLOUD;
   return {
     ...(own.formatCompatibility?{formatCompatibility:{...own.formatCompatibility}}:{}),
+    ...(own.v2Failure?{v2Failure:true}:{}),
     ...(own.ownerChoiceRequired?{ownerChoiceRequired:true}:{}),
     ...(own.restoreProgress?{restoreProgress:own.restoreProgress}:{}),
     ...(own.errorCode?{errorCode:own.errorCode}:{}),

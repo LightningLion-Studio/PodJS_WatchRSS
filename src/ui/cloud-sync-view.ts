@@ -38,6 +38,9 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     ...(restoreProgressView(cloud.restoreProgress) ?? {}),
     ...(cloud.quotaBytes > 0 ? {space: {label: `已用 ${formatBytes(cloud.usedBytes)} / ${formatBytes(cloud.quotaBytes)}`, fraction: Math.min(1, Math.max(0, cloud.usedBytes / cloud.quotaBytes))}} : {}),
   };
+  if (phase === 'error' && cloud.v2Failure) {
+    return {...base,title:'同步失败',detail:cloud.message,tone:'error',button:{label:'重试',action:'sync',enabled:!pending}};
+  }
   const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&cloud.message!=='等待网络连接'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
   // A manual sync that left the foreground: queued is with the system, not finished.
   if (handoff === 'held') return {...base, title: '等待手机同步结束', detail: '蓝牙传输结束后会自动继续云同步。', tone: 'attention', button: {label: '同步中…', action: 'sync', enabled: false}};

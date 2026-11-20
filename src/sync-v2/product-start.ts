@@ -5,7 +5,13 @@ import {SyncV2Lifetime} from './lifetime';
  * - on: open once after the v1 account and its keys are ready, then install
  *   the UI port;
  * - the only unmount point is stop() (logout, account switch, dispose). */
-export interface SyncV2ProductSession<Port> {ui:Port;sync?():Promise<unknown>;close():Promise<void>}
+export interface SyncV2RoundResult {completionError:string|null}
+export interface SyncV2ProductSession<Port> {
+ ui:Port;
+ initialResult?:SyncV2RoundResult;
+ sync?():Promise<SyncV2RoundResult>;
+ close():Promise<void>;
+}
 export interface SyncV2ProductOptions<Port> {
  /** SYNC_V2_PRODUCT.syncV2 (src/sync-v2/gate.ts). */
  enabled:boolean;
@@ -46,11 +52,13 @@ export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
    })();
   },
   /** A scheduler tick opens once, then executes a fresh round on later ticks. */
-  async sync(next:string):Promise<Port|null>{
+  async sync(next:string):Promise<SyncV2RoundResult|null>{
    const existing=identity===next?session:null,ticket=generation;
    const ui=await product.start(next);
-   if(existing&&ticket===generation&&session===existing)await existing.sync?.();
-   return ui;
+   const current=session;
+   if(!ui||!current||current.ui!==ui)return null;
+   const result=existing&&ticket===generation&&current===existing?await existing.sync?.():current.initialResult;
+   return session===current?result??null:null;
   },
   stop,
   get active(){return session!==null;},
@@ -62,5 +70,5 @@ export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
  * expired recovery metadata, so they use the same lease as mutations. */
 export function leasedSyncV2Session<Port extends object>(session:SyncV2ProductSession<Port>,exclusive:<T>(work:()=>Promise<T>)=>Promise<T>):SyncV2ProductSession<Port>{
  const ui=new Proxy(session.ui,{get(target,key){const value=Reflect.get(target,key,target);if(typeof value!=='function')return value;if(key==='subscribe')return value.bind(target);return (...args:unknown[])=>exclusive(async()=>value.apply(target,args));}});
- return {ui,sync:session.sync?()=>exclusive(()=>session.sync!()):undefined,close:()=>session.close()};
+ return {ui,initialResult:session.initialResult,sync:session.sync?()=>exclusive(()=>session.sync!()):undefined,close:()=>session.close()};
 }

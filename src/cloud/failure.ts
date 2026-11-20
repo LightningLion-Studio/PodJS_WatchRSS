@@ -1,7 +1,7 @@
 import {recordFailureDiagnostic} from './record-diagnostic';
 /** Closed stage names only. The original exception stays in-process as cause;
  * diagnostics serialize only the code, stage, name and HTTP status. */
-const stages=['guard','lease_acquire','cleanup','lease_release','network','session_open','account_read','account_current','owner','token','repository','bootstrap','content','device','keys','checkpoint','run'] as const;
+const stages=['guard','lease_acquire','cleanup','lease_release','network','session_open','account_read','account_current','owner','token','repository','bootstrap','content','device','keys','sync_v2','checkpoint','run'] as const;
 export type CloudSyncFailureStage=typeof stages[number];
 export function cloudFailureStage(error:unknown,fallback:CloudSyncFailureStage):CloudSyncFailureStage{const stage=(error as {stage?:unknown})?.stage;return stages.includes(stage as CloudSyncFailureStage)?stage as CloudSyncFailureStage:fallback;}
 export function cloudSyncFailure(error:unknown,stage:CloudSyncFailureStage):unknown {

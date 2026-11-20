@@ -57,12 +57,18 @@ export function CloudSyncScreen(props: {
   const network=routeNetwork??directNetworkWork;
   const [v2, setV2] = createSignal<SyncV2UiState>();
   const [v2Revision, setV2Revision] = createSignal(0);
-  if (props.syncV2) onCleanup(props.syncV2.subscribe(() => setV2Revision(value => value + 1)));
+  createEffect(() => {
+    const port = props.syncV2;
+    setV2(undefined);
+    if (port) onCleanup(port.subscribe(() => setV2Revision(value => value + 1)));
+  });
   const [status, setStatus] = createSignal<AccountStatusSnapshot | null>();
   const bound=createMemo(()=>!!status());
+  const resultSequence=createMemo(()=>status()?.cloud?.resultSequence);
   let v2Sequence = 0;
   createEffect(() => {
     v2Revision();
+    resultSequence();
     const request = ++v2Sequence;
     if (!props.syncV2 || !props.active() || !bound()) return;
     void props.syncV2.snapshot().then(value => { if (request === v2Sequence) setV2(value); }, () => { if (request === v2Sequence) setV2(undefined); });
@@ -111,7 +117,7 @@ export function CloudSyncScreen(props: {
   let loadRevision=0,pageGeneration=0,disposed=false;
   const usable=()=>{
     const cloud=status()?.cloud;
-    return !!(cloud?.lastCompletedAt||cloud?.quotaBytes||cloud?.ownerChoiceRequired||v2());
+    return !!(cloud?.lastCompletedAt||cloud?.quotaBytes||cloud?.ownerChoiceRequired||cloud?.v2Failure||v2());
   };
   useCachedNetworkContent(usable);
   let accountScope:string|undefined, accountRevision:number|undefined;
@@ -169,15 +175,31 @@ export function CloudSyncScreen(props: {
       return;
     }
     const request=++loadRevision;
+    let timer:HostOperation<void>|undefined,settled=false;
+    const settleLoad=()=>{
+      if(settled)return false;
+      settled=true;
+      try{timer?.cancel();}catch{/* The host can close while this page unmounts. */}
+      return true;
+    };
+    onCleanup(settleLoad);
+    const fail=()=>{
+      if(!settleLoad()||request!==loadRevision||!props.active()||status())return;
+      ++loadRevision;
+      setLoadFailed(true);
+      props.onError('云同步状态读取失败，请重试。');
+    };
     void props.load().then(value=>{
-      if(request!==loadRevision||!props.active())return;
+      if(!settleLoad()||request!==loadRevision||!props.active())return;
       acceptStatus(value&&props.readCloud?refreshAccountCloudStatus(value,props.readCloud()):value);
       setLoadFailed(false);
       setAvailable(props.available());
-    }).catch(()=>{
-      if(request!==loadRevision||!props.active()||status())return;
-      setLoadFailed(true);
-      props.onError('云同步状态读取失败，请重试。');
+    },fail);
+    // A ready local snapshot settles before this microtask. Only a pending read needs a timer.
+    void Promise.resolve().then(()=>{
+      if(settled||status())return;
+      try{timer=delay(10_000);}catch{fail();return;}
+      void timer.result.then(fail,fail);
     });
   });
   const join=()=>{

@@ -55,7 +55,7 @@ test('asset reader rejects truncation and a concurrent file change',async()=>{co
 test('v2 primary hands off before all legacy business calls and retains pending ciphertext',async()=>{
  const f=await fixture(),bootstrap=f.client.bootstrap.bind(f.client);f.client.bootstrap=async()=>({...await bootstrap(),syncV2:{algorithm:'ES256',receiptKeyId:'a'.repeat(32),receiptSigningPublicKey:'test-only'}});let ready=0;
  f.session.prepareRestore=async()=>{throw Error('legacy restore must not run');};f.blobs.set('pending-body',new Uint8Array([1]));
- const service=new WatchCloudSyncService({primaryV2:true,keysReady:async()=>{ready++;},open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'test',exclusive:async work=>work()},enabled);
+ const service=new WatchCloudSyncService({primaryV2:true,keysReady:async()=>{ready++;},syncV2:async()=>({completionError:null}),open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'test',exclusive:async work=>work()},enabled);
  expect(await service.syncNow(true)).toBe(true);expect(ready).toBe(1);expect(f.calls.some(c=>/\/records|\/snapshots|\/sync\/exchange/.test(c.url))).toBe(false);expect(f.blobs.get('pending-body')).toEqual(new Uint8Array([1]));
 });
 test('v2 product with withdrawn announcement stops before legacy business requests',async()=>{

@@ -1,3 +1,4 @@
+import {createSignal} from 'solid-js';
 import {withAccountLease} from '../account/lease';
 import {playbackWork} from '../core/playback-work';
 import {cloudStatePort} from './state-sql';
@@ -55,7 +56,25 @@ function start(){
   // 26.4 P6-10: off by default. Off => no keysReady hook, no v2 request, no UI port.
   let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined;
   const v2Guard={require(){guard.require();if(!v2Current)throw Error('feature_disabled');v2Current();}};
-  const v2Exclusive=<T>(work:()=>Promise<T>)=>{const next=v2Tail.then(async()=>{guard.require();const current=execution.begin(),budget=new CloudSyncBudget();if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)throw Error('cloud_account_busy');v2Current=()=>{current();budget.check();};try{v2Current();return await work();}finally{v2Current=undefined;await host('cloud.release',{});}});v2Tail=next.catch(()=>{});return next;};
+  const v2Exclusive=<T>(work:()=>Promise<T>)=>{
+   const next=v2Tail.then(async()=>{
+    guard.require();
+    const current=execution.begin(),budget=new CloudSyncBudget();
+    if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)throw Error('cloud_account_busy');
+    v2Current=()=>{current();budget.check();};
+    try {
+     v2Current();
+     const result=await work();
+     v2Current();
+     return result;
+    } finally {
+     v2Current=undefined;
+     await host('cloud.release',{});
+    }
+   });
+   v2Tail=next.catch(()=>{});
+   return next;
+  };
   const clearV2Keys=()=>{for(const key of heldKeys.values())key.fill(0);heldKeys.clear();};cleanups.push(clearV2Keys);
   syncV2=watchSyncV2Product({enabled:SYNC_V2_PRODUCT.syncV2,drainOnStop:true,announced:async()=>!!syncV2Ready?.syncV2,install:installApplicationSyncV2Ui,open:async lifetime=>{
    const v2Host=cloudRunHost((async<T>(method:string,args:Record<string,unknown>)=>{
@@ -66,7 +85,8 @@ function start(){
     const operation=hostOperation<T>(method,args),off=method.startsWith('sql.')||method.startsWith('secure.')||cleanup?()=>{}:lifetime.onCancel(()=>operation.cancel());
     try{return await operation.result;}finally{off();}
    }),()=>v2Guard.require());
-   const ready=syncV2Ready,account=await summaryAccountStore.read();if(!ready||!account||account.userId!==ready.userId)return null;
+   const ready=syncV2Ready,account=await summaryAccountStore.read();
+   if(!ready||!account||account.userId!==ready.userId)throw Error('cloud_v2_start_unavailable');
    const {accountBoundCasHost}=await import('../sync-v2/product'),accountHost=accountBoundCasHost(v2Host,account,()=>summaryAccountStore.read());
    const transport=createCloudTransport(accountHost,v2Guard),tokens=new (await import('../account/token')).WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
    const session=async()=>{const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);return current;};
@@ -79,11 +99,21 @@ function start(){
    },bodyInstall:work=>withAccountLease(host,async()=>{const current=await summaryAccountStore.read();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current!);return work();}),allowBodies:async()=>{if(await handoff?.authorized(cloudAccountIdentity(account)))return true;const n=await accountHost<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});return n.active&&n.validated&&n.wifi&&n.metered===false;},bootstrap:async()=>{await session();const latest=syncV2Ready;if(!latest||latest.userId!==account.userId||!latest.syncV2)throw Error('feature_disabled');return {accountId:(await import('../sync-v2/signing')).accountIdFromUserId(account.userId),syncV2:latest.syncV2,devices:latest.bootstrap.devices,libraryEpoch:latest.bootstrap.libraryEpoch,contentGeneration:latest.bootstrap.contentGeneration};}}));return opened?leasedSyncV2Session(opened,v2Exclusive):null;
   }});
   const keysReady=SYNC_V2_PRODUCT.syncV2?async(event:NonNullable<typeof syncV2Ready>)=>{
-   const expected=await summaryAccountStore.read();if(!expected||expected.userId!==event.userId)return;
+   const expected=await summaryAccountStore.read();if(!expected||expected.userId!==event.userId)throw Error('cloud_operation_superseded');
    if(!event.syncV2){syncV2Ready=undefined;clearV2Keys();await syncV2?.stop();return;}
    const captured=new Map<number,Uint8Array>();try{for(const c of event.bootstrap.keyCommitments){const key=await event.keys.accountKey(event.userId,c.keyVersion);if(key)captured.set(c.keyVersion,key);}const latest=await summaryAccountStore.read();if(disposed||cloudAccountIdentity(latest)!==cloudAccountIdentity(expected)){for(const key of captured.values())key.fill(0);return;}clearV2Keys();heldKeys=captured;syncV2Ready=event;}catch(error){for(const key of captured.values())key.fill(0);throw error;}
   }:undefined;
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  const syncV2Round=async(scope=identity)=>{
+   const prepared=syncV2Ready;
+   const account=await summaryAccountStore.read();
+   const current=()=>!disposed&&scope===identity&&syncV2Ready===prepared;
+   if(!prepared||!syncV2||!current()||cloudAccountIdentity(account)!==scope)return null;
+   const result=await syncV2.sync(JSON.stringify([scope,prepared.bootstrap.libraryEpoch,prepared.bootstrap.contentGeneration,Math.max(0,...heldKeys.keys())]));
+   if(!current())throw Error('cloud_operation_superseded');
+   if(!result)throw Error('cloud_v2_repo_missing');
+   return result;
+  };
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady,syncV2:syncV2Round});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   let accountId='',accountScope='',accountRead=0;
   scheduler=new WatchCloudScheduler({
    prepare:()=>prepareAccount(),
@@ -97,26 +127,12 @@ function start(){
     run.bindIntent(grant);
     // Approval retains the initial recent sync when no durable grant exists.
     const manual=!!grant||run.afterApproval,mode=grant?.mode??requestedMode;
-    const previousReady=syncV2Ready;
     const outcome=await runtime!.service.syncNowResult(manual,mode,scope);
     // Report whether the writer finished for scheduling purposes. Only a
     // current writer may deliver its result or touch a grant.
-    if(!run.current||identity!==scope)return outcome.ok&&!SYNC_V2_PRODUCT.syncV2;
+    if(!run.current||identity!==scope)return false;
     run.publish(outcome);
-    let success=outcome.ok;
-    if(SYNC_V2_PRODUCT.syncV2){
-     success=false;
-     const prepared=syncV2Ready;
-     if(prepared&&prepared!==previousReady&&!disposed){
-      const a=await summaryAccountStore.read();
-      if(a&&run.current&&cloudAccountIdentity(a)===scope&&syncV2Ready===prepared)try{
-       const port=await syncV2?.sync(JSON.stringify([scope,prepared.bootstrap.libraryEpoch,prepared.bootstrap.contentGeneration,Math.max(0,...heldKeys.keys())]));
-       const view=await port?.snapshot();
-       success=!!view&&!view.errorCode&&!view.choice;
-      }catch(error){appLogger.i('SyncV2',String((error as Error)?.message??error));}
-     }
-    }
-    if(!run.current||identity!==scope)return success;
+    const success=outcome.ok;
     // The exact grant read by this run is the only record it can complete.
     try{
      if(success&&grant)await handoff?.completeExecuted(grant);
@@ -242,8 +258,20 @@ export const applicationCloudActions={async logout(){owner?.resetApproval();awai
 export const applicationCloudHandoff={subscribe(fn:()=>void){handoffListeners.add(fn);return()=>{handoffListeners.delete(fn);};},get state(){return owner?.handoffState??{phase:'idle' as const};},async workerState(){cloudGate.require();return hostOperation<{state:string}>('cloud.workState',{}).result;}};
 
 /** Sync v2 UI port. Undefined until the runtime is wired (write gates closed today), so 云同步 shows no Sync v2 notices. */
-let syncV2Ui:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined,syncV2OwnDeviceId:string|null=null;
+const [syncV2Ui,setSyncV2Ui]=createSignal<import('../ui/sync-v2-view.ts').SyncV2UiPort>();
+let syncV2OwnDeviceId:string|null=null;
 /** Every snapshot refreshes the cached v2 signing deviceId (26.1 P6-7). */
-export function installApplicationSyncV2Ui(port:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined){syncV2OwnDeviceId=null;if(!port){syncV2Ui=undefined;return;}const snapshot=port.snapshot.bind(port);syncV2Ui=Object.assign(Object.create(port),{async snapshot(){const value=await snapshot();if(syncV2Ui===wrapped)syncV2OwnDeviceId=value.ownDeviceId??null;return value;}});const wrapped=syncV2Ui!;void wrapped.snapshot().catch(()=>{});}
-export function applicationSyncV2Ui(){return syncV2Ui;}
+export function installApplicationSyncV2Ui(port:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined){
+ syncV2OwnDeviceId=null;
+ if(!port){setSyncV2Ui(undefined);return;}
+ const snapshot=port.snapshot.bind(port);
+ const wrapped:typeof port=Object.assign(Object.create(port),{async snapshot(){
+  const value=await snapshot();
+  if(syncV2Ui()===wrapped)syncV2OwnDeviceId=value.ownDeviceId??null;
+  return value;
+ }});
+ setSyncV2Ui(wrapped);
+ void wrapped.snapshot().catch(()=>{});
+}
+export function applicationSyncV2Ui(){return syncV2Ui();}
 export function applicationSyncV2OwnDeviceId(){return syncV2OwnDeviceId;}

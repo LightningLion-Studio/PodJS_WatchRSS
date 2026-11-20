@@ -67,7 +67,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  };
  const transport:HttpTransport={request:r=>lifetime.read(()=>options.transport.request({...r,background:lifetime}))};
  const held=new Set<Uint8Array>(),keyring:AccountKeyring={currentKeyVersion:u=>options.keys.currentKeyVersion(u),accountKey:async(u,v)=>{const key=await options.keys.accountKey(u,v);if(closed){key?.fill(0);throw Error('feature_disabled');}if(key)held.add(key);return key;}};
- let localFactory:ReturnType<typeof watchLocalProjection>|undefined,runtimeFactory:ReturnType<typeof watchSyncV2>|undefined,ui:Ui|undefined,installedRecord:{idKeyHex:string}|undefined,closed=false,activeClock=options.clock,syncRound:(()=>Promise<void>)|undefined;
+ let localFactory:ReturnType<typeof watchLocalProjection>|undefined,runtimeFactory:ReturnType<typeof watchSyncV2>|undefined,ui:Ui|undefined,installedRecord:{idKeyHex:string}|undefined,closed=false,activeClock=options.clock,syncRound:(()=>Promise<{completionError:string|null}>)|undefined;
  let offClose=()=>{},closingPromise:Promise<void>|undefined;
  const close=()=>{
   if(closingPromise)return closingPromise;
@@ -166,8 +166,13 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     throw error;
    }
   };
+  let repeatRound=false;
   const round=async()=>{
-   await assertCurrent();await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));await runtime.refreshTrustedTime();const deferred=await flush();
+   await assertCurrent();
+   // A reused HTTP port can remember read=false; refresh before its first guarded request.
+   if(repeatRound)await runtime.http.capabilities();
+   repeatRound=true;
+   await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));await runtime.refreshTrustedTime();const deferred=await flush();
    if(deferred){
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish,settings=await control.settings();
     if(state.cloud?.pendingCloudChoice&&!settings.choice_apply||pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
@@ -186,11 +191,39 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const bodyPorts=createCloudHostPorts(guardedHost,{require(){lifetime.require();}});
   const channel=bodyRepository?new WatchBodyChannel({http:new BodyChannelHttp({enabled:true,origin,policy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},scope:fetched.scope,transport,check:async()=>{await assertCurrent();await runtime.bodyCheck();},session:async()=>{const a=await assertCurrent(),b=await options.bootstrap();if(!b.libraryEpoch||!b.contentGeneration)throw Error('scope_mismatch');return {accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,legacyEpoch:b.libraryEpoch,legacyGeneration:b.contentGeneration};}}),scope:fetched.scope,projection:local.store,crypto:bodyPorts.crypto,signer:crypto,author:runtime.bodyAuthor,approved:runtime.approved,key:async v=>(await content.at(v)).key,currentKey:content.current,files:bodyPorts.files,root:'watch-cloud-cache/'+digest([origin,account.userId]).slice(0,32)+'/body-v1',repository:bodyRepository,now:options.now,check:async()=>{await assertCurrent();},yieldControl:async()=>{await guardedHost('runtime.delay',{milliseconds:1});}}):undefined;
   const bodyRound=async(expiresAtMillis:number)=>{if(!channel)return;try{if(!await channel.hasWork())return;const allowed=options.allowBodies?await options.allowBodies():(await guardedHost<{wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{}));if(allowed!==true&&!(typeof allowed==='object'&&allowed.wifi&&allowed.metered===false)){bodyError=bodyError??'body_channel_waiting_wifi';return;}const result=await channel.sync(expiresAtMillis);bodyError=bodyError??result.errors[0]??null;}catch(error){bodyError=String((error as Error).message);}};
-  const sync=async()=>{bodyError=null;const result=await round();if(result?.readOnly)return result;if(channel){let observation=await runtime.refreshAccount();if(await channel.needsPublication()){await runtime.publish();observation=await runtime.refreshAccount();}await bodyRound(observation.expiresAtMillis);}if(bodyRepository)try{await guardedHost('sql.notify',{topic:'watchrss-library'});}catch{await assertCurrent();}return result;};
-  await sync();
+  const sync=async()=>{
+   bodyError=null;
+   const result=await round();
+   if(!result?.readOnly){
+    if(channel){
+     let observation=await runtime.refreshAccount();
+     if(await channel.needsPublication()){
+      await runtime.publish();
+      observation=await runtime.refreshAccount();
+     }
+     await bodyRound(observation.expiresAtMillis);
+    }
+    if(bodyRepository)try{await guardedHost('sql.notify',{topic:'watchrss-library'});}catch{await assertCurrent();}
+   }
+   return result;
+  };
+  const synchronize=async()=>{
+   const result=await sync();
+   let completionError:string|null=null;
+   // The worker makes its own retry decision directly from bodyError.
+   if(options.createUi){
+    const state=await local.store.readState();
+    if(state.pendingChoice)completionError='choice_pending';
+    else if(result?.readOnly||state.cloud?.blockedCommitOid||result?.applyDisabled&&state.account&&state.activeGeneration!==state.account.oid)completionError='cloud_v2_read_only';
+    else if(bodyError)completionError=bodyError;
+    else if(state.hasUnsentEdits||state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
+   }
+   return {completionError};
+  };
+  const initialResult=await synchronize();
   ui=options.createUi?.({bodyError:()=>bodyError,runtime:{pull:sync,publish:()=>runtime.publish(),resumeChoice:async()=>{await flush();},reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
-  syncRound=sync;
-  return {ui:ui!,bodyError:()=>bodyError,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
+  syncRound=synchronize;
+  return {ui:ui!,bodyError:()=>bodyError,initialResult,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
  }catch(error){await close().catch(()=>{});throw productError(error);}
 }
 /** Internal compatibility codes stop at the application boundary. */

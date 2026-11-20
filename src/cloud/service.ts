@@ -1,4 +1,5 @@
 import {isTransportFailure} from '../network/recovery';
+import type {SyncV2RoundResult} from '../sync-v2/product-start';
 import {isBookCompanion} from './book-companion';
 import {idleHit} from '../diagnostics/idle-counters';
 import {cloudChangeUnchanged,cloudRemoteUnchanged,cloudLocalUnchanged,type CloudChangeDetection,type CloudChangeRead,type CloudChangeStamp} from './change-detection';
@@ -26,7 +27,7 @@ import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type 
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface CloudSyncResult {readonly ok:boolean; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
-export interface WatchCloudStatus {resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
+export interface WatchCloudStatus {v2Failure?:true;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
  changes?:CloudChangeDetection;prepareRestore?():Promise<void>;
@@ -46,6 +47,7 @@ export interface CloudSyncPorts {
  snapshotDiagnostic?:(value:string)=>void;
  /** 26.4 P6-10: v1 account and keys verified ready. Only set when the Sync v2 product switch is on. */
  primaryV2?:boolean;
+ syncV2?:(expectedScope?:string)=>Promise<SyncV2RoundResult|null>;
  keysReady?:(event:{userId:string;deviceId:string;keys:{currentKeyVersion(userId:string):Promise<number>;accountKey(userId:string,version?:number):Promise<Uint8Array|undefined>};syncV2:unknown;bootstrap:import('./types').CloudBootstrap})=>void|Promise<void>;
  recordDiagnostic?:(value:string)=>void;
  formatDiagnostic?:(value:string)=>void;
@@ -94,9 +96,71 @@ export class WatchCloudSyncService {
  syncNow(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string):Promise<boolean>{
   return this.syncNowResult(manual,mode,expectedScope).then(result=>result.ok);
  }
+ private failV2(error:unknown, member?:CloudMemberState) {
+  const failure=error as {code?:unknown;message?:unknown}|undefined;
+  const code=failure?.code??failure?.message;
+  this.networkFailure=code==='cloud_v2_offline'||code==='transport_error'||isTransportFailure(error);
+  let message:string;
+  switch(code){
+   case 'cloud_v2_offline': message='当前无可用网络。请连接网络后重试。'; break;
+   case 'cloud_v2_not_announced': message='云同步服务暂不可用，请稍后重试。'; break;
+   case 'cloud_v2_repo_missing': message='请先在手机或小程序完成首次云同步。'; break;
+   case 'object_missing': message='云端资料暂时缺失，请稍后重试。'; break;
+   case 'feature_disabled': message='云端暂未开放同步，请稍后重试。'; break;
+   case 'cloud_v2_start_unavailable': message='暂时无法启动云同步，请重试。'; break;
+   case 'cloud_v2_read_only': message='云端资料暂时只读，本机修改已保留。'; break;
+   case 'cloud_v2_pending': message='还有资料待同步，请稍后重试。'; break;
+   case 'choice_pending': message='请先选择要保留的资料。'; break;
+   case 'body_channel_waiting_wifi': message='正文尚未同步。请连接 Wi-Fi 后重试。'; break;
+   case 'body_channel_write_disabled': message='云端暂未开放正文上传，本机正文已保留。'; break;
+   case 'cloud_account_busy':
+   case 'library_busy': message='云同步资源暂忙，请稍后重试。'; break;
+   case 'key_unavailable':
+   case 'signing_state_unavailable': message='同步密钥暂不可用，请检查设备授权后重试。'; break;
+   case 'upgrade_required':
+   case 'unsupported_feature': message='云端协议需要更新，请更新腕上RSS后重试。'; break;
+   case 'authentication_required':
+   case 'authorization_required':
+   case 'scope_mismatch': message='云同步授权未通过，请检查账号后重试。'; break;
+   case 'service_key_changed':
+   case 'signature_invalid': message='无法验证云同步服务，请稍后重试。'; break;
+   case 'cloud_sync_deadline_exceeded':
+   case 'network_timeout':
+   case 'timeout':
+   case 'ETIMEDOUT': message='连接云端超时，请重试。'; break;
+   default: message=this.networkFailure?'无法连接云端，请检查网络后重试。':'暂时无法完成云同步，请重试。';
+  }
+  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+30_000;
+  this.value={...this.value,v2Failure:true,retryable:true,retryAtMillis};
+  this.set('error',message,member);
+ }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string):Promise<CloudSyncResult>{
-  try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(()=>{if(epoch!==this.statusEpoch)return false;this.runEpoch=epoch;this.completion=undefined;this.networkFailure=false;this.durableProgress=false;this.continuationExpected=false;this.transportFailed=false;this.failureStage='lease_acquire';this.value={...this.value,restoreProgress:undefined,continuationReady:false,yieldedToWriter:false};this.budget=new CloudSyncBudget(this.ports.now);this.recordFailure=undefined;return this.ports.exclusive(async()=>confirmed=await this.recover(manual,mode,expectedScope));}).catch(original=>{const error=cloudSyncFailure(original,this.failureStage);this.failureStage=cloudFailureStage(error,this.failureStage);failure=cloudFormatFailure(error);const diagnostic=JSON.parse(recordFailureDiagnostic(error));failureCode=diagnostic.code;failureMethod=diagnostic.method;const cleanup=(error as {cleanupCode?:unknown})?.cleanupCode;if(typeof cleanup==='string'&&JSON.parse(recordFailureDiagnostic(Error(cleanup))).code!=='unclassified')cleanupCode=cleanup;if(epoch!==this.statusEpoch)return false;
+  try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(async()=>{
+   if(epoch!==this.statusEpoch)return false;
+   this.runEpoch=epoch;this.completion=undefined;this.networkFailure=false;this.durableProgress=false;this.continuationExpected=false;this.transportFailed=false;this.failureStage='lease_acquire';
+   this.value={...this.value,restoreProgress:undefined,continuationReady:false,yieldedToWriter:false};
+   this.budget=new CloudSyncBudget(this.ports.now);this.recordFailure=undefined;
+   const prepared=await this.ports.exclusive(async()=>{
+    const ready=await this.recover(manual,mode,expectedScope);
+    if(!this.ports.primaryV2)confirmed=ready;
+    return ready;
+   });
+   if(!this.ports.primaryV2)return prepared;
+   if(!prepared||epoch!==this.statusEpoch)return false;
+   this.failureStage='sync_v2';
+   this.budget.check();
+   const result=await this.ports.syncV2?.(expectedScope);
+   if(epoch!==this.statusEpoch)return false;
+   if(!result)throw Error('cloud_v2_start_unavailable');
+   if(result.completionError)throw Error(result.completionError);
+   this.set('complete','云同步完成');
+   return true;
+  }).catch(original=>{const error=cloudSyncFailure(original,this.failureStage);this.failureStage=cloudFailureStage(error,this.failureStage);failure=cloudFormatFailure(error);const diagnostic=JSON.parse(recordFailureDiagnostic(error));failureCode=diagnostic.code;failureMethod=diagnostic.method;const cleanup=(error as {cleanupCode?:unknown})?.cleanupCode;if(typeof cleanup==='string'&&JSON.parse(recordFailureDiagnostic(Error(cleanup))).code!=='unclassified')cleanupCode=cleanup;if(epoch!==this.statusEpoch)return false;
   if(confirmed)return true;
+  if(this.ports.primaryV2&&(this.failureStage==='sync_v2'||isTransportFailure(original)||failure==='timeout')&&failure!=='suspended'&&!isLibraryOwnerMismatch(original)){
+   this.failV2(original);
+   return false;
+  }
   this.networkFailure=isTransportFailure(error);
   const reason=String(error);if(isLibraryOwnerMismatch(error)){this.requireOwnerChoice();}else if(contentRecovery(error)==='upgrade'&&(error as {code?:unknown})?.code==='cloud_format_upgrade_required'){this.value={...this.value,errorCode:'cloud_format_upgrade_required',retryable:false,formatCompatibility:{...(this.value.formatCompatibility??emptyCompatibilityStatus()),editPending:Math.max(1,this.value.formatCompatibility?.editPending??0),upgradeRequired:true}};this.set('error','请升级到最新版本以继续同步');}else if(reason.includes('cloud_snapshot_unit_capacity')){this.value={...this.value,errorCode:'cloud_snapshot_unit_capacity',retryable:false};this.set('error','旧快照单个对象超过本端连续解压上限，请在手机处理后重试');}else if(snapshotDeferred(error)){const abandoned=(error as {snapshotAbandonedItems?:number}).snapshotAbandonedItems;const abandonedItems=Number.isSafeInteger(abandoned)&&abandoned!>0?abandoned!:0;this.value={...this.value,abandonedItems,errorCode:failureCode as typeof SNAPSHOT_DEFER_CODES[number],pendingItems:Math.max(1,this.value.pendingItems??0),retryable:true,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('waiting',(abandonedItems?'部分私有条目结构不完整，已放弃（'+abandonedItems+'）；':'')+(this.recordFailure?'云记录待重试；':'')+(['cloud_snapshot_object_missing','cloud_snapshot_object_integrity'].includes(failureCode??'')?'私有条目缺少元数据或正文，等待重试':'云快照暂时无法恢复，等待重试'));}else if(reason.includes('cloud_snapshot_progress_stalled')){this.value={...this.value,errorCode:'cloud_snapshot_progress_stalled',retryable:true,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('waiting','云快照恢复暂未推进，稍后自动继续');}else if(failureCode===CLOUD_HOST_CAPABILITY_UNAVAILABLE){this.value={...this.value,errorCode:CLOUD_HOST_CAPABILITY_UNAVAILABLE,retryable:false,retryAtMillis:undefined};this.set('error','请升级腕上RSS以继续云同步');}else if(failure==='busy'){this.value={...this.value,yieldedToWriter:failureCode==='cloud_writer_busy',retryable:true,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('idle',failureCode==='cloud_account_busy'?'账号正在更新，稍后自动继续同步':'其他同步正在运行，稍后自动继续同步');}else if(failure==='timeout'||failure==='concurrent-library-change'||failure==='runtime'){this.value={...this.value,retryable:true,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('error','云同步暂时中断，本机编辑已保留，请稍后重试');}else if(failure==='storage'){this.value={...this.value,retryable:true};this.set('error','本机存储空间不足，请释放空间后重试；本机编辑已保留');}else if(failure==='suspended'){this.value={...this.value,retryable:true,retryAtMillis:Math.max(1,(this.ports.now??Date.now)())};this.set('waiting','等待继续，回到应用或系统后台接手后自动续做');}else if(failure==='gate'){this.value={...this.value,retryable:true,formatCompatibility:{...(this.value.formatCompatibility??emptyCompatibilityStatus()),editPending:1,upgradeRequired:false}};this.set('idle','新格式写入暂未开放，本机编辑已保留');}else if(reason.includes('cloud_format_overlay_resources_pending')){this.value={...this.value,retryable:false,pendingItems:1};this.set('idle','条目资源需要在支持的设备处理，本机编辑已保留');}else if(reason.includes('cloud_format_capacity')){this.value={...this.value,retryable:false};this.set('idle','云资料超过本端处理上限，请先在手机整理；本机编辑已保留');}else if(reason.includes('cloud_format_')){this.value={...this.value,retryable:false,formatCompatibility:{...(this.value.formatCompatibility??emptyCompatibilityStatus()),editPending:Math.max(1,this.value.formatCompatibility?.editPending??0),upgradeRequired:true}};this.set('idle','云资料包含只读格式，本机编辑已保留，请升级后继续');}else if(reason.includes('cloud_private_body_pending'))this.set('idle','正文仍在同步，请稍后重试');else if(contentRecovery(error)==='upgrade'||reason.includes('client_upgrade_required')||reason.includes('snapshot_content_layout_unsupported')){this.value={...this.value,retryable:false};this.set('error','请升级腕上RSS以继续云同步');}else if(['rebuild','plan'].includes(contentRecovery(error)??'')){this.value={...this.value,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('idle','云端内容正在重建，已排队重试；本机资料已保留');}else if(reason.includes('library_epoch_mismatch'))this.set('waiting-approval','资料库已重置，请重新批准');else if(reason.includes('rotation_proof_invalid')||reason.includes('device_attestation_invalid'))this.set('waiting-approval','密钥验证失败，请重新批准');else if(reason.includes('device_key_conflict'))this.set('waiting-approval','本机云设备公钥冲突，请重新登记本机');else if(reason.includes('library_owner_mismatch'))this.set('error','本机资料属于其他账号，请先选择清空或合并');else this.set('error','云同步失败，请稍后重试');return false;}).then(result=>{try{this.ports.snapshotDiagnostic?.(JSON.stringify(restoreProgressDiagnostic(this.value.restoreProgress??emptyRestoreProgress())));}catch{}if(epoch===this.statusEpoch)this.value={...this.value,continuationReady:!result&&this.durableProgress&&!this.transportFailed&&(failureCode==='cloud_sync_deadline_exceeded'||this.continuationExpected&&failure==='none')};if(this.value.continuationReady){idleHit(failureCode==='cloud_sync_deadline_exceeded'?88:89);this.value={...this.value,phase:'waiting',message:'等待继续，正在续接恢复',retryable:true,retryAtMillis:(this.ports.now??Date.now)()+1000};this.emit();}emitCloudFormat(this.ports.formatDiagnostic,{event:'format-sync',outcome:this.value.continuationReady?'deferred':epoch!==this.statusEpoch?'superseded':result?'complete':failure==='busy'||failure==='suspended'||snapshotDeferred({code:failureCode})||failureCode==='cloud_snapshot_progress_stalled'||failureCode==='cloud_sync_deadline_exceeded'?'deferred':failure==='none'&&this.value.phase!=='error'?'deferred':'failed',...(failureCode?{code:failureCode,stage:this.failureStage,...(failureMethod?{method:failureMethod}:{}),...(cleanupCode?{cleanupCode}:{})}:this.recordFailure?{code:this.recordFailure.code}:{}),...(this.recordFailure?{recordCode:this.recordFailure.code,recordStage:this.recordFailure.stage}:{}),category:failure==='none'&&this.recordFailure?this.recordFailure.category:(!result&&failure==='none'&&this.value.formatCompatibility?.upgradeRequired?'format':!result&&failure==='none'&&this.value.phase==='error'?'other':failure),durationMillis:Math.max(0,(this.ports.now??Date.now)()-started)});
   if(epoch!==this.statusEpoch)return {ok:false};
@@ -121,7 +185,12 @@ export class WatchCloudSyncService {
   }finally{key.fill(0);}
  }
  private async run(manual:boolean,mode:'all'|'recent128',freshPlan=false,forceContentReset=false,expectedScope?:string){
-  this.value={...this.value,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined,errorCode:this.value.ownerChoiceRequired?'library_owner_mismatch':undefined,formatCompatibility:undefined};this.failureStage='network';this.guard.require();const network=await this.ports.network();if(!network.active||!network.validated){this.networkFailure=true;this.set('idle','等待网络连接');return false;}
+  this.value={...this.value,v2Failure:undefined,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined,errorCode:this.value.ownerChoiceRequired?'library_owner_mismatch':undefined,formatCompatibility:undefined};this.failureStage='network';this.guard.require();const network=await this.ports.network();
+  if(!network.active||!network.validated){
+   if(this.ports.primaryV2)this.failV2(Error('cloud_v2_offline'));
+   else {this.networkFailure=true;this.set('idle','等待网络连接');}
+   return false;
+  }
   // Unknown/cellular/ethernet transports do not silently authorize private bodies.
   const full=manual||(network.wifi&&!network.metered);
   this.failureStage='session_open';this.budget?.check();const s=await this.ports.open(()=>{this.budget?.check();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');},expectedScope);if(!s){if(this.runEpoch===this.statusEpoch)this.reset();return false;}
@@ -133,7 +202,7 @@ export class WatchCloudSyncService {
    await this.ports.keysReady?.({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:boot.syncV2,bootstrap:boot});
    if(!this.ports.primaryV2)return true;
    this.completion=undefined;
-   this.set('idle','Sync v2 服务暂不可用，本机资料已保留',boot.member);
+   this.failV2(Error('cloud_v2_not_announced'),boot.member);
    return false;
   };
   if(!await continueWithAnnouncement(bootstrap))return false;
@@ -181,8 +250,16 @@ export class WatchCloudSyncService {
   try{ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,device?.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);}
   catch(error){if(String(error).includes('library_epoch_mismatch'))await s.invalidate?.();throw error;}
   if(ready==='waiting-approval'){this.set('waiting-approval','请在已登录设备上批准此手表',bootstrap.member);return false;}
-  await current();if(this.ports.keysReady)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}const member=bootstrap.member;
-  if(this.ports.primaryV2&&bootstrap.syncV2){this.set('complete','Sync v2 已接管云同步',bootstrap.member);return true;}
+  await current();
+  const member=bootstrap.member;
+  const event={userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap};
+  if(this.ports.primaryV2){
+   this.failureStage='sync_v2';
+   await this.ports.keysReady?.(event);
+   this.set('registering','正在同步云端资料',member);
+   return true;
+  }
+  try{await this.ports.keysReady?.(event);}catch{}
   this.failureStage='checkpoint';const restore=await new SnapshotRestoreCheckpoint(s,this.ports.hash,current,this.ports.now??Date.now,metric=>{try{this.ports.snapshotDiagnostic?.(JSON.stringify(metric));}catch{}}).open(bootstrap.libraryEpoch,content.contentGeneration);
   this.failureStage='run';const resumed=!remoteSame&&restore.active&&restore.phase!=='records';
   try{
