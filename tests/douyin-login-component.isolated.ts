@@ -23,6 +23,7 @@ mock.module('../src/onboarding/network-host.ts', () => ({ observeHostInternet: (
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (p: Node['props']) => element('ScrollEntries', { children: createMemo(() => p.entries.map((entry: any) => entry.render())) }) }));
 for (const [path, name] of [['../src/ui/douyin/ImmersiveEntry.tsx', 'ImmersiveEntry'], ['../src/ui/RemoteImage.tsx', 'RemoteImage'], ['../src/ui/SafeQrScreen.tsx', 'SafeQrScreen'], ['../src/ui/ShareQrScreen.tsx', 'ShareQrScreen']] as const) mock.module(path, () => ({ [name]: () => null }));
 let readerProps: any, rssProps: any;
+let detailStatus: () => { message?: string; retry?: () => void };
 const realHost = await import('@pocketjs/framework/host');
 mock.module('@pocketjs/framework/host', () => ({ ...realHost, getOps: () => ({ measureText: (text: string) => text.length * 12 }) }));
 mock.module('../src/ui/RssScreens.tsx', () => ({
@@ -32,7 +33,7 @@ mock.module('../src/ui/RssScreens.tsx', () => ({
 }));
 mock.module('../src/ui/ReaderBody.tsx', () => ({ReaderBody: (p: any) => {readerProps=p;return element('ReaderBody',p);}}));
 // Douyin detail renders through the shared reader-styled MediaReaderDetail (title row + blocks).
-mock.module('../src/ui/MediaReaderDetail.tsx', () => ({MediaReaderDetail: (p: any) => {readerProps={...p,fontSize:p.preset.body.fontSizeSp,onMedia:()=>p.onPlay()};return element('MediaReaderDetail',p);}}));
+mock.module('../src/ui/MediaReaderDetail.tsx', () => ({MediaReaderDetail: (p: any) => {detailStatus=()=>({message:p.message,retry:p.onRetry});readerProps={...p,fontSize:p.preset.body.fontSizeSp,onMedia:()=>p.onPlay()};return element('MediaReaderDetail',p);}}));
 const { NetworkRecovery } = await import('../src/network/recovery.ts');
 const { NetworkRecoveryContext } = await import('../src/network/context.ts');
 const { DouyinScreen } = await import('../src/ui/douyin/index.tsx');
@@ -357,4 +358,74 @@ test('manual login persists only a verified cookie and keeps validation errors v
  manual();await settle();expect(saves).toBe(0);expect(content()).toContain('暂时无法验证 Cookie');
  verdict='unauthenticated';manual();await settle();expect(saves).toBe(0);expect(content()).toContain('Cookie 无效');
  verdict='authenticated';manual();await settle();expect([saves,navigations]).toEqual([1,1]);
+});
+
+for (const reason of ['expired', 'oversized', 'missing-source'] as const) test(`DYFAV ${reason} saved stream resolves the same awemeId through detail`, async () => {
+  const item = { ...sample('123'), playUrl: reason === 'missing-source' ? '' : 'https://mock.invalid/stale?x-expires=1700000000' };
+  if (reason === 'oversized') Object.assign(item, {
+    playUrl: 'https://mock.invalid/1080p',
+    variants: [{ playUrl: 'https://mock.invalid/1080p', width: 1080, height: 1920, codec: 'h264', bitrate: 500000 }],
+  });
+  const fresh = { ...sample('123'), playUrl: 'https://mock.invalid/fresh' };
+  const calls: unknown[] = [], plays: any[] = [];
+  const client = {
+    onAuthExpired: () => () => {},
+    findLocalItem: async () => item,
+    resolvePlayback: async (id: string, options?: { forceRefresh?: boolean; allowDetail?: boolean }) => {
+      calls.push([id, options]);
+      return options?.forceRefresh && options.allowDetail
+        ? { ok: true, data: fresh }
+        : { ok: false, code: 'TEMPORARILY_UNAVAILABLE', message: '抖音暂时不可用，请稍后重试' };
+    },
+  };
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return DouyinScreen({
+      width: 233, height: 233, route: { name: 'detail', awemeId: '123', savedPlayback: true },
+      client, onPlay: (value: any) => plays.push(value), onNavigate() {}, settings: {},
+    } as unknown as DouyinScreenProps);
+  });
+  await settle();
+  nodes(root);
+  readerProps.onMedia({ type: 'video' });
+  await settle();
+  expect(calls).toEqual([['123', { forceRefresh: true, allowDetail: true }]]);
+  expect(plays).toMatchObject([{ playback: fresh, savedPlayback: true }]);
+});
+
+test('DYFAV detail failure exposes a reason and the retry button can open the same saved item', async () => {
+  const item = { ...sample('321'), playUrl: '' };
+  const fresh = { ...item, playUrl: 'https://mock.invalid/fresh' };
+  const ids: string[] = [], plays: any[] = [];
+  const client = {
+    onAuthExpired: () => () => {},
+    findLocalItem: async () => item,
+    resolvePlayback: async (id: string) => {
+      ids.push(id);
+      return ids.length === 1 ? { ok: false, code: 'PARSE_FAILED', message: 'private fixture details' } : { ok: true, data: fresh };
+    },
+  };
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return DouyinScreen({
+      width: 233, height: 233, route: { name: 'detail', awemeId: '321', savedPlayback: true },
+      client, onPlay: (value: any) => plays.push(value), onNavigate() {}, settings: {},
+    } as unknown as DouyinScreenProps);
+  });
+  await settle();
+  nodes(root);
+  readerProps.onMedia({ type: 'video' });
+  await settle();
+  expect(detailStatus().message).toBe('视频详情解析失败，请重试');
+  expect(plays).toHaveLength(0);
+  expect(detailStatus().retry).toBeFunction();
+  detailStatus().retry?.();
+  await settle();
+  expect(ids).toEqual(['321', '321']);
+  expect(plays).toMatchObject([{ playback: fresh, savedPlayback: true }]);
+  nodes(root);
+  readerProps.onMedia({ type: 'video' });
+  await settle();
+  expect(ids).toEqual(['321', '321']);
+  expect(plays).toMatchObject([{ playback: fresh }, { playback: fresh }]);
 });

@@ -1708,6 +1708,7 @@ export default function WatchRSS(props: {
               entry={entry}
               page={entryPage}
               active={active}
+              coveredByActions={() => current().douyinActionsOwner === entry}
               width={width}
               height={height}
               round={metrics.shape === "round"}

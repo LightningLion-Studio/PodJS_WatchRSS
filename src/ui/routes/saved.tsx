@@ -42,15 +42,18 @@ export function SavedRoutes(props: SavedRoutesProps) {
         ? biliVideoTarget(article.link)
         : null;
       const douyin = douyinVideoTarget(article.link);
+      const awemeId = douyin?.awemeId ?? douyinVideoTarget(article.videoUrl)?.awemeId;
       if (bili) {
         void props.openBili({ name: "detail", ...bili });
-      } else if (douyin?.awemeId) {
-        void props.openDouyin({ name: "detail", awemeId: douyin.awemeId });
+      } else if (awemeId) {
+        void props.openDouyin({ name: "detail", awemeId, savedPlayback: true });
       } else {
         void props.openArticle(article, props.page() === "watch-later");
       }
-    } else if (item.awemeId) {
-      void props.openDouyin({ name: "detail", awemeId: item.awemeId });
+    } else if (item.awemeId?.trim()) {
+      void props.openDouyin({ name: "detail", awemeId: item.awemeId.trim(), savedPlayback: true });
+    } else {
+      props.setError("收藏缺少视频标识");
     }
   };
 

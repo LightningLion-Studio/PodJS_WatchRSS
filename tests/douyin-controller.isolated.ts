@@ -48,14 +48,14 @@ function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateSto
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;adjacentPreview=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({historyStorage:options?.historyStorage,secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
- let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
- createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;
+ let goHome!:()=>void, controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
+ createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;goHome=()=>setStack(rows=>rows.slice(0,1));
  const [busy,setBusy]=createSignal(false),[message,setError]=createSignal(''),[playing,setPlaying]=createSignal<any>();error=message;
  controller=createMediaRouteController({initialVideoBounds:initial?()=>({x:0,y:0,width:233,height:233}):undefined,createInitialVideoPool:initial?()=>typeof initial==='function'?initial():initial:undefined,current:()=>entries().at(-1)!,motion:{phase:'idle'},busy,setBusy,setError,settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as any,
  playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;const result=setPlaying(v);options?.publish?.(source);return result;}) as any,
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
- return {controller,stack,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
+ return {controller,stack,goHome,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
  createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
  }};
 }
@@ -1193,4 +1193,38 @@ test('PERFVIDEO reverse paging uses a verified bundle while the redundant previe
  expect(f.source()).toMatchObject(expected);
  expect(f.source().audioUrl).toBeUndefined();
  expect(f.requests()).toBe(0);
+});
+
+test('DYFAV reopens the last exact item at the recorded position and paused state', async () => {
+  const f = fixture(), a = item('resume-favorite'), b = item('different');
+  const request = { item: a, playback: a, playlist: [a], hasMore: false };
+  f.controller.douyinPlay(request);
+  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
+  const first = f.stack().at(-1)!;
+  first.onDouyinExit?.(first.playback!, 2345, false);
+  restoredFrame = { available: true, kind: 'actual_frame', path: 'video-frames/resume.jpg' };
+  f.controller.douyinPlay(request);
+  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
+  expect(f.source()).toMatchObject({ awemeId: a.awemeId, resumePositionMs: 2345, resumePaused: true, previewFrame: { frame: restoredFrame } });
+  f.controller.douyinPlay({ ...request, item: b, playback: b, playlist: [b] });
+  await f.controller.douyinNavigate({ name: 'player', awemeId: b.awemeId });
+  expect(f.source().resumePositionMs).toBeUndefined();
+  expect(f.requests()).toBe(0);
+});
+
+
+test('DYFAV Home reentry offers explicit restore of the immersive queue anchor', async () => {
+  const f = fixture(), a = item('last-immersive'), b = item('not-selected');
+  f.controller.douyinPlay({ item: a, playback: a, playlist: [b, a], hasMore: false, immersive: true });
+  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
+  const first = f.stack().at(-1)!;
+  first.onDouyinExit?.(first.playback!, 2400, true);
+  f.goHome();
+  await f.controller.douyinNavigate({ name: 'entry' });
+  const cover = f.stack().at(-1)!;
+  expect(cover.page).toBe('douyin');
+  expect(cover.resumeDouyinPlayback).toBeFunction();
+  expect(await cover.resumeDouyinPlayback?.(() => true)).toBe(true);
+  expect(f.source()).toMatchObject({ awemeId: a.awemeId, resumePositionMs: 2400, resumePaused: false });
+  expect(f.requests()).toBe(0);
 });

@@ -1298,3 +1298,174 @@ test('PERFVIDEO reports the real frame for its native generation after cached pi
   expect(presented).toBe(1);
  }finally{globals.pod=saved;}
 });
+
+for (const playing of [true, false]) test(`DYFAV local actions retain the selected decoder and ${playing ? 'playing' : 'paused'} state`, async () => {
+  const { DouyinActionsController } = await import('../src/douyin/actions.ts');
+  initial = 'available'; prepares = []; plays = 0; legacyStops = 0; gestures.length = 0; boundsCalls.length = 0;
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'favorite', url: 'https://mock.invalid/favorite', title: 'favorite' };
+  const [covered, setCovered] = createSignal(false);
+  let saved = false, detailRequests = 0;
+  const actions = new DouyinActionsController({
+    fetchDetail: async () => { detailRequests++; return { ok: false, code: 'REQUEST_FAILED', message: 'offline' }; },
+    getSavedState: async () => ({ favorite: saved, watchLater: false }),
+    toggleSaved: async () => (saved = !saved),
+  } as any, source.awemeId, { ...source, description: 'fixture', authorName: 'fixture' } as any, () => {}, () => setCovered(false));
+  let handle: any;
+  createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      source, width: 233, height: 233, round: true, offset: 0,
+      get active() { return !covered(); },
+      get coveredByActions() { return covered(); },
+      onActions: () => setCovered(true),
+      ref: value => { handle = value; },
+    });
+  });
+  await flush();
+  if (!playing) await handle.shellPlaying(false);
+  current = { ...current, positionMs: 4567 };
+  jankStateChanged(current);
+  gestures[0].onLongPress();
+  await flush();
+  expect(boundsCalls.at(-1)?.visible).toBe(false);
+  await actions.load();
+  await actions.toggle('favorite');
+  await flush();
+  expect(saved).toBe(true);
+  expect(prepares).toHaveLength(1);
+  expect(legacyStops).toBe(0);
+  expect(detailRequests).toBe(0);
+  expect(boundsCalls.at(-1)?.visible).toBe(true);
+  expect(await handle.shellState()).toMatchObject({ state: playing ? 'playing' : 'paused', positionMs: 4567 });
+});
+
+test('DYFAV decoder release restores a paused position with a cover until a frame arrives', async () => {
+  initial = 'available'; prepares = []; plays = 0;
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'resume', url: 'https://mock.invalid/resume', posterUrl: 'https://mock.invalid/cover', title: 'resume', resumePositionMs: 4321, resumePaused: true };
+  let finish!: (value: any) => void;
+  heldPrepare = new Promise(resolve => { finish = resolve; });
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({ source, width: 233, height: 233, round: true, offset: 0, active: true });
+  });
+  await flush();
+  expect(nodes(root).find(n => n.kind === 'Poster')?.props.url).toBe(source.posterUrl);
+  current = { ...state('paused'), positionMs: 4321, hasRenderedFirstFrame: true };
+  finish(current);
+  await flush();
+  expect(prepares[0].resumePositionMs).toBe(4321);
+  expect(plays).toBe(0);
+  expect(nodes(root).filter(n => n.kind === 'Poster')).toHaveLength(0);
+});
+
+test('DYFAV rejects a stale saved stream with a single detail reload', async () => {
+  initial = 'available'; prepares = [];
+  const a = { platform: 'douyin' as const, awemeId: 'saved', url: 'https://mock.invalid/stale', title: 'saved', detailPlayback: true, savedPlayback: true };
+  const [source, setSource] = createSignal(a);
+  const modes: unknown[] = [];
+  nextError = { code: 'source_expired' };
+  createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      get source() { return source(); }, width: 233, height: 233, round: true, offset: 0, active: true,
+      onReload: (_position, _current, mode) => {
+        modes.push(mode);
+        setSource({ ...a, url: 'https://mock.invalid/fresh' });
+      },
+    });
+  });
+  await flush();
+  for (let i = 0; i < 3; i++) { ticks.splice(0).forEach(tick => tick()); await flush(); }
+  expect(modes).toEqual(['detail']);
+  expect(prepares.map(value => value.url)).toEqual([a.url, 'https://mock.invalid/fresh']);
+});
+
+
+test('DYFAV session player keeps the active decoder under actions and evicts its neighbour', async () => {
+  sessionsCapable = true;
+  decoderLimit = 3;
+  initial = 'available';
+  sessionCalls.length = 0;
+  const [covered, setCovered] = createSignal(false);
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'session', url: 'https://mock.invalid/session', title: 'session' };
+  const next = { ...source, awemeId: 'next', url: 'https://mock.invalid/next' };
+  const released: string[] = [], placements: { id: string; visible: boolean }[] = [];
+  const release = sessionPort.release, bounds = sessionPort.setBounds;
+  Object.assign(sessionPort, {
+    release: async (id: string) => { released.push(id); return release(); },
+    setBounds: async (id: string, value: { visible: boolean }) => { placements.push({ id, visible: value.visible }); return bounds(id); },
+  });
+  try {
+    let handle: any;
+    createRoot(stop => {
+      stops.push(stop);
+      return VideoPlayerScreen({
+        source, width: 233, height: 233, round: true, offset: 0,
+        get active() { return !covered(); },
+        get coveredByActions() { return covered(); },
+        onAdjacentKey: direction => direction === 'next' ? next.awemeId : undefined,
+        onPrepareAdjacent: async () => ({ key: next.awemeId, source: next }),
+        ref: value => { handle = value; },
+      });
+    });
+    await flush();
+    const prepares = () => sessionCalls.filter(value => value.method === 'prepare');
+    const activeId = prepares().find(value => !value.prewarm).sessionId;
+    const neighbourId = prepares().find(value => value.prewarm).sessionId;
+    setCovered(true);
+    await flush();
+    expect(placements.at(-1)).toEqual({ id: activeId, visible: false });
+    expect(released).toContain(neighbourId);
+    expect(released).not.toContain(activeId);
+    setCovered(false);
+    await flush();
+    expect(placements.at(-1)).toEqual({ id: activeId, visible: true });
+    expect(prepares().filter(value => !value.prewarm)).toHaveLength(1);
+    expect(await handle.shellState()).toMatchObject({ state: 'playing' });
+  } finally {
+    Object.assign(sessionPort, { release, setBounds: bounds });
+  }
+});
+
+test('DYFAV pressure under actions can release and seek without starting a paused video', async () => {
+  initial = 'available'; prepares = []; plays = 0; legacyStops = 0;
+  const globals = globalThis as typeof globalThis & { pod?: { memoryBudgetBytes?: () => number } };
+  const originalPod = globals.pod;
+  globals.pod = { ...originalPod, memoryBudgetBytes: () => 256_000_000 };
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'trim', url: 'https://mock.invalid/trim', posterUrl: 'https://mock.invalid/cover', title: 'trim' };
+  const [covered, setCovered] = createSignal(false);
+  let handle: any;
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      source, width: 233, height: 233, round: true, offset: 0,
+      get active() { return !covered(); },
+      get coveredByActions() { return covered(); },
+      ref: value => { handle = value; },
+    });
+  });
+  await flush();
+  await handle.shellPlaying(false);
+  current = { ...current, positionMs: 654 };
+  jankStateChanged(current);
+  setCovered(true);
+  try {
+    dispatchMemoryPressure({ t: 'memory.pressure', level: 2 });
+    await flush();
+    expect(legacyStops).toBe(1);
+    let finish!: (value: any) => void;
+    heldPrepare = new Promise(resolve => { finish = resolve; });
+    setCovered(false);
+    await flush();
+    expect(nodes(root).find(n => n.kind === 'Poster')?.props.url).toBe(source.posterUrl);
+    expect(prepares.at(-1).resumePositionMs).toBe(654);
+    current = { ...state('paused'), positionMs: 654, hasRenderedFirstFrame: true };
+    finish(current);
+    await flush();
+    expect(plays).toBe(1);
+    expect(await handle.shellState()).toMatchObject({ state: 'paused', positionMs: 654 });
+  } finally {
+    dispatchMemoryPressure({ t: 'memory.pressure', level: 0 });
+    globals.pod = originalPod;
+  }
+});

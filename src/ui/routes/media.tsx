@@ -37,6 +37,7 @@ interface MediaRoutesProps {
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
+  coveredByActions?: () => boolean;
   width: number;
   height: number;
   round: boolean;
@@ -164,6 +165,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
           restoreStock={()=>douyinStock.restore()}
+          resumePlayback={props.entry.resumeDouyinPlayback}
           onPreloadWindow={(owner,items,anchor,seq)=>{douyinPreload.start(owner,items,anchor??undefined,'entry');void props.primeDouyinEntry?.(props.entry,owner,items,anchor,seq);}}
           onPreloadStop={owner=>{douyinPreload.stop(owner);props.stopDouyinEntry?.(owner);}}
           settings={{
@@ -202,6 +204,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               : props.entry.playback!
           }
           active={props.active()}
+          coveredByActions={props.coveredByActions?.()}
+          onDouyinExit={props.entry.onDouyinExit}
           offset={props.active() ? props.backOffset() : 0}
           offsetVector={props.active() ? props.backTranslation?.() : undefined}
           round={props.round}
