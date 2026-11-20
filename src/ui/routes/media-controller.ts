@@ -110,7 +110,7 @@ export function createMediaRouteController(
   let lastDouyinExit: { awemeId: string; immersive: boolean; auth: number; positionMs: number; playing: boolean } | undefined;
   const douyinResume = (awemeId: string, immersive = false): Pick<PlaybackSource, 'resumePositionMs' | 'resumePaused'> => {
     const exit = lastDouyinExit;
-    if (exit?.awemeId !== awemeId || exit.immersive !== immersive || exit.auth !== douyinClient.playbackAuthorizationVersion()) return {};
+    if (exit?.awemeId !== awemeId || exit.immersive !== immersive || exit.auth !== douyinClient.playbackAuthorizationVersion?.()) return {};
     return { resumePositionMs: exit.positionMs, resumePaused: !exit.playing };
   };
 
@@ -135,12 +135,12 @@ export function createMediaRouteController(
       return;
     }
     dependencies.setPlayingSource(source);
-    const auth = source.platform === 'douyin' ? douyinClient.playbackAuthorizationVersion() : undefined;
+    const auth = source.platform === 'douyin' ? douyinClient.playbackAuthorizationVersion?.() : undefined;
     dependencies.setPage("video", {
       playback: source, ...extra,
       ...(auth !== undefined ? {
         onDouyinExit: (selected, positionMs, playing) => {
-          if (!selected.awemeId || auth !== douyinClient.playbackAuthorizationVersion()) return;
+          if (!selected.awemeId || auth !== douyinClient.playbackAuthorizationVersion?.()) return;
           lastDouyinExit = { awemeId: selected.awemeId, immersive: selected.immersive === true, auth, positionMs, playing };
         },
       } : {}),
@@ -558,12 +558,12 @@ export function createMediaRouteController(
       const exit = lastDouyinExit;
       const offerResume = route.name === 'entry' && !route.resumeAwemeId && !route.debugAutoEnterFlow
         && dependencies.current().page === 'home' && exit?.immersive
-        && exit.auth === douyinClient.playbackAuthorizationVersion();
+        && exit.auth === douyinClient.playbackAuthorizationVersion?.();
       dependencies.setPage("douyin", {
         douyinRoute: route,
         ...(offerResume ? {
           resumeDouyinPlayback: async current => {
-            const authorized = () => exit.auth === douyinClient.playbackAuthorizationVersion();
+            const authorized = () => exit.auth === douyinClient.playbackAuthorizationVersion?.();
             if (!current() || !authorized()) return false;
             return restoreDouyinVideo(exit.awemeId, true, undefined, false, () => current() && authorized());
           },
@@ -574,8 +574,8 @@ export function createMediaRouteController(
 
   // Activity restoration and legacy KV resume share this queue-backed entry point.
   const restoreDouyinVideo = async (awemeId:string, immersive=false, memory?:RouteEntry["memory"], detailPlayback=false, canOpen:()=>boolean=()=>true):Promise<boolean> => {
-    const origin = dependencies.current(), auth = douyinClient.playbackAuthorizationVersion();
-    const authorized = () => auth === douyinClient.playbackAuthorizationVersion();
+    const origin = dependencies.current(), auth = douyinClient.playbackAuthorizationVersion?.();
+    const authorized = () => auth === douyinClient.playbackAuthorizationVersion?.();
     const current = () => canOpen() && authorized() && dependencies.current() === origin;
     const restored = await restoreDouyinQueue(douyinClient, awemeId, immersive,id=>douyinPreload.lookup(id));
     if (!restored || !current()) return false;
