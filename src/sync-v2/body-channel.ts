@@ -86,10 +86,9 @@ export class WatchBodyChannel {
   if(raw){
    await this.o.repository.validate(kind,id,value,raw);
    if(carrierBodyRevision(kind,row.entityKey,sha256Hex(raw))!==row.bodyRevision)throw Error('body_revision_changed');
-   // A verified matching carrier avoids duplicate randomized uploads after
-   // restart. Foreign bytes are read only through the authenticated mapper.
+   // A matching local original only needs the authenticated carrier manifest.
    let cursor='';for(;;){const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
-    for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,false);return;}catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
+    for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,raw);return;}catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
     if(page.nextAfter===null)break;cursor=page.nextAfter;
    }
    let descriptor:Carrier|undefined;const key=await this.o.currentKey();
@@ -105,17 +104,18 @@ export class WatchBodyChannel {
    await this.current(entry,anchor);await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);if(!b)throw Error('closure_incomplete');return b;});await this.current(entry,anchor);return;
   }
   let cursor='',last:unknown;for(;;){const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
-   for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,true);return;}catch(error){last=error;if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
+   for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path);return;}catch(error){last=error;if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
    if(page.nextAfter===null)break;cursor=page.nextAfter;
   }throw last??Error('body_channel_pending');
  }
- private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,install:boolean){
+ private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,localBody?:Uint8Array){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId},key=await this.o.approved(descriptor.body.authorDeviceId);
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
-  const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,localBody,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
+  const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
+  if(raw!==localBody)await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
   await this.current(entry,anchor);
-  if(install){
+  if(!localBody){
    // Preserve concurrent offline bytes even when the account row is unchanged.
    const old=await this.o.repository.read(binding.kind,binding.logicalId);if(binding.kind==='book'&&old&&sha256Hex(old)!==sha256Hex(raw))throw Error('body_revision_changed');
    await this.o.repository.install(binding.kind,binding.logicalId,raw,old&&sha256Hex(old)===sha256Hex(raw)?sha256Hex(old):null);await this.current(entry,anchor);

@@ -48,7 +48,7 @@ export async function prepareCarrier(options:{crypto:SnapshotCrypto;signer:Signi
  const descriptor=await signControl(options.signer,options.alias,BODY_DOMAIN,{version:1,purpose:BODY_PURPOSE,scope,carrierId:id,authorDeviceId,...{entityKey:binding.entityKey,bodyRevision:binding.bodyRevision},keyVersion,anchor:options.anchor,sourceSnapshotId:null,manifest:{sha256:hash,sizeBytes:manifest.length},chunks:[...snapshot.newChunks].map(([sha256,b])=>({sha256,sizeBytes:b.length})).sort((a,b)=>a.sha256<b.sha256?-1:a.sha256>b.sha256?1:0)}) as Carrier;
  validateCarrier(descriptor,scope);return {descriptor,objects};
 }
-export async function openCarrier(options:{descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>;yieldControl?:()=>Promise<void>}){
+export async function openCarrier(options:{descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>;yieldControl?:()=>Promise<void>;localBody?:Uint8Array}){
  const {descriptor,crypto,binding}=options;validateCarrier(descriptor,options.scope);const b=descriptor.body;
  if(b.entityKey!==binding.entityKey||b.bodyRevision!==binding.bodyRevision)throw Error('body_revision_changed');
  await verifySigned(options.signer,options.publicKey,BODY_DOMAIN,b,descriptor.signature);
@@ -77,7 +77,8 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
   const m=parseCanonicalJson(plain);exact(m,['version','purpose','scope','entityKey','bodyRevision','kind','logicalId','plaintextSha256','objects']);sameScope(m.scope,options.scope);
   if(m.version!==1||m.purpose!==BODY_PURPOSE||m.entityKey!==binding.entityKey||m.bodyRevision!==binding.bodyRevision||m.kind!==binding.kind||m.logicalId!==binding.logicalId)throw Error('source_identity_missing');text(m.logicalId);hexId(m.plaintextSha256,64);
   const snapshot=synthetic(uuid,b.authorDeviceId,b.keyVersion,m.objects);validateManifest(snapshot);
-  if(m.objects.length!==1||m.objects[0].name!==bodyObjectName(binding.kind,binding.logicalId))throw Error('source_identity_missing');
+  const name=bodyObjectName(binding.kind,binding.logicalId),object=snapshot.objects[0];
+  if(snapshot.objects.length!==1||object?.name!==name)throw Error('source_identity_missing');
   const closure=new Map<string,number>();
   for(const o of m.objects){
    exact(o,['name','encoding','originalBytes','encodedBytes','chunks',...(Object.hasOwn(o,'contentSha256')?['contentSha256']:[])]);
@@ -85,6 +86,13 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
    for(const c of o.chunks){exact(c,['plaintextSha256','ciphertextSha256','plaintextBytes','ciphertextBytes','saltBase64','nonceBase64']);if(closure.has(c.ciphertextSha256)&&closure.get(c.ciphertextSha256)!==c.ciphertextBytes)throw Error('closure_incomplete');closure.set(c.ciphertextSha256,c.ciphertextBytes);}
   }
   if(closure.size!==b.chunks.length||b.chunks.some(c=>closure.get(c.sha256)!==c.sizeBytes))throw Error('closure_incomplete');
+  // This path only recognises an installed original. Download and recovery
+  // callers still authenticate every remote chunk before using its bytes.
+  if(options.localBody?.length===object.originalBytes&&object.contentSha256===m.plaintextSha256){
+   const hash=sha256Hex(options.localBody);
+   if(hash!==m.plaintextSha256||carrierBodyRevision(binding.kind,binding.entityKey,hash)!==binding.bodyRevision)throw Error('hash_mismatch');
+   return new Map([[name,options.localBody]]);
+  }
   const decoded=await new WatchCloudCodec(crypto,guard).restore(key,snapshot,hash=>read(hash,closure.get(hash)!));
   const digest=new ContentSha256();for(const o of m.objects){const raw=decoded.get(o.name)!;
    for(let at=0;at<raw.length;at+=262144){digest.update(raw.subarray(at,Math.min(raw.length,at+262144)));if(at+262144<raw.length)await options.yieldControl?.();}
