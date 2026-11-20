@@ -1,4 +1,5 @@
 import config from '../../../pod.config.json';
+import {noteAssetIntake} from '../../sync-v2/local-transfer-intake';
 import type {WatchAccountStore} from '../../account/store';
 import type {WatchAccountState} from '../../account/types';
 import type {SyncActionContext,SyncFrameConnection} from '../session';
@@ -34,6 +35,7 @@ export interface BinaryApplicationPorts {
  b2BooksEnabled?:boolean;
  bookRuntime?():Promise<boolean>;
  bookExcluded?(kind:'bookState'|'bookReading',limit:'body'|'string'):void;
+ intake?:import('../../sync-v2/local-transfer-intake').LocalTransferIntake;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
  guardedTransaction?:import('./coordinator').BinaryPorts['guardedTransaction'];
@@ -108,9 +110,12 @@ export class BinaryApplicationService implements BinarySessionPort {
   const scope=D('wrss.library-binary.v2/storage',[accountScope,n.peer,watch]);
   let owner:LibraryBinaryConnection;
   const work=()=>{check();owner?.workUnit();};
-  const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work):undefined;
+  const intake=this.ports.intake;
+  const write:import('../../sync-v2/local-transfer-intake').BoundLocalTransferIntake|undefined=intake?apply=>intake(account,watch,apply):undefined;
+  const protectAsset=write?noteAssetIntake(write,2,n.peer,work):undefined;
+  const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work,write):undefined;
   const fileWork=this.ports.bookWork?.(work),bookFiles=fileWork?.files??this.ports.books;
-  const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work,this.ports.bookExcluded):undefined;
+  const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work,this.ports.bookExcluded,write):undefined;
   const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined);
   await authorize(()=>this.ports.store.exclusive(async()=>{
    await this.ports.store.collect(scope,async job=>{
@@ -127,6 +132,14 @@ export class BinaryApplicationService implements BinarySessionPort {
   });}
   catch(error){await stream.close();throw error;}
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
+   protectNoteAsset:protectAsset?(job,object,stage,apply)=>{
+    let file:ReturnType<typeof stage>|undefined;
+    const body={size:object.size,sha256:object.sha256,read:async(offset:number,length:number)=>{
+     work();const {path}=await (file??=stage());
+     return (await this.ports.files.readBytes(path,offset,length)).bytes;
+    }};
+    return protectAsset({cursor:job.jobId+':'+object.objectId,logicalId:object.businessId,body},apply);
+   }:undefined,
    stopLocalWork:fileWork?.stop,guardedTransaction:this.ports.guardedTransaction,durableTransaction:this.ports.durableTransaction,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(stream,this.ports.now,undefined,native));

@@ -71,7 +71,7 @@ type BusinessRepository=Pick<SqlLibrarySessionRepository,'binaryFreezeSources'|'
 
 export class BinaryLibraryKinds {
  constructor(private readonly repository:()=>Promise<BusinessRepository>,private readonly files:BinaryArticleFiles,
-  private readonly work:()=>void){}
+  private readonly work:()=>void,private readonly intake?:BoundLocalTransferIntake){}
  async freezeSources(){
   return (await (await this.repository()).binaryFreezeSources(this.work)).map(sourceDescriptor);
  }
@@ -101,12 +101,24 @@ export class BinaryLibraryKinds {
  shadowBytes(objects:readonly ObjectDescriptor[]){
   return objects.some(d=>d.kind==='articleBody')?ARTICLE_IMPORT_SHADOW_BYTES:0;
  }
- async apply(d:ObjectDescriptor,path:string,peer:string,boundary:ReceiptBoundary){
+ async apply(d:ObjectDescriptor,path:string,peer:string,boundary:ReceiptBoundary,jobId?:string){
   const value=this.validate(d),repository=await this.repository();
-  if('article' in value){
-   const staged=d.kind==='articleBody'?await importArticleFile(this.files,path,d,value.body.chunkHashes,this.work):null;
-   await repository.binaryReceiveArticle(value,peer,boundary,staged);
-  }else await repository.binaryReceiveSource(value,peer,boundary);
+  const apply=async(check?:LocalTransferWrite)=>{
+   const input={peer,version:2 as const,cursor:(jobId??'')+':'+d.objectId,check:boundary.check};
+   if('article' in value){
+    const article=Object.fromEntries(Object.entries(value.article).filter(([key,value])=>value!==undefined&&BUSINESS_FIELDS.article.includes(key)));
+    const body=d.kind==='articleBody'?{size:d.size,sha256:d.sha256,read:async(offset:number,length:number)=>{this.work();return (await this.files.readBytes(path,offset,length)).bytes;}}:undefined;
+    await check?.({...input,records:[{kind:'article',logicalId:d.businessId,value:article}],body});
+    const staged=d.kind==='articleBody'?await importArticleFile(this.files,path,d,value.body.chunkHashes,this.work):null;
+    await repository.binaryReceiveArticle(value,peer,boundary,staged);
+   }else{
+    await check?.({...input,records:[{kind:'source',logicalId:d.businessId,value}]});
+    await repository.binaryReceiveSource(value,peer,boundary);
+   }
+  };
+  if(this.intake)await this.intake(apply);else await apply();
   this.work();
  }
 }
+import {BUSINESS_FIELDS} from '../../sync-v2/business';
+import type {BoundLocalTransferIntake,LocalTransferWrite} from '../../sync-v2/local-transfer-intake';

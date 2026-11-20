@@ -39,6 +39,8 @@ test('P6-9 article mapping selects UTF-8 text before HTML and keeps book/asset p
  let read=0;const resolve=articleBodyResolver({crypto,keys,scope,read:async()=>{read++;return {article:{contentText:'正文'},manifest:{bodyAvailable:true}} as any;}});
  for(const kind of ['book','asset','note'])expect(await resolve({candidate:{meta:{kind}}},null)).toBeNull();expect(read).toBe(0);
  const binding=await resolve({entityKey:id,candidate:{meta:{kind:'article',logicalId:'x'}}},null);expect(binding!.recipeOid).toBeNull();expect(binding!.promiseId).not.toBeNull();expect(binding!.bodyRevision).toBe(articleBodyRevision(id,bytes('正文')));
+ const same=articleBodyResolver({crypto,keys,scope,read:async()=>({article:{contentText:'正文🙂\n'.repeat(50000)},manifest:{bodyAvailable:true}} as any)});
+ expect(await same({entityKey:id,candidate:{meta:{kind:'article',logicalId:'x'}}},{row:built.binding} as any)).toEqual(built.binding);
 });
 test('P6-6 product UI maps legacy clock_unknown without changing core errors',async()=>{
  const ui=new WatchSyncV2UiState({runtime:{pull:async()=>{throw Error('clock_unknown');},publish:async()=>{}},control:{} as any,projection:{} as any,productErrors:true});await expect(ui.syncNow()).rejects.toThrow('trusted_time_unavailable');

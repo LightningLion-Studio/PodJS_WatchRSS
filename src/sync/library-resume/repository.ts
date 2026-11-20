@@ -9,6 +9,8 @@ import {D,objectId,descriptor} from './digests';
 import {CHUNK_BYTES,fail,hash,utf8,b64,strictJson,exact,integer,hex,type Snapshot,type Selection,type ObjectDescriptor,type Row} from './wire';
 import type {FrozenAsset} from './assets';
 import {decodeSyncUtf8} from '../protocol';
+import {BUSINESS_FIELDS} from '../../sync-v2/business';
+import type {LocalTransferWrite} from '../../sync-v2/local-transfer-intake';
 
 export interface FrozenResumeArticle {prepared:PreparedArticle;binding:number|null;chunkHashes:string[]}
 export interface FrozenResumeInventory {articles:FrozenResumeArticle[];sources:readonly SyncedSource[];assets?:FrozenAsset[]}
@@ -36,20 +38,28 @@ export async function sourcePlan(repository:SqlLibrarySessionRepository,store:Re
  return {objects,read:async(d,index)=>{if(d.kind==='noteAsset'){if(!readAsset)fail('SOURCE_CHANGED');const bytes=await readAsset(d.businessId);if(bytes.length!==d.size||hash(bytes)!==d.sha256)fail('SOURCE_CHANGED');return bytes.slice(index*CHUNK_BYTES,(index+1)*CHUNK_BYTES);}if(d.kind!=='articleBody')fail();if(cachedId!==d.objectId){const frozen=articles.get(d.objectId);if(!frozen)fail('SOURCE_CHANGED');cached=await repository.resumeReadBody(frozen);if(cached.length!==d.size||hash(cached)!==d.sha256)fail('SOURCE_CHANGED');cachedId=d.objectId;}const bytes=cached!.slice(index*CHUNK_BYTES,Math.min(d.size,(index+1)*CHUNK_BYTES));if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');return bytes;}};
 }
 export interface ResumeFileReader {read(path:string,size:number):Promise<Uint8Array>}
-export async function applyResumeObject(repository:SqlLibrarySessionRepository,files:ResumeFileReader,job:Job,d:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>{
+export async function applyResumeObject(repository:SqlLibrarySessionRepository,files:ResumeFileReader,job:Job,d:ObjectDescriptor,path:string,boundary:ReceiptBoundary,protect?:LocalTransferWrite):Promise<void>{
  const metadata=strictJson(decodeSyncUtf8(b64(d.metadataBase64,job.description.selection.limits.maxMetadataBytes)),false),peer=job.description.phoneDeviceId;
+ const input={peer,version:1 as const,cursor:job.jobId+':'+d.objectId,check:boundary.check};
  if(d.kind==='rssSource'){
-  if(metadata.url!==d.businessId)fail('OBJECT_CONFLICT');validateSource(metadata);await repository.resumeReceiveSource(metadata as unknown as SyncedSource,peer,boundary);return;
+  if(metadata.url!==d.businessId)fail('OBJECT_CONFLICT');validateSource(metadata);
+  await protect?.({...input,records:[{kind:'source',logicalId:d.businessId,value:metadata}]});
+  await repository.resumeReceiveSource(metadata as unknown as SyncedSource,peer,boundary);return;
  }
  if(d.kind!=='articleBody'&&d.kind!=='articleMetadata')fail('UNSUPPORTED_KIND');
  if(metadata.articleId!==d.businessId)fail('OBJECT_CONFLICT');if(Object.keys(metadata).some(k=>k!=='body'&&!ARTICLE_KEYS.includes(k as typeof ARTICLE_KEYS[number])))fail('BUSINESS_REJECTED');
  const body=exact(metadata.body,['bodyHash','bodyByteCount','chunkSize','chunkHashes','metadataOnly']);integer(body.bodyByteCount,16777216);if((body.chunkSize!==128*1024&&!(d.kind==='articleMetadata'&&body.chunkSize===0&&body.bodyByteCount===0&&body.bodyHash===''))||!Array.isArray(body.chunkHashes)||body.chunkHashes.length!==Math.ceil(Number(body.bodyByteCount)/(128*1024)))fail('OBJECT_CONFLICT');if(body.bodyHash!==''||Number(body.bodyByteCount)>0)hex(body.bodyHash);for(const h of body.chunkHashes)hex(h);
  if(body.metadataOnly!==(d.kind==='articleMetadata'))fail('OBJECT_CONFLICT');
+ let bytes:Uint8Array|undefined;
  if(d.kind==='articleBody'){
-  const bytes=await files.read(path,d.size);if(bytes.length!==d.size||hash(bytes)!==d.sha256||body.bodyHash!==d.sha256||body.bodyByteCount!==d.size||body.chunkSize!==128*1024)fail('HASH_MISMATCH');
+  bytes=await files.read(path,d.size);if(bytes.length!==d.size||hash(bytes)!==d.sha256||body.bodyHash!==d.sha256||body.bodyByteCount!==d.size||body.chunkSize!==128*1024)fail('HASH_MISMATCH');
   const chunks:Row[]=[];for(let at=0,index=0;at<bytes.length;at+=128*1024,index++){const part=bytes.subarray(at,at+128*1024),digest=hash(part);if(!Array.isArray(body.chunkHashes)||body.chunkHashes[index]!==digest)fail('HASH_MISMATCH');chunks.push({index,hash:digest,data:encodeBase64(part)});}body.chunks=chunks;
  }else body.chunks=[];
  const entry=parseChunkedArticles({articles:[metadata]})[0];if(!entry)fail('BUSINESS_REJECTED');
+ if(protect){
+  const value=Object.fromEntries(Object.entries(entry.article).filter(([key,value])=>value!==undefined&&BUSINESS_FIELDS.article.includes(key)));
+  await protect({...input,records:[{kind:'article',logicalId:d.businessId,value}],body:bytes?{size:d.size,sha256:d.sha256,read:async(offset,length)=>bytes!.subarray(offset,offset+length)}:undefined});
+ }
  await repository.resumeReceiveArticle(entry,peer,boundary);
 }
 function validateSource(o:Row){

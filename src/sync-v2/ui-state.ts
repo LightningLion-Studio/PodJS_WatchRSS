@@ -79,7 +79,7 @@ const modelOf=(meta:{logicalId?:string;payload:Record<string,any>},state:{payloa
 /** Canonical plain-data clone: guarantees the snapshot/preview holds no class
  * instances, no handle objects and no non-contract fields. */
 function cleanSnapshot<T>(value:T):T{return JSON.parse(canonical(JSON.parse(JSON.stringify(value))));}
-function capped(rows:SideRow[]){const head=rows.slice(0,PREVIEW_SIDE_LIMIT);return {rows:head.map(r=>({title:r.title,kind:r.kind})),more:rows.length-head.length};}
+function capped(rows:ChoicePreview['local']){const head=rows.slice(0,PREVIEW_SIDE_LIMIT);return {rows:head.map(r=>({title:r.title,kind:r.kind})),more:rows.length-head.length};}
 export class WatchSyncV2UiState {
  private listeners=new Set<()=>void>();
  private previews=new WeakMap<ChoicePreview,object>();
@@ -87,7 +87,7 @@ export class WatchSyncV2UiState {
  private active?:{preview:ChoicePreview;proof:object};
  /** canMerge/reason cache keyed by the state fingerprint, so one snapshot does
   * not re-run the heavy pendingChoice preparation on every UI frame. */
- private mergeCache?:{fingerprint:string;canMerge:boolean;reason:string|null};
+ private mergeCache?:{fingerprint:string;canMerge:boolean;reason:string|null;localChanges:number;cloudChanges:number};
  private inflightSyncs=0;
  private lastErrorCode:string|null=null;
  private lastSyncedAtMillis:number|null=null;
@@ -136,16 +136,26 @@ export class WatchSyncV2UiState {
   await this.o.runtime?.resumeChoice?.();
   const state=await this.o.projection.readState();
   if(!state.pendingChoice)throw Error('choice_stale');
-  const view=await this.o.control!.pendingChoice();
+  const {view,legacyPreview}=await this.choiceView(state);
   if(!view)throw Error('choice_stale');
-  const side=await this.collectSides(state);
-  const local=capped(side.localChanges),cloud=capped(side.cloudChanges);
+  let side=legacyPreview;
+  if(!side){
+   const changes=await this.collectSides(state);
+   side={local:changes.localChanges,cloud:changes.cloudChanges};
+  }
+  const local=capped(side.local),cloud=capped(side.cloud);
   const preview:ChoicePreview=cleanSnapshot({local:local.rows,cloud:cloud.rows,more:{local:local.more,cloud:cloud.more},canMerge:view.canMerge===true,reason:view.canMerge===true?null:view.reason??null});
   this.previews.set(preview,view.proof as object);
   this.active={preview,proof:view.proof as object};
-  this.mergeCache={fingerprint:fingerprintOf(state),canMerge:preview.canMerge,reason:preview.reason};
+  this.mergeCache={fingerprint:fingerprintOf(state),canMerge:preview.canMerge,reason:preview.reason,localChanges:side.local.length,cloudChanges:side.cloud.length};
   return preview;
  });}
+ private async choiceView(state:SyncState){
+  const key=state.pendingChoice?.inboxKeys[0];
+  if(key===undefined)return {view:await this.o.control!.pendingChoice(),legacyPreview:undefined};
+  const view=await this.o.control!.pendingLegacyChoice(key);
+  return {view,legacyPreview:view.legacyPreview};
+ }
  async chooseLocal(preview:ChoicePreview){return this.action(async()=>await this.o.control!.chooseLocal(this.proofFor(preview),this.newRequestId()));}
  async chooseCloud(preview:ChoicePreview,choiceId?:string){return this.action(async()=>await this.o.control!.chooseCloud(this.proofFor(preview),this.newRequestId(),choiceId));}
  async chooseMerge(preview:ChoicePreview){return this.action(async()=>await this.o.control!.chooseMerge(this.proofFor(preview),this.newRequestId()));}
@@ -181,21 +191,26 @@ export class WatchSyncV2UiState {
   * its fingerprint cache, or one fresh pendingChoice() pass. */
  private async choiceState(state:SyncState,side:{localChanges:SideRow[];cloudChanges:SideRow[]}){
   const kind:'rollback'|'concurrent'=compareD64(state.rollbackGeneration,state.editBase.generation)>0?'rollback':'concurrent';
-  if(this.active)return{localChanges:side.localChanges.length,cloudChanges:side.cloudChanges.length,canMerge:this.active.preview.canMerge,mergeUnavailableReason:this.active.preview.reason,kind};
+  if(this.active&&this.mergeCache?.fingerprint===fingerprintOf(state)){
+   const preview=this.active.preview;
+   return {localChanges:preview.local.length+preview.more.local,cloudChanges:preview.cloud.length+preview.more.cloud,canMerge:preview.canMerge,mergeUnavailableReason:preview.reason,kind};
+  }
   const fingerprint=fingerprintOf(state);
+  let localChanges=side.localChanges.length,cloudChanges=side.cloudChanges.length;
   let canMerge:boolean,reason:string|null;
-  if(this.mergeCache&&this.mergeCache.fingerprint===fingerprint){canMerge=this.mergeCache.canMerge;reason=this.mergeCache.reason;}
+  if(this.mergeCache&&this.mergeCache.fingerprint===fingerprint){({canMerge,reason,localChanges,cloudChanges}=this.mergeCache);}
   else{
    try{
-    const view=await this.o.control!.pendingChoice();
+    const {view,legacyPreview}=await this.choiceView(state);
     if(!view)throw Error('choice_stale');
     canMerge=view.canMerge===true;reason=canMerge?null:view.reason??null;
+    if(legacyPreview){localChanges=legacyPreview.local.length;cloudChanges=legacyPreview.cloud.length;}
     // The snapshot only reads; the preparation reservation is released at once.
     await this.o.control!.closePreview(view.proof as object);
    }catch(error){canMerge=false;reason=codeOf(error)==='choice_stale'?'choice_stale':'projection_incomplete';}
-   if(!this.active)this.mergeCache={fingerprint,canMerge,reason};
+   if(!this.active)this.mergeCache={fingerprint,canMerge,reason,localChanges,cloudChanges};
   }
-  return {localChanges:side.localChanges.length,cloudChanges:side.cloudChanges.length,canMerge,mergeUnavailableReason:canMerge?null:reason,kind};
+  return {localChanges,cloudChanges,canMerge,mergeUnavailableReason:canMerge?null:reason,kind};
  }
  /** The two change sets in planner semantics: local candidates that differ
   * from the current authenticated cloud tree (or from the kept baseline when

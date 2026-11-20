@@ -14,8 +14,9 @@ export class WatchEquivalentLegacy {
   if((await this.store.checkpoint())?.phase!=='complete')throw Error('merge_not_safe');
   for(;;){const page=await this.store.candidatePage(after,32);if(!page.length)break;for(const r of page){const c=r.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);rows[r.entityKey]={identity:c.meta.logicalId,...c.meta.payload,...c.state.payload};kinds.set(r.entityKey,c.meta.kind);sealedRows.push(r);}after=page.at(-1)!.entityKey;}
   const inbox=await this.db.query('SELECT rowid,inbox_key,input_hash,body FROM syncv2_legacy_inbox WHERE scope=? ORDER BY rowid',[this.scopeKey]);
-  for(const row of inbox){const key=String(row.inbox_key),value=await this.cipher.open(this.aad('legacy',key),String(row.body));
-   const {route,applied,...original}=value;if(!(route==='discarded-for-cloud'&&value.discardedInputHash===row.input_hash)&&digest(original)!==row.input_hash)throw Error('merge_not_safe');raw[key]=value;
+  for(const row of inbox){const key=String(row.inbox_key),{entry:value}=await this.store.legacyChoiceEntry(key);
+   if(value.transferBody&&!value.applied)throw Error('merge_not_safe');
+   const {route,applied}=value;raw[key]=value;
    const body=JSON.parse(value.body);if(!body||Object.getPrototypeOf(body)!==Object.prototype)throw Error('merge_not_safe');
    for(const [id,input]of Object.entries(body) as [string,any][]){const kind=kinds.get(id);if(!kind||!input||Object.getPrototypeOf(input)!==Object.prototype)throw Error('merge_not_safe');const {identity,...business}=input;try{const wire=toWire(kind,business);body[id]={identity,...wire.meta,...wire.state};}catch{throw Error('merge_not_safe');}}
    const removedEntityKeys:string[]=[],bodyRefsByEntity={};const intent={body,entityKeys:value.entityKeys,removedEntityKeys,bodyRefsByEntity};

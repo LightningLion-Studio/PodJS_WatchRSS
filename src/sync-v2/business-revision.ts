@@ -18,7 +18,9 @@ export async function installBusinessRevision(db:ProjectionSql){
  for(const table of Object.keys(PROJECTION_SOURCE_TABLES))if(existing.has(table)){
   const columns=(await db.query('PRAGMA table_info('+table+')')).map(r=>String(r.name));
   if(columns.some(c=>!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c)))throw Error('unsupported_feature');
-  for(const op of ['INSERT','UPDATE','DELETE'])definitions.push(`CREATE TRIGGER IF NOT EXISTS syncv2_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${op==='UPDATE'?' WHEN '+columns.map(c=>'OLD.'+c+' IS NOT NEW.'+c).join(' OR '):''} BEGIN
+  // A local presence witness is not a memo attachment business field.
+  const projected=table==='memo_assets'?columns.filter(c=>c!=='local_sha256'):columns;
+  for(const op of ['INSERT','UPDATE','DELETE'])definitions.push(`CREATE TRIGGER IF NOT EXISTS syncv2_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${op==='UPDATE'?' WHEN '+projected.map(c=>'OLD.'+c+' IS NOT NEW.'+c).join(' OR '):''} BEGIN
  INSERT INTO business_sync_revision(id,epoch,revision) VALUES(1,lower(hex(randomblob(16))),1) ON CONFLICT(id) DO UPDATE SET epoch=CASE WHEN revision=9223372036854775807 THEN excluded.epoch ELSE epoch END,revision=CASE WHEN revision=9223372036854775807 THEN 1 ELSE revision+1 END;END`);
  }
  // The framework decides which definitions actually need replacement. Bind

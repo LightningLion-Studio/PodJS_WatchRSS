@@ -26,7 +26,7 @@ class Bytes {
 export function bytePair(){const a=new Bytes(),b=new Bytes();const close=async()=>{a.close();b.close();};const stream=(input:Bytes,output:Bytes):SyncByteStream=>({read:async max=>input.read(max),write:async bytes=>{if(output.closed)throw Error('closed');output.push(bytes);},close});return {phone:stream(a,b),watch:stream(b,a),close};}
 /** Host runtime for product TS, with real fsync files and the same SQLite DB for
  * receipts/business rows. This replaces Android service ports, never B2 logic. */
-export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fileRefs?:boolean;usableBytes?:number;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
+export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fileRefs?:boolean;usableBytes?:number;userId?:string;watchId?:string;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
  const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
  const nativeSql=new Database(join(root,'native.sqlite'));
  nativeSql.exec('PRAGMA synchronous=FULL; CREATE TABLE requests(scope TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(scope,id))');
@@ -92,11 +92,12 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const chunks=new VerifiedChunkStore((m,a)=>native(m,a),(m,a,b)=>native(m,a,b));const store=new BinaryStore(db);
  const kv=new Map<string,string>();const account=new WatchAccountStore({get:k=>kv.get(k)??null,set:(k,v)=>{kv.set(k,v);},remove:k=>{kv.delete(k);}});
  // Synthetic account only. No production tokens or keys.
- kv.set('state_json',JSON.stringify({userId:'b2-host',watchDeviceToken:'fixture',backendBaseUrl:'https://fixture.invalid'}));
- const accountScope=D('wrss.library-resume.v1/account',['https://fixture.invalid','b2-host']);
- const ports:BinaryApplicationPorts={b2Enabled:options.enabled??true,b2BooksEnabled:options.fileRefs,byteBridge:()=>true,localPermission:()=>true,store,chunks,files,account,deviceId:async()=>'watch',randomId:async()=>nonce(),now:()=>performance.now(),sleep};
+ const userId=options.userId??'b2-host',watchId=options.watchId??'watch';
+ kv.set('state_json',JSON.stringify({userId,watchDeviceToken:'fixture',backendBaseUrl:'https://fixture.invalid'}));
+ const accountScope=D('wrss.library-resume.v1/account',['https://fixture.invalid',userId]);
+ const ports:BinaryApplicationPorts={b2Enabled:options.enabled??true,b2BooksEnabled:options.fileRefs,byteBridge:()=>true,localPermission:()=>true,store,chunks,files,account,deviceId:async()=>watchId,randomId:async()=>nonce(),now:()=>performance.now(),sleep};
  const service=new BinaryApplicationService(ports);
- const repository={deviceId:async()=>'watch',configurePeer:()=>{}} as unknown as LibrarySessionRepository;
+ const repository={deviceId:async()=>watchId,configurePeer:()=>{}} as unknown as LibrarySessionRepository;
  function session(pair=bytePair()){
   const operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
   const radio={status:async()=>({permission:'granted',available:true,enabled:true}),listen:()=>operation({id:'listener'}),accept:()=>operation({id:'stream',remoteName:'host',remoteAddress:'host'}),close:async()=>{}} as unknown as RfcommPorts['radio'];

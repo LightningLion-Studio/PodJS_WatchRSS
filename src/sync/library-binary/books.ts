@@ -3,7 +3,7 @@ import type {SqlBookStore} from '../../books/store';
 import type {BookFileInfo} from '../../books/files';
 import {ContentSha256} from '@podjs/framework/content-sha256';
 
-import {BOOK_MAX_CHAPTERS,validateBookReading,validateBookShape,type BookReading,type BookState} from '../../books/protocol';
+import {BOOK_MAX_CHAPTERS,validateBook,validateBookReading,validateBookShape,type BookReading,type BookState} from '../../books/protocol';
 import {libraryRevision} from '../revision';
 import {D} from './digests';
 import {bookDescription,bookObject,BOOK_SEGMENT_BYTES,validateBookPlan} from './book-plan';
@@ -11,6 +11,8 @@ import {BodyJsonReader} from './article-file';
 import {BOOK_METADATA_BODY_BYTES,BOOK_METADATA_STRING_BYTES,BookMetadataRejected,bookSqlText,pagedBookBoundary} from './book-metadata';
 import {importBookPackage,type BinaryBookFiles} from './book-import';
 import type {BinaryStore,Job,ReceiptBoundary} from './store';
+import type {BoundLocalTransferIntake} from '../../sync-v2/local-transfer-intake';
+import type {SourceRecord} from '../../sync-v2/store';
 import {CHUNK_BYTES,HARD_LIMITS,fail,hash,utf8,type Kind,type Limits,type ObjectDescriptor} from './wire';
 
 export interface FrozenBookFile {path:string;offset:number}
@@ -23,7 +25,8 @@ const finalPath=(bookId:string,sha256:string)=>'books/'+bookId+'-'+sha256+'.json
 export class BinaryBooks {
  constructor(private readonly store:BinaryStore,private readonly books:()=>Promise<SqlBookStore|undefined>,
   private readonly files:BinaryBookFiles,private readonly chunks:VerifiedChunkStore,private readonly work:()=>void,
-  private readonly excluded:(kind:'bookState'|'bookReading',limit:BookMetadataRejected['limit'])=>void=()=>{}){}
+  private readonly excluded:(kind:'bookState'|'bookReading',limit:BookMetadataRejected['limit'])=>void=()=>{},
+  private readonly intake?:BoundLocalTransferIntake){}
 
  validate(d:ObjectDescriptor,limits:Limits=HARD_LIMITS){return bookDescription(d,limits);}
 
@@ -225,10 +228,13 @@ export class BinaryBooks {
    const state=await this.payload(d,path);
    validateBookShape(state);
    if(state.bookId!==id)fail('BUSINESS_REJECTED');
-   await repo.capture();
-   const {bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle}=state;
-   await repo.mergeBinaryState(state,pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),{
-    sql:'INSERT INTO library_binary_book_states VALUES(?,?,?,?)',params:[...key,id,JSON.stringify({bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle})],
+   const incoming=this.intake?await validateBook(state,repo.ports.sha256):state;
+   await this.write(job,d,boundary,[{kind:'book',logicalId:id,value:incoming}],async()=>{
+    await repo.capture();
+    const {bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle}=state;
+    await repo.mergeBinaryState(state,pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),{
+     sql:'INSERT INTO library_binary_book_states VALUES(?,?,?,?)',params:[...key,id,JSON.stringify({bookId,fingerprint,chapterCount,instanceId,deleted,lifecycle})],
+    });
    });
    return;
   }
@@ -241,17 +247,19 @@ export class BinaryBooks {
     if(item.bookId!==id||reading.length&&reading.at(-1)!.chapterIndex>=item.chapterIndex)fail('BUSINESS_REJECTED');
     reading.push(item);
    }
-   await repo.captureReading();
-   const first=reading[0]!.chapterIndex,last=reading.at(-1)!.chapterIndex,page=book.metadata.pageIndex;
-   // Interval ordering detects duplicates in either apply order. The unique
-   // chapter index is authoritative if two pages are retried concurrently.
-   const conflict=(await this.store.db.query(`SELECT 1 FROM library_binary_book_pages WHERE scope=? AND job_id=? AND book_id=?
-    AND ((page<? AND last_chapter>=?) OR (page>? AND first_chapter<=?)) LIMIT 1`,[...key,id,page,first,page,last])).length;
-   if(conflict)fail('BUSINESS_REJECTED');
-   await repo.mergeReadingBatch(reading,{capture:false,boundary:pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),guards:[
-    {sql:'INSERT INTO library_binary_book_pages VALUES(?,?,?,?,?,?)',params:[...key,id,page,first,last]},
-    ...reading.map(r=>({sql:'INSERT INTO library_binary_book_chapters VALUES(?,?,?,?)',params:[...key,id,r.chapterIndex]})),
-   ]});
+   await this.write(job,d,boundary,reading.map(value=>({kind:'book-reading',logicalId:id+':'+value.chapterIndex,value})),async()=>{
+    await repo.captureReading();
+    const first=reading[0]!.chapterIndex,last=reading.at(-1)!.chapterIndex,page=book.metadata.pageIndex;
+    // Interval ordering detects duplicates in either apply order. The unique
+    // chapter index is authoritative if two pages are retried concurrently.
+    const conflict=(await this.store.db.query(`SELECT 1 FROM library_binary_book_pages WHERE scope=? AND job_id=? AND book_id=?
+     AND ((page<? AND last_chapter>=?) OR (page>? AND first_chapter<=?)) LIMIT 1`,[...key,id,page,first,page,last])).length;
+    if(conflict)fail('BUSINESS_REJECTED');
+    await repo.mergeReadingBatch(reading,{capture:false,boundary:pagedBookBoundary(this.store.db,[...key,d.objectId],boundary),guards:[
+     {sql:'INSERT INTO library_binary_book_pages VALUES(?,?,?,?,?,?)',params:[...key,id,page,first,last]},
+     ...reading.map(r=>({sql:'INSERT INTO library_binary_book_chapters VALUES(?,?,?,?)',params:[...key,id,r.chapterIndex]})),
+    ]});
+   });
    return;
   }
   const m=book.metadata;
@@ -292,7 +300,7 @@ export class BinaryBooks {
   // The durable, whole-object-verified assembly is now the recovery source.
   for(const oid of m.segmentObjectIds)await this.removeArtifact(job,oid);
   try{
-   await repo.installBinaryPackage(info,state,stagedKey,visit=>importBookPackage(this.files,info,state,visit,this.work),
+   const install=()=>repo.installBinaryPackage(info,state,stagedKey,visit=>importBookPackage(this.files,info,state,visit,this.work),
     async()=>{
      boundary.check?.();
      await (boundary.transaction??(statements=>this.store.db.transaction(statements)))([...boundary.before,
@@ -301,10 +309,24 @@ export class BinaryBooks {
      if(info.path!==published)await this.files.durableCommit(info.path,published,info.size,info.sha256);
      return {...info,path:published};
     },pagedBookBoundary(this.store.db,[...key,d.objectId],boundary));
+   if(this.intake){
+    const full=await repo.transferState(id);
+    if(!full)fail('BUSINESS_REJECTED');
+    await this.write(job,d,boundary,[{kind:'book',logicalId:id,value:full}],install,info);
+   }else await install();
   }finally{
    // The row and file are kept for retry after a failed apply.
    if((await this.store.object(job,d.objectId)).receipt)await this.removeArtifact(job,d.objectId,published).catch(()=>{});
   }
+ }
+ private write(job:Job,d:ObjectDescriptor,boundary:ReceiptBoundary,records:SourceRecord[],apply:()=>Promise<void>,file?:BookFileInfo){
+  if(!this.intake)return apply();
+  return this.intake(async check=>{
+   const body=file?{size:file.size,sha256:file.sha256,read:async(offset:number,length:number)=>{this.work();return (await this.files.readBytes(file.path,offset,length)).bytes;}}:undefined;
+   await check({records,body,version:2,peer:job.description.phoneDeviceId,cursor:job.jobId+':'+d.objectId,check:boundary.check});
+   boundary.check?.();
+   return apply();
+  });
  }
  private async payload(d:ObjectDescriptor,path:string):Promise<unknown>{
   // Finalize has already verified the raw size and SHA-256 against the manifest.

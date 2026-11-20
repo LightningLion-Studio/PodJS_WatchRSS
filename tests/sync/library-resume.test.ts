@@ -6,6 +6,8 @@ import {ResumeStore} from '../../src/sync/library-resume/store';
 import {parseWireJson} from '../../src/sync/wire-json';
 import {libraryRevision} from '../../src/sync/revision';
 import {fixture,vectors,nonce} from '../helpers/library-resume-fixture';
+import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
+import {SYNC_V2_PRODUCT} from '../../src/sync-v2/gate';
 const bodyObject=vectors.objects.find(o=>o.kind==='articleBody')!;
 const rssObject=vectors.objects.find(o=>o.kind==='rssSource')!;
 test('Python-produced JSON conformance vectors cover every phase and preserve raw byte digests',()=>{
@@ -28,11 +30,14 @@ test('C lexical parser rejects duplicate/escaped keys, unsafe integers, floats a
  expect(()=>parseWireJson('{"action":"syncLibraryResume","x":1,"x":2}')).toThrow();
  expect(parseWireJson('{"action":"syncLibrary","x":1,"x":2}').x).toBe(2);
 });
-test('lost chunk ACK reconnects to durable missing ranges; apply business/receipt commit once',async()=>{
+test('with Sync v2 enabled, lost chunk ACK reconnects to durable missing ranges; apply business/receipt commit once',async()=>{
  const f=await fixture();try{
-  let c=f.connect({drop:'putChunk'});await c.phone.prepare();await c.phone.begin();expect((await c.phone.manifest()).success).toBe(true);
+  expect(SYNC_V2_PRODUCT.syncV2).toBe(true);
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000');
+  const intake:import('../../src/sync-v2/local-transfer-intake').BoundLocalTransferIntake=run=>guard.intake(guard.account,guard.deviceId,run);
+  let c=f.connect({drop:'putChunk',intake});await c.phone.prepare();await c.phone.begin();expect((await c.phone.manifest()).success).toBe(true);
   await expect(c.phone.put(0)).rejects.toThrow();await c.running;expect(f.native.stages).toBe(1);
-  c=f.connect();await c.phone.prepare('resume');expect((await c.phone.begin('resume')).epoch).toBe(2);
+  c=f.connect({intake});await c.phone.prepare('resume');expect((await c.phone.begin('resume')).epoch).toBe(2);
   const missing=await c.phone.missing(),item=(missing.result!.items as Row[]).find(o=>o.objectId===bodyObject.objectId)!;expect(item.missingRanges).toEqual([[1,bodyObject.chunkHashes.length]]);
   for(let i=1;i<bodyObject.chunkHashes.length;i++)expect((await c.phone.put(i)).success).toBe(true);
   const result=await c.phone.apply();expect(result.success).toBe(true);expect(result.result!.state).toBe('APPLIED');
@@ -43,6 +48,22 @@ test('lost chunk ACK reconnects to durable missing ranges; apply business/receip
   await c.pair.close();await c.running;
  }finally{f.sql.close();}
 },30000);
+
+test('with Sync v2 enabled, resume records a rollback-affected source without APPLIED',async()=>{
+ const f=await fixture();
+ try{
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000');
+  await guard.rollback();
+  const c=f.connect({intake:run=>guard.intake(guard.account,guard.deviceId,run)});
+  try{
+   await c.phone.prepare();await c.phone.begin();expect((await c.phone.manifest()).success).toBe(true);
+   expect((await c.phone.apply(rssObject.objectId)).error?.code).toBe('BUSINESS_REJECTED');
+   expect(await f.db.query('SELECT url FROM channels WHERE url=?',[rssObject.businessId])).toEqual([]);
+   expect(await f.db.query('SELECT receipt FROM library_resume_objects WHERE receipt IS NOT NULL')).toEqual([]);
+   expect((await guard.store.readState()).pendingChoice?.inboxKeys).toHaveLength(1);
+  }finally{await c.pair.close();await c.running;}
+ }finally{f.sql.close();}
+});
 test('business commit before lost APPLIED reply recovers the same receipt without another merge',async()=>{
  const f=await fixture();try{
   let c=f.connect({drop:'apply'});await c.phone.prepare();await c.phone.begin();await c.phone.manifest();await c.phone.stage();await expect(c.phone.apply()).rejects.toThrow();await c.running;

@@ -9,6 +9,7 @@ import {ResumeStore} from './store';
 import {ResumeAssets,type AssetHost} from './assets';
 import {D} from './digests';
 import {applyResumeObject,sourcePlan,resumeInventoryDigest} from './repository';
+import {noteAssetIntake,type LocalTransferIntake} from '../../sync-v2/local-transfer-intake';
 import {HARD_LIMITS,capability,text,fail,envelope,ResumeError,resumeError,type Capability,type Row} from './wire';
 
 export interface ResumeSessionPort {
@@ -22,7 +23,7 @@ interface Negotiation {peer:string;capability:Capability;account?:WatchAccountSt
  */
 export class ResumeApplicationService implements ResumeSessionPort {
  private readonly sessions=new WeakMap<object,Negotiation>();
- constructor(private readonly ports:{store:ResumeStore;chunks:VerifiedChunkStore;account:WatchAccountStore;repository:()=>Promise<SqlLibrarySessionRepository>;randomId:()=>Promise<string>;localPermission:()=>boolean;assetHost?:AssetHost;readFile:(path:string,size:number)=>Promise<Uint8Array>;changed?:()=>void;diagnostic?:(error:unknown)=>void}){}
+ constructor(private readonly ports:{store:ResumeStore;chunks:VerifiedChunkStore;account:WatchAccountStore;repository:()=>Promise<SqlLibrarySessionRepository>;randomId:()=>Promise<string>;localPermission:()=>boolean;assetHost?:AssetHost;readFile:(path:string,size:number)=>Promise<Uint8Array>;intake?:LocalTransferIntake;changed?:()=>void;diagnostic?:(error:unknown)=>void}){}
  async probe(request:Row,context:SyncActionContext):Promise<Row>{
   this.sessions.delete(context.session);
   if(!Array.isArray(request.supportedLibraryResumeVersions)||!request.supportedLibraryResumeVersions.includes(1)||!this.ports.localPermission())return {};
@@ -47,13 +48,27 @@ export class ResumeApplicationService implements ResumeSessionPort {
   const account=n.account,repository=await this.ports.repository(),watch=await repository.deviceId(),connectionId=await this.ports.randomId();
   const accountScope=D('wrss.library-resume.v1/account',[account.backendBaseUrl,account.userId]),scope=D('wrss.library-resume.v1/storage',[accountScope,n.peer,watch]);
   const check=()=>{context.checkCancelled?.();if(!this.ports.localPermission())fail('AUTH_REVOKED');};
+  const intake=this.ports.intake;
+  const protectAsset=intake?noteAssetIntake(run=>intake(account,watch,run),1,n.peer,check):undefined;
   const current=<T>(run:()=>Promise<T>)=>this.ports.account.withLibraryAccount(account,async()=>{check();const runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');await this.ports.store.observeClock(runtime.elapsedMillis);try{return await run();}catch(e){this.ports.diagnostic?.(e);throw resumeError(e);}});
   await current(()=>this.ports.store.exclusive(()=>this.ports.store.collect(scope,job=>this.ports.chunks.collect(D('wrss.library-resume.v1/native-scope',[scope,job.jobId]),true))));
   const owner=new LibraryResumeConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize:current,check,sleep:delay,randomId:this.ports.randomId,
+   protectNoteAsset:protectAsset?(job,object,stage,apply)=>{
+    let original:Promise<Uint8Array>|undefined;
+    const body={size:object.size,sha256:object.sha256,read:async(offset:number,length:number)=>{
+     check();const bytes=await (original??=stage().then(({path})=>this.ports.readFile(path,object.size)));
+     return bytes.subarray(offset,offset+length);
+    }};
+    return protectAsset({cursor:job.jobId+':'+object.objectId,logicalId:object.businessId,body},apply);
+   }:undefined,
    freeze:async()=>{check();const inventory=await repository.resumeFreeze(check);if(assets)inventory.assets=await assets.freeze();return {witness:{snapshotId:await this.ports.randomId(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0},inventory};},
    source:(w,s)=>sourcePlan(repository,this.ports.store,scope,w,s,assets?.read.bind(assets)),
    publish:(lease,object,d)=>d.kind==='noteAsset'&&assets?assets.publish(lease,object,d):this.ports.chunks.finalize(lease,object),
-   apply:(job,object,path,boundary)=>object.kind==='noteAsset'&&assets?assets.apply(object,path,boundary):applyResumeObject(repository,{read:this.ports.readFile},job,object,path,boundary),
+   apply:(job,object,path,boundary)=>{
+    if(object.kind==='noteAsset'&&assets)return assets.apply(object,path,boundary);
+    const files={read:this.ports.readFile};
+    return intake?intake(account,watch,protect=>applyResumeObject(repository,files,job,object,path,boundary,protect)):applyResumeObject(repository,files,job,object,path,boundary);
+   },
    // This first product port freezes subplans (0/0). A kind list alone
    // cannot attest that every operation in a global sequence range is covered.
    supportsRange:async()=>false,

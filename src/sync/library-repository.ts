@@ -628,5 +628,5 @@ export class SqlLibrarySessionRepository extends SqlLibraryCloudRepository {
   super(db,ports);
   if(this.books)this.bookActions=new BookSyncActions(this.db,this.books);
  }
- syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined);});}
+ syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck,check?:import('../sync-v2/local-transfer-intake').LocalTransferWrite){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined,check);});}
 }

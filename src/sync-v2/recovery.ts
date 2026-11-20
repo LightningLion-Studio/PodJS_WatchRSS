@@ -10,6 +10,7 @@ import {chunkedValues,INLINE_VALUE_BYTES,type WatchProjectionStore,type LocalCip
 import {CHUNKED_REF_KEY,chunkedRef} from '@podjs/framework/chunked-aead';
 import type {WatchSpaceStore} from './space-store';
 import {SEVEN_DAYS} from './eviction';
+import type {LegacyBodyArchive,LegacyBodyRef} from './legacy-body';
 export type RecoveryValue={kind:Kind;value:Record<string,any>;bodyRefs:string[]};
 export type RecoveryDelta={version:2;changes:({id:string;kind:'set';value:Record<string,any>}|{id:string;kind:'remove'})[];editBase:SyncState['editBase'];bodyRefs:string[]};
 export type RecoveryCopy={copyId:string;header:any;nonce:string;ciphertext:string};
@@ -68,15 +69,27 @@ export class WatchRecovery {
   * changes, recovery reference and pins commit at the prepared SQL snapshot.
   * Journal validity uses only the authenticated head and local business edits.
   * This entry must be invoked only after explicit choices/cloud confirmation. */
- async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];explicitCloudChoice:true;next:SyncState;statements:Statement[]}){
+ async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];explicitCloudChoice:true;next:SyncState;statements:Statement[];incomingBody?:LegacyBodyRef;incomingMetadata?:true}){
   if(input.explicitCloudChoice!==true)throw Error('choice_pending');const before=await this.projection.readState();checkCapture(before,input.capture);await this.checkRecords(before);
   const next={...input.next,recoveryCopies:[...before.recoveryCopies??[]],recoveryPins:[...before.recoveryPins??[]],recoveryClock:before.recoveryClock??0,recoveryEditPins:[...before.recoveryEditPins??[]]};
   // The caller cannot alter recovery references through next state.
   const delta=recoveryDelta(input.local,input.cloud,before.editBase,input.capturedKeys);
-  if(!before.keepDiscardedLocalChanges7Days||!delta.changes.length){await this.projection.choiceUpdate(before,next,input.statements,'choice_apply',input.next.stateVersion);return null;}
+  const incomingBody=input.incomingBody;
+  if(incomingBody){
+   const id=input.capturedKeys?.[0],record=id?input.local[id]:undefined;
+   if(input.capturedKeys?.length!==1||!id||!record||!['book','article','asset'].includes(record.kind)||delta.bodyRefs.length)throw Error('closure_incomplete');
+   if(!delta.changes.length)delta.changes.push({id,kind:'set',value:recoveryBusiness(record.kind,record.value)});
+  }
+  if(!before.keepDiscardedLocalChanges7Days||!delta.changes.length&&!incomingBody){
+   const statements=incomingBody?[...input.statements,this.projection.legacyBodies.drop(incomingBody)]:input.statements;
+   await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);return null;
+  }
   const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0)||now>Number.MAX_SAFE_INTEGER-SEVEN_DAYS)throw Error('clock_unknown');
   const copyId=await this.ports.randomId();hexId(copyId,32);if(next.recoveryCopies.some(c=>c.copyId===copyId)||next.recoveryPins.some(p=>p.copyId===copyId))throw Error('idempotency_conflict');
-  const sources=await this.ports.source(delta.bodyRefs,delta.changes);if(canonical(sources.map(s=>s.oid).sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
+  if(incomingBody)await this.projection.legacyBodies.verify(incomingBody);
+  // The separately authenticated transport bytes have no cloud recipe. Every
+  // ordinary recipe named by the recovery delta still requires its closure.
+  const sources=(incomingBody||input.incomingMetadata)&&!delta.bodyRefs.length?[]:await this.ports.source(delta.bodyRefs,delta.changes);if(canonical(sources.map(s=>s.oid).sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
   let worst=jsonBytes(delta).length*3+16384;for(const source of sources){uint(source.size);if(source.size>266264)throw Error('object_too_large');worst+=source.size*3+16384;}
   const release=await this.ports.reserve(worst),resources:Resource[]=[],files:RecoveryFile[]=[];let committed=false;
   try{
@@ -87,11 +100,11 @@ export class WatchRecovery {
      files.push({oid:source.oid,path,offset:at,length,storedBytes:data.length});
     }if(source.oid.split(':sha256:')[1]!==hash.finish())throw Error('hash_mismatch');
    }
-   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid},chunkGuards:Statement[]=[],copy=await this.seal(header,delta,chunkGuards);
+   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid,...(incomingBody?{incomingBody}:{})},chunkGuards:Statement[]=[],copy=await this.seal(header,delta,chunkGuards);
    if(canonical(await this.read(copy))!==canonical(delta))throw Error('storage_error');
    // Body files are durable before state CAS. Uncommitted files carry no pin.
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
-   const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
+   const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,...(incomingBody?this.projection.legacyBodies.guard(incomingBody):[]),this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
    await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);committed=true;return copy;
   }finally{await this.cache.unstage(resources);await release();if(!committed)try{await this.cache.collect();}catch{}}
  }
@@ -102,14 +115,17 @@ export class WatchRecovery {
   const expired=(before.recoveryCopies??[]).filter(c=>c.header.expiresAtMillis<=trustedNow),ids=new Set(expired.map(c=>c.copyId));
   const next={...before,recoveryClock:trustedNow,recoveryCopies:(before.recoveryCopies??[]).filter(c=>!ids.has(c.copyId)),recoveryPins:(before.recoveryPins??[]).filter(p=>!ids.has(p.copyId))};
   const statements:Statement[]=[];for(const id of ids){statements.push(this.cache.journal.detach('recovery:'+id),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'recovery:'+id]});}
+  for(const copy of expired)if(copy.header.incomingBody)statements.push(this.projection.legacyBodies.drop(copy.header.incomingBody));
   statements.push(this.sweep(next));await this.projection.controlUpdateStable(before,next,statements);await this.releaseAcknowledgedEdits();const freed=await this.cache.collect();return {purged:expired.length,...freed};
  }
  /** Explicit user restore creates new pending edits under the current account.
   * The prepare callback returns SQL only; it must not mutate before the CAS. */
- async restoreAsEdits(copyId:string,prepare:(delta:RecoveryDelta)=>Promise<Statement[]>){
+ async restoreAsEdits(copyId:string,prepare:(delta:RecoveryDelta,archive?:LegacyBodyArchive)=>Promise<Statement[]>){
   const before=await this.projection.readState();await this.checkRecords(before);const copy=before.recoveryCopies?.find(c=>c.copyId===copyId);if(!copy||!before.account)throw Error('object_missing');const delta=await this.read(copy);
   for(const ref of delta.bodyRefs)await this.readBody(copy,ref);
-  const statements=await prepare(delta),revision=nextD64(before.localChangeRevision),next={...before,localChangeRevision:revision,hasUnsentEdits:true,recoveryEditPins:[...before.recoveryEditPins??[]],editBase:before.hasUnsentEdits||before.pendingChoice?before.editBase:{accountOid:before.account.oid,generation:before.account.generation}};
+  const ref=copy.header.incomingBody as LegacyBodyRef|undefined;
+  const archive:LegacyBodyArchive|undefined=ref?{ref,read:visit=>this.projection.legacyBodies.verify(ref,visit)}:undefined;
+  const statements=await prepare(delta,archive),revision=nextD64(before.localChangeRevision),next={...before,localChangeRevision:revision,hasUnsentEdits:true,recoveryEditPins:[...before.recoveryEditPins??[]],editBase:before.hasUnsentEdits||before.pendingChoice?before.editBase:{accountOid:before.account.oid,generation:before.account.generation}};
   if(delta.bodyRefs.length){
    const row=await this.cache.journal.row('recovery:'+copyId);if(!row)throw Error('object_missing');
    const files:RecoveryFile[]=await this.cache.cipher.open(this.cache.aad('recovery-files:'+copyId),row.value),editId=digest({copyId,revision});

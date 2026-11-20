@@ -14,6 +14,7 @@ import {D,requestDigest,offerDigest,preparationDigest,selectionDigest,planDigest
 import {ResumeError,HARD_LIMITS,CHUNK_BYTES,hash,type Row,type Envelope,type ObjectDescriptor,type Capability,type Selection,type BeginPayload,type Binding,type Snapshot} from '../../src/sync/library-resume/wire';
 import vectors from '../fixtures/library-resume-v1.json';
 import type {SyncFrameConnection} from '../../src/sync/session';
+import type {BoundLocalTransferIntake,LocalTransferWrite} from '../../src/sync-v2/local-transfer-intake';
 export {vectors};
 export const nonce=()=>randomBytes(16).toString('hex');
 class Queue {
@@ -64,9 +65,13 @@ export async function fixture(){
  const parseUri=async(value:string)=>{try{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}catch{return {valid:false,scheme:null,host:null,rawPath:null,rawQuery:null};}};
  const repository=new SqlLibrarySessionRepository(db,{codec:{sha256:async b=>hash(b),encode:async b=>new Uint8Array(gzipSync(Buffer.from(encodeBodyJson(b)))),decode:async b=>gunzipSync(b).toString()},files:{storeText:async(_k,v)=>v,hydrate:async v=>v},text:{parseUri,htmlText:async html=>html.replace(/<[^>]+>/g,'')},uri:{parseUri,parseAndroid:parseUri},migrateReading:async()=>{},cleanupRemovedContent:async()=>{}});
  const cap:Capability={version:1,kinds:[{kind:'articleBody',schemaVersion:1,send:true,receive:true},{kind:'articleMetadata',schemaVersion:1,send:true,receive:true},{kind:'rssSource',schemaVersion:1,send:true,receive:true}],limits:{...HARD_LIMITS}};
- const connect=(options:{drop?:string;source?:ResumePorts['source'];receive?:(frame:Row)=>Row}={})=>{
+ const connect=(options:{drop?:string;source?:ResumePorts['source'];receive?:(frame:Row)=>Row;intake?:BoundLocalTransferIntake}={})=>{
   const pair=frames();if(options.receive){const read=pair.watch.readFrame.bind(pair.watch);pair.watch.readFrame=async timeout=>options.receive!(await read(timeout));}let dropped=false;const original=pair.watch.writeFrame.bind(pair.watch);pair.watch.writeFrame=async frame=>{if(!dropped&&frame.type==='response'&&frame.success&&frame.phase===options.drop){dropped=true;await pair.close();throw Error('reply lost');}return original(frame);};
   const ports:ResumePorts={store,chunks,capability:cap,accountScope:vectors.accountScope,phoneDeviceId:vectors.phoneDeviceId,watchDeviceId:vectors.watchDeviceId,connectionId:nonce(),authorize:async run=>run(),check:()=>{},sleep:ms=>{let timer:ReturnType<typeof setTimeout>;return {result:new Promise<void>(resolve=>{timer=setTimeout(resolve,ms);}),cancel:()=>clearTimeout(timer!)};},randomId:async()=>nonce(),freeze:async()=>({witness:vectors.watchSnapshot,inventory:{}}),source:options.source??(async()=>({objects:[],read:async()=>new Uint8Array()})),apply:(j,d,path,b)=>applyResumeObject(repository,{read:async(path,size)=>{const v=native.files.get(path);if(!v||v.length!==size)throw Error('LOCAL_IO');return v;}},j,d,path,b),supportsRange:async()=>true};
+  if(options.intake)ports.apply=(j,d,path,b)=>{
+   const apply=(check:LocalTransferWrite)=>applyResumeObject(repository,{read:async(path,size)=>{const v=native.files.get(path);if(!v||v.length!==size)throw Error('LOCAL_IO');return v;}},j,d,path,b,check);
+   return options.intake!(apply);
+  };
   const server=new LibraryResumeConnection(ports,pair.watch),errors:unknown[]=[];const running=pair.watch.readFrame(120000).then(first=>server.run(first)).catch(e=>{errors.push(e);});const phone=new Peer(pair.phone,cap);
   return {phone,server,pair,running,errors,ports};
  };

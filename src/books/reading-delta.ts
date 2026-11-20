@@ -4,7 +4,7 @@ import {libraryRevision,revisionGuard} from '../sync/revision';
 import {querySyncPages} from '../sync/sql-pages';
 import {canonical} from '../cloud/records';
 import type {SqlBookStore} from './store';
-import {validateBookReading} from './protocol';
+import {validateBookReading,type BookReading} from './protocol';
 import {readingLeafHash,readingBookRoot,readingRoot,validateReadingSummary,type ReadingSummary,type ReadingEntry} from './reading-hash';
 export type AfterReadingAck=(commit:()=>Promise<void>)=>void;
 interface Window {id:string;peer:string;local:ReadingSummary;remote:ReadingSummary;from:number;remoteFrom:number;entries:ReadingEntry[];outAfter:number;remoteLast:number;done:boolean;batch:number;equal:boolean;last?:{signature:string;response:JsonObject}}
@@ -38,7 +38,7 @@ export class BookReadingDelta {
   throw Error('book_reading_changed_repeatedly');
  }
  async entries(from:number,to:number):Promise<ReadingEntry[]>{return (await querySyncPages(this.db,'SELECT h.seq,h.state_json FROM sync_book_reading_history h WHERE h.seq>? AND h.seq<=? AND NOT EXISTS(SELECT 1 FROM sync_book_reading_history newer WHERE newer.book_id=h.book_id AND newer.chapter_index=h.chapter_index AND newer.seq>h.seq AND newer.seq<=?) ORDER BY h.seq',[from,to,to])).map(r=>({seq:Number(r.seq),state:JSON.parse(String(r.state_json))}));}
- async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck,protect?:(reading:readonly BookReading[])=>Promise<void>):Promise<JsonObject>{
   const peer=String(request.deviceId),base={success:true,action:'syncBooks',version:1,phase:request.phase};
   if(request.phase==='readingSummary'){
    validateReadingSummary(request.summary);requireThat(safe(request.ackedLocalSeq));const remote=request.summary,local=await this.summary(),known=request.knownRemote as {epoch:string;seq:number}|null;
@@ -60,7 +60,8 @@ export class BookReadingDelta {
    const signature=canonical(request);if(request.batchIndex===window.batch-1&&window.last?.signature===signature)return {...window.last.response,applied:0};
    requireThat(request.batchIndex===window.batch&&request.after===window.outAfter&&(!window.done||request.done===true&&(request.entries as unknown[]).length===0));
    let last=window.remoteLast;const entries=request.entries as unknown as ReadingEntry[];for(const e of entries){requireThat(e&&safe(e.seq)&&e.seq>last&&e.seq<=window.remote.seq);validateBookReading(e.state);last=e.seq;}
-   const applied=await this.store.mergeReadingBatch(entries.map(e=>e.state)),after=request.after as number,states=window.entries.slice(after,after+100),nextAfter=after+states.length;
+   const reading=entries.map(e=>e.state);await protect?.(reading);
+   const applied=await this.store.mergeReadingBatch(reading),after=request.after as number,states=window.entries.slice(after,after+100),nextAfter=after+states.length;
    const response={...base,windowId:window.id,entries:states,nextAfter,hasMore:nextAfter<window.entries.length,applied};window.remoteLast=last;window.done=request.done===true;window.outAfter=nextAfter;window.batch++;window.last={signature,response};return response;
   }
   requireThat(request.phase==='readingCommit'&&window.done&&window.outAfter===window.entries.length&&request.receivedSeq===window.local.seq&&request.sentSeq===window.remote.seq&&typeof request.mergedRoot==='string'&&!!afterAck);

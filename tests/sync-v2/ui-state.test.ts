@@ -6,6 +6,7 @@ import {test,expect} from 'bun:test';
 import {p5Fixture,dirtyRollback} from './p5-fixture';
 import {watchSyncV2UiState,type SyncV2StateReader,type ChoicePreview} from '../../src/sync-v2/ui-state';
 import {initialState,type SyncState} from '../../src/sync-v2/state';
+import {canonical} from '../../src/sync-v2/protocol';
 import type {WatchAccountControl} from '../../src/sync-v2/account-control';
 
 const ACCOUNT_OID='commit:sha256:'+'a'.repeat(64);
@@ -104,7 +105,7 @@ test('awaiting_choice: kind=rollback, counts vs cloud tree and baseline, canMerg
 });
 
 test('awaiting_choice: kind=concurrent; add and delete entry kinds; unchanged rows not counted',async()=>{
- const state=awaitChoiceState({rollbackGeneration:'1',editBase:{accountOid:ACCOUNT_OID,generation:'1'},pendingChoice:{generation:'1',inboxKeys:['legacy-1']}});
+ const state=awaitChoiceState({rollbackGeneration:'1',editBase:{accountOid:ACCOUNT_OID,generation:'1'},pendingChoice:{generation:'1',inboxKeys:[]}});
  const {projection}=fakeProjection({state,candidates:[
   {entityKey:'e-a',title:'fresh',markdown:'mine'},// not in cloud, not in base -> add
   {entityKey:'e-b',title:'gone',markdown:'mine',deleted:true},// locally deleted -> delete
@@ -270,6 +271,28 @@ test('P5 rollback choice: canMerge=false reason comes from the real planner and 
   expect(json).not.toContain('local\ntext');
   expect(json).not.toContain('ancestor');
   expect(json).not.toContain((await f.projection.readState()).account!.oid);
+ }finally{f.close();}
+});
+
+test('the existing choice screen confirms one protected input and preserves the next',async()=>{
+ const f=await p5Fixture();
+ try{
+  await dirtyRollback(f);
+  const {fromWire}=await import('../../src/sync-v2/business');
+  const [row]=await f.projection.candidatePage();
+  const {meta,state}=row!.candidate;
+  const value=fromWire(meta.kind,meta.payload,state.payload);
+  const input={peer:'watch-test-peer',version:14 as const,entityKeys:[row!.entityKey]};
+  for(const cursor of ['first','second']){
+   await f.projection.receiveLegacy({...input,cursor,body:{[row!.entityKey]:{identity:meta.logicalId,...value,title:'Incoming '+cursor}}},null);
+  }
+  const ui=p5Adapter(f),preview=await ui.openChoice();
+  expect(preview.local).toEqual([{title:'Incoming first',kind:'edit'}]);
+  await ui.chooseCloud(preview);
+  const remaining=await f.projection.readStableState();
+  expect(remaining.pendingChoice?.inboxKeys).toEqual([canonical([input.peer,14,'second'])]);
+  expect(remaining.applied[input.peer]).toBeUndefined();
+  expect((await ui.openChoice()).local).toEqual([{title:'Incoming second',kind:'edit'}]);
  }finally{f.close();}
 });
 

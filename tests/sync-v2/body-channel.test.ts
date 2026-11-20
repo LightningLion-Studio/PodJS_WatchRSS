@@ -12,6 +12,7 @@ import {toWire} from '../../src/sync-v2/business';
 import {refreshNoteAssets,NOTE_ASSET_SCHEMA} from '../../src/sync-v2/note-assets';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {SqlFixture,idKey} from './fixture';
+import {businessRevision,installBusinessRevision} from '../../src/sync-v2/business-revision';
 const anchor={commitOid:'commit:sha256:'+'a'.repeat(64),revision:'1',rollbackGeneration:'0'},author='a'.repeat(32);
 async function prepared(kind:'asset'|'book'='asset',raw=new Uint8Array(180000).fill(42),logicalId=kind==='asset'?'image.png':'b'.repeat(64)){
  const entity='c'.repeat(64),binding={kind,logicalId,entityKey:entity,bodyRevision:carrierBodyRevision(kind,entity,sha256Hex(raw))};
@@ -102,6 +103,21 @@ test('asset metadata uses the Markdown storage key and survives a missing attach
  const source=await SqlBusinessSource.open(f),rows=[];let after='';for(;;){const page=await source.page(after,32);rows.push(...page.rows);if(page.done)break;after=page.after;}
  expect(rows.find(r=>r.kind==='asset')).toMatchObject({logicalId:'image.png',value:{assetId:'image.png',originalFilename:'image.png',mime:'image/png',deleted:false}});
  }finally{f.close();}});
+test('only the exact cloud attachment hash is adopted without a new business revision',async()=>{
+ const f=new SqlFixture();
+ try{
+  await f.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:"INSERT INTO memo_assets VALUES('image.png','image/png','image.png',1,'phone',0,0,'')"}]);
+  await installBusinessRevision(f);
+  const before=await businessRevision(f),raw=new Uint8Array([1,2,3]);
+  const repository={cloudNotes:async()=>({notes:[],assetKeys:['image.png']}),cloudNoteAsset:async()=>raw};
+  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async(_id,hash)=>hash===sha256Hex(raw))).toEqual([]);
+  expect(await businessRevision(f)).toEqual(before);
+  expect(await f.query('SELECT updated_at,source_device_id,local_sha256 FROM memo_assets')).toEqual([{updated_at:1,source_device_id:'phone',local_sha256:sha256Hex(raw)}]);
+  raw[0]=9;
+  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async()=>false)).toEqual([]);
+  expect(await businessRevision(f)).not.toEqual(before);
+ }finally{f.close();}
+});
 test('product publishes authoritative note/asset state despite closed body_write, with an explicit body error',async()=>{
  const {fixture}=await import('./p6-fix-fixture'),{openApplicationSyncV2}=await import('../../src/sync-v2/application-open'),{serviceInfo}=await import('./p2-fixture');
 

@@ -40,6 +40,7 @@ import {digest,canonical} from './protocol';
 import {unhex} from '@podjs/framework/crypto';
 import {TrustedClock} from './trusted-time';
 import {articleBodyResolver} from './article-body';
+import {carrierBodyRevision} from './body-channel-codec';
 import type {SyncV2UiStateOptions} from './ui-state';
 import {WatchAccountBusinessSql} from './account-business';
 import {accountBodyVerifier} from './account-body';
@@ -53,7 +54,7 @@ import {watchSpaceV2} from './space-runtime';
 
 /** Product assembly over the original v1 library and authenticated account.
  * The caller serializes this opener after v1 releases its writer lease. */
-export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;now?:()=>number;clock?:TrustedClock}){
+export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock}){
  const {account,repository}=options,lifetime=options.lifetime??new SyncV2Lifetime();
  // Retain the writer lease through SQL. Read/crypto/network waits can unwind
  // immediately; their late results cannot cross another guarded IO boundary.
@@ -90,10 +91,18 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  const rawBodyRepository=repository.cloudNotes&&repository.cloudNoteAsset&&repository.mergeCloudNoteAsset&&repository.cloudBookBody&&repository.receiveCloudBook?bodyChannelRepository(repository as BodyRepository):undefined;
  const bodyRepository=rawBodyRepository?{...rawBodyRepository,install:async(...args:Parameters<typeof rawBodyRepository.install>)=>{await assertCurrent();const install=()=>rawBodyRepository.install(...args);await (options.bodyInstall?options.bodyInstall(install):install());await assertCurrent();}}:undefined;
  let bodyError:string|null=null;
- const refreshAssets=async()=>{if(repository.cloudNotes&&repository.cloudNoteAsset){const errors=await refreshNoteAssets(projectionSql(guardedHost),repository as BodyRepository,options.legacyDeviceId,options.now??Date.now);bodyError=errors[0]??null;}};
- await refreshAssets();
  localFactory=watchLocalProjection({enabled:true,host:guardedHost,identity,descriptor:fetched.descriptor,scope:fetched.scope,libraryId,accountScope,metadata:repository});
   const local=await localFactory.open();if(!local)throw Error('feature_disabled');
+  const refreshAssets=async()=>{
+   if(!repository.cloudNotes||!repository.cloudNoteAsset)return;
+   const state=await local.store.readState(),current=state.cloud?.current;
+   const errors=await refreshNoteAssets(projectionSql(guardedHost),repository as BodyRepository,options.legacyDeviceId,options.now??Date.now,async(id,hash)=>{
+    if(!state.account||current?.commitOid!==state.account.oid)return false;
+    const entity=local.store.entityKeyFor('asset',id),entry=await local.store.cloudRow(current.treeRoot,entity);
+    return entry?.meta.kind==='asset'&&entry.meta.logicalId===id&&!entry.row.deleted&&entry.row.bodyRevision===carrierBodyRevision('asset',entity,hash);
+   });
+   bodyError=errors[0]??null;
+  };
   const crypto=createSyncV2Crypto(guardedHost),current=await content.current(),keys={id:unhex(installed.idKeyHex),content:current.key,version:current.version,readContentKey:async(v:number)=>(await content.at(v)).key};
   held.add(keys.id);
   const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:id=>repository.cloudArticleBody(id)}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
@@ -106,7 +115,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const engine=new WatchContentEngine(store,new WatchContentHttp(runtime.http,crypto,options.now??Date.now,true),crypto,keys,{source:async()=>{throw Error('feature_disabled');},approved:runtime.approved,alias:'',assertCurrent:async()=>{await assertCurrent();},signals:async()=>ports.signals(false),yieldControl:()=>guardedHost('runtime.delay',{milliseconds:1})});
   const space=await watchSpaceV2({enabled:true,host:guardedHost,projection:local.store,content:engine,accountScope,trustedNow:()=>clock.now()});if(!space)throw Error('feature_disabled');
   const business=new WatchAccountBusinessSql(db,local.store,fetched.scope,keys.id,space.closures,accountBodyVerifier(runtime.http,crypto,keys,runtime.approved),space.recovery.ports.reserve);await business.initialize();
-  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now(),preserveStalePublication:true});
+  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now(),preserveStalePublication:true,prepareArchivedBook:options.prepareArchivedBook});
   const recoverConflict=async()=>{
    // Confirm the same immutable request first. Only a recorded CAS rejection
    // authorizes refreshing the winning identity/account and retiring its journal.

@@ -18,6 +18,7 @@ export interface ResumePorts {
  source(witness:Snapshot,selection:Selection):Promise<ResumeSourcePlan>;
  apply(job:Job,object:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>;
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor):Promise<VerifiedPublication>;
+ protectNoteAsset?(job:Job,object:ObjectDescriptor,stage:()=>Promise<VerifiedPublication>,apply:()=>Promise<void>):Promise<void>;
  supportsRange?(p:BeginPayload):Promise<boolean>;
  applied?():void;
  diagnostic?(error:unknown):void;
@@ -173,8 +174,15 @@ export class LibraryResumeConnection {
  private async apply(j:Job,r:Envelope):Promise<Row>{
   if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){await this.ports.store.db.transaction([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
-  const final=await (this.ports.publish?this.ports.publish(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),o.descriptor):this.ports.chunks.finalize(j.lease as unknown as ObjectLease,nativeObject(o.descriptor)));this.check();
-  await this.ports.apply(j,o.descriptor,final.path,this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check()));this.check();
+  const lease=j.lease as unknown as ObjectLease,object=nativeObject(o.descriptor);
+  const stage=()=>this.ports.chunks.finalize(lease,object);
+  const apply=async()=>{
+   const final=await (this.ports.publish?this.ports.publish(lease,object,o.descriptor):stage());this.check();
+   await this.ports.apply(j,o.descriptor,final.path,this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check()));
+  };
+  if(o.descriptor.kind==='noteAsset'&&this.ports.protectNoteAsset)await this.ports.protectNoteAsset(j,o.descriptor,stage,apply);
+  else await apply();
+  this.check();
   const saved=await this.ports.store.object(j,o.descriptor.objectId);if(!saved.receipt)fail('RECEIPT_CONFLICT');
   // Business commit is authoritative. Cleanup is repeatable and cannot revoke it.
   try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource'].includes(o.descriptor.kind));}catch{}

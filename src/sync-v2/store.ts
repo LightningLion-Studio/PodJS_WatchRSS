@@ -12,12 +12,15 @@ import {sha256Hex} from '@podjs/framework/crypto';
 import {CHUNKED_AEAD_BLOCK_BYTES,CHUNKED_REF_KEY,SQL_CHUNKED_VALUE_SCHEMA,SqlChunkedValues,chunkedRef,type AeadBlockPort,type ChunkedValueRef} from '@podjs/framework/chunked-aead';
 import {readBoundedKeysetBatch,commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {canonical,canonicalLegacy,jsonBytes,parseCanonicalJson,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
-import {candidates} from './business';
+import {candidates,toWire} from './business';
+import {carrierBodyRevision} from './body-channel-codec';
 import {ProjectionGate} from './gate';
 import {UNOPENABLE_NOTES_SCHEMA,unopenableNotesStatements} from './note-rows';
 import {arrayRecordFeed,arrayStatementFeed,feedPages,type RecordFeed,type StatementFeed} from './record-feed';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {publicationCurrent,queuedReadOnly,initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
+import {LEGACY_BODY_SCHEMA,WatchLegacyBody,type LegacyBodyRef,type LegacyBodySource} from './legacy-body';
+import type {LocalTransferInput} from './local-transfer-intake';
 /** open authenticates with an existing key; it must never persist a new key. */
 export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>;
  /** N1: bounded single-call AES-GCM under the same key, for values stored as
@@ -59,6 +62,7 @@ export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AU
  `CREATE INDEX IF NOT EXISTS syncv2_outbox_scope ON syncv2_outbox(scope,seq)`,
  `CREATE TABLE IF NOT EXISTS syncv2_control(id INTEGER PRIMARY KEY CHECK(id=1),scope TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_legacy_inbox(scope TEXT NOT NULL,inbox_key TEXT NOT NULL,input_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,inbox_key))`,
+ LEGACY_BODY_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_note_bindings(scope TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,entity_key))`,
  `CREATE TABLE IF NOT EXISTS syncv2_write_gates(scope TEXT PRIMARY KEY,history_restore INTEGER NOT NULL CHECK(history_restore IN (0,1)),choice_apply INTEGER NOT NULL CHECK(choice_apply IN (0,1)),control_revision TEXT NOT NULL DEFAULT '0')`,
  UNOPENABLE_NOTES_SCHEMA,
@@ -82,21 +86,22 @@ export class WatchProjectionStore {
  private legacyAdapter?:WatchEquivalentLegacy;
  private cloudCache:SqlAuthenticatedCache<any>;
  private readonly stateJournal:SqlStateJournal<SyncState>;
+ readonly legacyBodies:WatchLegacyBody;
  /** Candidate options every builder (scan, follow, choice, recovery) must share. */
  segmentOptions(){return {noteSegments:this.options.noteSegments===true};}
- constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean}={}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(async()=>{this.key.fill(0);await stopExistingProjection(this.db);});
+ constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean;localIntake?:boolean}={}){
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);this.legacyBodies=new WatchLegacyBody(db,cipher,this.scopeKey);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(async()=>{this.key.fill(0);if(!this.options.localIntake)await stopExistingProjection(this.db);});
  }
  entityKeyFor(kind:Kind,logicalId:string){this.gate.require();return entityKey(this.key,this.scope.repoId,kind,logicalId);}
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
- private chunks(kind:'candidate'|'cloud-row'|'edit-base'){return chunkedValues(this.db,this.cipher,this.scopeKey+'#'+kind);}
+ private chunks(kind:'candidate'|'cloud-row'|'edit-base'|'legacy'){return chunkedValues(this.db,this.cipher,this.scopeKey+'#'+kind);}
  /** Seals one value; above INLINE_VALUE_BYTES its blocks are written first
   * (content-addressed version) and `statements` must commit with the row. */
- private async sealSpilled(kind:'candidate'|'edit-base',owner:string,aad:string,value:unknown):Promise<{body:string;statements:Statement[];ref?:ChunkedValueRef}>{
+ private async sealSpilled(kind:'candidate'|'edit-base'|'legacy',owner:string,aad:string,value:unknown):Promise<{body:string;statements:Statement[];ref?:ChunkedValueRef}>{
   const raw=jsonBytes(value);if(raw.length<=INLINE_VALUE_BYTES)return {body:await this.cipher.seal(aad,value),statements:this.cipher.blocks?[this.chunks(kind).keepOnly(owner,null)]:[]};
   const store=this.chunks(kind),ref=await store.write(owner,sha256Hex(raw),aad,raw);return {body:await this.cipher.seal(aad,{[CHUNKED_REF_KEY]:ref}),statements:[...store.guard(ref),store.keepOnly(owner,ref.version)],ref};
  }
- private async openSpilled(kind:'candidate'|'edit-base',owner:string,aad:string,body:string){
+ private async openSpilled(kind:'candidate'|'edit-base'|'legacy',owner:string,aad:string,body:string){
   const value=await this.cipher.open(aad,body),ref=chunkedRef(value);if(!ref)return value;if(ref.owner!==owner)throw Error('authentication_required');
   return parseCanonicalJson(await this.chunks(kind).read(ref,aad));
  }
@@ -170,7 +175,7 @@ export class WatchProjectionStore {
   return state;
  }
  private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&(state.cloud?.pendingPublish?.explicit||state.cloud?.pendingCloudChoice))||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
-  try{await commitSqlCas(db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
+  try{await commitSqlCas(db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND (enabled=1 OR ?=1)) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,this.options.localIntake?1:0,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
   * Preparation runs outside SQL; all prepared statements commit at this CAS. */
@@ -339,17 +344,30 @@ export class WatchProjectionStore {
  }
  async legacyChoiceEntry(key:string){
   const row=(await this.db.query('SELECT input_hash,body FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,key]))[0];if(!row)throw Error('choice_stale');
-  const entry=await this.cipher.open(this.aad('legacy',key),String(row.body)),{route,applied,...original}=entry;
-  if(!(route==='discarded-for-cloud'&&entry.discardedInputHash===row.input_hash)&&digest(original)!==row.input_hash)throw Error('idempotency_conflict');return {entry,inputHash:String(row.input_hash)};
+  const entry=await this.openSpilled('legacy',digest(key),this.aad('legacy',key),String(row.body)),{route,applied,...original}=entry;
+  if(!(route==='discarded-for-cloud'&&entry.discardedInputHash===row.input_hash)&&legacyInputHash(original)!==row.input_hash)throw Error('idempotency_conflict');return {entry,inputHash:String(row.input_hash)};
  }
  async prepareLegacyDecision(before:SyncState,key:string,route:'discarded-for-cloud'|'resolve-local'){
   const selected=await this.legacyChoiceEntry(key);checkCapture(before,captureChoice(before,before.account!),key);if(selected.entry.route!=='pendingChoice'||selected.entry.applied)throw Error('choice_stale');
-  const rows=await this.db.query('SELECT inbox_key FROM syncv2_legacy_inbox WHERE scope=? ORDER BY rowid',[this.scopeKey]),entries=[];for(const row of rows)entries.push({key:String(row.inbox_key),...(await this.legacyChoiceEntry(String(row.inbox_key)))});
-  const value={...selected.entry,route,applied:route==='resolve-local'};if(route==='discarded-for-cloud'){value.body='{}';value.bodyRefsByEntity={};value.discardedInputHash=selected.inputHash;}
+  const rows=await this.db.query('SELECT inbox_key FROM syncv2_legacy_inbox WHERE scope=? ORDER BY rowid',[this.scopeKey]);
+  const value={...selected.entry,route,applied:route==='resolve-local'};if(route==='discarded-for-cloud'){value.body='{}';value.bodyRefsByEntity={};delete value.transferBody;value.discardedInputHash=selected.inputHash;}
   const next=JSON.parse(canonical(before)) as SyncState,remaining=next.pendingChoice!.inboxKeys.filter(k=>k!==key);next.pendingChoice=remaining.length||before.hasUnsentEdits&&before.editBase.generation!==before.rollbackGeneration?{...next.pendingChoice!,inboxKeys:remaining}:null;
-  const streams=new Map<string,typeof entries>();for(const e of entries){const stream=canonical([e.entry.peer,e.entry.version]);const list=streams.get(stream)??[];list.push(e.key===key?{...e,entry:value}:e);streams.set(stream,list);}
-  for(const [stream,list]of streams){let cursor:string|undefined;for(const e of list){if(!e.entry.applied)break;cursor=e.entry.cursor;}if(cursor!==undefined)next.applied[stream]=cursor;const peer=list[0]!.entry.peer;if([...streams.values()].filter(v=>v[0]!.entry.peer===peer).length===1){if(cursor!==undefined)next.applied[peer]=cursor;}else delete next.applied[peer];}
-  return {next,statements:[{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=? AND input_hash=?',params:[await this.cipher.seal(this.aad('legacy',key),value),this.scopeKey,key,selected.inputHash]}]};
+  const streams=new Map<string,{peer:string;cursor?:string;stopped:boolean}>();
+  const counts=new Map<string,number>();
+  for(const row of rows){
+   const id=String(row.inbox_key),entry=id===key?value:(await this.legacyChoiceEntry(id)).entry;
+   const stream=canonical([entry.peer,entry.version]);
+   let receipt=streams.get(stream);
+   if(!receipt){receipt={peer:entry.peer,stopped:false};streams.set(stream,receipt);counts.set(entry.peer,(counts.get(entry.peer)??0)+1);}
+   if(receipt.stopped)continue;
+   if(entry.applied)receipt.cursor=entry.cursor;else receipt.stopped=true;
+  }
+  for(const [stream,{peer,cursor}]of streams){
+   if(cursor!==undefined)next.applied[stream]=cursor;
+   if(counts.get(peer)===1){if(cursor!==undefined)next.applied[peer]=cursor;}else delete next.applied[peer];
+  }
+  const sealed=await this.sealSpilled('legacy',digest(key),this.aad('legacy',key),value);
+  return {next,statements:[...sealed.statements,{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=? AND input_hash=?',params:[sealed.body,this.scopeKey,key,selected.inputHash]},...(route==='resolve-local'&&selected.entry.transferBody?[this.legacyBodies.drop(selected.entry.transferBody)]:[])] as Statement[]};
  }
  /** R2: the business-layer read-only set, replaced at the pull's state CAS. */
  unopenableNotesStatements(noteIds:readonly string[]){return unopenableNotesStatements(this.scopeKey,noteIds);}
@@ -490,14 +508,71 @@ export class WatchProjectionStore {
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
+ /** Local transport has no proof about the rollback's affected set. The
+  * account writer lease orders this check and the caller's business commit. */
+ async protectLocalInput(input:LocalTransferInput):Promise<boolean>{
+  const state=await this.persistedState();
+  if(legacyInputRoute(state,[],null)==='normal'&&!state.pendingChoice)return false;
+  if(!state.pendingChoice&&await this.sameCurrentTransfer(state,input))return false;
+  const body:Record<string,unknown>={},identitiesByEntity:Record<string,{kind:Kind;logicalId:string}>={};
+  for(const {kind,logicalId,value} of input.records){
+   const id=this.entityKeyFor(kind,logicalId);
+   if(Object.hasOwn(body,id))throw Error('idempotency_conflict');
+   body[id]={...value,identity:logicalId};identitiesByEntity[id]={kind,logicalId};
+  }
+  if(input.body){
+   await this.db.transaction([{sql:LEGACY_BODY_SCHEMA},this.legacyBodies.discardIncomplete()]);
+   await input.reserveBody?.(input.body.size);
+  }
+  await this.receiveLegacy({peer:input.peer,version:input.version,cursor:input.cursor,body,identitiesByEntity,entityKeys:Object.keys(body),localTransfer:true},null,{source:input.body,check:input.check});
+  return true;
+ }
+ private async sameCurrentTransfer(state:SyncState,input:LocalTransferInput){
+  const current=state.cloud?.current;
+  if(!state.account||!state.activeGeneration||state.activeGeneration!==state.account.oid||current?.commitOid!==state.account.oid||state.hasUnsentEdits||!sameBusinessRevision(state.businessRevision,await businessRevision(this.db)))return false;
+  for(const {kind,logicalId,value} of input.records){
+   const id=this.entityKeyFor(kind,logicalId),cloud=await this.cloudRow(current.treeRoot,id);
+   if(!cloud||cloud.unopenable||cloud.meta.kind!==kind||cloud.meta.logicalId!==logicalId)return false;
+   if(kind==='asset'&&input.body&&input.records.length===1)return !cloud.row.deleted&&carrierBodyRevision('asset',id,input.body.sha256)===cloud.row.bodyRevision;
+   if(canonical(toWire(kind,value))!==canonical({meta:cloud.meta.payload,state:cloud.state.payload}))return false;
+   if(input.body&&(input.records.length!==1||kind!=='book'||carrierBodyRevision('book',id,input.body.sha256)!==cloud.row.bodyRevision))return false;
+  }
+  return true;
+ }
  /** No business apply or ACK. Legacy data is an encrypted shadow journal. */
- async receiveLegacy(input:{peer:string;version:13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>},affected:string[]|null){
-  const state=await this.readState();nextD64(state.stateVersion);const inboxKey=canonical([input.peer,input.version,input.cursor]),body=canonicalLegacy(input.body),retained={...input,body,bodyEncoding:'legacy-json'},hash=digest(retained),old=(await this.db.query('SELECT input_hash FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0];
+ async receiveLegacy(input:{peer:string;version:1|2|13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>;localTransfer?:true},affected:string[]|null,transfer?:{source?:LegacyBodySource;check?:()=>void}){
+  const state=await this.readState();nextD64(state.stateVersion);const inboxKey=canonical([input.peer,input.version,input.cursor]),body=canonicalLegacy(input.body);
+  const source=transfer?.source,check=transfer?.check??(()=>{}),retained={...input,body,bodyEncoding:'legacy-json',...(source?{transferBody:{size:source.size,sha256:source.sha256}}:{})};
+  const hash=legacyInputHash(retained),old=(await this.db.query('SELECT input_hash FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0];
   if(old){if(old.input_hash!==hash)throw Error('idempotency_conflict');return {duplicate:true,ack:false};}
-  const route=legacyInputRoute(state,input.entityKeys,affected),pending=route==='pendingChoice',next={...state,localChangeRevision:nextD64(state.localChangeRevision)};
+  const route=this.options.localIntake&&state.pendingChoice?'pendingChoice':legacyInputRoute(state,input.entityKeys,affected),pending=route==='pendingChoice',next={...state,localChangeRevision:nextD64(state.localChangeRevision)};
   if(pending)next.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[...state.pendingChoice?.inboxKeys??[],inboxKey]};
-  await this.commit(state,next,[{sql:'INSERT INTO syncv2_legacy_inbox VALUES(?,?,?,?)',params:[this.scopeKey,inboxKey,hash,await this.cipher.seal(this.aad('legacy',inboxKey),{...retained,route,applied:false})]}]);return {duplicate:false,route,ack:false};
+  if(source&&!pending)throw Error('choice_stale');
+  let ref:LegacyBodyRef|undefined;
+  try{
+   if(source){
+    const owner=(await this.db.query('SELECT lower(hex(randomblob(32))) AS id'))[0]?.id;
+    if(typeof owner!=='string')throw Error('storage_error');
+    ref={owner,size:source.size,sha256:source.sha256};
+    await this.legacyBodies.stage(ref,source,check);
+   }
+   const entry={...retained,...(ref?{transferBody:ref}:{}),route,applied:false},sealed=await this.sealSpilled('legacy',digest(inboxKey),this.aad('legacy',inboxKey),entry);
+   const mapping:Statement[]=Object.entries(input.localTransfer?input.identitiesByEntity??{}:{}).map(([key,identity])=>{
+    this.validateEntityIdentity(key,identity.kind,identity.logicalId);
+    return {sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[this.libraryId,this.scope.repoId,identity.kind,identity.logicalId,key]};
+   });
+   await this.commit(state,next,[...(ref?this.legacyBodies.activation(ref):[]),...sealed.statements,...mapping,{sql:'INSERT INTO syncv2_legacy_inbox VALUES(?,?,?,?)',params:[this.scopeKey,inboxKey,hash,sealed.body]}],check);
+  }catch(error){
+   if(ref&&!((await this.db.query('SELECT 1 FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0]))await this.db.transaction([this.legacyBodies.drop(ref)]);
+   throw error;
+  }
+  return {duplicate:false,route,ack:false};
  }
  /** Preparation guard available to a future UI. P1 never applies a choice. */
  async validateChoice(capture:Capture,key:string){checkCapture(await this.readState(),capture,key);}
+}
+
+function legacyInputHash(input:{transferBody?:{size:number;sha256:string}}){
+ const {transferBody,...rest}=input;
+ return digest(transferBody?{...rest,transferBody:{size:transferBody.size,sha256:transferBody.sha256}}:rest);
 }

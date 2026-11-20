@@ -1,4 +1,4 @@
-import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription} from './body-binding';
+import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription,emptyBodyDescription,businessBodyWitness} from './body-binding';
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
 import {conflictTexts} from './note-conflict-set';
@@ -21,8 +21,11 @@ import {PublicationLookupUnavailable,type WatchIndexPublisher,type BodyResolver}
 import type {WatchRecovery,RecoveryValue} from './recovery';
 import type {SyncV2Http} from './http';
 import {parseNetwork} from './http';
+import type {LegacyBodyArchive,LegacyBodyRef} from './legacy-body';
+import type {BookState} from '../books/protocol';
+import {carrierBodyRevision} from './body-channel-codec';
 const clone=<T>(v:T):T=>JSON.parse(canonical(v));
-type RecordRow={entityKey:string;rowSequence:string;candidate:any;manifest?:any;row?:any};
+type RecordRow={entityKey:string;rowSequence:string;candidate:any;manifest?:any;row?:any;metadataOnly?:true;archivedBody?:true};
 export interface AccountBusinessPort {
  /** Pure preparation against the same business DB. Commit must occur only at
   * WatchProjectionStore's CAS, never inside this callback. */
@@ -45,6 +48,7 @@ export interface AccountControlOptions {
  trustedNow:()=>number|null;rebuildProjection?:()=>Promise<void>;historyRestore?:boolean;choiceApply?:boolean;
  /** Product entries authenticate the winning head before reconciling an intent. */
  preserveStalePublication?:boolean;
+ prepareArchivedBook?:(book:BookState,archive:LegacyBodyArchive)=>Promise<Statement[]>;
 }
 export class WatchAccountControl {
  private plans=new WeakMap<object,{capture:Capture;local:RecordRow[];cloud:RecordRow[];merge:any;mergedRows?:RecordRow[];release?:()=>Promise<void>;legacyKey?:string;legacyHash?:string;legacyMerge?:any;applyPlan?:import('@podjs/framework/sql-program').SqlProgramRef}>();
@@ -62,7 +66,27 @@ export class WatchAccountControl {
  }
  async setKeepDiscardedLocalChanges7Days(value:boolean){if(typeof value!=='boolean')throw Error('invalid_schema');return this.o.recovery.setKeep(value);}
  async recoveryCopies(){await this.o.recovery.purgeRecovery(this.o.trustedNow());return (await this.o.store.readState()).recoveryCopies?.map(c=>({copyId:c.copyId,createdAtMillis:c.header.createdAtMillis,expiresAtMillis:c.header.expiresAtMillis}))??[];}
- async restoreRecovery(copyId:string){await this.gate('choice');await this.o.recovery.purgeRecovery(this.o.trustedNow());return this.o.recovery.restoreAsEdits(copyId,async delta=>{const before=await this.o.store.readState(),rows=new Map((await this.local()).map(r=>[r.entityKey,r]));for(const change of delta.changes){if(change.kind==='remove'){rows.delete(change.id);continue;}const identity=await this.o.store.identityForEntity(change.id),value={...change.value};if(Object.hasOwn(value,'readingProgressMicros')){value.readingProgress=value.readingProgressMicros/1000000;delete value.readingProgressMicros;}rows.set(change.id,{entityKey:change.id,rowSequence:nextD64(before.localChangeRevision),candidate:candidates(identity.kind,identity.logicalId,change.id,value,undefined,this.o.store.segmentOptions())});}const records=this.records([...rows.values()]),business=await this.o.business.prepare(records,before);return this.o.store.prepareAccountProjection({...before,localChangeRevision:nextD64(before.localChangeRevision)},records,business);});}
+ async restoreRecovery(copyId:string){
+  await this.gate('choice');await this.o.recovery.purgeRecovery(this.o.trustedNow());
+  return this.o.recovery.restoreAsEdits(copyId,async(delta,archive)=>{
+   const before=await this.o.store.readState(),rows=new Map((await this.local()).map(r=>[r.entityKey,r]));
+   for(const change of delta.changes){
+    if(change.kind==='remove'){rows.delete(change.id);continue;}
+    const identity=await this.o.store.identityForEntity(change.id),value={...change.value};
+    if(Object.hasOwn(value,'readingProgressMicros')){value.readingProgress=value.readingProgressMicros/1000000;delete value.readingProgressMicros;}
+    rows.set(change.id,{entityKey:change.id,rowSequence:nextD64(before.localChangeRevision),candidate:candidates(identity.kind,identity.logicalId,change.id,value,undefined,this.o.store.segmentOptions())});
+   }
+   const effects=archive?await this.prepareArchivedChoice(delta.changes.map(c=>c.id),rows,archive):[];
+   const records=this.records([...rows.values()]),business=await this.o.business.prepare(records,before);
+   return this.o.store.prepareAccountProjection({...before,localChangeRevision:nextD64(before.localChangeRevision)},records,[...effects,...business]);
+  });
+ }
+ private async prepareArchivedChoice(keys:readonly string[],rows:Map<string,RecordRow>,archive:LegacyBodyArchive){
+  const row=keys.length===1?rows.get(keys[0]!):undefined,prepare=this.o.prepareArchivedBook;
+  if(row?.candidate.meta.kind!=='book'||!prepare)throw Error('closure_incomplete');
+  const book=fromWire('book',row.candidate.meta.payload,row.candidate.state.payload) as BookState;
+  return prepare(book,archive);
+ }
  private async local(){const out:RecordRow[]=[];let after='';for(;;){const page=await this.o.store.candidatePage(after,32);if(!page.length)break;out.push(...page);after=page.at(-1)!.entityKey;}return out;}
  private async cloud(s:SyncState){if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const rows:RecordRow[]=[];let after='';for(;;){const page=await this.o.store.cloudRows(s.cloud.current.treeRoot,after,32);if(!page.length)break;for(const r of page){const row=await this.openable(r);if(row)rows.push(row);}after=page.at(-1)!.row.entityKey;}return rows;}
  /** F1: a cloud row this device cannot open is never applied. The local note
@@ -129,13 +153,13 @@ export class WatchAccountControl {
    out.push({...r,manifest:tombstoneBodyDescription(r.candidate,current)});
   }return out;
  }
- private async prepareApply(state:SyncState,rows:RecordRow[]){
+ private async prepareApply(state:SyncState,rows:RecordRow[],effects:Statement[]=[]){
   rows=await this.retainTombstoneBodies(state,rows);
   const independent=await this.independentReferences(state,rows);
   const assets=new Map(rows.filter(r=>r.candidate.meta.kind==='asset').map(r=>[r.candidate.meta.logicalId,r]));for(const r of rows)if(r.candidate.meta.kind==='note'&&!r.candidate.state.payload.deleted){const p=r.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];for(const text of texts)for(const id of noteAssetKeys(text)){const asset=assets.get(id);if(!asset||asset.candidate.state.payload.deleted||asset.manifest?.bodyRevision==null||asset.manifest?.recipeOid==null&&!independent.has(asset.entityKey))throw Error('closure_incomplete');}}
   const wire=this.o.publisher.preflightRecords(rows),window=await this.o.http.negotiate([],[]),closure=new Map<string,number>();
-  for(const r of rows){if(isBodyTombstone(r.candidate))continue;const body={entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null};const witness=independent.has(r.entityKey)?{objects:[]}:await this.o.business.verifyBody(body,window.windowId);if(body.bodyRevision!==null&&!witness)throw Error('closure_incomplete');for(const o of witness?.objects??[]){oid(o.oid,o.oid.split(':')[0]!);uint(o.storedBytes);const old=closure.get(o.oid);if(old!==undefined&&old!==o.storedBytes)throw Error('closure_incomplete');closure.set(o.oid,o.storedBytes);}}
-  const records=this.records(rows),business=await this.o.business.prepare(records,state),prepared=await this.o.store.prepareAccountProjection(state,records,business),plan=(prepared as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef;
+  for(const r of rows){if(isBodyTombstone(r.candidate))continue;const body={entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null};const witness=independent.has(r.entityKey)||r.archivedBody?{objects:[]}:await this.o.business.verifyBody(body,window.windowId);if(body.bodyRevision!==null&&!witness)throw Error('closure_incomplete');for(const o of witness?.objects??[]){oid(o.oid,o.oid.split(':')[0]!);uint(o.storedBytes);const old=closure.get(o.oid);if(old!==undefined&&old!==o.storedBytes)throw Error('closure_incomplete');closure.set(o.oid,o.storedBytes);}}
+  const records=this.records(rows),business=await this.o.business.prepare(records,state),prepared=await this.o.store.prepareAccountProjection(state,records,[...effects,...business]),plan=(prepared as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef;
   let required=wire.wireBytes+plan.bytes*6+bytes(canonical(state)).length*4+32768;for(const size of closure.values())required+=size*2;if(!Number.isSafeInteger(required))throw Error('object_too_large');
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
  }
@@ -144,18 +168,36 @@ export class WatchAccountControl {
  private async checked(proof:object){const p=this.plans.get(proof);if(!p)throw Error('choice_stale');const s=await this.o.store.readState();checkCapture(s,p.capture);if(p.legacyKey&&digest(await this.o.store.legacyChoiceEntry(p.legacyKey))!==p.legacyHash)throw Error('choice_stale');return {p,s};}
  async pendingLegacyChoice(key:string){
   const view=await this.pendingChoice();if(!view)throw Error('choice_stale');const p=this.plans.get(view.proof)!;checkCapture(await this.o.store.readState(),p.capture,key);
-  const incoming=await this.o.store.legacyChoiceEntry(key);if(incoming.entry.route!=='pendingChoice')throw Error('choice_stale');p.local=await this.legacyOverlay(p.local,incoming.entry);p.legacyKey=key;p.legacyHash=digest(incoming);
-  let can=false;try{p.legacyMerge=await this.o.store.equivalentLegacy().planLegacyMerge(key);can=true;}catch(error){if((error as Error).message!=='merge_not_safe')throw error;}
-  return {...view,canMerge:can,reason:can?null:'missing_base',inboxKey:key};
+  try{
+   const incoming=await this.o.store.legacyChoiceEntry(key);if(incoming.entry.route!=='pendingChoice')throw Error('choice_stale');p.local=await this.legacyOverlay(p.local,incoming.entry,p.cloud);p.legacyKey=key;p.legacyHash=digest(incoming);
+   let can=false;
+   if(!incoming.entry.transferBody)try{p.legacyMerge=await this.o.store.equivalentLegacy().planLegacyMerge(key);can=true;}catch(error){if((error as Error).message!=='merge_not_safe')throw error;}
+   const local=new Map(p.local.map(r=>[r.entityKey,r])),cloud=new Map(p.cloud.map(r=>[r.entityKey,r]));
+   const side=(r:RecordRow|undefined,other:RecordRow|undefined)=>{
+    const candidate=(r??other)?.candidate,meta=candidate?.meta.payload;
+    const title=[meta?.title,meta?.name,meta?.originalFilename].find(v=>typeof v==='string'&&v.length)??null;
+    const kind=!r||candidate.state.payload.deleted===true?'delete':!other?'add':'edit';
+    return {title,kind} as {title:string|null;kind:'add'|'edit'|'delete'};
+   };
+   const keys=incoming.entry.entityKeys as string[];
+   const legacyPreview={local:keys.map(id=>side(local.get(id),cloud.get(id))),cloud:keys.map(id=>side(cloud.get(id),local.get(id)))};
+   checkCapture(await this.o.store.readState(),p.capture,key);
+   return {...view,canMerge:can,reason:can?null:'missing_base',inboxKey:key,legacyPreview};
+  }catch(error){await this.closePreview(view.proof);throw error;}
  }
- private async legacyOverlay(rows:RecordRow[],entry:any){
+ private async legacyOverlay(rows:RecordRow[],entry:any,cloud:RecordRow[]){
   const body=JSON.parse(entry.body),removed=entry.removedEntityKeys??[],keys=entry.entityKeys;if(!body||Object.getPrototypeOf(body)!==Object.prototype||!Array.isArray(removed)||!Array.isArray(keys)||new Set(keys).size!==keys.length||canonical([...new Set([...Object.keys(body),...removed])].sort())!==canonical([...keys].sort())||removed.some((id:string)=>Object.hasOwn(body,id)))throw Error('invalid_schema');
-  const out=new Map(rows.map(r=>[r.entityKey,r]));for(const [id,raw]of Object.entries(body) as [string,any][]){
+  const out=new Map(rows.map(r=>[r.entityKey,r])),cloudBy=new Map(cloud.map(r=>[r.entityKey,r]));for(const [id,raw]of Object.entries(body) as [string,any][]){
    const known=out.get(id),identity=known?{kind:known.candidate.meta.kind,logicalId:known.candidate.meta.logicalId}:entry.identitiesByEntity?.[id]??await this.o.store.identityForEntity(id);
    const {identity:logicalId,...value}=raw;if(logicalId!==identity.logicalId)throw Error('identity_conflict');this.o.store.validateEntityIdentity(id,identity.kind,identity.logicalId);const candidate=candidates(identity.kind,identity.logicalId,id,value,known?.candidate.meta.addedAtSource==='original'?known.candidate.addedAtMillis:undefined,this.o.store.segmentOptions());
    // Unknown body closures are preserved, never treated as an empty body.
-   if(['article','book','asset'].includes(identity.kind)&&!entry.bodyRefsByEntity?.[id]?.length)throw Error('closure_incomplete');
-   out.set(id,{entityKey:id,rowSequence:known?.rowSequence??'1',candidate,manifest:known?.manifest});
+   const archived=keys.length===1&&['book','article'].includes(identity.kind)&&entry.transferBody;
+   if(['article','book','asset'].includes(identity.kind)&&!entry.bodyRefsByEntity?.[id]?.length&&!archived&&!entry.localTransfer)throw Error('closure_incomplete');
+   const prior=cloudBy.get(id),versions=[known,prior].filter(r=>r?.manifest?.bodyRevision);
+   let manifest=known?.manifest;
+   if(entry.localTransfer&&['article','book'].includes(identity.kind))manifest=versions.find(r=>businessBodyWitness(identity.kind,value)===businessBodyWitness(identity.kind,fromWire(identity.kind,r!.candidate.meta.payload,r!.candidate.state.payload)))?.manifest;
+   const metadataOnly=entry.localTransfer&&!entry.transferBody&&!versions.length&&['article','book'].includes(identity.kind);
+   out.set(id,{entityKey:id,rowSequence:known?.rowSequence??'1',candidate,manifest:metadataOnly?emptyBodyDescription():manifest,...(metadataOnly?{metadataOnly:true}:{})});
   }for(const id of removed)out.delete(id);return [...out.values()];
  }
  private records(rows:RecordRow[]):SourceRecord[]{return rows.map(r=>({kind:r.candidate.meta.kind,logicalId:r.candidate.meta.logicalId,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),...(r.candidate.meta.addedAtSource==='original'?{addedAtMillis:r.candidate.addedAtMillis}:{})}));}
@@ -205,12 +247,20 @@ export class WatchAccountControl {
   await this.gate('choice');const s=await this.o.store.readStableState(),intent=s.cloud?.pendingCloudChoice;if(intent?.phase!=='accepted')throw Error('choice_stale');
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
   checkCapture(await this.o.store.readState(),capture);let localRows=await this.local(),cloudRows=await this.cloud(s),applyRows=cloudRows,capturedKeys:string[]|undefined,decision:Awaited<ReturnType<WatchProjectionStore['prepareLegacyDecision']>>|undefined;
-  if(intent.legacyKey){const incoming=await this.o.store.legacyChoiceEntry(intent.legacyKey);if(digest(incoming)!==intent.legacyHash)throw Error('choice_stale');localRows=await this.legacyOverlay(localRows,incoming.entry);capturedKeys=incoming.entry.entityKeys;const map=new Map((await this.local()).map(r=>[r.entityKey,r]));for(const id of capturedKeys!){const cloud=cloudRows.find(r=>r.entityKey===id);if(cloud)map.set(id,cloud);else map.delete(id);}applyRows=await this.local();decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
+  const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
+  if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
   const records=this.records(applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
   const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business),release=await this.reserveProjection(statements);
   try{
-   const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={};for(const r of localRows){const legacy=intent.legacyKey?(await this.o.store.legacyChoiceEntry(intent.legacyKey)).entry:null;const c=cloudRows.find(x=>x.entityKey===r.entityKey),value=fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload);local[r.entityKey]=c&&canonical(toWire(r.candidate.meta.kind,value))===canonical({meta:c.candidate.meta.payload,state:c.candidate.state.payload})?{kind:r.candidate.meta.kind,value,bodyRefs:[]}:legacy&&capturedKeys?.includes(r.entityKey)?{kind:r.candidate.meta.kind,value,bodyRefs:legacy.bodyRefsByEntity?.[r.entityKey]??[]}:await this.o.business.recoveryValue(r.entityKey);}for(const r of cloudRows)cloud[r.entityKey]={kind:r.candidate.meta.kind,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),bodyRefs:[]};
-   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,...(capturedKeys?{capturedKeys}:{}),explicitCloudChoice:true,next,statements});
+   const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;
+   for(const r of localRows){
+    if(selected&&!selected.has(r.entityKey))continue;
+    const c=cloudRows.find(x=>x.entityKey===r.entityKey),value=fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload);
+    local[r.entityKey]=c&&canonical(toWire(r.candidate.meta.kind,value))===canonical({meta:c.candidate.meta.payload,state:c.candidate.state.payload})?{kind:r.candidate.meta.kind,value,bodyRefs:[]}:legacy?{kind:r.candidate.meta.kind,value,bodyRefs:legacy.entry.bodyRefsByEntity?.[r.entityKey]??[]}:await this.o.business.recoveryValue(r.entityKey);
+   }
+   for(const r of cloudRows)if(!selected||selected.has(r.entityKey))cloud[r.entityKey]={kind:r.candidate.meta.kind,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),bodyRefs:[]};
+   const incomingBody=legacy?.entry.transferBody as LegacyBodyRef|undefined;
+   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
   }finally{await release();}
   if(!intent.legacyKey)await this.flushApplied();await this.o.store.dropInactiveCloudRows(s.cloud.current.treeRoot);return {applied:!intent.legacyKey,commit:null,...(intent.legacyKey?{discarded:true}: {})};
  }
@@ -222,12 +272,19 @@ export class WatchAccountControl {
  async chooseMerge(proof:object,requestId:string){return this.choose(proof,requestId,true);}
  private async choose(proof:object,requestId:string,merge:boolean){
   await this.gate('choice');const {p,s}=await this.checked(proof);if(s.cloud?.pendingPublish||s.cloud?.pendingCloudChoice)throw Error('publication_pending');if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(merge&&p.legacyKey){if(!p.legacyMerge)throw Object.assign(Error('merge_unavailable'),{reason:'missing_base'});const result=await this.o.store.equivalentLegacy().resolveLegacyMerge(p.legacyKey,p.legacyMerge);await this.closePreview(proof);return result;}let rows=p.local;
+  const legacy=p.legacyKey?(await this.o.store.legacyChoiceEntry(p.legacyKey)).entry:null,ref=legacy?.transferBody as LegacyBodyRef|undefined;
   if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud,await this.o.store.editBases(s));if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
    rows=p.mergedRows!;if(!rows)throw Error('merge_unavailable');
   }
   rows=await this.retainTombstoneBodies(s,rows);
-  const independent=await this.independentReferences(s,rows);for(const r of rows)if(!isBodyTombstone(r.candidate)&&['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid&&!independent.has(r.entityKey))throw Error('closure_incomplete');
-  const author=await this.o.author(),window=await this.o.http.negotiate([],[]);for(const r of rows)if(!isBodyTombstone(r.candidate)&&!independent.has(r.entityKey))await this.o.business.verifyBody({entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null},window.windowId);await this.checked(proof);const preflight=merge&&p.applyPlan?{plan:p.applyPlan,release:async()=>{}}:await this.prepareApply(s,rows);try{await this.o.publisher.prepareExplicit({kind:merge?'resolve-merge':'resolve-local',expected:s,...author,requestId,records:rows,applyPlan:preflight.plan,...(p.legacyKey?{legacyKey:p.legacyKey}:{})});const result=await this.resumePublication();await this.closePreview(proof);return result;}finally{if(!await this.o.store.planOwned(preflight.plan.id))await preflight.release();}
+  let effects:Statement[]=[];
+  if(ref){
+   effects=await this.prepareArchivedChoice(legacy.entityKeys,new Map(rows.map(r=>[r.entityKey,r])),{ref,read:visit=>this.o.store.legacyBodies.verify(ref,visit)});
+   const id=legacy.entityKeys[0],bodyRevision=carrierBodyRevision('book',id,ref.sha256);
+   rows=rows.map(r=>r.entityKey===id?{...r,archivedBody:true,manifest:{...emptyBodyDescription(),bodyRevision,promiseId:bodyRevision}}:r);
+  }
+  const independent=await this.independentReferences(s,rows);for(const r of rows)if(!r.archivedBody&&!r.metadataOnly&&!isBodyTombstone(r.candidate)&&['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid&&!independent.has(r.entityKey))throw Error('closure_incomplete');
+  const author=await this.o.author(),window=await this.o.http.negotiate([],[]);for(const r of rows)if(!r.archivedBody&&!isBodyTombstone(r.candidate)&&!independent.has(r.entityKey))await this.o.business.verifyBody({entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null},window.windowId);await this.checked(proof);const preflight=merge&&p.applyPlan?{plan:p.applyPlan,release:async()=>{}}:await this.prepareApply(s,rows,effects);try{await this.o.publisher.prepareExplicit({kind:merge?'resolve-merge':'resolve-local',expected:s,...author,requestId,records:rows,applyPlan:preflight.plan,...(p.legacyKey?{legacyKey:p.legacyKey}:{})});const result=await this.resumePublication();await this.closePreview(proof);return result;}finally{if(!await this.o.store.planOwned(preflight.plan.id))await preflight.release();}
  }
  async rollback(targetCommitOid:string,capture:Capture,requestId:string){
   await this.recoverPreparation();await this.gate('history');hexId(requestId,32);oid(targetCommitOid,'commit');const before=await this.o.store.readState();this.checkWindow(before,capture);if(before.hasUnsentEdits||before.pendingChoice)throw Error('choice_pending');

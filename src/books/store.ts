@@ -59,6 +59,7 @@ export class SqlBookStore {
   return states;
  }
  private state(row:Row){return JSON.parse(str(row.state_json)) as BookState;}
+ async transferState(id:string){const row=await this.record(id);return row?this.state(row):undefined;}
  private statement(s:BookState,json:unknown=canonical(s)):Statement{return {sql:`INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json) VALUES(?,?,?,?) ON CONFLICT(book_id) DO UPDATE SET state_json=excluded.state_json WHERE state_json IS NOT excluded.state_json`,params:[s.bookId,s.fingerprint,s.chapterCount,json]};}
  async states(){
   await this.capture();

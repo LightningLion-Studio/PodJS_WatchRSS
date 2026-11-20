@@ -66,6 +66,12 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
    if(selected.length!==1||selected.some(o=>o.entryRef||o.originalBytes>64*1024*1024||cloudCompatibility(o).readOnly||cloudHasUnknownData(o)))throw Error('body_legacy_mapping_unavailable');
    const closure=new Map<string,number>();for(const o of selected)for(const c of o.chunks){if(closure.has(c.ciphertextSha256)&&closure.get(c.ciphertextSha256)!==c.ciphertextBytes)throw Error('closure_incomplete');closure.set(c.ciphertextSha256,c.ciphertextBytes);}
    if(closure.size!==b.chunks.length||b.chunks.some(c=>closure.get(c.sha256)!==c.sizeBytes))throw Error('closure_incomplete');
+   const original=options.localBody,source=selected[0]!;
+   if(binding.kind==='book'&&source.contentSha256&&original?.length===source.originalBytes){
+    const hash=sha256Hex(original);
+    if(hash!==source.contentSha256||carrierBodyRevision('book',binding.entityKey,hash)!==binding.bodyRevision)throw Error('hash_mismatch');
+    return new Map([[source.name,original]]);
+   }
    const objects=await codec.restore(key,legacy,hash=>read(hash,closure.get(hash)!),selected),body=objects.get(selected[0]!.name)!;
    let raw=body;
    if(binding.kind==='asset'){const path=bodyObjectName('asset',binding.logicalId),directory=indexWrss(body);if(!directory.has(path)||directory.get(path)!.length>5*1024*1024)throw Error('source_identity_missing');raw=(await readWrssEntry(body,path,crypto.gunzip,{},directory))!;}

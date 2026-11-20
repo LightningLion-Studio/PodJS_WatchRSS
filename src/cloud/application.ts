@@ -7,7 +7,9 @@ import {CloudManualHandoff,manualEpochKey,sameManualIntent} from './manual-hando
 import {localTransferActivity} from '../sync/local-transfer';
 import {cloudAccountIdentity} from './identity';
 import {CloudForegroundExecution,CloudSyncBudget,cloudRunHost} from './execution';
-import {hostOperation,delay,onNetworkChange,displayPower,onSqlChanged} from '@podjs/framework/services';
+import {bookFileWork} from '../sync/library-binary/book-import';
+import {prepareArchivedBook} from '../books/archive-restore';
+import {hostOperation,delay,onNetworkChange,displayPower,onSqlChanged,fileChunks} from '@podjs/framework/services';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import {subscribeLibraryMutations} from '../core/library-mutations';
 import {initializeCloudHost} from './host';
@@ -69,7 +71,12 @@ function start(){
    const transport=createCloudTransport(accountHost,v2Guard),tokens=new (await import('../account/token')).WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
    const session=async()=>{const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);return current;};
    const {openApplicationSyncV2}=await import('../sync-v2/application-open');
-   const opened=await v2Exclusive(async()=>openApplicationSyncV2({lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),bodyInstall:work=>withAccountLease(host,async()=>{const current=await summaryAccountStore.read();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current!);return work();}),allowBodies:async()=>{if(await handoff?.authorized(cloudAccountIdentity(account)))return true;const n=await accountHost<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});return n.active&&n.validated&&n.wifi&&n.metered===false;},bootstrap:async()=>{await session();const latest=syncV2Ready;if(!latest||latest.userId!==account.userId||!latest.syncV2)throw Error('feature_disabled');return {accountId:(await import('../sync-v2/signing')).accountIdFromUserId(account.userId),syncV2:latest.syncV2,devices:latest.bootstrap.devices,libraryEpoch:latest.bootstrap.libraryEpoch,contentGeneration:latest.bootstrap.contentGeneration};}}));return opened?leasedSyncV2Session(opened,v2Exclusive):null;
+   const opened=await v2Exclusive(async()=>openApplicationSyncV2({lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedBook:async(book,archive)=>{
+    const books=(await getLibrarySyncRepository()).books;
+    if(!books)throw Error('book_storage_unavailable');
+    const check=()=>v2Guard.require(),work=bookFileWork(fileChunks,hostOperation,check);
+    try{return await prepareArchivedBook(books,work.files,book,archive,check);}finally{work.stop();}
+   },bodyInstall:work=>withAccountLease(host,async()=>{const current=await summaryAccountStore.read();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current!);return work();}),allowBodies:async()=>{if(await handoff?.authorized(cloudAccountIdentity(account)))return true;const n=await accountHost<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});return n.active&&n.validated&&n.wifi&&n.metered===false;},bootstrap:async()=>{await session();const latest=syncV2Ready;if(!latest||latest.userId!==account.userId||!latest.syncV2)throw Error('feature_disabled');return {accountId:(await import('../sync-v2/signing')).accountIdFromUserId(account.userId),syncV2:latest.syncV2,devices:latest.bootstrap.devices,libraryEpoch:latest.bootstrap.libraryEpoch,contentGeneration:latest.bootstrap.contentGeneration};}}));return opened?leasedSyncV2Session(opened,v2Exclusive):null;
   }});
   const keysReady=SYNC_V2_PRODUCT.syncV2?async(event:NonNullable<typeof syncV2Ready>)=>{
    const expected=await summaryAccountStore.read();if(!expected||expected.userId!==event.userId)return;

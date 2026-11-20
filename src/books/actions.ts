@@ -6,6 +6,10 @@ import type {SqlDatabase} from '../core/types';
 import type {JsonObject} from '../sync/protocol';
 import {SqlBookStore} from './store';
 import {validateBook,validateBookReading,BOOK_CHUNK_SIZE,BOOK_MAX_PACKAGE_BYTES,type BookReading,type BookState} from './protocol';
+import type {BookFileInfo} from './files';
+import type {LocalTransferWrite} from '../sync-v2/local-transfer-intake';
+import type {SourceRecord} from '../sync-v2/store';
+import {canonicalLegacy,digest} from '../sync-v2/protocol';
 const hex=/^[a-f0-9]{64}$/;
 const integer=(v:unknown,min=0,max=Number.MAX_SAFE_INTEGER):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=min&&v<=max;
 const requireThat=(ok:unknown)=>{if(!ok)throw Error('book_request_invalid');};
@@ -14,17 +18,24 @@ export class BookSyncActions {
  private delta:BookReadingDelta;
  private partsReady?:Promise<void>;
  constructor(private db:SqlDatabase,private store:SqlBookStore){this.delta=new BookReadingDelta(db,store);}
- async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck,check?:LocalTransferWrite):Promise<JsonObject>{
   requireThat(request.version===1&&typeof request.deviceId==='string'&&request.deviceId.length>0&&request.deviceId.length<=512);
   const base={success:true,action:'syncBooks',version:1,phase:request.phase};
-  if(['readingSummary','readingDelta','readingCommit'].includes(String(request.phase)))return this.delta.apply(request,session,afterAck);
+  const protect=async(records:SourceRecord[],file?:BookFileInfo)=>{
+   if(!check||!records.length)return;
+   const body=file?{size:file.size,sha256:file.sha256,read:async(offset:number,length:number)=>(await this.store.ports.files.read(file.path,offset,length)).bytes}:undefined;
+   await check({version:14,peer:String(request.deviceId),cursor:digest(['syncBooks',request.phase,canonicalLegacy(records),file?.sha256??null]),records,body});
+  };
+  const protectReading=(reading:readonly BookReading[])=>protect(reading.map(value=>({kind:'book-reading',logicalId:value.bookId+':'+value.chapterIndex,value})));
+  if(['readingSummary','readingDelta','readingCommit'].includes(String(request.phase)))return this.delta.apply(request,session,afterAck,protectReading);
   if(request.phase==='manifest'){
    requireThat(Array.isArray(request.books)&&request.books.length<=100000);const incoming:BookState[]=[];const ids=new Set<string>();for(const raw of request.books as unknown[]){const value=await validateBook(raw,this.store.ports.sha256);requireThat(!ids.has(value.bookId)&&typeof (raw as JsonObject).contentAvailable==='boolean');ids.add(value.bookId);incoming.push(value);}
+   await protect(incoming.map(value=>({kind:'book',logicalId:value.bookId,value})));
    this.pages.delete(session);await this.store.registerLocal(incoming);let applied=0;for(const s of incoming)applied+=await this.store.merge(s);const books=await this.store.manifests(),missingBookIds:string[]=[];for(let i=0;i<incoming.length;i++){const s=incoming[i]!;if(!s.deleted&&(request.books as JsonObject[])[i]!.contentAvailable===true&&!await this.store.package(s.bookId))missingBookIds.push(s.bookId);}
    return {...base,deviceId:await this.store.ports.deviceId(),books,missingBookIds,applied};
   }
   if(request.phase==='reading'){
-   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading();const applied=await this.store.mergeReadingBatch(request.states as BookReading[]);if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
+   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);await protectReading(request.states as BookReading[]);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading();const applied=await this.store.mergeReadingBatch(request.states as BookReading[]);if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
   }
   const id=request.bookId;requireThat(typeof id==='string'&&hex.test(id));
   if(request.phase==='pull'){
@@ -68,7 +79,14 @@ export class BookSyncActions {
   const info=await this.store.ports.files.combine(parts.map(r=>String(r.path)),BOOK_MAX_PACKAGE_BYTES);
   try{
    let applied:number;
-   try{requireThat(info.size===request.byteCount&&info.sha256===key[1]);applied=await this.store.installPackage(info,key[0]);}
+   try{
+    requireThat(info.size===request.byteCount&&info.sha256===key[1]);
+    if(check){
+     const state=await this.store.transferState(key[0]);requireThat(state&&state.fingerprint===request.fingerprint);
+     await protect([{kind:'book',logicalId:key[0],value:state!}],info);
+    }
+    applied=await this.store.installPackage(info,key[0]);
+   }
    catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false);throw error;}
    await this.discard(key,parts,true);
    return {...base,received:true,complete:true,applied};

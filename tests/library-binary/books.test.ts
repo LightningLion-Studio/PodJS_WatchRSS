@@ -2,6 +2,9 @@ import {test,expect} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {attachBinaryBooks,sampleBook} from '../helpers/library-binary-books';
+import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
+import {SYNC_V2_PRODUCT} from '../../src/sync-v2/gate';
+import {prepareArchivedBook} from '../../src/books/archive-restore';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
 import {BinaryBooks} from '../../src/sync/library-binary/books';
 import {LibraryBinaryConnection} from '../../src/sync/library-binary/coordinator';
@@ -17,6 +20,7 @@ import {negotiate} from '../../src/sync/library-binary/routing';
 import {BOOK_KINDS,CHUNK_BYTES,HARD_LIMITS,hash,type AppliedReceipt,type BeginPayload,type Binding,type Capability,type Envelope,type ObjectDescriptor,type Row,type Snapshot} from '../../src/sync/library-binary/wire';
 
 type Fixture=Awaited<ReturnType<typeof binaryRuntime>>;
+const v2Identity={userId:'11000000-0000-0000-0000-000000000000',watchId:'22000000-0000-0000-0000-000000000000'};
 const request=(phase:Envelope['phase'],payload:Row,jobId:string|null=null,planDigest:string|null=null,epoch:number|null=null):Envelope=>({
  action:'syncLibraryBinary',version:2,type:'request',phase,jobId,planDigest,epoch,requestId:nonce(),requestDigest:requestDigest(jobId,planDigest,phase,payload),payload,
 });
@@ -29,7 +33,7 @@ async function connect(f:Fixture){
   return reply;
  };
  const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
- await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:'b2-host'}});
+ await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});
  const cap=probe.libraryBinary as unknown as Capability;
  return {session,cap,switch:async()=>{
   await session.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});
@@ -45,17 +49,18 @@ async function receiver(f:Fixture,objects:ObjectDescriptor[],prior?:{binding:Bin
   await io.writeFrame(encodeFrame({kind:'control',envelope:r}));
   const response=decodeFrame(await io.readFrame());
   if(response.kind!=='control'||response.envelope.phase!==r.phase)throw Error('Unexpected response');
-  expect(response.envelope.success).toBe(success);return response.envelope;
+  expect(response.envelope.success,r.phase+' response '+response.envelope.error?.code).toBe(success);return response.envelope;
  };
  const phoneCap={...cap,kinds:cap.kinds.filter(k=>BOOK_KINDS.some(kind=>k.kind===kind))};
  const selection=negotiate(phoneCap,cap)!;
  expect(selection.limits.maxInFlightChunks).toBe(8);
  const phoneSnapshot=prior?.description.phoneSnapshot??{snapshotId:'phone',manifestDigest:'1'.repeat(64),fromExclusive:0,toInclusive:0};
- const offer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId:'watch',phoneCapabilities:phoneCap,phoneSnapshot,watchSnapshot:prior?.description.watchSnapshot??null});
+ const watchDeviceId=await f.ports.deviceId();
+ const offer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneCapabilities:phoneCap,phoneSnapshot,watchSnapshot:prior?.description.watchSnapshot??null});
  const offered=(await call(offer)).result!;
  const binding:Binding={jobId:prior?.binding.jobId??nonce(),direction:'phoneToWatch',intent:prior?'resume':'create',selection};
  await call(request('prepare',{step:'confirm',offerRequestId:offer.requestId,bindings:[binding],preparationDigest:preparationDigest(String(offered.offerDigest),[binding])}));
- const description:BeginPayload={intent:binding.intent,direction:binding.direction,accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId:'watch',phoneSnapshot,watchSnapshot:offered.watchSnapshot as Snapshot,
+ const description:BeginPayload={intent:binding.intent,direction:binding.direction,accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneSnapshot,watchSnapshot:offered.watchSnapshot as Snapshot,
   selection,selectionDigest:selectionDigest(selection),objectCount:objects.length,objectsRoot:objectsRoot(objects.map(d=>d.objectId)),pageObjectCounts:[objects.length]};
  const job=binding.jobId,plan=planDigest(description);
  const began=await call(request('begin',description as unknown as Row,job,plan));
@@ -136,9 +141,12 @@ test('book groups admit the 512 MiB limit and reject incorrect segment ordering 
 });
 
 test('book FileRefs survive reconnect and two segments commit with the existing reading clocks',async()=>{
- const f=await binaryRuntime({fileRefs:true});
+ const f=await binaryRuntime({fileRefs:true,...v2Identity});
  try{
   const {repository,files}=await attachBinaryBooks(f);
+  expect(SYNC_V2_PRODUCT.syncV2).toBe(true);
+  const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,v2Identity.watchId);
+  f.ports.intake=guard.intake;
   const book=await sampleBook(f,files,BOOK_SEGMENT_BYTES+CHUNK_BYTES+7);
   let peer=await receiver(f,book.objects);
   await peer.manifest();
@@ -182,6 +190,82 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
   expect(source.range?.(second,0)).toMatchObject({offset:BOOK_SEGMENT_BYTES,size:CHUNK_BYTES});
  }finally{await f.dispose();}
 },60000);
+
+test('with Sync v2 enabled, B2 and v1 book state share the protected inbox after rollback',async()=>{
+ const f=await binaryRuntime({fileRefs:true,...v2Identity});let peer:Awaited<ReturnType<typeof receiver>>|undefined;
+ try{
+  expect(SYNC_V2_PRODUCT.syncV2).toBe(true);
+  const {repository,files}=await attachBinaryBooks(f),book=await sampleBook(f,files,128);
+  const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,v2Identity.watchId);
+  await guard.rollback();
+  f.ports.intake=guard.intake;
+  await expect(guard.intake(guard.account,guard.deviceId,check=>repository.syncBooks({action:'syncBooks',phase:'manifest',version:1,deviceId:'phone',books:[{...book.state,contentAvailable:false}]},undefined,undefined,check))).rejects.toThrow('BUSINESS_REJECTED');
+  peer=await receiver(f,[book.stateObject]);
+  await peer.manifest();
+  await transfer(peer,book.stateObject,book.read);
+  const response=await peer.operation('apply',{objectId:book.stateObject.objectId},false);
+  expect(response.error?.code).toBe('BUSINESS_REJECTED');
+  expect(await f.db.query('SELECT book_id FROM sync_books')).toEqual([]);
+  expect(await f.db.query('SELECT receipt FROM library_binary_objects')).toEqual([{receipt:null}]);
+  expect(await f.db.query('SELECT COUNT(*) AS n FROM syncv2_legacy_inbox')).toEqual([{n:2}]);
+  expect((await guard.store.readState()).pendingChoice?.inboxKeys).toHaveLength(2);
+  expect(await f.db.query('SELECT enabled FROM syncv2_control')).toEqual([{enabled:0}]);
+  expect(guard.leased()).toBe(false);
+ }finally{
+  if(peer){await peer.session.pair.close();await peer.session.running.catch(()=>{});}
+  await f.dispose();
+ }
+});
+
+test('B2 book prepared from the protected archive stays hidden until business commit',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {repository,files}=await attachBinaryBooks(f);
+  const book=await sampleBook(f,files,CHUNK_BYTES*3+7);
+  await repository.books!.merge(book.state);
+  let peak=0;
+  const archive={ref:{...book.info,owner:'e'.repeat(64)},read:async(visit:(part:Uint8Array,offset:number)=>Promise<void>)=>{
+   for(let offset=0;offset<book.info.size;offset+=CHUNK_BYTES){
+    const {bytes}=await files.readBytes(book.path,offset,CHUNK_BYTES);
+    peak=Math.max(peak,bytes.length);
+    await visit(bytes,offset);
+   }
+  }};
+  const statements=await prepareArchivedBook(repository.books!,files,book.state,archive,()=>{});
+  expect(peak).toBe(CHUNK_BYTES);
+  expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
+  expect(await f.db.query('SELECT id FROM articles')).toEqual([]);
+  await f.db.transaction(statements);
+  const installed=await repository.books!.package(book.state.bookId);
+  expect(installed).toMatchObject(book.info);
+  expect(await files.hash(installed!.path)).toEqual(book.info);
+ }finally{await f.dispose();}
+});
+
+test('B2 commit after rollback retains verified package bytes without an APPLIED receipt',async()=>{
+ const f=await binaryRuntime({fileRefs:true,...v2Identity});let peer:Awaited<ReturnType<typeof receiver>>|undefined;
+ try{
+  const {repository,files}=await attachBinaryBooks(f),book=await sampleBook(f,files,CHUNK_BYTES*3+7);
+  const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,v2Identity.watchId);
+  f.ports.intake=guard.intake;
+  peer=await receiver(f,[book.stateObject,...book.segments,book.commit].sort((a,b)=>a.objectId.localeCompare(b.objectId)));
+  await peer.manifest();
+  for(const object of [book.stateObject,...book.segments]){
+   await transfer(peer,object,book.read);
+   expect((await peer.operation('apply',{objectId:object.objectId})).result?.state).toBe('APPLIED');
+  }
+  await guard.rollback();
+  expect((await peer.operation('apply',{objectId:book.commit.objectId},false)).error?.code).toBe('BUSINESS_REJECTED');
+  expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
+  expect(await f.db.query('SELECT receipt FROM library_binary_objects WHERE object_id=?',[book.commit.objectId])).toEqual([{receipt:null}]);
+  const state=await guard.store.readState(),{entry}=await guard.store.legacyChoiceEntry(state.pendingChoice!.inboxKeys[0]!);
+  expect(entry.transferBody).toMatchObject(book.info);
+  await guard.store.legacyBodies.verify(entry.transferBody);
+ }finally{
+  if(peer){await peer.session.pair.close();await peer.session.running.catch(()=>{});}
+  await f.dispose();
+ }
+});
 
 test('insufficient peak stops at manifest before accepting book DATA',async()=>{
  const f=await binaryRuntime({fileRefs:true,usableBytes:70*1024*1024});
