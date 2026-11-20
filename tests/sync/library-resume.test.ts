@@ -8,6 +8,10 @@ import {libraryRevision} from '../../src/sync/revision';
 import {fixture,vectors,nonce} from '../helpers/library-resume-fixture';
 import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
 import {SYNC_V2_PRODUCT} from '../../src/sync-v2/gate';
+import {WatchAccountBusinessSql} from '../../src/sync-v2/account-business';
+import {idKey,scope} from '../sync-v2/fixture';
+import {articleBodyBytes,articleBodyRevision} from '../../src/sync-v2/article-body';
+import {toWire} from '../../src/sync-v2/business';
 const bodyObject=vectors.objects.find(o=>o.kind==='articleBody')!;
 const rssObject=vectors.objects.find(o=>o.kind==='rssSource')!;
 test('Python-produced JSON conformance vectors cover every phase and preserve raw byte digests',()=>{
@@ -45,6 +49,40 @@ test('with Sync v2 enabled, lost chunk ACK reconnects to durable missing ranges;
   expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:1}]);
   expect(await f.db.query('SELECT COUNT(*) AS n FROM library_resume_objects WHERE receipt IS NOT NULL')).toEqual([{n:1}]);
   expect(f.native.stages).toBe(bodyObject.chunkHashes.length);expect(f.native.objects.size).toBe(0);
+  // First v2 materialization of this article keeps the native resume receipt.
+  const [accepted]=await f.db.query('SELECT a.id,a.link,e.content_hash,e.body_hash FROM articles a JOIN article_sync_encoding_cache e ON e.item_id=a.id');
+  const business=new WatchAccountBusinessSql(f.db,guard.store,scope,idKey,{recoveryValue:async()=>{throw Error('unexpected recovery');}},async()=>{throw Error('unexpected recipe download');},async()=>async()=>{},async(id,entity)=>{
+   const body=await f.repository.cloudArticlePlain(id),plain=body&&articleBodyBytes(body);
+   return plain?articleBodyRevision(entity,plain):undefined;
+  });
+  await business.initialize();
+  const incoming={kind:'article' as const,logicalId:bodyObject.businessId,value:{
+   articleId:bodyObject.businessId,url:String(accepted!.link),contentHash:String(accepted!.content_hash),updatedAt:12,title:'云端标题',sourceDeviceId:'phone',
+  }};
+  await f.db.transaction(await business.prepare([incoming],await guard.store.readState()));
+  expect(await f.db.query('SELECT id,title FROM articles')).toEqual([{id:accepted!.id,title:'云端标题'}]);
+  expect(await f.db.query('SELECT item_id,body_pending FROM article_register_state')).toEqual([{item_id:accepted!.id,body_pending:0}]);
+  expect(await f.db.query('SELECT body_hash FROM article_sync_content')).toEqual([{body_hash:accepted!.body_hash}]);
+  const state=await guard.store.readState(),commitOid='commit:sha256:'+'a'.repeat(64);
+  const before={...state,account:{oid:commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid,treeRoot:'test'}}} as typeof state;
+  let expectedRevision:string|undefined;
+  guard.store.cloudRow=async(_root,id)=>{
+   const body=await f.repository.cloudArticlePlain(bodyObject.businessId),plain=body&&articleBodyBytes(body);
+   const bodyRevision=expectedRevision??(plain&&articleBodyRevision(id,plain));
+   expect(bodyRevision).toBeDefined();
+   return {meta:{kind:'article',logicalId:bodyObject.businessId,payload:{contentHash:incoming.value.contentHash}},
+    row:{bodyRevision,deleted:false,recipeOid:'recipe:sha256:'+'b'.repeat(64)}};
+  };
+  incoming.value.title='同正文的新标题';
+  incoming.value.contentHash='d'.repeat(64);
+  await f.db.transaction(await business.prepare([incoming],before));
+  expect(await f.db.query('SELECT body_pending FROM article_register_state')).toEqual([{body_pending:0}]);
+  expectedRevision='e'.repeat(32);
+  const wire=toWire('article',incoming.value);
+  guard.store.readCandidate=async()=>({meta:{kind:'article',logicalId:incoming.logicalId,payload:wire.meta},state:{payload:wire.state}});
+  await f.db.transaction(await business.prepare([incoming],before));
+  expect(await f.db.query('SELECT body_pending FROM article_register_state')).toEqual([{body_pending:1}]);
+  expect(await f.db.query('SELECT body_hash FROM article_sync_content')).toEqual([]);
   await c.pair.close();await c.running;
  }finally{f.sql.close();}
 },30000);

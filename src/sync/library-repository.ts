@@ -1,3 +1,4 @@
+import {compareLifecycleTokens} from '@podjs/framework/lifecycle-token';
 import {playbackWork} from '../core/playback-work';
 import type {ReceiptBoundary} from './library-resume/store';
 import type {FrozenResumeInventory,FrozenResumeArticle} from './library-resume/repository';
@@ -383,6 +384,16 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
 
  cloudBooks(check?:()=>void){return this.run(async()=>{await this.migrate();await this.books?.registerLocal([],check);return {books:await this.books?.states()??[],reading:await this.books?.readingStates()??[],mappings:await this.books?.mappings()??[]};});}
  mergeCloudBooks(books:readonly BookState[],reading:readonly BookReading[],check?:()=>void){return this.run(async()=>{await this.migrate();if(!this.books)throw Error('book_storage_unavailable');await this.books.prepareCloudMerge(books,reading,check);let applied=0;for(const b of books){check?.();applied+=await this.books.merge(b);}for(let at=0;at<reading.length;at+=100){check?.();applied+=await this.books.mergeReadingBatch(reading.slice(at,at+100));}return applied;});}
+ cloudBookWitness(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>){return this.run(async()=>{
+  await this.migrate();
+  const books=this.books;if(!books)return;
+  const file=await books.package(id);if(!file)return;
+  const state=await books.transferState(id);
+  if(!state||state.deleted||state.bookId!==expected.bookId||state.fingerprint!==expected.fingerprint||state.chapterCount!==expected.chapterCount||state.instanceId!==expected.instanceId||compareLifecycleTokens(state.lifecycle,expected.lifecycle)!==0)throw Error('body_revision_changed');
+  const actual=await this.ports.bookFiles!.hash(file.path),current=await books.package(id);
+  if(actual.sha256!==file.sha256||actual.size!==file.size||current?.path!==file.path||current.sha256!==file.sha256||current.size!==file.size)throw Error('cloud_book_package_changed');
+  return actual;
+ });}
  cloudBookPreview(id:string){return this.run(async()=>{
   await this.migrate();const file=await this.books?.package(id);if(!file)return;
   if(file.size>256*1024*1024)throw Error('cloud_book_capacity_pending');
@@ -421,11 +432,19 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
  cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void){return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();return this.local.cloudRestoreMetadata(request,check);}));}
  /** P6 article bytes use the existing verified v1 cache and its native aliases. */
  cloudArticleBody(id:string){return this.run(async()=>{
+  const article=await this.cloudArticleSource(id);
+  return article?this.local.cloudArticleBody(article):undefined;
+ });}
+ cloudArticlePlain(id:string){return this.run(async()=>{
+  const article=await this.cloudArticleSource(id),item=article?.cloudReadingItemId;
+  return item===undefined?undefined:this.local.cloudArticlePlain(item);
+ });}
+ private async cloudArticleSource(id:string){
   await this.cloudState();const itemIds=await this.local.cloudReadingItemIds([await this.ports.codec.sha256(utf8Encode(id))]);if(itemIds.length>100)throw Error('source_identity_missing');
   const page=await this.local.cloudRestoreMetadata({ids:[id],itemIds,limit:100}),exact=page.articles.filter(a=>a.articleId===id||a.cloudLegacyArticleIds?.includes(id));
   const matches=exact.length?exact:page.articles.filter(a=>a.cloudReadingItemId!==undefined&&itemIds.includes(a.cloudReadingItemId));if(matches.length>1)throw Error('source_identity_missing');
-  return matches[0]?this.local.cloudArticleBody(matches[0]):undefined;
- });}
+  return matches[0];
+ }
 
  cloudReadingRevision(){return this.run(()=>libraryRevision(this.db));}
  private readingStore?:CloudReadingStore;

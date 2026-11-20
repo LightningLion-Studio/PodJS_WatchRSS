@@ -7,11 +7,14 @@ import type {WatchProjectionStore} from './store';
 import {fromWire} from './business';
 import {canonical,digest,jsonBytes,parseCanonicalJson,type Scope} from './protocol';
 import {BodyChannelHttp} from './body-channel-http';
-import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind} from './body-channel-codec';
+import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind,type LocalBodyWitness} from './body-channel-codec';
 import type {BodyResolver} from './publisher';
 import {SyncV2Error} from './http';
 import {businessBodyWitness,sameIndependentIdentity,tombstoneBodyDescription} from './body-binding';
+import type {BookState} from '../books/protocol';
 export interface BodyChannelRepository {
+ /** Hashes an installed, validated package without loading it into the guest. */
+ readBookWitness?(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>):Promise<LocalBodyWitness|undefined>;
  read(kind:BodyKind,id:string):Promise<Uint8Array|undefined>;
  /** Validates frozen book identity/fingerprint before any file installation. */
  validate(kind:BodyKind,id:string,value:Record<string,any>,bytes:Uint8Array):Promise<void>;
@@ -40,12 +43,12 @@ export class WatchBodyChannel {
  private now(){return (this.o.now??Date.now)();}
  private async current(entry:any,anchor:any){
   await this.o.check();const state=await this.o.projection.readState(),head=state.cloud?.current;
-  if(!state.account||head?.commitOid!==state.account.oid||canonical({commitOid:state.account.oid,revision:state.account.revision,rollbackGeneration:state.account.generation})!==canonical(anchor))throw Error('choice_stale');
+  if(state.pendingChoice||!state.account||head?.commitOid!==state.account.oid||canonical({commitOid:state.account.oid,revision:state.account.revision,rollbackGeneration:state.account.generation})!==canonical(anchor))throw Error('choice_stale');
   const now=await this.o.projection.cloudRow(head.treeRoot,entry.row.entityKey);
   if(!now||now.row.deleted||canonical(now)!==canonical(entry))throw Error('body_revision_changed');
  }
  async hasWork(){
-  const state=await this.o.projection.readState(),head=state.cloud?.current;if(!state.account||head?.commitOid!==state.account.oid)return false;
+  const state=await this.o.projection.readState(),head=state.cloud?.current;if(state.pendingChoice||!state.account||head?.commitOid!==state.account.oid)return false;
   let after='';for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)return false;if(page.some((entry:any)=>['book','asset'].includes(entry.meta.kind)&&!entry.row.deleted&&!entry.row.recipeOid))return true;after=page.at(-1).row.entityKey;}
  }
  /** Existing P6 random placeholders need a hash binding even when their
@@ -55,13 +58,28 @@ export class WatchBodyChannel {
   let after='';for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)return false;
    for(const entry of page){const kind=entry.meta.kind;if(!['book','asset'].includes(kind)||entry.row.deleted||entry.row.recipeOid)continue;
     const c=await this.o.projection.readCandidate(entry.row.entityKey);if(!c||businessBodyWitness(kind,fromWire(kind,c.meta.payload,c.state.payload))!==businessBodyWitness(kind,fromWire(kind,entry.meta.payload,entry.state.payload)))continue;
-    try{const raw=await this.o.repository.read(kind,entry.meta.logicalId);if(!raw)continue;await this.o.repository.validate(kind,entry.meta.logicalId,fromWire(kind,entry.meta.payload,entry.state.payload),raw);if(carrierBodyRevision(kind,entry.row.entityKey,sha256Hex(raw))!==entry.row.bodyRevision){const carriers=await this.o.http.list(entry.row.entityKey,entry.row.bodyRevision);if(!carriers.carriers.length)return true;}}catch{await this.o.check();}
+    try{
+     const id=entry.meta.logicalId,value=fromWire(kind,entry.meta.payload,entry.state.payload);
+     let hash:string;
+     if(kind==='book'&&this.o.repository.readBookWitness){
+      const witness=await this.o.repository.readBookWitness(id,value as BookState);
+      if(!witness||witness.size>64*1024*1024)continue;
+      hash=witness.sha256;
+     }else{
+      const raw=await this.o.repository.read(kind,id);if(!raw)continue;
+      await this.o.repository.validate(kind,id,value,raw);hash=sha256Hex(raw);
+     }
+     if(carrierBodyRevision(kind,entry.row.entityKey,hash)!==entry.row.bodyRevision){
+      const carriers=await this.o.http.list(entry.row.entityKey,entry.row.bodyRevision);
+      if(!carriers.carriers.length)return true;
+     }
+    }catch{await this.o.check();}
    }after=page.at(-1).row.entityKey;
   }
  }
  async sync(){
   await this.o.check();const state=await this.o.projection.readState(),head=state.cloud?.current;
-  if(!state.account||head?.commitOid!==state.account.oid)return {pending:0,errors:[] as string[]};
+  if(state.pendingChoice||!state.account||head?.commitOid!==state.account.oid)return {pending:0,errors:[] as string[]};
   const anchor={commitOid:state.account.oid,revision:state.account.revision,rollbackGeneration:state.account.generation};let after='',pending=0;const errors:string[]=[];
   for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)break;
    for(const entry of page){if(!['book','asset'].includes(entry.meta.kind)||entry.row.deleted||entry.row.recipeOid)continue;
@@ -82,14 +100,37 @@ export class WatchBodyChannel {
   if(value.deleted)throw Error('body_revision_changed');await this.current(entry,anchor);
   const path=this.o.root+'/'+binding.entityKey+'/'+binding.bodyRevision,retry=await this.o.files.read(path+'/retry.json');
   if(retry){const v=parseCanonicalJson(retry);if(typeof v.code!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(v.code)||!Number.isSafeInteger(v.until)||v.attempts!==undefined&&(!Number.isSafeInteger(v.attempts)||v.attempts<0||v.attempts>32))throw Error('invalid_schema');if(v.until>this.now())throw new BodyRetryDeferred(v.code);}
-  const raw=await this.o.repository.read(kind,id);
-  if(raw){
-   await this.o.repository.validate(kind,id,value,raw);
-   if(carrierBodyRevision(kind,row.entityKey,sha256Hex(raw))!==row.bodyRevision)throw Error('body_revision_changed');
+  const readBookWitness=kind==='book'?this.o.repository.readBookWitness:undefined;
+  const readWitness=readBookWitness?()=>readBookWitness.call(this.o.repository,id,value as BookState):undefined;
+  let raw:Uint8Array|undefined,local:LocalBodyWitness|undefined;
+  if(readWitness)local=await readWitness();
+  else {
+   raw=await this.o.repository.read(kind,id);
+   if(raw){
+    await this.o.repository.validate(kind,id,value,raw);
+    local={sha256:sha256Hex(raw),size:raw.length};
+   }
+  }
+  if(local){
+   if(local.size>64*1024*1024)throw Error('body_channel_capacity_pending');
+   if(carrierBodyRevision(kind,row.entityKey,local.sha256)!==row.bodyRevision)throw Error('body_revision_changed');
    // A matching local original only needs the authenticated carrier manifest.
    let cursor='';for(;;){const page=await this.o.http.list(row.entityKey,row.bodyRevision,cursor);
-    for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,raw);return;}catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;}}
+    for(const c of page.carriers){try{await this.receive(entry,anchor,c.descriptor,path,local);}catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','choice_stale'].includes((error as Error).message))throw error;continue;}
+     if(readWitness){
+      const latest=await readWitness();
+      if(latest?.sha256!==local.sha256||latest.size!==local.size)throw Error('body_revision_changed');
+     }else{
+      const latest=await this.o.repository.read(kind,id);
+      if(!latest||latest.length!==local.size||sha256Hex(latest)!==local.sha256)throw Error('body_revision_changed');
+     }
+     await this.current(entry,anchor);return;}
     if(page.nextAfter===null)break;cursor=page.nextAfter;
+   }
+   if(!raw){
+    raw=await this.o.repository.read(kind,id);
+    if(!raw||raw.length!==local.size||sha256Hex(raw)!==local.sha256)throw Error('body_revision_changed');
+    await this.o.repository.validate(kind,id,value,raw);
    }
    let descriptor:Carrier|undefined;const key=await this.o.currentKey();
    try{
@@ -108,17 +149,23 @@ export class WatchBodyChannel {
    if(page.nextAfter===null)break;cursor=page.nextAfter;
   }throw last??Error('body_channel_pending');
  }
- private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,localBody?:Uint8Array){
+ private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,local?:LocalBodyWitness){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId},key=await this.o.approved(descriptor.body.authorDeviceId);
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,localBody,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,local,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
+  if(!decoded)return;
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
-  if(raw!==localBody)await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
-  await this.current(entry,anchor);
-  if(!localBody){
-   // Preserve concurrent offline bytes even when the account row is unchanged.
-   const old=await this.o.repository.read(binding.kind,binding.logicalId);if(binding.kind==='book'&&old&&sha256Hex(old)!==sha256Hex(raw))throw Error('body_revision_changed');
-   await this.o.repository.install(binding.kind,binding.logicalId,raw,old&&sha256Hex(old)===sha256Hex(raw)?sha256Hex(old):null);await this.current(entry,anchor);
+  await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
+  const incomingHash=sha256Hex(raw);
+  if(local){
+   if(local.sha256!==incomingHash||local.size!==raw.length)throw Error('hash_mismatch');
+   return;
   }
+  // If Bluetooth finished while the carrier was in flight, retain its bytes.
+  await this.current(entry,anchor);
+  const old=await this.o.repository.read(binding.kind,binding.logicalId);
+  if(old&&sha256Hex(old)===incomingHash){await this.current(entry,anchor);return;}
+  if(binding.kind==='book'&&old)throw Error('body_revision_changed');
+  await this.o.repository.install(binding.kind,binding.logicalId,raw,null);await this.current(entry,anchor);
  }
 }

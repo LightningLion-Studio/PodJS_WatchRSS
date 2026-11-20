@@ -4,8 +4,9 @@ import {validateBookPackage,splitBookLines} from '../books/package';
 import {utf8Decode} from '../cloud/types';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {NOTE_IMAGE_LIMIT} from '../notes/cloud-assets';
-export type BodyRepository=Pick<SqlLibrarySessionRepository,'cloudNotes'|'cloudNoteAsset'|'mergeCloudNoteAsset'|'cloudBookBody'|'receiveCloudBook'>&Partial<Pick<SqlLibrarySessionRepository,'cloudBookPreview'>>;
+export type BodyRepository=Pick<SqlLibrarySessionRepository,'cloudNotes'|'cloudNoteAsset'|'mergeCloudNoteAsset'|'cloudBookBody'|'receiveCloudBook'>&Partial<Pick<SqlLibrarySessionRepository,'cloudBookPreview'|'cloudBookWitness'>>;
 export function bodyChannelRepository(repository:BodyRepository):BodyChannelRepository{return {
+ ...(repository.cloudBookWitness?{readBookWitness:repository.cloudBookWitness.bind(repository)}:{}),
  async read(kind,id){if(kind==='book'){const preview=await repository.cloudBookPreview?.(id);if(preview&&preview.size>64*1024*1024)throw Error('body_channel_capacity_pending');return repository.cloudBookBody(id);}try{return await repository.cloudNoteAsset(id);}catch(error){if((error as Error).message==='cloud_note_asset_missing')return;throw error;}},
  async validate(kind,id,value,raw){
   if(raw.length>64*1024*1024)throw Error('object_too_large');

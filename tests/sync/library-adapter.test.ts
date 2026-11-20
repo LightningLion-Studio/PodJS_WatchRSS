@@ -247,10 +247,13 @@ test('P6 article body adapter reads the verified v1 cache using native and canon
  const f=await setup();try{
   await f.repo.prepareWindow('phone',0);expect((await f.db.query('SELECT body_hash FROM article_sync_content WHERE item_id=1'))[0].body_hash).toHaveLength(64);
   const native=await f.repo.cloudArticleBody(f.id);expect(native?.article.contentText).toBe('body');expect(native?.manifest.bodyAvailable).toBe(true);expect(native?.manifest.chunkHashes.length).toBeGreaterThan(0);
+  expect(await f.repo.cloudArticlePlain(f.id)).toEqual({contentHtml:null,contentText:'body'});
   await f.db.execute("UPDATE channels SET url='https://example.com/feed' WHERE id=1");await f.db.execute("UPDATE articles SET guid='article-guid' WHERE id=1");
   const page=await f.repo.cloudRestoreMetadata();expect(page.articles).toHaveLength(1);expect(page.articles[0].articleId).not.toBe(f.id);
   const canonical=await f.repo.cloudArticleBody(page.articles[0].articleId);expect(canonical?.article.contentText).toBe('body');expect(canonical?.manifest.bodyHash).toBe(native?.manifest.bodyHash);expect((await f.repo.cloudArticleBody(f.id))?.article.contentText).toBe('body');
   expect(await f.repo.cloudArticleBody('missing')).toBeUndefined();
+  await f.db.execute("UPDATE articles SET content=NULL,description='仅预览' WHERE id=1");
+  expect(await f.repo.cloudArticlePlain(f.id)).toBeUndefined();
  }finally{f.sql.close();}
 });
 

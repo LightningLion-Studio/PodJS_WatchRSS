@@ -6,7 +6,6 @@ import {digest,jsonBytes,type Scope} from './protocol';
 import {sealV2,type EnvelopeCrypto,type ObjectKeys} from './sealed';
 import {recipe,contentIdFromHash} from './content-schema';
 import type {BodyManifest,BodyResolver} from './publisher';
-import type {PreparedArticle} from '../sync/article-export';
 export const ARTICLE_BLOCK_BYTES=262144;
 export function articleBodyBytes(value:{contentText?:string;contentHtml?:string|null}){
  const text=value.contentText||value.contentHtml;return text?encodeUtf8(text,'replacement'):null;
@@ -24,11 +23,10 @@ export async function buildArticleBody(crypto:EnvelopeCrypto,keys:ObjectKeys,sco
 /** A recipe may enter an index only after the content lane has made its closure
  * durable. With contentWrite closed, retain the deterministic revision and
  * placeholder, or reuse an already published recipe for the exact same bytes. */
-export function articleBodyResolver(options:{crypto:EnvelopeCrypto;keys:ObjectKeys;scope:Scope;read:(id:string)=>Promise<PreparedArticle|undefined>}):BodyResolver{
+export function articleBodyResolver(options:{crypto:EnvelopeCrypto;keys:ObjectKeys;scope:Scope;read:(id:string)=>Promise<Uint8Array|null|undefined>}):BodyResolver{
  return async(entry,existing)=>{
   if(entry.candidate.meta.kind!=='article')return null;
-  const prepared=await options.read(entry.candidate.meta.logicalId);if(!prepared?.manifest.bodyAvailable)return null;
-  const plain=articleBodyBytes(prepared.article);if(!plain)return null;
+  const plain=await options.read(entry.candidate.meta.logicalId);if(!plain)return null;
   const revision=articleBodyRevision(entry.entityKey,plain);
   if(existing?.row.bodyRevision===revision)return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,existing.row[k]])) as unknown as BodyManifest;
   // Validate the real mapping even while the content upload gate is closed.

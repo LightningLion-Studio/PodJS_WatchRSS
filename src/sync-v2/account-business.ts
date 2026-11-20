@@ -22,7 +22,7 @@ import {arrayRecordFeed,feedPages,wireDigest,type RecordFeed,type StatementFeed}
 import {PAGE_BYTES} from './store';
 export {noteUpsert};
 export class WatchAccountBusinessSql implements AccountBusinessPort {
- constructor(private readonly db:ProjectionSql,private readonly projection:WatchProjectionStore,private readonly scope:Scope,private readonly idKey:Uint8Array,private readonly closures:Pick<WatchBusinessClosure,'recoveryValue'>,readonly verifyBody:AccountBusinessPort['verifyBody'],readonly reserve:AccountBusinessPort['reserve']){}
+ constructor(private readonly db:ProjectionSql,private readonly projection:WatchProjectionStore,private readonly scope:Scope,private readonly idKey:Uint8Array,private readonly closures:Pick<WatchBusinessClosure,'recoveryValue'>,readonly verifyBody:AccountBusinessPort['verifyBody'],readonly reserve:AccountBusinessPort['reserve'],private readonly articleLocalRevision?:(id:string,entity:string)=>Promise<string|undefined>){}
  recoveryValue(id:string){return this.closures.recoveryValue(id);}
  /** Additive metadata table for interaction records which have no local article
   * yet. No body materialization or identity replacement occurs. */
@@ -32,14 +32,30 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
  /** R4: the same statements as `prepare`, produced page by page. Each run reads
   * the records twice and the candidates once; across records it keeps only
   * identities and the small source/article/reading facts later steps need. */
- prepareFeed(feed:RecordFeed,_before:SyncState):StatementFeed{return {run:()=>this.statements(feed)};}
- private async *statements(feed:RecordFeed):AsyncGenerator<Statement[]>{
+ prepareFeed(feed:RecordFeed,before:SyncState):StatementFeed{return {run:()=>this.statements(feed,before)};}
+ private async *statements(feed:RecordFeed,before:SyncState):AsyncGenerator<Statement[]>{
   const statements:Statement[]=[],ids=new Set<string>(),unchanged=new Set<string>(),facts=feed.facts,count=facts.length;
+  let keepsArticleBody=false;
   const sources=facts.flatMap(f=>f.source?[f.source]:[]),articles=facts.filter(f=>f.kind==='article'),readings=facts.filter(f=>f.kind==='book-reading');
-  for(const f of facts){const id=f.kind+'\0'+f.logicalId;ids.add(id);const c=await this.projection.readCandidate(entityKey(this.idKey,this.scope.repoId,f.kind,f.logicalId));if(c&&c.meta.kind===f.kind&&c.meta.logicalId===f.logicalId&&wireDigest(f.kind,{meta:c.meta.payload,state:c.state.payload})===f.wire)unchanged.add(id);}
+  const current=before.cloud?.current,unchangedArticleRecipes=new Map<string,string>();
+  const cloudArticleRevision=async(id:string,entity:string,contentHash:unknown):Promise<string|undefined>=>{
+   if(!this.articleLocalRevision||!current||current.commitOid!==before.account?.oid)return;
+   const cloud=await this.projection.cloudRow(current.treeRoot,entity);
+   if(cloud?.meta.kind==='article'&&cloud.meta.logicalId===id&&cloud.meta.payload.contentHash===contentHash&&!cloud.row.deleted&&cloud.row.recipeOid)return cloud.row.bodyRevision;
+  };
+  for(const f of facts){
+   const id=f.kind+'\0'+f.logicalId,entity=entityKey(this.idKey,this.scope.repoId,f.kind,f.logicalId);ids.add(id);
+   const c=await this.projection.readCandidate(entity);
+   if(!c||c.meta.kind!==f.kind||c.meta.logicalId!==f.logicalId||wireDigest(f.kind,{meta:c.meta.payload,state:c.state.payload})!==f.wire)continue;
+   unchanged.add(id);
+   if(f.kind==='article'){
+    const revision=await cloudArticleRevision(f.logicalId,entity,c.meta.payload.contentHash);
+    if(revision)unchangedArticleRecipes.set(f.logicalId,revision);
+   }
+  }
   const removed:SourceRecord[]=[];let after='';
   for(;;){const page=await this.projection.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const c=r.candidate;if(ids.has(c.meta.kind+'\0'+c.meta.logicalId))continue;const v=fromWire(c.meta.kind,c.meta.payload,c.state.payload);removed.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:c.meta.kind==='book-reading'?{bookId:v.bookId,chapterIndex:v.chapterIndex}:{}});}after=page.at(-1)!.entityKey;}
-  if(!removed.length&&unchanged.size===count)return;
+  if(!removed.length&&unchanged.size===count&&!unchangedArticleRecipes.size)return;
   const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   const requireTable=(table:string)=>{if(!tables.has(table))throw Error('unsupported_feature');};
   const retiredSources=new Set([...removed.filter(r=>r.kind==='source').map(r=>r.logicalId),...sources.filter(r=>r.value.deleted).map(r=>r.logicalId)]);
@@ -60,7 +76,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    // Asset bytes remain in the content store until all authenticated pins allow
    // collection. Removing an account row never deletes a native attachment.
   }
-  for await(const page of feedPages(feed)){for(const r of page){let v=r.value;toWire(r.kind,v);if(unchanged.has(r.kind+'\0'+r.logicalId))continue;
+  for await(const page of feedPages(feed)){for(const r of page){let v=r.value;toWire(r.kind,v);const onlyCheckBody=unchanged.has(r.kind+'\0'+r.logicalId);if(onlyCheckBody&&(r.kind!=='article'||!unchangedArticleRecipes.has(r.logicalId)))continue;
    // Use the frozen legacy interpretation only for the native representation.
    // The authenticated v2 candidate remains byte-for-byte unchanged.
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}
@@ -87,13 +103,45 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
     for(const p of ['favorite','watchLater']){columns.push(p+'_saved',p+'_clock',p+'_order',p+'_source',p+'_source_order');values.push(v[p+'Saved']===undefined?null:+v[p+'Saved'],v[p+'ChangedAt']??null,v[p+'SortOrder']??null,v[p+'SourceDeviceId']??v.sourceDeviceId,deviceOrder(v[p+'SourceDeviceId']??v.sourceDeviceId));}
     statements.push(upsert('sync_book_reading',columns,values,['book_id','chapter_index']));for(const row of await this.db.query('SELECT DISTINCT item_id FROM sync_book_aliases WHERE book_id=? AND chapter_index=? AND item_id IS NOT NULL',[v.bookId,v.chapterIndex]))statements.push(...this.reading(Number(row.item_id),v));
    }else if(r.kind==='article'){
-    requireTable('article_register_state');const old=(await this.db.query('SELECT r.*,c.body_hash FROM article_register_state r LEFT JOIN article_sync_content c ON c.item_id=r.item_id WHERE r.article_id=?',[v.articleId]))[0],channel=retiredSources.has(v.rssSourceUrl)?'watchrss://phone-imports':v.rssSourceUrl??'watchrss://phone-imports';
+    requireTable('article_register_state');
+    const old=(await this.db.query(`SELECT a.id AS item_id,r.state_json,r.body_pending,r.materialized_json,c.body_hash,e.content_hash AS accepted_hash,
+      (a.description IS NOT ? OR a.link IS NOT ?) AS invalidates_body
+     FROM articles a LEFT JOIN article_register_state r ON r.article_id=?
+     LEFT JOIN article_sync_content c ON c.item_id=a.id
+     LEFT JOIN article_sync_encoding_cache e ON e.item_id=a.id AND e.body_hash=c.body_hash
+     WHERE a.id=COALESCE(r.item_id,(SELECT item_id FROM sync_article_ids WHERE article_id=?))`,[v.excerpt??'',v.url,v.articleId,v.articleId]))[0];
+    const channel=retiredSources.has(v.rssSourceUrl)?'watchrss://phone-imports':v.rssSourceUrl??'watchrss://phone-imports';
+
+    // A Bluetooth body may be installed before this article has a v2 register.
+    // Its native receipt binds the accepted content hash to the installed body.
+    const accepted=!!old?.body_hash&&/^[a-f0-9]{64}$/.test(v.contentHash)&&old.accepted_hash===v.contentHash;
+    const sameRegister=old?.state_json!=null&&JSON.parse(String(old.state_json)).value?.contentHash===v.contentHash;
+    const registered=sameRegister&&Number(old.body_pending)===0&&!!old.body_hash&&!!old.materialized_json&&JSON.parse(String(old.materialized_json))[8]===old.body_hash;
+    let sameBody=accepted||sameRegister,ready=accepted||registered;
+    if(old?.body_hash&&!v.deleted&&this.articleLocalRevision){
+     const entity=entityKey(this.idKey,this.scope.repoId,'article',v.articleId);
+     const revision=onlyCheckBody?unchangedArticleRecipes.get(r.logicalId):await cloudArticleRevision(v.articleId,entity,v.contentHash);
+     // The authenticated account binding takes precedence over the v1 receipt.
+     if(revision)sameBody=ready=await this.articleLocalRevision(v.articleId,entity)===revision;
+    }
+    if(onlyCheckBody&&(!old?.body_hash||ready&&sameRegister&&Number(old.body_pending)===0))continue;
     statements.push({sql:'INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) VALUES(?,?,?,0)',params:[channel,v.rssSourceTitle??'',v.importedAt??0]},{sql:'INSERT OR IGNORE INTO articles(channel_id,title,description,link,dedup_key,fetched_at) SELECT id,?,?,?,?,? FROM channels WHERE url=? AND NOT EXISTS(SELECT 1 FROM sync_article_ids WHERE article_id=? AND item_id IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM article_register_state WHERE article_id=? AND item_id IS NOT NULL)',params:[v.title??'',v.excerpt??'',v.url,v.articleId,v.updatedAt??0,channel,v.articleId,v.articleId]},
      {sql:'INSERT INTO sync_article_ids(article_id,item_id,url) SELECT ?,a.id,? FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND a.dedup_key=? ON CONFLICT(article_id) DO UPDATE SET item_id=excluded.item_id,url=excluded.url WHERE item_id IS NULL',params:[v.articleId,v.url,channel,v.articleId]});
-    const sameBody=old&&JSON.parse(String(old.state_json)).value?.contentHash===v.contentHash,ready=!!(sameBody&&Number(old.body_pending)===0&&old.body_hash&&old.materialized_json&&JSON.parse(String(old.materialized_json))[8]===old.body_hash);
+    // Preview/link writes invalidate caches via the native trigger. Preserve
+    // only the verified version in the same SQL transaction, without copying
+    // the body through the script or exempting other writers from the trigger.
+    const keepBody=ready&&!v.deleted&&!!Number(old.invalidates_body);
+    if(keepBody){
+     if(!keepsArticleBody){
+      statements.push({sql:'CREATE TEMP TABLE syncv2_kept_article_body AS SELECT * FROM article_sync_content WHERE 0'});
+      keepsArticleBody=true;
+     }
+     statements.push({sql:'INSERT INTO syncv2_kept_article_body SELECT * FROM article_sync_content WHERE item_id=? AND body_hash=?',params:[old.item_id,old.body_hash]});
+    }
     const witness=articleProjectionSignature(v.deleted?undefined:{title:v.title??'',description:v.excerpt??'',image_url:v.imageUrl??null,link:v.url,is_read:+!!v.isRead,is_saved:+!!v.favoriteSaved,reading_progress:v.readingProgress??0,fetched_at:v.updatedAt??0,body_hash:sameBody?old?.body_hash??null:null},v.deleted?undefined:{progress:v.readingProgress??0,changed_at:v.readingPositionChangedAt??0,position_bytes:v.readingPositionBytes??0,position_hash:v.readingPositionContentHash??''},v.deleted?[]:['favorite','watchLater'].filter(p=>Object.hasOwn(v,p+'Saved')).map(p=>({save_type:p,saved:+v[p+'Saved'],changed_at:v[p+'ChangedAt'],sort_order:-v[p+'SortOrder']})),v.deleted?{changed_at:v.deletedAt,source_device_id:v.registerSources?.deletion??v.sourceDeviceId??''}:undefined);
     const doc=JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v,...(Object.hasOwn(v,'registerSources')?{features:{incompat:[],roCompat:[ARTICLE_REGISTER_FEATURE]}}:{})});statements.push({sql:'INSERT INTO article_register_state(article_id,item_id,state_json,raw_json,materialized_json,body_pending) VALUES(?,(SELECT item_id FROM sync_article_ids WHERE article_id=?),?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET item_id=COALESCE(article_register_state.item_id,excluded.item_id),state_json=excluded.state_json,raw_json=excluded.raw_json,pending_json=NULL,raw_conflict=0,materialized_json=excluded.materialized_json,body_pending=excluded.body_pending',params:[v.articleId,v.articleId,doc,doc,witness,v.deleted||ready?0:1]},
      {sql:'UPDATE articles SET title=?,description=?,link=?,image_url=?,guid=?,fetched_at=? WHERE id=(SELECT item_id FROM article_register_state WHERE article_id=?)',params:[v.title??'',v.excerpt??'',v.url,v.imageUrl??null,v.guid??null,v.updatedAt??0,v.articleId]});
+    if(keepBody)statements.push({sql:'INSERT OR IGNORE INTO article_sync_content SELECT * FROM syncv2_kept_article_body'},{sql:'DELETE FROM syncv2_kept_article_body'});
     statements.push({sql:'DELETE FROM article_register_conflicts WHERE article_id=?',params:[v.articleId]});
     if(old?.item_id){if(!sameBody)statements.push({sql:'UPDATE articles SET content=NULL WHERE id=?',params:[old.item_id]},...['article_body_chunks','article_original_chunks','article_sync_content','article_sync_encoding_cache'].map(table=>({sql:`DELETE FROM ${table} WHERE ${table.startsWith('article_sync_')?'item_id':'article_id'}=?`,params:[old.item_id]})));}statements.push(...this.articleReading(v.articleId,v));if(v.deleted)statements.push(upsert('sync_article_deletions',['article_id','url','changed_at','source_device_id','source_order'],[v.articleId,v.url,v.deletedAt,v.registerSources?.deletion??v.sourceDeviceId??'',deviceOrder(v.registerSources?.deletion??v.sourceDeviceId??'')],['article_id']));else statements.push({sql:'DELETE FROM sync_article_deletions WHERE article_id=?',params:[v.articleId]});if(v.deleted)statements.push({sql:'DELETE FROM articles WHERE id=(SELECT item_id FROM article_register_state WHERE article_id=?)',params:[v.articleId]});
    }else if(r.kind==='rss-state'){
@@ -103,6 +151,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    }else if(r.kind==='asset'){requireTable('memo_assets');statements.push(upsert('memo_assets','asset_id mime original_filename updated_at source_device_id deleted deleted_at'.split(' '),[v.assetId,v.mime,v.originalFilename,v.updatedAt,v.sourceDeviceId,+v.deleted,v.deletedAt],['asset_id']));}
    else throw Error('unsupported_feature');
   }if(statements.length)yield statements.splice(0);}
+  if(keepsArticleBody)statements.push({sql:'DROP TABLE syncv2_kept_article_body'});
   if(tables.has('sync_book_reading_dirty'))for(const r of readings)statements.push({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND chapter_index=?)',params:[r.bookId,r.chapterIndex]});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=0 WHERE id=1'});if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'});
   if(statements.length)yield statements;
  }

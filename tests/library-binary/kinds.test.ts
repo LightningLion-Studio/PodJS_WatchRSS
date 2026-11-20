@@ -11,7 +11,12 @@ import {HARD_LIMITS,hash,utf8,type ObjectDescriptor} from '../../src/sync/librar
 test('B2 v14 body imports immutable file references with the business rows and receipt',async()=>{
  const f=await binaryRuntime();
  try{
-  const {repository,files}=await attachBinaryLibrary(f);
+  let readingCloudBody=false;
+  const {repository,files}=await attachBinaryLibrary(f,undefined,undefined,async value=>{
+   if(!readingCloudBody)throw Error('unexpected B2 hydrate');
+   const marker='watchrss-watch-content:';
+   return value.startsWith(marker)?readFile(join(f.root,'article_content',value.slice(marker.length)),'utf8'):value;
+  });
   const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
   const content=' '.repeat(16360)+'😀\\\/汉字\n'+'z'.repeat(150000)+'\ud800';
   const {object,payload}=sampleArticle('streamed',content);
@@ -27,6 +32,9 @@ test('B2 v14 body imports immutable file references with the business rows and r
   expect(row.content).toMatch(/^watchrss-watch-content:v2-[a-f0-9-]+\.txt$/);
   expect(await readFile(join(f.root,'article_content',String(row.content).split(':')[1]!), 'utf8')).toBe(content.slice(0,-1)+'?');
   expect(await f.db.query('SELECT outcome FROM receipts')).toEqual([{outcome:'merged'}]);
+  readingCloudBody=true;
+  expect(await repository.cloudArticlePlain(object.businessId)).toEqual({contentHtml:null,contentText:content.slice(0,-1)+'?'});
+  readingCloudBody=false;
   const metadata=sampleArticle('streamed','','articleMetadata',{title:'new',updatedAt:70,readingProgress:0.75,readingPositionChangedAt:70}).object;
   await kinds.apply(metadata,'unused','phone',boundary);
   expect((await f.db.query('SELECT content,title,reading_progress FROM articles'))[0]).toEqual({content:row.content,title:'new',reading_progress:0.75});

@@ -56,13 +56,30 @@ for(const kind of ['asset','book'] as const)test('matching local '+kind+' authen
   meta:{kind,logicalId:identity,payload:wire.meta},
   state:{payload:wire.state},
  };
- const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
- const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{read:async()=>p.raw,validate:async()=>{},install:async()=>{throw Error('unexpected install');}},check:async()=>{}});
+ let pendingChoice=false;
+ const projection={readState:async()=>({pendingChoice,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
+ let witnessReads=0,replaceOnRecheck=false;
+ const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
+  ...(kind==='book'?{readBookWitness:async()=>({sha256:++witnessReads===2&&replaceOnRecheck?'f'.repeat(64):sha256Hex(p.raw),size:p.raw.length})}:{}),
+  read:async()=>{if(kind==='book')throw Error('unexpected full book read');return p.raw;},
+  validate:async()=>{},install:async()=>{throw Error('unexpected install');},
+ },check:async()=>{}});
  const before=b.calls.length;
  expect(await channel.sync()).toEqual({pending:0,errors:[]});
  const reads=b.calls.slice(before).filter(call=>call.url.includes('/objects/'));
  expect(reads).toHaveLength(1);
  expect(reads[0]!.url).toContain(p.descriptor.body.manifest.sha256);
+ const complete=b.calls.length;
+ pendingChoice=true;
+ expect(await channel.hasWork()).toBe(false);
+ expect(await channel.sync()).toEqual({pending:0,errors:[]});
+ expect(b.calls).toHaveLength(complete);
+ pendingChoice=false;
+ if(kind==='book'){
+  witnessReads=0;replaceOnRecheck=true;
+  expect(await channel.sync()).toEqual({pending:1,errors:['body_revision_changed']});
+  expect(b.calls.slice(before).filter(call=>call.url.includes('/objects/'))).toHaveLength(1);
+ }
 });
 test('upload resumes a lost response from server offsets and does not republish ready carrier',async()=>{
  const p=await prepared(),b=backend();b.losePart();await expect(b.http().upload(p.descriptor,async h=>p.objects.get(h)!)).rejects.toThrow('lost part response');const count=b.calls.filter(c=>c.method==='PUT').length;await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);expect(b.ready.has(p.descriptor.body.carrierId)).toBe(true);expect(b.calls.filter(c=>c.method==='PUT').slice(count).every(c=>!c.url.endsWith('/parts/0')||!c.url.includes(p.descriptor.body.manifest.sha256))).toBe(true);

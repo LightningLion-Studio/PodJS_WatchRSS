@@ -48,7 +48,16 @@ export async function prepareCarrier(options:{crypto:SnapshotCrypto;signer:Signi
  const descriptor=await signControl(options.signer,options.alias,BODY_DOMAIN,{version:1,purpose:BODY_PURPOSE,scope,carrierId:id,authorDeviceId,...{entityKey:binding.entityKey,bodyRevision:binding.bodyRevision},keyVersion,anchor:options.anchor,sourceSnapshotId:null,manifest:{sha256:hash,sizeBytes:manifest.length},chunks:[...snapshot.newChunks].map(([sha256,b])=>({sha256,sizeBytes:b.length})).sort((a,b)=>a.sha256<b.sha256?-1:a.sha256>b.sha256?1:0)}) as Carrier;
  validateCarrier(descriptor,scope);return {descriptor,objects};
 }
-export async function openCarrier(options:{descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>;yieldControl?:()=>Promise<void>;localBody?:Uint8Array}){
+export type LocalBodyWitness={size:number;sha256:string};
+type OpenCarrierOptions={descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>;yieldControl?:()=>Promise<void>};
+export function openCarrier(options:OpenCarrierOptions):Promise<Map<string,Uint8Array>>;
+export function openCarrier(options:OpenCarrierOptions&{local?:LocalBodyWitness}):Promise<Map<string,Uint8Array>|null>;
+export async function openCarrier(options:OpenCarrierOptions&{local?:LocalBodyWitness}){
+ const matchesLocal=(size:number,sha256:string)=>{
+  if(!options.local)return false;
+  if(options.local.size!==size||options.local.sha256!==sha256)throw Error('hash_mismatch');
+  return true;
+ };
  const {descriptor,crypto,binding}=options;validateCarrier(descriptor,options.scope);const b=descriptor.body;
  if(b.entityKey!==binding.entityKey||b.bodyRevision!==binding.bodyRevision)throw Error('body_revision_changed');
  await verifySigned(options.signer,options.publicKey,BODY_DOMAIN,b,descriptor.signature);
@@ -66,11 +75,10 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
    if(selected.length!==1||selected.some(o=>o.entryRef||o.originalBytes>64*1024*1024||cloudCompatibility(o).readOnly||cloudHasUnknownData(o)))throw Error('body_legacy_mapping_unavailable');
    const closure=new Map<string,number>();for(const o of selected)for(const c of o.chunks){if(closure.has(c.ciphertextSha256)&&closure.get(c.ciphertextSha256)!==c.ciphertextBytes)throw Error('closure_incomplete');closure.set(c.ciphertextSha256,c.ciphertextBytes);}
    if(closure.size!==b.chunks.length||b.chunks.some(c=>closure.get(c.sha256)!==c.sizeBytes))throw Error('closure_incomplete');
-   const original=options.localBody,source=selected[0]!;
-   if(binding.kind==='book'&&source.contentSha256&&original?.length===source.originalBytes){
-    const hash=sha256Hex(original);
-    if(hash!==source.contentSha256||carrierBodyRevision('book',binding.entityKey,hash)!==binding.bodyRevision)throw Error('hash_mismatch');
-    return new Map([[source.name,original]]);
+   const source=selected[0]!;
+   if(binding.kind==='book'&&source.contentSha256&&matchesLocal(source.originalBytes,source.contentSha256)){
+    if(carrierBodyRevision('book',binding.entityKey,source.contentSha256)!==binding.bodyRevision)throw Error('hash_mismatch');
+    return null;
    }
    const objects=await codec.restore(key,legacy,hash=>read(hash,closure.get(hash)!),selected),body=objects.get(selected[0]!.name)!;
    let raw=body;
@@ -94,10 +102,9 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
   if(closure.size!==b.chunks.length||b.chunks.some(c=>closure.get(c.sha256)!==c.sizeBytes))throw Error('closure_incomplete');
   // This path only recognises an installed original. Download and recovery
   // callers still authenticate every remote chunk before using its bytes.
-  if(options.localBody?.length===object.originalBytes&&object.contentSha256===m.plaintextSha256){
-   const hash=sha256Hex(options.localBody);
-   if(hash!==m.plaintextSha256||carrierBodyRevision(binding.kind,binding.entityKey,hash)!==binding.bodyRevision)throw Error('hash_mismatch');
-   return new Map([[name,options.localBody]]);
+  if(object.contentSha256===m.plaintextSha256&&matchesLocal(object.originalBytes,m.plaintextSha256)){
+   if(carrierBodyRevision(binding.kind,binding.entityKey,m.plaintextSha256)!==binding.bodyRevision)throw Error('hash_mismatch');
+   return null;
   }
   const decoded=await new WatchCloudCodec(crypto,guard).restore(key,snapshot,hash=>read(hash,closure.get(hash)!));
   const digest=new ContentSha256();for(const o of m.objects){const raw=decoded.get(o.name)!;

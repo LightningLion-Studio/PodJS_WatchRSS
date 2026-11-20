@@ -173,6 +173,9 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
   const published=await repository.books!.package(book.state.bookId);
   expect(published).toMatchObject(book.info);
   expect(await f.files.hash(published!.path)).toEqual(book.info);
+  expect(await repository.cloudBookWitness(book.state.bookId,book.state)).toEqual(book.info);
+  await expect(repository.cloudBookWitness(book.state.bookId,{...book.state,instanceId:'f'.repeat(32)})).rejects.toThrow('body_revision_changed');
+  await expect(repository.cloudBookWitness(book.state.bookId,{...book.state,lifecycle:{generation:1,operationId:'e'.repeat(32),startedAt:1}})).rejects.toThrow('body_revision_changed');
   expect(await f.db.query('SELECT chapter_index FROM sync_book_chapters')).toEqual([{chapter_index:1}]);
   expect((await repository.books!.readingStates(false))[0]).toMatchObject({readingPositionChangedAt:21,favoriteSaved:true});
   await peer.operation('complete',{objectCount:book.objects.length,receiptsRoot:receiptsRoot(book.objects.map(d=>receipts.get(d.objectId)!)),ackToInclusive:0});

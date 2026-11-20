@@ -148,6 +148,20 @@ export class LocalArticleManifestStore {
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during body lookup");
   return {itemId:num(row.id),available:actual.available,hasStoredBody:cached?(!blank(cached.contentHtml)||!blank(cached.contentText)):!blank(nullable(row.actual_content))||!blank(nullable(row.original_content)),body:actual.available?{contentHtml:actual.contentHtml,contentText:actual.contentText}:null};
  }
+ /** The v2 recipe describes logical text, independent of v14 gzip bytes. */
+ async cloudArticlePlain(item:number):Promise<{contentHtml:string|null;contentText:string}|undefined>{
+  const revision=await libraryRevision(this.db),row=(await this.db.query(this.rowSelect()+' WHERE a.id=?',[item]))[0];
+  if(!row)return;
+  let body=await this.readCachedBody(row,true);
+  if(!body){
+   await this.hydrateRow(row);
+   if(blank(nullable(row.actual_content))&&blank(nullable(row.original_content)))return;
+   const {available,contentHtml,contentText}=await this.bodyFromRow(row);
+   if(available)body={contentHtml,contentText};
+  }
+  if(await libraryRevision(this.db)!==revision)throw Error('body_revision_changed');
+  return body??undefined;
+ }
  /** P6: read one native article, including ordinary unsaved RSS entries that
   * are intentionally absent from the v1 private-body export inventory. */
  async cloudArticleBody(article:ExportedArticle):Promise<PreparedArticle|undefined>{
