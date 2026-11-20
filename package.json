@@ -36,7 +36,7 @@
       "default": "./src/sync-v2/release-build.ts"
     },
     "#cloud-background-entry": {
-      "default": "./src/cloud/background-v1.ts"
+      "default": "./src/cloud/background-v2-entry.ts"
     },
     "#douyin-transport-build": {
       "default": "./src/douyin/transport-build.ts"
