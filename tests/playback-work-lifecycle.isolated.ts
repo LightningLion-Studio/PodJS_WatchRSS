@@ -8,7 +8,7 @@ mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo
 mock.module('@pocketjs/framework/components',()=>Object.fromEntries(['View','Text','Image'].map(kind=>[kind,(props:any)=>({kind,props})])));
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:()=>({dispose(){}})}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:()=>20})}));
-mock.module('@pocketjs/framework/input',()=>({hitNode(){},pressNode(){}}));
+mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:()=>null}));
 let phase='active';const listeners=new Set<(s:string)=>void>();
 mock.module('@podjs/framework/watch',()=>({lifecycle:()=>phase,onLifecycleChange:(f:any)=>{listeners.add(f);return()=>listeners.delete(f);},onRawScrollInput:()=>()=>{},getDisplayMetrics:()=>({shape:'rect'})}));
 mock.module('@podjs/framework/services',()=>({mediaVolume:{},delay:()=>({result:new Promise(()=>{}),cancel(){}}),hostOperation:()=>({result:Promise.resolve(),cancel(){}})}));

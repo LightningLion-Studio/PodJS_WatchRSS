@@ -16,6 +16,7 @@ import type {ReaderBackgroundSnapshot} from "../reader/background-assets.ts";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { GROUP_NUMBER, GROUP_URL, informationText } from "./information-data.ts";
 import { SafeQrScreen } from "./SafeQrScreen.tsx";
+import {legalDocumentStyle} from './legal-document-style.ts';
 import {BeianScreen} from './BeianScreen.tsx';
 import {InformationDocument, type InformationDocumentHandle} from './InformationDocument.tsx';
 import type {InformationListAnchor} from './information-anchor.ts';
@@ -164,7 +165,9 @@ export function InformationScreen(props: InformationScreenProps) {
           </Show>
         }>
           <InformationDocument title={documentTitle()} content={documentContent()!} width={props.width ?? 233} height={props.height}
-            preset={props.preset} fonts={props.fonts} backgroundSnapshot={props.backgroundSnapshot}
+            preset={remote() ? legalDocumentStyle.preset : props.preset}
+            fonts={remote() ? legalDocumentStyle.fonts : props.fonts}
+            backgroundSnapshot={remote() ? legalDocumentStyle.backgroundSnapshot : props.backgroundSnapshot}
             active={props.active} accessibilityLabel={props.accessibilityLabel} restoredScrollOffsetPx={restoreOffset()} restoredListAnchor={pendingAnchor() ?? undefined}
             onBeian={() => props.onNavigate('beian')} ref={mountDocument} onDispose={unmountDocument} />
         </Show>

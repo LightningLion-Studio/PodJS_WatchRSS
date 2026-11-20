@@ -22,15 +22,16 @@ function Marquee(props: { active?: () => boolean; text: string; top: number; lef
 /** Android ShareQrScreen structure without blur/entry animation unsupported by PocketJS. */
 export function ShareQrScreen(props: ShareQrScreenProps) {
   const content=()=>shareQrPresentation(props.title,props.url,props.topHint);
-  const layout=()=>shareQrLayout(props.qrWidthRatio);
+  const metrics = getDisplayMetrics();
+  const layout = createMemo(() => shareQrLayout(props.qrWidthRatio, metrics.shape === "round"));
   let viewport: NodeMirror | undefined;
   createGesture({ region: { node: () => viewport }, axis: "y", onTap: () => props.onClose() });
   const scale = () => Math.min(props.width / 233, props.height / 233), left = () => (props.width - 233 * scale()) / 2, top = () => (props.height - 233 * scale()) / 2;
-  const pixelSize=()=>shareQrPixelSize(layout().qrSize,scale(),getDisplayMetrics().density);
+  const pixelSize=()=>shareQrPixelSize(layout().qr.width,scale(),metrics.density);
   return <View ref={node => viewport = node} onPress={props.onClose} focusable class="absolute inset-0 bg-black"><View class="absolute" style={{ insetL: left(), insetT: top(), width: 233, height: 233, scale: scale(), originX: 0, originY: 0 }}>
-    <Marquee active={props.active} text={content().title} left={56.5} top={layout().titleTop} width={120} size={21} />
-    <Marquee active={props.active} text={content().subtitle} left={21.5} top={layout().subtitleTop} width={190} size={12} />
-    <View class="absolute items-center justify-center" style={{insetL:layout().qrLeft,insetT:layout().qrTop,width:layout().qrSize,height:layout().qrSize}}><QRCode nativeWatch pixelSize={pixelSize()} nativeBitmapSize={pixelSize()} value={content().link} size={layout().qrSize} onError={props.onError} /></View>
+    <Marquee active={props.active} text={content().title} left={layout().title.x} top={layout().title.y} width={layout().title.width} size={21} />
+    <Marquee active={props.active} text={content().subtitle} left={layout().subtitle.x} top={layout().subtitle.y} width={layout().subtitle.width} size={12} />
+    <View class="absolute items-center justify-center" style={{insetL:layout().qr.x,insetT:layout().qr.y,width:layout().qr.width,height:layout().qr.height}}><QRCode quietZone={4} pixelSize={pixelSize()} value={content().link} size={layout().qr.width} onError={props.onError} /></View>
   </View></View>;
 }
 

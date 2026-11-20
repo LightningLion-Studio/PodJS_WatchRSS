@@ -614,3 +614,15 @@ for(const leave of ['inactive','disposed'] as const){
   reject(Error('delayed settings failure'));await settle();expect(hostRequests).toEqual([]);
  });
 }
+
+for (const page of ['privacy', 'useragreement'] as const) test(`${page} ignores user colors, background assets and fonts`, async () => {
+  const customized = defaultReaderPreset('custom', '自定义', false, 22);
+  customized.body.colorArgb = 0xff00ff00;
+  customized.background = {...customized.background, type:'IMAGE', assetId:'custom-background'};
+  const mounted = mount({page, preset:customized, restoredState:state('本地协议正文', null)});
+  const document = renderedDocument(mounted);
+  expect(document.props.preset.background).toMatchObject({type:'SOLID', assetId:null, colorArgb:0xff000000});
+  expect(document.props.preset.body).toMatchObject({colorArgb:0xfff2f2f2, fontSizeSp:14});
+  expect(document.props.fonts(document.props.preset.body).fontPath).toBeUndefined();
+  expect(document.props.backgroundSnapshot).toEqual({state:{}, revision:0});
+});

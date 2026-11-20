@@ -54,6 +54,15 @@ test("collects nested text and rejects malformed XML", () => {
   expect(() => parseFeed(`<rss><channel><title>x</channel></rss>`)).toThrow(/Malformed XML/);
 });
 
+test("channel metadata uses the subscription URL only when its title is missing or a URL", () => {
+  const url = "https://rss.huxiu.com/";
+  const feed = (title: string) => parseFeed(`<rss><channel>${title}</channel></rss>`, 1, url);
+  expect(feed("<title><![CDATA[ 虎嗅 ]]></title>").title).toBe("虎嗅");
+  expect(feed("<title>　 </title>").title).toBe(url);
+  expect(feed("<title>https://rss.huxiu.com/0</title>").title).toBe(url);
+  expect(feed("").title).toBe(url);
+});
+
 class FakeDb {
   executed: { sql: string; params?: readonly unknown[] }[] = [];
   async execute(sql: string, params?: readonly unknown[]) { this.executed.push({sql,params}); }
@@ -74,6 +83,26 @@ class BunDb {
   async query(sql: string, params: readonly unknown[] = []) { const rows=this.raw.query(sql).all(...params as any[]) as Record<string, unknown>[]; if(sql.includes("article_body_chunks")) this.maxChunkResult=Math.max(this.maxChunkResult,...rows.map(r=>String(r.body ?? "").length)); return rows; }
   async transaction(statements: {sql:string;params?:readonly unknown[]}[]) { this.raw.exec("BEGIN"); try { for (const s of statements) this.raw.query(s.sql).run(...(s.params ?? []) as any[]); this.raw.exec("COMMIT"); } catch (e) { this.raw.exec("ROLLBACK"); throw e; } }
 }
+
+test("public-pool refresh repairs URL placeholders and preserves meaningful titles", async () => {
+  const raw = new Database(":memory:");
+  try {
+    const db = new BunDb(raw);
+    await initializeSchema(db, {seedBuiltinChannels: false});
+    const repo = new WatchRssRepository(db, async () => "");
+    const url = "https://rss.huxiu.com/0";
+    const feed = (title: string) => `<rss><channel><title>${title}</title></channel></rss>`;
+    const channel = await repo.addChannel(url);
+    expect((await repo.refreshChannel(channel.id, feed(""), undefined, true)).channel.title).toBe(url);
+    expect((await repo.refreshChannel(channel.id, feed("虎嗅"), undefined, true)).channel.title).toBe("虎嗅");
+    expect((await repo.refreshChannel(channel.id, feed(url))).channel.title).toBe("虎嗅");
+    await db.execute("UPDATE channels SET title=? WHERE id=?", ["自定义名称", channel.id]);
+    expect((await repo.refreshChannel(channel.id, feed("虎嗅"), undefined, true)).channel.title).toBe("自定义名称");
+    await db.execute("UPDATE channels SET title='Untitled feed' WHERE id=?", [channel.id]);
+    expect((await repo.refreshChannel(channel.id, feed(""))).channel.title).toBe(url);
+  } finally { raw.close(); }
+});
+
 test('new libraries seed native builtin rows atomically, while an existing deletion stays deleted',async()=>{
   const raw=new Database(':memory:');const db=new BunDb(raw);
   try{
