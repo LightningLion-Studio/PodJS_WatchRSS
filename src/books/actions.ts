@@ -2,7 +2,8 @@ import {BOOK_PART_RECEIPT_SCHEMA} from './schema';
 import {BookReadingDelta,type AfterReadingAck} from './reading-delta';
 import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {querySyncPages} from '../sync/sql-pages';
-import type {SqlDatabase} from '../core/types';
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck,SqlDatabase} from '../core/types';
 import type {JsonObject} from '../sync/protocol';
 import {SqlBookStore} from './store';
 import {validateBook,validateBookReading,BOOK_CHUNK_SIZE,BOOK_MAX_PACKAGE_BYTES,type BookReading,type BookState} from './protocol';
@@ -18,9 +19,9 @@ export class BookSyncActions {
  private delta:BookReadingDelta;
  private partsReady?:Promise<void>;
  constructor(private db:SqlDatabase,private store:SqlBookStore){this.delta=new BookReadingDelta(db,store);}
- async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck,check?:LocalTransferWrite,cancel?:()=>void,readingFence?:string):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object=this.fallback,afterAck?:AfterReadingAck,check?:LocalTransferWrite,cancel?:SqlCancellationCheck,readingFence?:string):Promise<JsonObject>{
   requireThat(request.version===1&&typeof request.deviceId==='string'&&request.deviceId.length>0&&request.deviceId.length<=512);
-  const base={success:true,action:'syncBooks',version:1,phase:request.phase};
+  const base={success:true,action:'syncBooks',version:1,phase:request.phase},db=cancellableSql(this.db,cancel);
   const protect=async(records:SourceRecord[],file?:BookFileInfo)=>{
    cancel?.();if(!check||!records.length)return;
    const body=file?{size:file.size,sha256:file.sha256,read:async(offset:number,length:number)=>(await this.store.ports.files.read(file.path,offset,length)).bytes}:undefined;
@@ -36,7 +37,7 @@ export class BookSyncActions {
    return {...base,deviceId:await this.store.ports.deviceId(),books,missingBookIds,applied};
   }
   if(request.phase==='reading'){
-   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);await protectReading(request.states as BookReading[]);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading();const applied=await this.store.mergeReadingBatch(request.states as BookReading[],{check:cancel});if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
+   requireThat(Array.isArray(request.states)&&request.states.length<=100&&integer(request.after));for(const state of request.states as unknown[])validateBookReading(state);await protectReading(request.states as BookReading[]);let snapshot=this.pages.get(session);if(!snapshot)await this.store.captureReading(cancel);const applied=await this.store.mergeReadingBatch(request.states as BookReading[],{check:cancel});if(!snapshot){snapshot=await this.store.readingStates(false);this.pages.set(session,snapshot);}const after=request.after as number;requireThat(after<=snapshot.length);const states=snapshot.slice(after,after+100),nextAfter=after+states.length;return {...base,states,nextAfter,hasMore:nextAfter<snapshot.length,applied};
   }
   const id=request.bookId;requireThat(typeof id==='string'&&hex.test(id));
   if(request.phase==='pull'){
@@ -58,7 +59,7 @@ export class BookSyncActions {
    requireThat(old.bytes.length===data.length&&old.bytes.every((v,i)=>v===data[i]));
    await protectPackage(committed);
    const parts=await querySyncPages(this.db,'SELECT path FROM sync_book_parts WHERE book_id=? AND package_sha256=? ORDER BY chunk_index',key);
-   await this.discard(key,parts,true);
+   await this.discard(key,parts,true,db);
    return {...base,received:true,complete:true,applied:0};
   }
   await this.preparePartReceipts();
@@ -75,7 +76,7 @@ export class BookSyncActions {
   }else{
    const part=await this.store.ports.files.writeBytes(data);
    try{
-    cancel?.();await this.db.transaction([{sql:'INSERT INTO sync_book_parts(book_id,package_sha256,fingerprint,byte_count,chunk_count,chunk_index,path) VALUES(?,?,?,?,?,?,?)',
+    await db.transaction([{sql:'INSERT INTO sync_book_parts(book_id,package_sha256,fingerprint,byte_count,chunk_count,chunk_index,path) VALUES(?,?,?,?,?,?,?)',
      params:[...key,request.fingerprint,request.byteCount,request.chunkCount,index,part.path]}]);
    }catch(error){await this.store.ports.files.remove(part.path);throw error;}
    received=Number((await this.db.query('SELECT received FROM sync_book_part_receipts WHERE book_id=? AND package_sha256=?',key))[0]?.received);
@@ -92,8 +93,8 @@ export class BookSyncActions {
     await protectPackage(info);
     applied=await this.store.installPackage(info,key[0],undefined,false,cancel);
    }
-   catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false);throw error;}
-   await this.discard(key,parts,true);
+   catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false,db);throw error;}
+   await this.discard(key,parts,true,db);
    return {...base,received:true,complete:true,applied};
   }finally{await this.store.ports.files.remove(info.path);}
  }
@@ -103,13 +104,13 @@ export class BookSyncActions {
    await this.db.transaction(BOOK_PART_RECEIPT_SCHEMA.map(sql=>({sql})));
   })().catch(error=>{this.partsReady=undefined;throw error;});
  }
- private async discard(key:readonly [string,string],rows:Record<string,unknown>[],published:boolean){
+ private async discard(key:readonly [string,string],rows:Record<string,unknown>[],published:boolean,db:SqlDatabase){
   if(!rows.length)return;
   const remove=async()=>{for(const row of rows)await this.store.ports.files.remove(String(row.path));};
   // A published package can replay cleanup after interruption. Keep the
   // durable paths until every staged file has been removed.
   if(published)await remove();
-  await this.db.transaction([{sql:'DELETE FROM sync_book_parts WHERE book_id=? AND package_sha256=?',params:key}]);
+  await db.transaction([{sql:'DELETE FROM sync_book_parts WHERE book_id=? AND package_sha256=?',params:key}]);
   if(!published)await remove();
  }
 }

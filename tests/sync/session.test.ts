@@ -164,3 +164,33 @@ for(const kind of ['source','article','alias','book chapter','replacement'] as c
   }
  }finally{f.sql.close();}
 });
+
+
+for(const rollback of [false,true])test('FIX2 v1 applied ACK is fenced by rollback generation '+rollback,async()=>{
+ const {bookFixture}=await import('../books/fixture');
+ const {localTransferIntakeFixture}=await import('../helpers/local-transfer-intake');
+ const {watchLegacyTransferIntake}=await import('../../src/sync-v2/local-transfer-intake');
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const {SqlLibrarySessionRepository}=await import('../../src/sync/library-repository');
+ const f=await bookFixture();
+ try{
+  await f.db.execute('UPDATE sync_local_identity SET device_id=? WHERE id=1',['22000000-0000-0000-0000-000000000000']);
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000');
+  const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:f.files});
+  const peer='fixture-phone';
+  await repo.prepareWindow(peer,0);
+  const handleAction=createApplicationActionHandler({
+   legacyIntake:watchLegacyTransferIntake({read:async()=>guard.account,withLibraryAccount:async(_account,run)=>run()},()=>repo.deviceId(),guard.intake),
+   deviceId:()=>repo.deviceId(),notes:{initialize:async()=>{},allIncludingDeleted:async()=>[],merge:async()=>0},notesChanged:()=>{},
+  });
+  const request:JsonObject={action:'syncLibrary',phase:'manifest',version:14,deviceId:peer,supportsChunkedBodies:true,supportsChangeSequences:true,changeSeqRange:{fromExclusive:0,toInclusive:3},fullSnapshot:false,rssSources:[{url:'https://example.com/rss',title:'Fixture RSS',updatedAt:10,sourceDeviceId:peer}],articleManifest:[]};
+  const ack={action:'ack',phase:'applied',success:true,applied:true};
+  const frames:JsonObject[]=[request,{action:'syncLibrary',phase:'articles',version:14,batchIndex:0,batchCount:1,articles:[],bodyRequests:[]},ack];
+  const read=async()=>{const frame=frames.shift()!;if(frame===ack&&rollback)await guard.rollback();return frame;};
+  const result=await new LibrarySyncSession({readFrame:read,writeFrame:async()=>{},close:async()=>{}},repo,{handleAction}).run();
+  const rows=await f.db.query('SELECT * FROM sync_peer_state');
+  const generation=(await guard.store.readState()).account?.generation;
+  expect(generation??'0').toBe(rollback?'1':'0');expect(result[0]?.ack?.applied).toBe(true);
+  expect(result[0]?.libraryApplied).toBe(!rollback);expect(rows).toMatchObject(rollback?[]:[{last_remote_seq_applied:3}]);
+ }finally{f.sql.close();}
+});

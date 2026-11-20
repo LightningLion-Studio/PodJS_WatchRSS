@@ -12,12 +12,14 @@ export type WatchAccountIdentity = Pick<WatchAccountState,'userId'|'backendBaseU
 export class WatchAccountStore {
   private tail:Promise<unknown>=Promise.resolve();
   private change<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>this.storage.exclusive?this.storage.exclusive(action):action());this.tail=result.catch(()=>{});return result;}
+  private librarySessionEpoch=0;
+  librarySessionGeneration():number{return this.librarySessionEpoch;}
   private readonly listeners = new Set<(state?:WatchAccountIdentity|null) => void>();
   constructor(private readonly storage: SecureStorage, private readonly key = KEY) {}
   subscribe(listener: (state?:WatchAccountIdentity|null) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private changed(state?:WatchAccountIdentity|null): void { for (const listener of [...this.listeners]) { try { listener(state); } catch { /* observers cannot invalidate a committed account write */ } } }
   /** The secure store changed outside save/clear; readers are uncached, observers must refresh. */
-  invalidate():void { this.changed(); }
+  invalidate():void { this.librarySessionEpoch++;this.changed(); }
   /** Resume-library commits share the existing cross-guest account mutation
    * lease. Logout/replacement cannot cross the final SQL commit boundary. */
   withLibraryAccount<T>(expected:WatchAccountIdentity|null,run:()=>Promise<T>):Promise<T>{return this.change(async()=>{
@@ -68,6 +70,6 @@ export class WatchAccountStore {
     await this.clearStored(current??undefined,false);
   });}
   clear(expected?:WatchAccountState): Promise<void> {return this.change(()=>this.clearStored(expected,true));}
-  private async clearStored(expected:WatchAccountState|undefined,revoke:boolean):Promise<void>{const account=await this.read();if(expected&&(!account||account.userId!==expected.userId||account.backendBaseUrl!==expected.backendBaseUrl||account.watchRefreshToken!==expected.watchRefreshToken))return;if(account&&revoke){try{await this.storage.revokeCloudScope?.(account);}catch{ /* Logout proceeds even if remote revocation fails. */ }}if(account&&!await this.storage.get('watchrss.library.owner'))await this.assertLibraryOwner(account);await this.storage.remove(this.key);this.changed(null);if(account)await this.storage.clearCloudScope?.(account);}
+  private async clearStored(expected:WatchAccountState|undefined,revoke:boolean):Promise<void>{const account=await this.read();if(expected&&(!account||account.userId!==expected.userId||account.backendBaseUrl!==expected.backendBaseUrl||account.watchRefreshToken!==expected.watchRefreshToken))return;if(account&&revoke){try{await this.storage.revokeCloudScope?.(account);}catch{ /* Logout proceeds even if remote revocation fails. */ }}if(account&&!await this.storage.get('watchrss.library.owner'))await this.assertLibraryOwner(account);await this.storage.remove(this.key);this.librarySessionEpoch++;this.changed(null);if(account)await this.storage.clearCloudScope?.(account);}
 
 }

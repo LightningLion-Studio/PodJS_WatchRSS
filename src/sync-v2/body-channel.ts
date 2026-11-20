@@ -1,3 +1,4 @@
+import type {PublicationDeadline} from '../cloud/publication-deadline';
 import {sha256Hex} from '@podjs/framework/crypto';
 import type {SnapshotCrypto} from '../cloud/codec';
 import type {CloudBlobStore} from '../cloud/cache';
@@ -19,7 +20,7 @@ export interface BodyChannelRepository {
  read(kind:BodyKind,id:string):Promise<Uint8Array|undefined>;
  /** Validates frozen book identity/fingerprint before any file installation. */
  validate(kind:BodyKind,id:string,value:Record<string,any>,bytes:Uint8Array):Promise<void>;
- install(kind:BodyKind,id:string,bytes:Uint8Array,expectedTargetSha256?:string|null):Promise<void>;
+ install(kind:BodyKind,id:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline):Promise<void>;
 }
 /** The v2 row carries a hash-bound placeholder, not a P3 recipe or cloud-ready. */
 const bodyFields=['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'];
@@ -99,6 +100,7 @@ export class WatchBodyChannel {
  private retryPath(entry:any){return this.o.root+'/'+entry.row.entityKey+'/'+entry.row.bodyRevision+'/retry.json';}
  private async syncEntry(entry:any,anchor:any,expiresAtMillis?:number){
   const checkWindow=()=>{if(expiresAtMillis!==undefined&&this.now()>expiresAtMillis)throw Error('window_expired');};
+  const deadline=expiresAtMillis===undefined?undefined:{expiresAtMillis,check:checkWindow};
   const {meta,row}=entry,kind=meta.kind as BodyKind,id=meta.logicalId,binding:BodyBinding={kind,logicalId:id,entityKey:row.entityKey,bodyRevision:row.bodyRevision},value=fromWire(kind,meta.payload,entry.state.payload);
   if(value.deleted)throw Error('body_revision_changed');checkWindow();await this.current(entry,anchor);checkWindow();
   const path=this.o.root+'/'+binding.entityKey+'/'+binding.bodyRevision,retry=await this.o.files.read(path+'/retry.json');
@@ -142,7 +144,7 @@ export class WatchBodyChannel {
       const key=await this.o.key(c.descriptor.body.keyVersion);
       try{if(key.length!==32)throw Error('key_unavailable');}finally{key.fill(0);}
      }else{
-      await this.receive(entry,anchor,c.descriptor,path,checkWindow);
+      await this.receive(entry,anchor,c.descriptor,path,checkWindow,deadline);
      }
     }catch(error){
      last=error;
@@ -183,7 +185,7 @@ export class WatchBodyChannel {
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
   return key.publicKey;
  }
- private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,checkWindow:()=>void){
+ private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,checkWindow:()=>void,deadline?:PublicationDeadline){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId};
   const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:(hash,size)=>{checkWindow();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
@@ -196,6 +198,6 @@ export class WatchBodyChannel {
   if(old&&sha256Hex(old)===incomingHash)return;
   if(binding.kind==='book'&&old)throw Error('body_revision_changed');
   await this.current(entry,anchor);checkWindow();
-  await this.o.repository.install(binding.kind,binding.logicalId,raw,null);await this.current(entry,anchor);checkWindow();
+  await this.o.repository.install(binding.kind,binding.logicalId,raw,null,deadline);await this.current(entry,anchor);checkWindow();
  }
 }

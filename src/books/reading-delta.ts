@@ -1,4 +1,5 @@
-import type {SqlDatabase} from '../core/types';
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck,SqlDatabase} from '../core/types';
 import type {JsonObject} from '../sync/protocol';
 import {libraryRevision,revisionGuard} from '../sync/revision';
 import {querySyncPages} from '../sync/sql-pages';
@@ -14,20 +15,20 @@ const requireThat=(yes:unknown)=>{if(!yes)throw Error('book_reading_window_inval
 export class BookReadingDelta {
  private windows=new WeakMap<object,Window>();private serial=0;
  constructor(private db:SqlDatabase,private store:SqlBookStore){}
- async summary():Promise<ReadingSummary>{
-  await this.store.captureReading();
+ async summary(check?:SqlCancellationCheck):Promise<ReadingSummary>{
+  const db=cancellableSql(this.db,check);await this.store.captureReading(check);
   for(let attempt=0;attempt<3;attempt++){const revision=await libraryRevision(this.db);try{
    const meta=(await this.db.query('SELECT * FROM sync_book_reading_meta WHERE id=1'))[0];requireThat(meta);
    let root=meta!.root as string|null,count=Number(meta!.count);
    if(root===null){
     const dirty=await querySyncPages(this.db,'SELECT book_id FROM sync_book_reading_hash_dirty ORDER BY book_id');
     for(const d of dirty){const id=String(d.book_id),missing=await querySyncPages(this.db,'SELECT r.chapter_index,r.state_json FROM sync_book_reading r LEFT JOIN sync_book_reading_hashes h ON h.book_id=r.book_id AND h.chapter_index=r.chapter_index WHERE r.book_id=? AND h.hash IS NULL ORDER BY r.chapter_index',[id]);
-     for(let at=0;at<missing.length;at+=100){const ss=[];for(const r of missing.slice(at,at+100))ss.push({sql:'INSERT OR REPLACE INTO sync_book_reading_hashes VALUES(?,?,?)',params:[id,r.chapter_index,await readingLeafHash(JSON.parse(String(r.state_json)),this.store.ports.sha256)]});await this.db.transaction([revisionGuard(revision),...ss]);}
+     for(let at=0;at<missing.length;at+=100){const ss=[];for(const r of missing.slice(at,at+100))ss.push({sql:'INSERT OR REPLACE INTO sync_book_reading_hashes VALUES(?,?,?)',params:[id,r.chapter_index,await readingLeafHash(JSON.parse(String(r.state_json)),this.store.ports.sha256)]});await db.transaction([revisionGuard(revision),...ss]);}
      const leaves=(await querySyncPages(this.db,'SELECT chapter_index,hash FROM sync_book_reading_hashes WHERE book_id=? ORDER BY chapter_index',[id])).map(r=>({chapterIndex:Number(r.chapter_index),hash:String(r.hash)}));
-     await this.db.transaction([revisionGuard(revision),leaves.length?{sql:'INSERT OR REPLACE INTO sync_book_reading_book_hashes VALUES(?,?,?)',params:[id,await readingBookRoot(id,leaves,this.store.ports.sha256),leaves.length]}:{sql:'DELETE FROM sync_book_reading_book_hashes WHERE book_id=?',params:[id]},{sql:'DELETE FROM sync_book_reading_hash_dirty WHERE book_id=?',params:[id]}]);
+     await db.transaction([revisionGuard(revision),leaves.length?{sql:'INSERT OR REPLACE INTO sync_book_reading_book_hashes VALUES(?,?,?)',params:[id,await readingBookRoot(id,leaves,this.store.ports.sha256),leaves.length]}:{sql:'DELETE FROM sync_book_reading_book_hashes WHERE book_id=?',params:[id]},{sql:'DELETE FROM sync_book_reading_hash_dirty WHERE book_id=?',params:[id]}]);
     }
     const books=(await querySyncPages(this.db,'SELECT * FROM sync_book_reading_book_hashes ORDER BY book_id')).map(r=>({bookId:String(r.book_id),root:String(r.root),count:Number(r.count)}));root=await readingRoot(books,this.store.ports.sha256);count=books.reduce((n,b)=>n+b.count,0);
-    await this.db.transaction([revisionGuard(revision),{sql:'UPDATE sync_book_reading_meta SET root=?,count=? WHERE id=1',params:[root,count]}]);
+    await db.transaction([revisionGuard(revision),{sql:'UPDATE sync_book_reading_meta SET root=?,count=? WHERE id=1',params:[root,count]}]);
    }
    // Read root and watermark in one SQLite snapshot. A write after hashing may
    // invalidate the root, but must never pair a stale root with its newer seq.
@@ -38,10 +39,10 @@ export class BookReadingDelta {
   throw Error('book_reading_changed_repeatedly');
  }
  async entries(from:number,to:number):Promise<ReadingEntry[]>{return (await querySyncPages(this.db,'SELECT h.seq,h.state_json FROM sync_book_reading_history h WHERE h.seq>? AND h.seq<=? AND NOT EXISTS(SELECT 1 FROM sync_book_reading_history newer WHERE newer.book_id=h.book_id AND newer.chapter_index=h.chapter_index AND newer.seq>h.seq AND newer.seq<=?) ORDER BY h.seq',[from,to,to])).map(r=>({seq:Number(r.seq),state:JSON.parse(String(r.state_json))}));}
- async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck,protect?:(reading:readonly BookReading[])=>Promise<void>,check?:()=>void,readingFence?:string):Promise<JsonObject>{
+ async apply(request:JsonObject,session:object,afterAck?:AfterReadingAck,protect?:(reading:readonly BookReading[])=>Promise<void>,check?:SqlCancellationCheck,readingFence?:string):Promise<JsonObject>{
   const peer=String(request.deviceId),base={success:true,action:'syncBooks',version:1,phase:request.phase};
   if(request.phase==='readingSummary'){
-   validateReadingSummary(request.summary);requireThat(safe(request.ackedLocalSeq));const remote=request.summary,local=await this.summary(),known=request.knownRemote as {epoch:string;seq:number}|null;
+   validateReadingSummary(request.summary);requireThat(safe(request.ackedLocalSeq));const remote=request.summary,local=await this.summary(check),known=request.knownRemote as {epoch:string;seq:number}|null;
    requireThat(known===null||!!known&&/^[a-f0-9]{32}$/.test(known.epoch)&&safe(known.seq));
    const p=(await this.db.query('SELECT * FROM sync_book_reading_peers WHERE peer=?',[peer]))[0],sameEpoch=!!p&&p.local_epoch===local.epoch&&p.remote_epoch===remote.epoch;
    let from=sameEpoch&&known?.epoch===local.epoch&&known.seq<=local.seq?Math.min(Number(p!.local_seq),known.seq):0;
@@ -72,10 +73,10 @@ export class BookReadingDelta {
   }
   requireThat(request.phase==='readingCommit'&&window.done&&window.outAfter===window.entries.length&&request.receivedSeq===window.local.seq&&request.sentSeq===window.remote.seq&&typeof request.mergedRoot==='string'&&!!afterAck);
   if(readingFence!==window.readingFence){this.windows.delete(session);throw Error('BUSINESS_REJECTED');}
-  const merged=await this.summary();check?.();requireThat(merged.epoch===window.local.epoch);
+  const merged=await this.summary(check);check?.();requireThat(merged.epoch===window.local.epoch);
   if(merged.root!==request.mergedRoot)return {...base,windowId:window.id,committed:false,retry:true,summary:merged,applied:0};
   afterAck!(async()=>{const now=(await this.db.query('SELECT epoch FROM sync_book_reading_meta WHERE id=1'))[0];requireThat(now?.epoch===window.local.epoch);
-   check?.();await this.db.execute('INSERT INTO sync_book_reading_peers(peer,local_epoch,local_seq,remote_epoch,remote_seq,root) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_book_reading_meta WHERE id=1 AND epoch=?) ON CONFLICT(peer) DO UPDATE SET local_epoch=excluded.local_epoch,local_seq=excluded.local_seq,remote_epoch=excluded.remote_epoch,remote_seq=excluded.remote_seq,root=excluded.root',[peer,window.local.epoch,window.local.seq,window.remote.epoch,window.remote.seq,merged.root,window.local.epoch]);
+   await cancellableSql(this.db,check).execute('INSERT INTO sync_book_reading_peers(peer,local_epoch,local_seq,remote_epoch,remote_seq,root) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_book_reading_meta WHERE id=1 AND epoch=?) ON CONFLICT(peer) DO UPDATE SET local_epoch=excluded.local_epoch,local_seq=excluded.local_seq,remote_epoch=excluded.remote_epoch,remote_seq=excluded.remote_seq,root=excluded.root',[peer,window.local.epoch,window.local.seq,window.remote.epoch,window.remote.seq,merged.root,window.local.epoch]);
   });return {...base,windowId:window.id,committed:true,root:merged.root,applied:0};
  }
 }

@@ -1,3 +1,4 @@
+import type {SqlCancellationCheck} from '../core/types';
 import {unhex} from '@podjs/framework/crypto';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
 import type {WatchAccountIdentity,WatchAccountStore} from '../account/store';
@@ -27,20 +28,36 @@ export interface LocalTransferInput {
  check?:()=>void;
  reserveBody?:(size:number)=>Promise<void>;
 }
-export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {readingFence?:()=>Promise<string>};
-export type BoundLocalTransferIntake=<T>(apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>;
+export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {transferFence?:(reading?:boolean)=>Promise<string>};
+export type BoundLocalTransferIntake=(<T>(apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>) & {
+ capture?:(requireAccount?:boolean)=>Promise<BoundLocalTransferIntake>;
+};
 export type LocalTransferIntake=<T>(account:WatchAccountIdentity|null,deviceId:string,apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>;
-export type NoteAssetIntake=(input:{cursor:string;logicalId:string;body:LegacyBodySource},apply:()=>Promise<void>)=>Promise<void>;
+export type NoteAssetIntake=((input:{cursor:string;logicalId:string;body:LegacyBodySource},apply:()=>Promise<void>)=>Promise<void>) & {
+ capture?:()=>Promise<NoteAssetIntake>;
+};
 
-type LibraryAccountStore=Pick<WatchAccountStore,'withLibraryAccount'>&{read():Promise<WatchAccountIdentity|null>};
+type LibraryAccountStore=Pick<WatchAccountStore,'withLibraryAccount'>&Partial<Pick<WatchAccountStore,'librarySessionGeneration'>>&{read():Promise<WatchAccountIdentity|null>};
 const noProtection:LocalTransferWrite=async()=>{};
 const accountFence=(account:WatchAccountIdentity|null)=>canonical(account?[account.backendBaseUrl,account.userId]:null);
 export function watchLegacyTransferIntake(accountStore:LibraryAccountStore,deviceId:()=>Promise<string>,intake:LocalTransferIntake):BoundLocalTransferIntake{
- return async apply=>{
-  if(!SYNC_V2_PRODUCT.syncV2)return apply(noProtection);
-  const account=await accountStore.read();
-  return accountStore.withLibraryAccount(account,async()=>account?intake(account,await deviceId(),apply):apply(noProtection));
+ const bind=(account:WatchAccountIdentity|null):BoundLocalTransferIntake=>apply=>
+  accountStore.withLibraryAccount(account,async()=>account?intake(account,await deviceId(),apply):apply(noProtection));
+ const run:BoundLocalTransferIntake=async apply=>SYNC_V2_PRODUCT.syncV2?bind(await accountStore.read())(apply):apply(noProtection);
+ if(SYNC_V2_PRODUCT.syncV2)run.capture=async requireAccount=>{
+  const epoch=accountStore.librarySessionGeneration?.(),account=await accountStore.read();
+  if(requireAccount&&!account)throw Error('AUTH_REVOKED');
+  const captured=bind(account),readFence=async(protect:LocalTransferWrite)=>{
+   if(accountStore.librarySessionGeneration?.()!==epoch)throw Error('AUTH_REVOKED');
+   return protect.transferFence?.();
+  };
+  const stamp=await captured(readFence);
+  return apply=>captured(async protect=>{
+   if(await readFence(protect)!==stamp)throw Error('BUSINESS_REJECTED');
+   return apply(protect);
+  });
  };
+ return run;
 }
 
 /** Order v1 book writes and applied ACKs by account, then writer, then library queue. */
@@ -49,13 +66,15 @@ export function watchBookSyncAction(
  accountStore:LibraryAccountStore,
  intake:LocalTransferIntake,
 ){
- return async(request:JsonObject,session?:object,afterAck?:AfterReadingAck,cancel?:()=>void)=>{
+ return async(request:JsonObject,session?:object,afterAck?:AfterReadingAck,cancel?:SqlCancellationCheck)=>{
   const repository=await getRepository();cancel?.();
   if(!SYNC_V2_PRODUCT.syncV2||request.phase==='pull')return repository.syncBooks(request,session,afterAck,undefined,cancel);
-  const account=await accountStore.read();
-  const run=<T>(apply:(protect:LocalTransferWrite)=>Promise<T>):Promise<T>=>accountStore.withLibraryAccount(account,async()=>account
-   ?intake(account,await repository.deviceId(),apply):apply(noProtection));
-  const fence=async(protect:LocalTransferWrite)=>canonical([accountFence(account),await protect.readingFence?.()??null]);
+  const epoch=accountStore.librarySessionGeneration?.(),account=await accountStore.read();
+  const run=<T>(apply:(protect:LocalTransferWrite)=>Promise<T>):Promise<T>=>accountStore.withLibraryAccount(account,async()=>{
+   if(accountStore.librarySessionGeneration?.()!==epoch)throw Error('AUTH_REVOKED');
+   return account?intake(account,await repository.deviceId(),apply):apply(noProtection);
+  });
+  const fence=async(protect:LocalTransferWrite)=>canonical([accountFence(account),epoch??null,await protect.transferFence?.(true)??null]);
   return run(async protect=>{
    cancel?.();
    const reading=request.phase==='readingSummary'||request.phase==='readingCommit';
@@ -90,12 +109,14 @@ export async function applyLegacyTransfer<T>(intake:BoundLocalTransferIntake|und
 }
 
 export function noteAssetIntake(intake:BoundLocalTransferIntake,version:1|2,peer:string,check:()=>void):NoteAssetIntake{
- return (input,apply)=>intake(async protect=>{
+ const run:NoteAssetIntake=(input,apply)=>intake(async protect=>{
   const id=input.logicalId;
   const value={assetId:id,mime:noteAssetMime(id),originalFilename:id,updatedAt:0,sourceDeviceId:peer,deleted:false,deletedAt:0};
   await protect({peer,version,cursor:input.cursor,records:[{kind:'asset',logicalId:id,value}],body:input.body,check});
   check();await apply();
  });
+ if(intake.capture)run.capture=async()=>noteAssetIntake(await intake.capture!(true),version,peer,check);
+ return run;
 }
 
 /** The local transfer already owns the account lease. Use a short cloud
@@ -132,7 +153,7 @@ export function watchLocalTransferIntake(db:ProjectionSql,host:CloudHostRequest)
      if((capacity.usableBytes??0)<size*2+1048576)throw Error('STORAGE_PRESSURE');
     };
     const protect:LocalTransferWrite=async input=>{input.check?.();if(await store.protectLocalInput({...input,reserveBody}))throw Error('BUSINESS_REJECTED');};
-    protect.readingFence=()=>store.localReadingFence();
+    protect.transferFence=reading=>store.localTransferFence(reading);
     return await apply(protect);
    }finally{key.fill(0);await gate.close();}
   }finally{await host('cloud.release',{});}

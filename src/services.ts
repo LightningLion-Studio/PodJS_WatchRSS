@@ -83,7 +83,15 @@ const clearDatabase: SqlDatabase = {
   transaction: async statements => {const counts=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,counts);},
   transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,changes);return changes;},
 };
-export const db:SqlDatabase={query:clearDatabase.query,execute:async(...args)=>{assertLibraryWritable();return clearDatabase.execute(...args);},transaction:async statements=>{assertLibraryWritable();return clearDatabase.transaction(statements);},transactionChanges:async statements=>{assertLibraryWritable();return clearDatabase.transactionChanges!(statements);}};
+export const db:SqlDatabase={query:clearDatabase.query,execute:async(...args)=>{assertLibraryWritable();return clearDatabase.execute(...args);},transaction:async statements=>{assertLibraryWritable();return clearDatabase.transaction(statements);},transactionChanges:async statements=>{assertLibraryWritable();return clearDatabase.transactionChanges!(statements);},async transactionChangesCancellable(statements,onCancel){
+ assertLibraryWritable();
+ // The host's SQL worker checks this request's CancellationSignal before
+ // starting, between statements, and before marking the transaction successful.
+ const operation=hostOperation<number[]>('sql.transaction',{statements,reportChanges:true});
+ const stop=onCancel(()=>operation.cancel('user_back'));
+ try{const counts=await operation.result;notifyLibrarySqlCommit(statements,counts);return counts;}
+ finally{stop();}
+}};
 export async function commitGuardedLibraryTransfer(channel:string,epoch:number,statements:Parameters<SqlDatabase['transaction']>[0]){
  assertLibraryWritable();
  const counts=await sqlite.transactionChangesGuarded(channel,epoch,statements as Parameters<typeof sqlite.transactionChangesGuarded>[2]);

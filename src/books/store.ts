@@ -1,3 +1,6 @@
+import type {PublicationDeadline} from '../cloud/publication-deadline';
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck} from '../core/types';
 import {compareLifecycleTokens} from '@podjs/framework/lifecycle-token';
 import {bookValidationRow,bookValidationRows,openBookInstall,validateInstall,verifyBookInstall} from './install-validation';
 import type {FileCheckpoint} from '@podjs/framework/work-window';
@@ -34,7 +37,7 @@ export class SqlBookStore {
  private work<T>(stage:string,action:()=>Promise<T>){const before={...this.io};return repositoryWork(this.ports.diagnostic?fields=>{const values=Object.fromEntries(Object.entries(this.io).map(([k,n])=>[k,n-before[k as keyof typeof before]]));this.ports.diagnostic?.({...fields,...values});}:undefined,stage,action);}
  /** Registered identities need state capture, not an unrelated legacy import
   * scan. Digest-backed preview candidates retain the full quarantine path. */
- async prepareCloudMerge(books:readonly BookState[],reading:readonly BookReading[],check?:()=>void){return this.work('book-prepare',async()=>{
+ async prepareCloudMerge(books:readonly BookState[],reading:readonly BookReading[],check?:SqlCancellationCheck){return this.work('book-prepare',async()=>{
   const ids=[...new Set([...books.map(b=>b.bookId),...reading.map(r=>r.bookId)])];if(!ids.length)return;check?.();
   const known=new Set<string>();for(let at=0;at<ids.length;at+=100)for(const r of await this.db.query('SELECT book_id FROM sync_books WHERE registration_complete=1 AND book_id IN('+ids.slice(at,at+100).map(()=>'?').join(',')+')',ids.slice(at,at+100)))known.add(str(r.book_id));
   let preview=false;for(let at=0;at<ids.length&&!preview;at+=100){const part=ids.slice(at,at+100),marks=part.map(()=>'?').join(',');check?.();preview=!!(await this.db.query(`SELECT 1 FROM articles a JOIN channels ch ON ch.id=a.channel_id JOIN article_sync_encoding_cache e ON e.item_id=a.id WHERE a.description IS NOT NULL AND a.description!='' AND length(e.content_hash)=64 AND e.content_hash NOT GLOB '*[^0-9a-f]*' AND (ch.url IN (SELECT channel_url FROM sync_book_aliases WHERE book_id IN (${marks}) AND channel_url!='https://watchrss.local/import-content') OR a.link IN (SELECT url FROM sync_book_aliases WHERE book_id IN (${marks}) AND channel_url='https://watchrss.local/import-content')) LIMIT 1`,[...part,...part])).length;}
@@ -79,7 +82,7 @@ export class SqlBookStore {
  async package(id:string):Promise<BookFileInfo|undefined>{const r=(await this.db.query('SELECT package_path,package_sha256,package_bytes,registration_complete FROM sync_books WHERE book_id=?',[id]))[0];if(!r?.package_path||!r.package_sha256||num(r.registration_complete)!==1)return;const stat=await this.ports.files.stat(str(r.package_path));if(!stat.exists||stat.size!==num(r.package_bytes))return;return {path:str(r.package_path),size:stat.size,sha256:str(r.package_sha256)};}
  async manifests(){const rows=await this.states(),out=[];for(const s of rows)out.push({...s,contentAvailable:!!await this.package(s.bookId)});return out;}
  private async guarded<T>(action:(revision:number)=>Promise<T>):Promise<T>{for(let attempt=0;attempt<3;attempt++){const revision=await libraryRevision(this.db);try{return await action(revision);}catch(error){if(await libraryRevision(this.db)===revision)throw error;}}throw Error('book_changed_repeatedly');}
- async merge(remote:BookState,check?:()=>void):Promise<number>{return this.work('book-state-merge',()=>this.mergeValue(remote,check));}
+ async merge(remote:BookState,check?:SqlCancellationCheck):Promise<number>{return this.work('book-state-merge',()=>this.mergeValue(remote,check));}
  /** Callers keep the legacy domain until every local original has an
   * immutable package. Legacy registration may hydrate an unbounded chapter. */
  async binaryReady():Promise<boolean>{
@@ -122,10 +125,10 @@ export class SqlBookStore {
    {sql:'DELETE FROM sync_book_display_dirty WHERE book_id=?',params:[id]},
   ];
  }
- private async mergeValue(remote:BookState,check?:()=>void):Promise<number>{await validateBook(remote,this.ports.sha256);return this.guarded(async revision=>{const previous=await this.record(remote.bookId),old=previous?this.state(previous):undefined,next=mergeBook(old,remote);let changed=0;if(!old||canonical(old)!==canonical(next)){check?.();await this.db.transaction([revisionGuard(revision),this.statement(next),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),...(old&&compareLifecycleTokens(next.lifecycle,old.lifecycle)>0?[{sql:'DELETE FROM sync_book_delete_members WHERE book_id=?',params:[next.bookId]},{sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[next.bookId]}]:[]),{sql:"UPDATE channels SET title=? WHERE title IS NOT ? AND url!='https://watchrss.local/import-content' AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[next.title,next.title,next.bookId]},{sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]);changed++;await this.rememberDisplay(next.bookId);}return changed+await this.applyDeletions(next,check);});}
+ private async mergeValue(remote:BookState,check?:SqlCancellationCheck):Promise<number>{await validateBook(remote,this.ports.sha256);return this.guarded(async revision=>{const previous=await this.record(remote.bookId),old=previous?this.state(previous):undefined,next=mergeBook(old,remote);let changed=0;if(!old||canonical(old)!==canonical(next)){await cancellableSql(this.db,check).transaction([revisionGuard(revision),this.statement(next),...(next.lifecycle?[this.lifecycleStatement(next)]:[]),...(old&&compareLifecycleTokens(next.lifecycle,old.lifecycle)>0?[{sql:'DELETE FROM sync_book_delete_members WHERE book_id=?',params:[next.bookId]},{sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[next.bookId]}]:[]),{sql:"UPDATE channels SET title=? WHERE title IS NOT ? AND url!='https://watchrss.local/import-content' AND url IN(SELECT channel_url FROM sync_book_aliases WHERE book_id=?)",params:[next.title,next.title,next.bookId]},{sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]);changed++;await this.rememberDisplay(next.bookId,check);}return changed+await this.applyDeletions(next,check);});}
  private async displayProjection(id:string){return this.rows(`SELECT DISTINCT CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN 'a:'||a.id ELSE 'c:'||c.id END AS key,CASE WHEN m.channel_url='https://watchrss.local/import-content' THEN a.title ELSE c.title END AS title FROM sync_book_aliases m JOIN articles a ON a.id=m.item_id JOIN channels c ON c.id=a.channel_id WHERE m.book_id=? ORDER BY key`,[id]);}
- private async rememberDisplay(id:string){await this.guarded(async revision=>{const dirty=(await this.db.query('SELECT revision FROM sync_book_display_dirty WHERE book_id=?',[id]))[0],projection=canonical(await this.displayProjection(id));await this.db.transaction([revisionGuard(revision),{sql:'INSERT INTO sync_book_display(book_id,projection) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET projection=excluded.projection WHERE projection IS NOT excluded.projection',params:[id,projection]},...(dirty?[{sql:'DELETE FROM sync_book_display_dirty WHERE book_id=? AND revision=?',params:[id,dirty.revision]}]:[])]);});}
- private async captureDisplay(){for(const row of await this.rows('SELECT b.book_id,b.state_json,d.projection FROM sync_books b JOIN sync_book_display_dirty x ON x.book_id=b.book_id LEFT JOIN sync_book_display d ON d.book_id=b.book_id WHERE b.registration_complete=1 ORDER BY b.book_id')){const id=str(row.book_id),now=await this.displayProjection(id),previous=row.projection?JSON.parse(str(row.projection)) as Row[]:undefined;const edits=previous?now.filter(n=>previous.some(o=>o.key===n.key&&o.title!==n.title)):[];if(edits.length){const old=this.state(row),title=str(edits[edits.length-1]!.title);await this.merge({...old,title,updatedAt:Math.max((this.ports.now??Date.now)(),old.updatedAt+1),sourceDeviceId:await this.ports.deviceId()});}else await this.rememberDisplay(id);}}
+ private async rememberDisplay(id:string,check?:SqlCancellationCheck){await this.guarded(async revision=>{const dirty=(await this.db.query('SELECT revision FROM sync_book_display_dirty WHERE book_id=?',[id]))[0],projection=canonical(await this.displayProjection(id));await cancellableSql(this.db,check).transaction([revisionGuard(revision),{sql:'INSERT INTO sync_book_display(book_id,projection) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET projection=excluded.projection WHERE projection IS NOT excluded.projection',params:[id,projection]},...(dirty?[{sql:'DELETE FROM sync_book_display_dirty WHERE book_id=? AND revision=?',params:[id,dirty.revision]}]:[])]);});}
+ private async captureDisplay(check?:SqlCancellationCheck){for(const row of await this.rows('SELECT b.book_id,b.state_json,d.projection FROM sync_books b JOIN sync_book_display_dirty x ON x.book_id=b.book_id LEFT JOIN sync_book_display d ON d.book_id=b.book_id WHERE b.registration_complete=1 ORDER BY b.book_id')){const id=str(row.book_id),now=await this.displayProjection(id),previous=row.projection?JSON.parse(str(row.projection)) as Row[]:undefined;const edits=previous?now.filter(n=>previous.some(o=>o.key===n.key&&o.title!==n.title)):[];if(edits.length){const old=this.state(row),title=str(edits[edits.length-1]!.title);await this.merge({...old,title,updatedAt:Math.max((this.ports.now??Date.now)(),old.updatedAt+1),sourceDeviceId:await this.ports.deviceId()},check);}else await this.rememberDisplay(id,check);}}
  private async deletionStatements(s:BookState,boundary?:ReceiptBoundary):Promise<{members:Statement[];effects:Statement[]}>{if(!s.deleted&&!s.deletedChapters.length)return {members:[],effects:[]};const memberStatements:Statement[]=[];
   if(boundary&&s.deletedChapters.length)memberStatements.push({sql:"INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) SELECT b.book_id,c.value FROM sync_books b,json_each(b.state_json,'$.deletedChapters') c WHERE b.book_id=?",params:[s.bookId]});
   else for(let at=0;at<s.deletedChapters.length;at+=400){const part=s.deletedChapters.slice(at,at+400);memberStatements.push({sql:'INSERT OR IGNORE INTO sync_book_delete_members(book_id,chapter_index) VALUES '+part.map(()=>'(?,?)').join(','),params:part.flatMap(i=>[s.bookId,i])});}
@@ -138,19 +141,18 @@ export class SqlBookStore {
    {sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'}];
   return {members:memberStatements,effects:statements};
  }
- private async applyDeletions(s:BookState,check?:()=>void):Promise<number>{
+ private async applyDeletions(s:BookState,check?:SqlCancellationCheck):Promise<number>{
   if(!s.deleted&&!s.deletedChapters.length)return 0;
   const {members,effects:statements}=await this.deletionStatements(s);
-  check?.();if(members.length)await this.db.transaction(members);
-  check?.();
-  if(!this.db.transactionChanges)throw Error('Book deletion requires committed counts');const n=await this.db.transactionChanges(statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})));let readingChanges=0;const affected=(await querySyncKeysetPages(this.db,'SELECT state_json,chapter_index FROM sync_book_reading WHERE book_id=? AND chapter_index>? ORDER BY chapter_index',[s.bookId],{key:'chapter_index'})).filter(r=>s.deleted||s.deletedChapters.includes(num(r.chapter_index))).map(r=>JSON.parse(str(r.state_json)) as BookReading);for(let at=0;at<affected.length;at+=100)readingChanges+=await this.mergeReadingBatch(affected.slice(at,at+100),{check});return n[2]!+(s.deleted?n[4]!:0)+readingChanges;
+  const db=cancellableSql(this.db,check);if(members.length)await db.transaction(members);
+  if(!db.transactionChanges)throw Error('Book deletion requires committed counts');const n=await db.transactionChanges(statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})));let readingChanges=0;const affected=(await querySyncKeysetPages(this.db,'SELECT state_json,chapter_index FROM sync_book_reading WHERE book_id=? AND chapter_index>? ORDER BY chapter_index',[s.bookId],{key:'chapter_index'})).filter(r=>s.deleted||s.deletedChapters.includes(num(r.chapter_index))).map(r=>JSON.parse(str(r.state_json)) as BookReading);for(let at=0;at<affected.length;at+=100)readingChanges+=await this.mergeReadingBatch(affected.slice(at,at+100),{check});return n[2]!+(s.deleted?n[4]!:0)+readingChanges;
  }
  /** Consume only the exact witnessed keys; a concurrent new deletion remains pending. */
- async capture(){const groups=new Map<string,Row[]>();for(const r of await this.rows('SELECT * FROM sync_book_events ORDER BY book_id,chapter_index')){const list=groups.get(str(r.book_id))??[];list.push(r);groups.set(str(r.book_id),list);}for(const [id,events]of groups)await this.guarded(async revision=>{const row=await this.record(id);if(!row)return;const old=this.state(row),current=events.filter(e=>!old.lifecycle||num(e.changed_at)>old.lifecycle.startedAt),whole=current.some(e=>num(e.chapter_index)===0),next={...old,deleted:old.deleted||whole,deletedChapters:[...new Set([...old.deletedChapters,...current.map(e=>num(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b),deletionClock:current.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletionClock),deletedAt:whole?current.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletedAt):old.deletedAt};const consume=events.map(e=>({sql:'DELETE FROM sync_book_events WHERE book_id=? AND chapter_index=? AND changed_at<=?',params:[id,e.chapter_index,e.changed_at]}));for(let at=0;at<consume.length;at+=900)await this.db.transaction([...(at===0?[revisionGuard(revision),this.statement(next)]:[]),...consume.slice(at,at+900)]);await this.applyDeletions(next);});await this.captureDisplay();}
+ async capture(check?:SqlCancellationCheck){const db=cancellableSql(this.db,check);const groups=new Map<string,Row[]>();for(const r of await this.rows('SELECT * FROM sync_book_events ORDER BY book_id,chapter_index')){const list=groups.get(str(r.book_id))??[];list.push(r);groups.set(str(r.book_id),list);}for(const [id,events]of groups)await this.guarded(async revision=>{const row=await this.record(id);if(!row)return;const old=this.state(row),current=events.filter(e=>!old.lifecycle||num(e.changed_at)>old.lifecycle.startedAt),whole=current.some(e=>num(e.chapter_index)===0),next={...old,deleted:old.deleted||whole,deletedChapters:[...new Set([...old.deletedChapters,...current.map(e=>num(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b),deletionClock:current.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletionClock),deletedAt:whole?current.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletedAt):old.deletedAt};const consume=events.map(e=>({sql:'DELETE FROM sync_book_events WHERE book_id=? AND chapter_index=? AND changed_at<=?',params:[id,e.chapter_index,e.changed_at]}));for(let at=0;at<consume.length;at+=900)await db.transaction([...(at===0?[revisionGuard(revision),this.statement(next)]:[]),...consume.slice(at,at+900)]);await this.applyDeletions(next,check);});await this.captureDisplay(check);}
  /** Freeze only an original continuous directory with proven body availability.
   * A matching peer state supplies a missing-tail check during legacy migration. */
- async registerLocal(expected:readonly BookState[]=[],check?:()=>void){return this.work('book-register',async()=>{const at=Date.now();try{return await this.registerLocalImpl(expected,check);}finally{this.ports.profile?.("books.register",Date.now()-at);}});}
- private async registerLocalImpl(expected:readonly BookState[],check?:()=>void){check?.();await this.capture();check?.();
+ async registerLocal(expected:readonly BookState[]=[],check?:SqlCancellationCheck){return this.work('book-register',async()=>{const at=Date.now();try{return await this.registerLocalImpl(expected,check);}finally{this.ports.profile?.("books.register",Date.now()-at);}});}
+ private async registerLocalImpl(expected:readonly BookState[],check?:SqlCancellationCheck){const db=cancellableSql(this.db,check);check?.();await this.capture(check);check?.();
   const key='previewguard-v1:'+canonical(expected.map(b=>[b.bookId,b.sourceUrl??'',b.chapterCount]).sort((a,b)=>String(a[0])<String(b[0])?-1:1)),revision=await libraryRevision(this.db),cached=(await this.db.query('SELECT revision FROM sync_book_registration_cache WHERE cache_key=?',[key]))[0];
   if(cached&&num(cached.revision)===revision){await this.captureReading();return;}
   let cacheable=true;const rows=await this.rows(`SELECT a.id,a.title,a.link,a.dedup_key,a.fetched_at,a.content IS NOT NULL AS has_content,COALESCE(a.description,'') AS excerpt,e.content_hash,ch.url AS channel_url,ch.title AS channel_title,
@@ -160,7 +162,7 @@ export class SqlBookStore {
   const groups=new Map<string,Row[]>();for(const r of rows){const url=str(r.link);if(!isBookUrl(url))continue;const group=url.startsWith('https://watchrss.local/import-content/txt/')?url:str(r.channel_url);const list=groups.get(group)??[];list.push(r);groups.set(group,list);}
   for(const [source,rows]of groups){check?.();try{const sourceRevision=await libraryRevision(this.db);const existing=await this.rows('SELECT DISTINCT b.* FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE (m.channel_url=? OR m.url=?) ORDER BY b.book_id',[source,source]),polluted:string[]=[];
     let blocked=false;for(const b of existing){if(await this.knownPreviewPackage(b,rows))polluted.push(str(b.book_id));else if(num(b.registration_complete)===1)blocked=true;}if(blocked)continue;
-    if(polluted.length){await this.db.transaction([revisionGuard(sourceRevision),...polluted.map(id=>({sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[id]}))]);this.ports.warn?.('book_known_preview_pending_body');}
+    if(polluted.length){await db.transaction([revisionGuard(sourceRevision),...polluted.map(id=>({sql:'UPDATE sync_books SET registration_complete=0 WHERE book_id=?',params:[id]}))]);this.ports.warn?.('book_known_preview_pending_body');}
     const single=source.startsWith('https://watchrss.local/import-content/txt/');const {rows:ordered,ordinals:indices}=await orderLegacyChapters(rows,check,{yieldTurn:async()=>{await this.db.query('SELECT 1');}});
     if(!single){const start=indices[0]!;if(![0,1].includes(start)||!indices.every((x,i)=>x===start+i))throw Error('incomplete_directory');}else if(ordered.length!==1)throw Error('ambiguous_single_text');
     const peer=expected.find(b=>b.sourceUrl===source&&!polluted.includes(b.bookId));const urls=new Set(ordered.map(r=>str(r.link)));const knownDeleted=await this.rows('SELECT url FROM sync_article_deletions WHERE url LIKE ? ORDER BY url',[source+'/chapter/%']);if(knownDeleted.some(r=>!urls.has(str(r.url))))throw Error('missing_original_deleted_chapter');if(peer&&peer.chapterCount!==ordered.length)throw Error('incomplete_directory');
@@ -172,7 +174,7 @@ export class SqlBookStore {
     try{check?.();const fingerprint=await bookFingerprint(hashes,this.ports.sha256),id=await bookId(fingerprint,this.ports.sha256);if(peer&&peer.bookId!==id)throw Error('original_fingerprint_mismatch');const previous=await this.record(id),old=previous?this.state(previous):undefined;const state:BookState={bookId:id,fingerprint,title:header.title,chapterCount:ordered.length,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:ordered.reduce((at,r)=>Math.max(at,num(r.fetched_at)),0),sourceDeviceId:await this.ports.deviceId(),sourceUrl:source,kind:header.kind};const next=mergeBook(old,state);if(await libraryRevision(this.db)!==sourceRevision)throw Error('book_changed_during_registration');const published=await this.package(id)??await this.ports.files.publish(temp,id);
      const statements:Statement[]=[revisionGuard(sourceRevision),this.statement(next),{sql:'UPDATE sync_books SET package_path=?,package_sha256=?,package_bytes=? WHERE book_id=?',params:[published.path,published.sha256,published.size,id]}];
      for(let i=0;i<mappings.length;i++){const m=mappings[i]!;statements.push({sql:'INSERT OR IGNORE INTO sync_book_chapters(book_id,chapter_index,article_id,item_id,url,chapter_hash) VALUES(?,?,?,(SELECT id FROM articles WHERE id=?),?,?)',params:[id,i+1,m.id,m.row.id,m.url,hashes[i]!]},{sql:'INSERT INTO sync_book_aliases(book_id,chapter_index,article_id,item_id,url,channel_url) VALUES(?,?,?,(SELECT id FROM articles WHERE id=?),?,?) ON CONFLICT(book_id,chapter_index,article_id) DO UPDATE SET item_id=excluded.item_id',params:[id,i+1,m.id,m.row.id,m.url,str(m.row.channel_url)]});}
-     for(let at=0;at<statements.length;at+=1000){check?.();await this.db.transaction(statements.slice(at,at+1000));}check?.();await this.db.transaction([{sql:'UPDATE sync_books SET registration_complete=1 WHERE book_id=?',params:[id]}]);await this.rememberDisplay(id);await this.applyDeletions(this.state((await this.record(id))!));
+     for(let at=0;at<statements.length;at+=1000){check?.();await db.transaction(statements.slice(at,at+1000));}check?.();await db.transaction([{sql:'UPDATE sync_books SET registration_complete=1 WHERE book_id=?',params:[id]}]);await this.rememberDisplay(id,check);await this.applyDeletions(this.state((await this.record(id))!),check);
     }finally{await this.ports.files.remove(temp.path);}
    }catch(error){check?.();if(!['incomplete_directory','missing_original_deleted_chapter','missing_authoritative_plain_text','ambiguous_single_text','original_fingerprint_mismatch'].includes(error instanceof Error?error.message:String(error)))cacheable=false;this.ports.warn?.(error instanceof Error&&error.message==='book_body_pending'?'book_body_pending':'book_legacy_original_incomplete');}}
   check?.();await this.captureReading();check?.();
@@ -192,8 +194,8 @@ export class SqlBookStore {
    if(previewEquivalent(c.contentText,str(r.excerpt))&&/^[a-f0-9]{64}$/.test(str(r.content_hash))&&!await matchingBodyDigest(c.contentText,c.contentHtml,str(r.content_hash),this.ports.sha256))preview=true;
   }}catch(_){return false;}await this.db.execute('INSERT INTO sync_book_registration_cache(cache_key,revision) VALUES(?,?) ON CONFLICT(cache_key) DO UPDATE SET revision=excluded.revision',[key,preview?1:0]);return preview;
  }
- async captureReading(){return this.work('book-capture-reading',async()=>{const at=Date.now();try{return await this.captureReadingImpl();}finally{this.ports.profile?.("books.captureReading",Date.now()-at);}});}
- private async captureReadingImpl(){
+ async captureReading(check?:SqlCancellationCheck){return this.work('book-capture-reading',async()=>{const at=Date.now();try{return await this.captureReadingImpl(check);}finally{this.ports.profile?.("books.captureReading",Date.now()-at);}});}
+ private async captureReadingImpl(check?:SqlCancellationCheck){const db=cancellableSql(this.db,check);
   if((await this.db.query('SELECT 1 FROM sync_book_events LIMIT 1')).length)await this.capture();
   for(;;){if(!(await this.db.query('SELECT 1 FROM sync_book_reading_dirty LIMIT 1')).length)return;
    await this.guarded(async revision=>{
@@ -210,8 +212,8 @@ export class SqlBookStore {
    if(bookInteracted(value))candidates.set(key,mergeBookReading(candidates.get(key),value));}
   const changed:BookReading[]=[];for(const [key,value]of candidates){const merged=mergeBookReading(old.get(key),value);if(canonical(merged)!==canonical(old.get(key)??null))changed.push(merged);}for(let at=0;at<changed.length;at+=100){const expected=at===0?revision:await libraryRevision(this.db);
    if(at>0){const current=new Map((await this.db.query('SELECT item_id,revision FROM sync_book_reading_dirty WHERE item_id IN('+marks+')',items)).map(r=>[num(r.item_id),num(r.revision)]));if(dirty.some(r=>current.get(num(r.item_id))!==num(r.revision)))throw Error('book_reading_capture_changed');}
-   await this.mergeReadingBatch(changed.slice(at,at+100),{capture:false,expectedRevision:expected});} 
-  await this.db.transaction([revisionGuard(changed.length?await libraryRevision(this.db):revision),...dirty.map(r=>({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id=? AND revision=?',params:[r.item_id,r.revision]}))]);
+   await this.mergeReadingBatch(changed.slice(at,at+100),{capture:false,expectedRevision:expected,check});}
+  await db.transaction([revisionGuard(changed.length?await libraryRevision(this.db):revision),...dirty.map(r=>({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id=? AND revision=?',params:[r.item_id,r.revision]}))]);
    });
   }
  }
@@ -223,10 +225,11 @@ export class SqlBookStore {
  }
  async mergeReading(remote:BookReading):Promise<number>{return this.mergeReadingBatch([remote]);}
  /** One durable page; clocks are merged before projecting each affected book once. */
- async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary;check?:()=>void}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
- private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary;check?:()=>void}={}):Promise<number>{
+ async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary;check?:SqlCancellationCheck}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
+ private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[];boundary?:ReceiptBoundary;check?:SqlCancellationCheck}={}):Promise<number>{
+  const db=cancellableSql(this.db,options.check);
   for(const value of incoming)validateBookReading(value);if(!incoming.length)return 0;if(incoming.length>100)throw Error('book_reading_batch_too_large');
-  if(options.capture!==false)await this.captureReading();
+  if(options.capture!==false)await this.captureReading(options.check);
   for(let attempt=0;attempt<3;attempt++){const revision=options.expectedRevision??await libraryRevision(this.db);try{
    if(options.expectedRevision!==undefined&&await libraryRevision(this.db)!==revision)throw Error('book_reading_capture_changed');
    const boundary=options.boundary,ids=[...new Set(incoming.map(r=>r.bookId))];
@@ -257,21 +260,21 @@ export class SqlBookStore {
    const guards=[...(boundary?.before??[]),...(options.guards??[])];
    if(!affected.size){
     if(boundary)await this.commitBinary(boundary,[revisionGuard(revision),...guards,...boundary.after('alreadyPresent')]);
-    else if(guards.length)await this.db.transaction([revisionGuard(revision),...guards]);
+    else if(guards.length)await db.transaction([revisionGuard(revision),...guards]);
     return 0;
-   }if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
+   }if(!db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
    for(const [id,indices] of affected)statements.push(...this.projectReadingStatements(id,indices));
    if(boundary){
     await this.commitBinary(boundary,[revisionGuard(revision),...guards,...statements,...boundary.after('merged')]);
     return writes;
    }
-   options.check?.();const counts=await this.db.transactionChanges([revisionGuard(revision),...guards,...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));
+   const counts=await db.transactionChanges([revisionGuard(revision),...guards,...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));
    return Math.max(counts.slice(1+guards.length,1+guards.length+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }
- async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint,cloud=false,check?:()=>void):Promise<number>{
-  check?.();await this.capture();
+ async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint,cloud=false,check?:SqlCancellationCheck,deadline?:PublicationDeadline):Promise<number>{
+  const db=cancellableSql(this.db,check);check?.();await this.capture(check);
   const startRevision=cloud?await libraryRevision(this.db):undefined;
   const existing=await this.record(id),expected=existing?this.state(existing):undefined;
   await checkpoint?.check();if(!/^[a-f0-9]{64}$/.test(id)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_package_identity_or_size');
@@ -282,7 +285,7 @@ export class SqlBookStore {
    const installed=await this.ports.files.stat(str(existing.package_path));
    const directory=(await this.db.query('SELECT count(*) AS n FROM sync_book_chapters WHERE book_id=?',[id]))[0];
    const missing=(await this.db.query('SELECT 1 FROM sync_book_chapters m LEFT JOIN articles a ON a.id=m.item_id WHERE m.book_id=? AND a.id IS NULL AND NOT EXISTS(SELECT 1 FROM sync_book_delete_members d WHERE d.book_id=m.book_id AND d.chapter_index=m.chapter_index) LIMIT 1',[id])).length;
-   if(installed.exists&&installed.size===info.size&&num(directory?.n)===expected!.chapterCount&&(!missing||expected!.deleted)){await this.captureReading();await checkpoint?.check();return 0;}
+   if(installed.exists&&installed.size===info.size&&num(directory?.n)===expected!.chapterCount&&(!missing||expected!.deleted)){await this.captureReading(check);await checkpoint?.check();return 0;}
   }
   // Cloud can verify each decoded chapter as it creates the private shadow.
   // Its receipt namespace is separate from older and Bluetooth installs.
@@ -301,7 +304,7 @@ export class SqlBookStore {
   const revision=startRevision??await libraryRevision(this.db),presentRows=await querySyncKeysetPages(this.db,`SELECT a.id,a.link,a.channel_id,a.dedup_key,ch.url AS channel_url,(SELECT article_id FROM sync_article_ids WHERE item_id=a.id) AS article_id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE (a.link LIKE 'https://watchrss.local/import-%' OR a.link LIKE 'watchrss://import/instance-v1/%') AND a.id>? ORDER BY a.id`),present=new Map(presentRows.map(r=>[str(r.link),r])),byItem=new Map(presentRows.map(r=>[num(r.id),r]));
   const legacyDeletes=new Map((await this.rows('SELECT url,changed_at FROM sync_article_deletions ORDER BY url')).map(r=>[str(r.url),num(r.changed_at)]));
   const resume=num(row.stage_revision)===revision;
-  if(!resume)await this.db.transaction([...(cloud?[revisionGuard(revision)]:[]),{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:[id,stageKey]},{sql:'UPDATE sync_book_install SET stage_index=0,stage_offset=0,stage_revision=? WHERE binding=?',params:[revision,binding]}]);
+  if(!resume)await db.transaction([...(cloud?[revisionGuard(revision)]:[]),{sql:'DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',params:[id,stageKey]},{sql:'UPDATE sync_book_install SET stage_index=0,stage_offset=0,stage_revision=? WHERE binding=?',params:[revision,binding]}]);
   let index=resume?num(row.stage_index):0,stageOffset=resume&&num(row.stage_offset)?num(row.stage_offset):num(row.header_offset),maxDelete=state.deletionClock;const deletionSet=new Set(state.deletedChapters);let staged:Statement[]=[],validation:Statement[]=[],stageBytes=0,pageStart=stageOffset;
   const prior=await querySyncKeysetPages(this.db,'SELECT chapter_index,existing_item,url FROM sync_book_stage WHERE book_id=? AND package_sha256=? AND chapter_index>? ORDER BY chapter_index',[id,stageKey],{key:'chapter_index'});
   const usedItems=new Set(prior.filter(r=>r.existing_item!=null).map(r=>num(r.existing_item))),usedUrls=new Set(prior.map(r=>str(r.url)));
@@ -322,7 +325,7 @@ export class SqlBookStore {
     await this.ports.text.syncStagedText!();
     await checkpoint?.check();
    }
-   await this.db.transaction([revisionGuard(revision),...staged,...validation,progress,...verifiedPrefix]);
+   await db.transaction([revisionGuard(revision),...staged,...validation,progress,...verifiedPrefix]);
    textDirectoryDirty=false;
    staged=[];validation=[];stageBytes=0;pageStart=stageOffset;
    const unit='book-stage:'+binding+':'+revision+':'+index;
@@ -371,10 +374,10 @@ export class SqlBookStore {
   const accepted={...state,fingerprint};
   const next=mergeBook(accepted,{...accepted,deletedChapters:[...deletionSet].sort((a,b)=>a-b),deletionClock:maxDelete});
   if(await libraryRevision(this.db)!==revision)throw Error('book_library_changed_during_staging');
-  check?.();const published=await this.ports.files.publish(info,id);
+  check?.();deadline?.check();const published=await this.ports.files.publish(info,id,deadline);
   if(cloud)await checkpoint?.check();
   const ss=this.packageStatements(next,published,stageKey,revision,binding);
-  if(!this.db.transactionChanges)throw Error('Book install requires committed counts');check?.();const counts=await this.db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id);await this.captureReading();return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next,check);
+  if(!db.transactionChanges)throw Error('Book install requires committed counts');deadline?.check();const counts=await db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id,check);await this.captureReading(check);return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next,check);
  }
  /** Import into a job-owned shadow. No package path or chapter is readable
   * until the revision, lifecycle, chapter rows and receipt commit together. */

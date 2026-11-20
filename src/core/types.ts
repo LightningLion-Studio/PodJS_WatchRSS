@@ -1,9 +1,11 @@
 export type SqlParams = readonly unknown[];
+export type SqlCancellationCheck=(()=>void) & {onCancel?:(cancel:()=>void)=>()=>void};
 export interface SqlDatabase {
   query(sql: string, params?: SqlParams, traceLabel?: string): Promise<Record<string, unknown>[]>;
   execute(sql: string, params?: SqlParams, traceLabel?: string): Promise<void>;
   transaction(statements: { sql: string; params?: SqlParams }[]): Promise<void>;
   transactionChanges?(statements: { sql: string; params?: SqlParams }[]): Promise<number[]>;
+  transactionChangesCancellable?(statements: {sql:string;params?:SqlParams}[],onCancel:NonNullable<SqlCancellationCheck['onCancel']>):Promise<number[]>;
 }
 export interface Channel { id: number; url: string; title: string; description: string | null; imageUrl: string | null; lastFetchedAt: number | null; createdAt: number; sortOrder: number; isPinned: boolean; unreadCount?: number; }
 export interface SourcePreferences { channelId: number; useOriginalContent: boolean; readPreset: string; }

@@ -1,3 +1,4 @@
+import type {SqlCancellationCheck} from '../core/types';
 import {knownRecordValue} from '../cloud/compatibility';
 import {normalizeSourceUrl} from './source-store';
 import {bytesToBase64} from '@podjs/framework/bytes';
@@ -49,7 +50,7 @@ export interface LibrarySessionRepository {
  exportRequested(requests:readonly RequestedArticleBody[],peer?:string):Promise<readonly PreparedArticle[]>;
  finalizeSnapshot(articleIds:readonly string[],sourceUrls:readonly string[],peer?:string):Promise<void>;
  resetPeerState():Promise<void>;
- markSuccess(pending:PendingSyncSuccess):Promise<void>;
+ markSuccess(pending:PendingSyncSuccess,check?:SqlCancellationCheck):Promise<void>;
 }
 export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'handoff'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
@@ -75,7 +76,7 @@ export interface LibrarySessionOptions {
  onSessionClosed?:(results:readonly SessionActionResult[])=>void;
  capabilities?:ProbeCapabilities;
  watchCapabilities?:JsonObject;
- handleAction?:((request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>;domainVectors?:DomainVectorProvider;legacyIntake?:BoundLocalTransferIntake};
+ handleAction?:((request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>;domainVectors?:DomainVectorProvider;legacyIntake?:BoundLocalTransferIntake;closeSession?:(session:object)=>Promise<void>|undefined};
  offerIpEndpoint?:(descriptor:JsonObject)=>Promise<boolean>;
  initialRequestTimeoutMs?:number;
  responseAckTimeoutMs?:number;
@@ -133,7 +134,7 @@ export class LibrarySyncSession {
  private async timed<T>(event:string,action:()=>Promise<T>):Promise<T>{const start=this.monotonic();try{return await action();}finally{this.log.event(event,{elapsedMs:Math.max(0,Math.round(this.monotonic()-start))});}}
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}
- private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.options.localObjects?.close();await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}})();}
+ private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.options.localObjects?.close();await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}finally{await this.options.handleAction?.closeSession?.(this.actionContext.session);}})();}
  private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();if(this.options.history){this.diagnosticRequest=f;if(f.action==='syncBooks'&&Array.isArray(f.books))for(const raw of f.books.slice(0,257)){if(raw&&typeof raw==='object'){const row=raw as JsonObject,title=rejectionTitle(row.title);if(title&&typeof row.bookId==='string'&&(this.diagnosticTitles.has(row.bookId)||this.diagnosticTitles.size<256))this.diagnosticTitles.set(row.bookId,title);}}}if(this.options.history&&!this.trace&&['syncDomains','syncLibrary','syncBooks','syncNotes','syncNoteAsset','syncLibraryResume'].includes(String(f.action))&&f.phase!=='probe'){this.trace=this.options.history?.begin(this.options.diagnosticChannel??'RFCOMM',this.now,this.monotonic,{at:this.diagnosticStartedAt,tick:this.diagnosticTick,reconnects:this.options.diagnosticReconnects??0});this.trace?.bytes(this.diagnosticBytes);}return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
  private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();await this.diagnosticResponse(frame);}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
  private async diagnosticResponse(frame:JsonObject){
@@ -187,12 +188,12 @@ export class LibrarySyncSession {
      if(!rejection&&request.action==='syncBooks'&&(!this.peerCapabilities.supportsBookSyncV1||this.extensionCapabilities().supportsBookSyncV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_sync_not_negotiated'};
      if(!rejection&&request.action==='syncBooks'&&['readingSummary','readingDelta','readingCommit'].includes(String(request.phase))&&(!this.peerCapabilities.supportsBookReadingDeltaV1||this.extensionCapabilities().supportsBookReadingDeltaV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_reading_delta_not_negotiated'};
     }
-    let response:JsonObject,pending:PendingSyncSuccess|null=null,legacySubset=false;
+    let response:JsonObject,pending:PendingSyncSuccess|null=null,ackIntake:BoundLocalTransferIntake|undefined,legacySubset=false;
     if(rejection){response=accepted?{...rejection,...persistentFields}:rejection;await this.write(response);}
     else if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='manifest'){
      try{
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
-      const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;legacySubset=exchange.legacySubset;
+      const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;ackIntake=exchange.ackIntake;legacySubset=exchange.legacySubset;
      }catch(error){
       this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:(error as Error).message==='BUSINESS_REJECTED'?'BUSINESS_REJECTED':busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
       try{await this.write(response);}catch{this.log.event('library.errorResponse.write.failed',{},'W');}this.aborting=true;this.log.event("server.exchange.aborted",{persistentSession:persistent,completedActions:results.length,elapsedMs:this.log.elapsed()});this.status({phase:'error',message:String(response.message)});results.push({request,response,ack:null,libraryApplied:false});return results;
@@ -224,7 +225,18 @@ export class LibrarySyncSession {
     // its first/direct applied ACK. Use the existing applied-stage budget for
     // multi-frame replies; small actions retain the ordinary response deadline.
     const ack=await this.ack((pending||legacySubset)&&!this.checkpointed&&Number(response.batchCount)>1?120000:0);let libraryApplied=false;
-    if(pending&&ack?.success&&ack.applied){this.check();try{await this.repository.markSuccess(pending);this.check();libraryApplied=true;this.log.event("library.peerState.mark.success",{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});}catch(error){this.log.event("library.peerState.mark.failed",{message:"<redacted>"},"E");throw error;}}
+    if(pending&&ack?.success&&ack.applied){
+     const exchange=pending,check=Object.assign(()=>this.check(),{onCancel:this.actionContext.onCancel});
+     const mark=()=>{check();return this.repository.markSuccess(exchange,check);};
+     try{
+      await (ackIntake?ackIntake(mark):mark());this.check();libraryApplied=true;
+      this.log.event('library.peerState.mark.success',{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});
+     }catch(error){
+      this.log.event('library.peerState.mark.failed',{message:'<redacted>'},'E');
+      if(!ackIntake||!['BUSINESS_REJECTED','AUTH_REVOKED'].includes((error as Error).message))throw error;
+      this.diagnosticFailed=true;
+     }
+    }
     else if(legacySubset||request.action==='syncBooks'){
      const stagedBook=SYNC_V2_PRODUCT.syncV2&&request.action==='syncBooks'&&request.phase==='body'&&response.complete!==true;
      libraryApplied=!stagedBook&&!!(response.success&&ack?.success&&ack.applied);
@@ -254,7 +266,7 @@ export class LibrarySyncSession {
    if(string(request.action)!=='previewReader')throw new Error('实时预览连接收到了其他蓝牙动作');
   }
  }
- private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess|null;legacySubset:boolean}>{
+ private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess|null;ackIntake?:BoundLocalTransferIntake;legacySubset:boolean}>{
   this.capabilities(request);const peer=trim(string(request.deviceId))?string(request.deviceId):'phone',mode=string(request.libraryMode)||'merge';
   if(!['merge','phoneToWatchReplace','watchToPhoneReplace'].includes(mode))throw new Error('Invalid library mode');
   const target=mode==='phoneToWatchReplace',source=mode==='watchToPhoneReplace';this.checkpointed=this.checkpointRequested&&mode==='merge'&&request[LIBRARY_CHECKPOINT_FEATURE]===true;
@@ -264,6 +276,7 @@ export class LibrarySyncSession {
   if(legacySubset&&(mode!=='merge'||remoteRange.fromSeqExclusive!==0||remoteRange.toSeqInclusive!==0||remoteRange.fullSnapshot||remoteCursor.lastRemoteSeqApplied!==0||remoteCursor.lastLocalSeqAckedByPeer!==0||!bool(request.forceFull)))throw Error('CAPABILITY_MISMATCH');
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
   const intake=this.options.handleAction?.legacyIntake,check=()=>this.check();
+  const ackIntake=legacySubset?undefined:await intake?.capture?.();check();
   const sourceRecords=sources.map(value=>{const url=normalizeSourceUrl(value.url);return {kind:'source' as const,logicalId:url,value:{...value,url}};});
   let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>applyLegacyTransfer(intake,peer,'mergeSources',sourceRecords,()=>this.repository.mergeSources(sources,peer,false),check)):0;this.check();
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
@@ -313,6 +326,6 @@ export class LibrarySyncSession {
   // Keep the same response summary as native without retaining body byte arrays.
   const first=responses[0]!,response:JsonObject={success:responses.every(f=>bool(f.success,true)),version:optLong(first.version,14),action:ACTION_SYNC_LIBRARY,phase:string(first.phase)||'complete',deviceId:string(first.deviceId),sentAt:optLong(first.sentAt),batchCount:responses.length,totalArticles:responses.reduce((n,f)=>n+(Array.isArray(f.articles)?f.articles.length:0),0)};if(first.stats)response.stats=first.stats;
   this.log.event("library.manifest.handle.complete",{incomingArticles:receipt.receivedArticles,outgoingSources:window.rssSources.length,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,remoteSeqPendingAck:remoteRange.toSeqInclusive,fullSnapshot:window.fullSnapshot,peerStatePendingAck:true});
-  return {response,legacySubset,pending:legacySubset?null:{remoteDeviceId:peer,localSeqToInclusive:target?0:window.toSeqInclusive,remoteSeqToInclusive:source?0:remoteRange.toSeqInclusive,remoteProtocolVersion:optLong(request.version),fullSnapshot:window.fullSnapshot,...(window.projectionGeneration?{projectionGeneration:window.projectionGeneration}:{}),receivedArticleManifest:source?[]:remoteManifest,receivedSources:source?[]:sources}};
+  return {response,legacySubset,ackIntake,pending:legacySubset?null:{remoteDeviceId:peer,localSeqToInclusive:target?0:window.toSeqInclusive,remoteSeqToInclusive:source?0:remoteRange.toSeqInclusive,remoteProtocolVersion:optLong(request.version),fullSnapshot:window.fullSnapshot,...(window.projectionGeneration?{projectionGeneration:window.projectionGeneration}:{}),receivedArticleManifest:source?[]:remoteManifest,receivedSources:source?[]:sources}};
  }
 }

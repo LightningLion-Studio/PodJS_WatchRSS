@@ -442,3 +442,99 @@ test('FIX1 legacy inbox archives 64 KiB blocks in bounded transactions',async()=
   await archive.verify(ref,async(part,offset)=>{expect(part).toEqual(raw.subarray(offset,offset+part.length));});
  }finally{sql.close();}
 });
+
+
+for(const expire of [false,true])test('FIX2 D1 attachment publication '+(expire?'blocks expiry during staging':'restores a missing original'),async()=>{
+ const {createNoteAssetWriter}=await import('../../src/notes/cloud-assets');
+ const p=await prepared(),b=backend();
+ await b.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
+ const logicalId=p.binding.logicalId;
+ const wire=toWire('asset',{assetId:logicalId,mime:'image/png',originalFilename:logicalId,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0});
+ const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId,payload:wire.meta},state:{payload:wire.state}};
+ const projection={
+  readState:async()=>({pendingChoice:null,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),
+  cloudRows:async(_root:string,after:string)=>after?[]:[entry],cloudRow:async()=>entry,
+ };
+ let now=1,published:Uint8Array|undefined,commitAt:number|undefined;
+ const fragments:Buffer[]=[];
+ const write=createNoteAssetWriter(async<T>(method:string,args:Record<string,unknown>)=>{
+  if(method==='file.stat')return {file:false,size:0} as T;
+  if(method==='file.createTemp')return {path:'notes/assets/.r2-temp'} as T;
+  if(method==='file.write'){
+   if(expire)now=3;
+   fragments.push(Buffer.from(String(args.dataBase64),'base64'));
+   return {size:fragments.reduce((n,p)=>n+p.length,0)} as T;
+  }
+  if(method==='file.commit'){
+   commitAt=now;published=Buffer.concat(fragments);
+   expect(args.expectedTargetSha256).toBeNull();expect(sha256Hex(published)).toBe(String(args.expectedSha256));
+   return {} as T;
+  }
+  if(method==='file.delete')return {} as T;
+  throw Error(method);
+ });
+ const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
+  read:async()=>published,validate:async()=>{},install:async(_kind,id,bytes,expected,deadline)=>{await write(id,bytes,expected,deadline);},
+ },check:async()=>{}});
+ const result=await channel.sync(2);
+ expect(result).toEqual(expire?{pending:1,errors:['window_expired']}:{pending:0,errors:[]});
+ if(expire){expect(commitAt).toBeUndefined();expect(published).toBeUndefined();}
+ else{expect(commitAt).toBe(1);expect(sha256Hex(published!)).toBe(sha256Hex(p.raw));}
+});
+
+for(const event of ['normal','replay','logout','logout and login','rollback','second session','signed out'] as const)test('FIX2 v1 attachment fence '+event,async()=>{
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const {watchLegacyTransferIntake}=await import('../../src/sync-v2/local-transfer-intake');
+ const {WatchAccountStore}=await import('../../src/account/store');
+ const {bookFixture}=await import('../books/fixture');
+ const {localTransferIntakeFixture}=await import('../helpers/local-transfer-intake');
+ const f=await bookFixture();
+ try{
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},'22000000-0000-0000-0000-000000000000');
+  if(event!=='rollback'&&event!=='normal')await guard.rollback();
+  const kv=new Map([['state_json',JSON.stringify({...guard.account,watchDeviceToken:'fixture'})]]);
+  const accounts=new WatchAccountStore({get:k=>kv.get(k)??null,set:(k,v)=>{kv.set(k,v);},remove:k=>{kv.delete(k);}});
+  expect((await accounts.read())?.userId).toBe(guard.account.userId);
+  const asset=v1AssetFiles(),body=new Uint8Array(512*1024+3).fill(42),name='review-multi.png';
+  const handler=createApplicationActionHandler({
+   notes:{initialize:async()=>{},merge:async()=>0,allIncludingDeleted:async()=>[]},
+   legacyIntake:watchLegacyTransferIntake(accounts,async()=>guard.deviceId,guard.intake),
+   deviceId:async()=>guard.deviceId,notesChanged:()=>{},noteAssets:asset.receiver,
+  });
+  const base={action:'syncNoteAsset',version:1,storageKey:name,sha256:sha256Hex(body),chunkCount:2};
+  const first={...base,chunkIndex:0,data:Buffer.from(body.subarray(0,512*1024)).toString('base64')};
+  const last={...base,chunkIndex:1,data:Buffer.from(body.subarray(512*1024)).toString('base64')};
+  const session={},context={session};
+  if(event==='signed out'){
+   await accounts.clear();
+   expect(await handler(first,undefined,context)).toMatchObject({success:false,message:'AUTH_REVOKED'});
+   expect(asset.contents.size).toBe(0);
+   return;
+  }
+  expect(await handler(first,undefined,context)).toMatchObject({success:true,complete:false});
+  if(event==='logout'||event==='logout and login'){
+   const account=(await accounts.read())!;
+   await accounts.clear();
+   if(event==='logout and login')await accounts.save(account);
+  }
+  if(event==='rollback')await guard.rollback();
+  const completion=await handler(last,undefined,event==='second session'?{session:{}}:context);
+  const keys=(await guard.store.readState()).pendingChoice?.inboxKeys??[];
+  if(event==='normal'){
+   expect(completion).toMatchObject({success:true,complete:true});expect(keys).toHaveLength(0);
+   expect(asset.contents.get('notes/assets/'+name)).toEqual(body);
+   return;
+  }
+  expect(asset.contents.get('notes/assets/'+name)).toBeUndefined();
+  if(event==='replay'||event==='rollback'){
+   expect(completion).toMatchObject({success:false,errorCode:'BUSINESS_REJECTED'});
+   expect(await handler(last,undefined,context)).toEqual(completion);
+   expect(keys).toHaveLength(event==='replay'?1:0);
+  }else{
+   expect(completion).toMatchObject({success:false,message:'AUTH_REVOKED'});
+   expect(keys).toHaveLength(0);
+  }
+  await handler.closeSession?.(session);
+  expect([...asset.contents.keys()]).toEqual([]);
+ }finally{f.sql.close();}
+});

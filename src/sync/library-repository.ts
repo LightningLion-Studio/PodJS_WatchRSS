@@ -1,3 +1,6 @@
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck} from '../core/types';
+import type {PublicationDeadline} from '../cloud/publication-deadline';
 import {compareLifecycleTokens} from '@podjs/framework/lifecycle-token';
 import {playbackWork} from '../core/playback-work';
 import type {ReceiptBoundary} from './library-resume/store';
@@ -49,7 +52,7 @@ import type {ArticleManifest} from './manifest.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
  noteAssetReader?:(key:string,check?:()=>void)=>Promise<Uint8Array>;
- noteAssetWriter?:(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null)=>Promise<number>;
+ noteAssetWriter?:(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline)=>Promise<number>;
  noteAssetCollector?:(references:()=>Promise<ReadonlySet<string>>,check:()=>void)=>Promise<number>;
  reencodeStoredBodies?:(ids:readonly number[])=>Promise<readonly ReencodedBody[]>;
  clearContentFiles?:(privateData:boolean,control?:LibraryClearControl)=>Promise<void>;
@@ -147,7 +150,7 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
   check();return {notes,assetKeys:[...new Set(texts.flatMap(t=>[...noteAssetKeys(t)]))].sort()};
  }
  async cloudNoteAsset(key:string,check?:()=>void){if(!this.ports.noteAssetReader)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetReader(key,check);}
- async mergeCloudNoteAsset(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes,expectedTargetSha256);}
+ async mergeCloudNoteAsset(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes,expectedTargetSha256,deadline);}
  async collectCloudNoteAssets(check:()=>void){
   if(!this.ports.noteAssetCollector)return 0;
   await this.mergeCloudNotes([],check);
@@ -431,7 +434,7 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
    return books.installPackage(published,id,checkpoint,true);
   });
  }
- receiveCloudBook(id:string,bytes:Uint8Array,checkpoint?:FileCheckpoint){return this.run(async()=>{await this.migrate();if(!this.books||!this.ports.bookFiles)throw Error('book_storage_unavailable');const file=await this.ports.bookFiles.writeBytes(bytes,checkpoint,id);try{return await this.books.installPackage(file,id,checkpoint,true);}finally{if(!checkpoint?.scope)await this.ports.bookFiles.remove(file.path);}});}
+ receiveCloudBook(id:string,bytes:Uint8Array,checkpoint?:FileCheckpoint,deadline?:PublicationDeadline){return this.run(async()=>{await this.migrate();if(!this.books||!this.ports.bookFiles)throw Error('book_storage_unavailable');deadline?.check();const stage=deadline?undefined:checkpoint,file=await this.ports.bookFiles.writeBytes(bytes,stage,id);try{return await this.books.installPackage(file,id,stage,true,deadline?.check,deadline);}finally{if(!stage?.scope)await this.ports.bookFiles.remove(file.path);}});}
  // Reading needs verified saved metadata, not a fresh legacy body manifest.
  // Hydrate lazy projection metadata before inspecting save clocks and orders.
  /** Conservative empty adoption: logical saved/deleted/pending state also
@@ -586,7 +589,7 @@ export class SqlLibraryCloudRepository implements LibrarySessionRepository {
  }
 
  resetPeerState(){return this.run(()=>this.sequence.reset());}
- markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.perf.time("markSuccess.total",()=>this.snapshot(async(_articles,sources,_device,manifests)=>{const peer=pending.remoteDeviceId,proof=await this.echo.stage(peer,manifests,sources,pending.receivedArticleManifest??[],pending.receivedSources??[]);await this.db.transaction([this.sequence.successStatement(pending),...(pending.fullSnapshot&&pending.projectionGeneration?[{sql:"INSERT INTO sync_fast_library_baseline(peer,generation) SELECT ?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain='library' AND generation=?) ON CONFLICT(peer) DO UPDATE SET generation=excluded.generation",params:[peer,pending.projectionGeneration,pending.projectionGeneration]}]:[]),{sql:'INSERT INTO sync_peer_features(peer_device_id,rss_canonical,book_sync) VALUES(?,?,?) ON CONFLICT(peer_device_id) DO UPDATE SET rss_canonical=excluded.rss_canonical,book_sync=excluded.book_sync',params:[peer,this.peerCanonical.get(peer)?1:0,this.peerBooks.get(peer)?1:0]},...proof]);},!!this.peerCanonical.get(pending.remoteDeviceId),!!this.peerBooks.get(pending.remoteDeviceId))).finally(()=>this.perf.flush("markSuccess.perf")));}
+ markSuccess(pending:PendingSyncSuccess,check?:SqlCancellationCheck){return this.run(()=>this.perf.time("markSuccess.total",()=>this.snapshot(async(_articles,sources,_device,manifests)=>{const peer=pending.remoteDeviceId,proof=await this.echo.stage(peer,manifests,sources,pending.receivedArticleManifest??[],pending.receivedSources??[]);await cancellableSql(this.db,check).transaction([this.sequence.successStatement(pending),...(pending.fullSnapshot&&pending.projectionGeneration?[{sql:"INSERT INTO sync_fast_library_baseline(peer,generation) SELECT ?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain='library' AND generation=?) ON CONFLICT(peer) DO UPDATE SET generation=excluded.generation",params:[peer,pending.projectionGeneration,pending.projectionGeneration]}]:[]),{sql:'INSERT INTO sync_peer_features(peer_device_id,rss_canonical,book_sync) VALUES(?,?,?) ON CONFLICT(peer_device_id) DO UPDATE SET rss_canonical=excluded.rss_canonical,book_sync=excluded.book_sync',params:[peer,this.peerCanonical.get(peer)?1:0,this.peerBooks.get(peer)?1:0]},...proof]);},!!this.peerCanonical.get(pending.remoteDeviceId),!!this.peerBooks.get(pending.remoteDeviceId))).finally(()=>this.perf.flush("markSuccess.perf")));}
  /** Phone clearLibrary removes the RSS library and sync cursors while keeping
   * the watch identity, standalone notes, account and reader configuration.
   * privateData is reserved for the explicit local ownership-clear service. */
@@ -660,5 +663,5 @@ export class SqlLibrarySessionRepository extends SqlLibraryCloudRepository {
   super(db,ports);
   if(this.books)this.bookActions=new BookSyncActions(this.db,this.books);
  }
- syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck,check?:import('../sync-v2/local-transfer-intake').LocalTransferWrite,cancel?:()=>void,readingFence?:string){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined,check,cancel,readingFence);});}
+ syncBooks(request:import('./protocol').JsonObject,session?:object,afterAck?:AfterReadingAck,check?:import('../sync-v2/local-transfer-intake').LocalTransferWrite,cancel?:SqlCancellationCheck,readingFence?:string){return this.run(async()=>{if(!this.bookActions)throw Error('book_sync_unavailable');await this.migrate();return this.bookActions.apply(request,session,afterAck?commit=>afterAck(()=>this.run(commit)):undefined,check,cancel,readingFence);});}
 }

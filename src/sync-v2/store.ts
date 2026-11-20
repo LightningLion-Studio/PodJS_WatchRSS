@@ -509,9 +509,9 @@ export class WatchProjectionStore {
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
  /** Captured while holding the account and writer leases. */
- async localReadingFence(){
+ async localTransferFence(reading=false){
   const state=await this.persistedState();
-  if(state.pendingChoice)throw Error('BUSINESS_REJECTED');
+  if(reading&&state.pendingChoice)throw Error('BUSINESS_REJECTED');
   return canonical([this.scopeKey,state.rollbackGeneration]);
  }
  /** The local transport has no proof about the rollback's affected set. The

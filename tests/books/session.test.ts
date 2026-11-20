@@ -140,3 +140,62 @@ test('FIX1 committed book witness hashes once and invalidates same-size file rep
   expect(hashes).toBe(2);
  }finally{f.sql.close();}
 });
+
+
+test('FIX2 cancellation revokes queued native book transaction',async()=>{
+ const f=await bookFixture();
+ try{
+  const id='22000000-0000-0000-0000-000000000000';
+  await f.db.execute('UPDATE sync_local_identity SET device_id=? WHERE id=1',[id]);
+  const guard=await localTransferIntakeFixture(f.db,{backendBaseUrl:'https://fixture.invalid',userId:'11000000-0000-0000-0000-000000000000'},id);
+  let queued!:()=>void,resume!:()=>void;
+  const submitted=new Promise<void>(resolve=>{queued=resolve;}),continueSql=new Promise<void>(resolve=>{resume=resolve;});
+  const transaction=f.db.transaction.bind(f.db);
+  const isBook=(ss:Parameters<typeof transaction>[0])=>ss.some(s=>s.sql.startsWith('INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json)'));
+  f.db.transaction=async ss=>{if(isBook(ss)){queued();await continueSql;}return transaction(ss);};
+  let guardedCalls=0,revocations=0;
+  f.db.transactionChangesCancellable=async(ss,subscribe)=>{
+   let cancelled=false;
+   const off=subscribe(()=>{cancelled=true;revocations++;});
+   try{
+    if(isBook(ss)){guardedCalls++;queued();await continueSql;}
+    if(cancelled)throw Error('native SQL cancelled');
+    return await f.db.transactionChanges!(ss);
+   }finally{off();}
+  };
+  const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:f.files,diagnostic:()=>{}});
+  const input:JsonObject[]=[
+   {action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportsBookSyncV1:true,supportsPersistentSession:true,requestPersistentSession:true},ack,
+   {action:'syncBooks',version:1,phase:'manifest',deviceId:'phone',books:[{bookId:v.bookId,fingerprint:v.fingerprint,title:'Queued book',chapterCount:2,deletedChapters:[],deleted:false,deletionClock:0,deletedAt:0,updatedAt:1,sourceDeviceId:'phone',contentAvailable:false}]},ack,
+  ];
+  const handler=createApplicationActionHandler({
+   books:{apply:watchBookSyncAction(async()=>repo,{read:async()=>guard.account,withLibraryAccount:async(_account,w)=>w()},guard.intake)},
+   notes:{initialize:async()=>{},merge:async()=>0,allIncludingDeleted:async()=>[]},notesChanged:()=>{},deviceId:()=>repo.deviceId(),
+  });
+  const output:JsonObject[]=[];
+  const session=new LibrarySyncSession({readFrame:async()=>input.shift()!,writeFrame:async frame=>{output.push(frame);},close:async()=>{}},repo,{handleAction:handler});
+  const running=session.run().catch(error=>String(error));
+  await submitted;
+  expect(await f.db.query('SELECT book_id FROM sync_books')).toEqual([]);
+  session.cancel();resume();
+  const result=await running,rows=await f.db.query('SELECT book_id FROM sync_books');
+  expect(String(result)).toContain('cancelled');expect(rows).toHaveLength(0);expect({guardedCalls,revocations}).toEqual({guardedCalls:1,revocations:1});expect(output.filter(r=>r.action==='syncBooks')).toHaveLength(0);
+ }finally{f.sql.close();}
+});
+
+
+for(const expire of [false,true])test('FIX2 book file publication rechecks after target stat '+expire,async()=>{
+ const {createBookFiles}=await import('../../src/books/files-port');
+ const id='a'.repeat(64),sha256='b'.repeat(64),size=512,info={path:'books/part-fix2.bin',size,sha256};
+ let now=1,commits=0;
+ const files=createBookFiles(async<T>(method:string,args:Record<string,unknown>)=>{
+  if(method==='file.stat'){if(expire)now=3;return {file:false} as T;}
+  if(method==='file.commit'){commits++;return {path:args.target,size,sha256} as T;}
+  throw Error(method);
+ });
+ const deadline={expiresAtMillis:2,check:()=>{if(now>2)throw Error('window_expired');}};
+ const publish=files.publish(info,id,deadline);
+ if(expire)await expect(publish).rejects.toThrow('window_expired');
+ else expect(await publish).toEqual({path:'books/'+id+'-'+sha256+'.jsonl',size,sha256});
+ expect(commits).toBe(expire?0:1);
+});

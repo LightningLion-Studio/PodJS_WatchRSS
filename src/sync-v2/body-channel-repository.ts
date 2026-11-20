@@ -13,5 +13,5 @@ export function bodyChannelRepository(repository:BodyRepository):BodyChannelRepo
   if(kind==='asset'){if(value.assetId!==id||raw.length>NOTE_IMAGE_LIMIT)throw Error('source_identity_missing');return;}
   await validateBookPackage(splitBookLines((async function*(){yield utf8Decode(raw);})()),async b=>sha256Hex(b),{bookId:id,fingerprint:value.fingerprint,chapterCount:value.chapterCount,instanceId:value.instanceId});
  },
- async install(kind,id,raw,expectedTargetSha256){if(kind==='book')await repository.receiveCloudBook(id,raw);else await repository.mergeCloudNoteAsset(id,raw,expectedTargetSha256);},
+ async install(kind,id,raw,expectedTargetSha256,deadline){if(kind==='book')await repository.receiveCloudBook(id,raw,undefined,deadline);else await repository.mergeCloudNoteAsset(id,raw,expectedTargetSha256,deadline);},
 };}

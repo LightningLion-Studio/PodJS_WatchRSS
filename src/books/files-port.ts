@@ -25,7 +25,19 @@ export function createBookFiles(host:BookFileRequest,hashBytes:(b:Uint8Array)=>P
  const files:BookFiles={
   write:async(parts,max)=>{const file=await temp();try{const size=await writeUtf8Stream(parts,(b,o)=>append(file,b,o),{maxBytes:Math.min(max,BOOK_MAX_PACKAGE_BYTES),surrogatePolicy:'question'}),digest=await hash(file);if(digest.size!==size)throw Error('book_file_changed');return {path:file,...digest};}catch(error){await remove(file);throw error;}},
   writeBytes:async(bytes,checkpoint,bookId)=>{if(bookId&&!/^[a-f0-9]{64}$/.test(bookId))throw Error('book_file_identity_invalid');if(checkpoint?.scope)return checkpointedFile(host,bytes,{directory:'books',identity:'book-package-v1',checkpoint,hash:hashBytes,piecesPerReceipt:4,syncDirectory:true,target:(binding,digest)=>bookId?'books/'+bookId+'-'+digest+'.jsonl':'books/part-'+binding+'.bin'});const info=await write([bytes],BOOK_MAX_PACKAGE_BYTES);const stem=info.path.slice('books/.pod-write-'.length,-'.part'.length),target='books/part-'+stem+'.bin';try{const result=await host<{path:string;size:number;sha256:string}>('file.commit',{path:info.path,target,expectedSize:info.size,expectedSha256:info.sha256,expectedTargetSha256:(await host<{file:boolean}>('file.stat',{path:target})).file?info.sha256:null});if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');return result;}finally{await remove(info.path);}},
-  publish:async(info,id)=>{if(!/^[a-f0-9]{64}$/.test(id)||!/^[a-f0-9]{64}$/.test(info.sha256)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_file_identity_invalid');const target='books/'+id+'-'+info.sha256+'.jsonl';if(info.path===target){const current=await hash(target);if(current.size!==info.size||current.sha256!==info.sha256)throw Error('book_file_changed');return info;}const result=await host<{path:string;size:number;sha256:string}>('file.commit',{path:path(info.path),target,expectedSize:info.size,expectedSha256:info.sha256,expectedTargetSha256:(await host<{file:boolean}>('file.stat',{path:target})).file?info.sha256:null});if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');return result;},
+  publish:async(info,id,deadline)=>{
+   if(!/^[a-f0-9]{64}$/.test(id)||!/^[a-f0-9]{64}$/.test(info.sha256)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_file_identity_invalid');
+   const target='books/'+id+'-'+info.sha256+'.jsonl';
+   if(info.path===target){
+    const current=await hash(target);deadline?.check();
+    if(current.size!==info.size||current.sha256!==info.sha256)throw Error('book_file_changed');return info;
+   }
+   const stat=await host<{file:boolean}>('file.stat',{path:target});
+   deadline?.check();
+   const result=await host<BookFileInfo>('file.commit',{path:path(info.path),target,expectedSize:info.size,expectedSha256:info.sha256,expectedTargetSha256:stat.file?info.sha256:null});
+   if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');
+   return result;
+  },
   adopt:async(info,id)=>{
    if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(info.path)||!/^[a-f0-9]{64}$/.test(id)||
       !/^[a-f0-9]{64}$/.test(info.sha256)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_file_identity_invalid');
