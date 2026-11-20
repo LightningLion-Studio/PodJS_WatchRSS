@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
 import type { BrowserAvailability } from '@podjs/framework/services';
 import type { InternetStatus } from '../src/onboarding/state.ts';
-import type { DouyinScreenProps } from '../src/ui/douyin/index.tsx';
+import type { DouyinPlayRequest, DouyinScreenProps } from '../src/ui/douyin/index.tsx';
 const require = createRequire(import.meta.url), { transformSync } = require('@babel/core');
 plugin({ name: 'douyin-login-solid', setup(builder) { builder.onLoad({ filter: /\/ui\/(douyin\/index|PlatformSettingsScreen|PlatformNotice|round-rows|AutoScrollSettingsScreen|DeleteConfirmDialog|DownloadPhoneAppDialog)\.tsx$/ }, async args => ({ contents: transformSync(await Bun.file(args.path).text(), { filename: args.path, babelrc: false, configFile: false, presets: [[require('babel-preset-solid'), { generate: 'universal', moduleName: '@pocketjs/framework/renderer' }], [require('@babel/preset-typescript'), { isTSX: true, allExtensions: true }]] }).code, loader: 'js' })); } });
 type Node = { kind: string; props: Record<string, any> };
@@ -367,7 +367,7 @@ for (const reason of ['expired', 'oversized', 'missing-source'] as const) test(`
     variants: [{ playUrl: 'https://mock.invalid/1080p', width: 1080, height: 1920, codec: 'h264', bitrate: 500000 }],
   });
   const fresh = { ...sample('123'), playUrl: 'https://mock.invalid/fresh' };
-  const calls: unknown[] = [], plays: any[] = [];
+  const calls: unknown[] = [], plays: DouyinPlayRequest[] = [];
   const client = {
     onAuthExpired: () => () => {},
     findLocalItem: async () => item,
@@ -382,7 +382,7 @@ for (const reason of ['expired', 'oversized', 'missing-source'] as const) test(`
     stops.push(stop);
     return DouyinScreen({
       width: 233, height: 233, route: { name: 'detail', awemeId: '123', savedPlayback: true },
-      client, onPlay: (value: any) => plays.push(value), onNavigate() {}, settings: {},
+      client, onPlay: (value: DouyinPlayRequest) => plays.push(value), onNavigate() {}, settings: {},
     } as unknown as DouyinScreenProps);
   });
   await settle();
@@ -396,7 +396,7 @@ for (const reason of ['expired', 'oversized', 'missing-source'] as const) test(`
 test('DYFAV detail failure exposes a reason and the retry button can open the same saved item', async () => {
   const item = { ...sample('321'), playUrl: '' };
   const fresh = { ...item, playUrl: 'https://mock.invalid/fresh' };
-  const ids: string[] = [], plays: any[] = [];
+  const ids: string[] = [], plays: DouyinPlayRequest[] = [];
   const client = {
     onAuthExpired: () => () => {},
     findLocalItem: async () => item,
@@ -409,7 +409,7 @@ test('DYFAV detail failure exposes a reason and the retry button can open the sa
     stops.push(stop);
     return DouyinScreen({
       width: 233, height: 233, route: { name: 'detail', awemeId: '321', savedPlayback: true },
-      client, onPlay: (value: any) => plays.push(value), onNavigate() {}, settings: {},
+      client, onPlay: (value: DouyinPlayRequest) => plays.push(value), onNavigate() {}, settings: {},
     } as unknown as DouyinScreenProps);
   });
   await settle();

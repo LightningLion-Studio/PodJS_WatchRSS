@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
 import { dispatchMemoryPressure } from '@podjs/framework/memory';
 import type { InternetStatus } from '../src/onboarding/state.ts';
+import type { DouyinItem } from '../src/douyin/types.ts';
+import type { VideoPlayerHandle } from '../src/ui/VideoPlayerScreen.tsx';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/VideoPlayerScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
@@ -1305,12 +1307,17 @@ for (const playing of [true, false]) test(`DYFAV local actions retain the select
   const source = { platform: 'douyin' as const, immersive: true, awemeId: 'favorite', url: 'https://mock.invalid/favorite', title: 'favorite' };
   const [covered, setCovered] = createSignal(false);
   let saved = false, detailRequests = 0;
+  const item: DouyinItem = {
+    awemeId: source.awemeId, playUrl: source.url, description: 'fixture', authorName: 'fixture',
+    authorId: '', createdAtSeconds: 0, durationMs: 1000, variants: [],
+    likeCount: 0, commentCount: 0, shareCount: 0, collectCount: 0,
+  };
   const actions = new DouyinActionsController({
     fetchDetail: async () => { detailRequests++; return { ok: false, code: 'REQUEST_FAILED', message: 'offline' }; },
     getSavedState: async () => ({ favorite: saved, watchLater: false }),
     toggleSaved: async () => (saved = !saved),
-  } as any, source.awemeId, { ...source, description: 'fixture', authorName: 'fixture' } as any, () => {}, () => setCovered(false));
-  let handle: any;
+  }, source.awemeId, item, () => {}, () => setCovered(false));
+  let handle!: VideoPlayerHandle;
   createRoot(stop => {
     stops.push(stop);
     return VideoPlayerScreen({
@@ -1342,7 +1349,7 @@ for (const playing of [true, false]) test(`DYFAV local actions retain the select
 test('DYFAV decoder release restores a paused position with a cover until a frame arrives', async () => {
   initial = 'available'; prepares = []; plays = 0;
   const source = { platform: 'douyin' as const, immersive: true, awemeId: 'resume', url: 'https://mock.invalid/resume', posterUrl: 'https://mock.invalid/cover', title: 'resume', resumePositionMs: 4321, resumePaused: true };
-  let finish!: (value: any) => void;
+  let finish!: (value: ReturnType<typeof state>) => void;
   heldPrepare = new Promise(resolve => { finish = resolve; });
   const root = createRoot(stop => {
     stops.push(stop);
@@ -1396,7 +1403,7 @@ test('DYFAV session player keeps the active decoder under actions and evicts its
     setBounds: async (id: string, value: { visible: boolean }) => { placements.push({ id, visible: value.visible }); return bounds(id); },
   });
   try {
-    let handle: any;
+    let handle!: VideoPlayerHandle;
     createRoot(stop => {
       stops.push(stop);
       return VideoPlayerScreen({
@@ -1434,7 +1441,7 @@ test('DYFAV pressure under actions can release and seek without starting a pause
   globals.pod = { ...originalPod, memoryBudgetBytes: () => 256_000_000 };
   const source = { platform: 'douyin' as const, immersive: true, awemeId: 'trim', url: 'https://mock.invalid/trim', posterUrl: 'https://mock.invalid/cover', title: 'trim' };
   const [covered, setCovered] = createSignal(false);
-  let handle: any;
+  let handle!: VideoPlayerHandle;
   const root = createRoot(stop => {
     stops.push(stop);
     return VideoPlayerScreen({
@@ -1453,7 +1460,7 @@ test('DYFAV pressure under actions can release and seek without starting a pause
     dispatchMemoryPressure({ t: 'memory.pressure', level: 2 });
     await flush();
     expect(legacyStops).toBe(1);
-    let finish!: (value: any) => void;
+    let finish!: (value: ReturnType<typeof state>) => void;
     heldPrepare = new Promise(resolve => { finish = resolve; });
     setCovered(false);
     await flush();
