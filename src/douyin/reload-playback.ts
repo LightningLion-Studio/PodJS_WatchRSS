@@ -32,6 +32,7 @@ export async function reloadDouyinPlayback(
   feedItem:DouyinItem,
   mode:DouyinReloadMode='feed',
   previousUrls:readonly string[]=[],
+  requireFreshAddress=false,
 ){
   if(!current())return;
   const options=mode==='detail'
@@ -41,17 +42,21 @@ export async function reloadDouyinPlayback(
   if(!current())return;
   if(!result.ok)throw Object.assign(new Error(result.message),douyinPlaybackFailure(result));
   const refreshing=mode!=='current';
-  const oldUrls=new Set([feedItem.playUrl,...douyinPlaybackMirrors(feedItem),...previousUrls]);
-  if(result.data.awemeId!==id||(refreshing&&(!directDouyinMediaUrl(result.data.playUrl)||oldUrls.has(result.data.playUrl)))){
+  if(result.data.awemeId!==id||(refreshing&&!directDouyinMediaUrl(result.data.playUrl))){
+    throw Object.assign(new Error('未返回该视频的可用播放地址'),{code:'TEMPORARILY_UNAVAILABLE'});
+  }
+  const oldUrls=mode==='detail'||(mode==='feed'&&requireFreshAddress)
+    ?new Set([feedItem.playUrl,...douyinPlaybackMirrors(feedItem),...previousUrls]):undefined;
+  if(oldUrls?.has(result.data.playUrl)){
     throw Object.assign(new Error('未返回该视频的新播放地址'),{code:'TEMPORARILY_UNAVAILABLE'});
   }
-  const item=refreshing?{
+  const item=oldUrls?{
     ...result.data,
     variants:result.data.variants?.filter(variant=>!oldUrls.has(variant.playUrl))
       .map(variant=>({...variant,playUrls:variant.playUrls?.filter(url=>!oldUrls.has(url))})),
   }:result.data;
   if(refreshing&&douyinPlaybackAddressExpired(item)){
-    throw Object.assign(new Error('新播放地址已过期'),{code:'TEMPORARILY_UNAVAILABLE'});
+    throw Object.assign(new Error('播放地址已过期'),{code:'TEMPORARILY_UNAVAILABLE'});
   }
   const headers=await client.buildPlaybackHeaders();
   if(!current())return;

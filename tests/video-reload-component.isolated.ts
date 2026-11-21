@@ -70,11 +70,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:string)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:string)=>{retries++;if(resolver)await resolver(p,current,mode);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>{retries++;if(resolver)await resolver(p,current,mode,requireFreshAddress);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
  return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
@@ -392,11 +392,34 @@ test('NETOVERLAY direct Bluetooth media loading shows an advisory without blocki
  createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return createComponent(VideoPlayerScreen,{source:{platform:'douyin',immersive:true,url:'podjs-media-cache://fixture',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
  await flush();expect(plays).toBe(1);expect(prepares).toHaveLength(1);expect(scope.blocking).toBe(false);expect(scope.bluetooth).toBe(true);
 });
-test('NOPLAY a rendered but nonloading buffered player gets a bounded normal reload',async()=>{
- const f=reloadMount({platform:'douyin',immersive:true,awemeId:'buffered-stall',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
- current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+test('RVDYA2-01 a rendered but nonloading buffered player resumes from the same valid feed address',async()=>{
+ const id='buffered-stall',url='https://fixture.invalid/stall.mp4?expires=4102444800';
+ const paths:string[]=[];
+ const client=new DouyinClient({
+  secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=synthetic':null,set:async()=>{},remove:async()=>{}},
+  signer:{sign:()=> 'synthetic'},
+  transport:{request:async request=>{
+   paths.push(new URL(request.url).pathname);
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({aweme_list:[{aweme_id:id,video:{play_addr:{url_list:[url]}}}]}))};
+  }},
+ });
+ const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
+ if(!feed.ok)throw Error(feed.code);
+ const source={platform:'douyin' as const,immersive:true,awemeId:id,url,title:'fixture'};
+ const f=reloadMount(source,async(position,guard,mode,requireFreshAddress)=>{
+  const resolved=await reloadDouyinPlayback(client,id,guard,feed.data.items[0]!,mode,[],requireFreshAddress);
+  if(resolved)f.publish(freshVideoSource(source,{url:resolved.item.playUrl,headers:resolved.headers},position));
+ });
+ await flush();expect(f.firstFrames()).toBe(1);
+ current={...state('paused'),positionMs:321,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
  stateEvents.forEach(fn=>fn(current));await flush();await tick(19999);expect(retries).toBe(0);
- await tick(1);await tick(351);expect(retries).toBe(1);expect(prepares.at(-1)).toMatchObject({bypassCache:true,resumePositionMs:1});
+ await tick(1);await tick(351);
+ for(let n=0;n<10&&current.state!=='playing';n++){await Bun.sleep(1);await flush();}
+ expect(retries).toBe(1);
+ expect(paths).toEqual(['/aweme/v2/web/module/feed/','/aweme/v2/web/module/feed/']);
+ expect(prepares).toHaveLength(2);
+ expect(prepares[1]).toMatchObject({url,bypassCache:true,resumePositionMs:321});
+ expect(current.state).toBe('playing');
 });
 test('NOPLAY a fresh native progress read cancels a stale buffered stall observation',async()=>{
  reloadMount({platform:'douyin',immersive:true,awemeId:'fresh-progress',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
@@ -617,6 +640,7 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
  const id='selected',oldUrl='https://fixture.invalid/old?x-expires=1000000000',freshUrl='https://fixture.invalid/fresh';
  const uri='podjs-media-cache://play/recovered';
  const requests:string[]=[],registered:Array<{key:string;url:string;limit?:number}>=[],firstFrames:string[]=[];
+ const reloadAddressRequirements:Array<boolean|undefined>=[];
  const values=new Map([['douyin.cookie','sessionid=synthetic']]);
  const row=(awemeId:string,url:string)=>({aweme_id:awemeId,video:{play_addr:{url_list:[url]}}});
  const client=new DouyinClient({
@@ -699,12 +723,17 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
   const root=createRoot(stop=>{
    stops.push(stop);
    return MediaRoutes({...controller,entry,playingSource,page:()=>entry.page,active:()=>true,width:233,height:233,round:true,backOffset:()=>0,setError,
+    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>{
+     reloadAddressRequirements.push(requireFreshAddress);
+     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress);
+    },
     services:{} as Parameters<typeof MediaRoutes>[0]['services'],
    } as unknown as Parameters<typeof MediaRoutes>[0]);
   });
   nodes(root);await flush();await tick(351);
   await until(()=>nativeFrame!==undefined);
   expect(requests).toEqual(['/aweme/v2/web/module/feed/','/aweme/v1/web/aweme/detail/','/aweme/v2/web/module/feed/']);
+  expect(reloadAddressRequirements).toEqual([false,true]);
   expect(registered).toEqual([{key:id,url:freshUrl,limit:720}]);
   expect(entry.player?.reloadAttempts?.()).toBe(2);
   expect(sessionCalls.filter(call=>call.method==='prepare')).toMatchObject([{url:uri,bypassCache:false,autoplay:true,respectSilentMode:true}]);

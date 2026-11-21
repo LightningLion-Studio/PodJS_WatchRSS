@@ -47,18 +47,27 @@ test('detail retry refuses the previous URL, its mirror, expired URLs and a mism
  for(let i=0;i<4;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
  expect(detailCount(f)).toBe(4);expect(f.requests).toHaveLength(5);
 });
-test('feed recovery rejects an unchanged address, an expired address, and a different item',async()=>{
+test('feed recovery reuses a valid address only when a new address is optional',async()=>{
  const f=fixture(),old=wire('selected');
+ const oldMirror='https://fixture.invalid/old-mirror';
+ old.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
  f.replies.push(response({aweme_list:[old]}));
  const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
  const item=page.data.items[0]!;
+ f.replies.push(response({aweme_list:[old]}));
+ expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
+ const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
+ for(const row of [old,mirror]){
+  f.replies.push(response({aweme_list:[row]}));
+  await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed',[],true)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+ }
  const expired=wire('selected');expired.video.bit_rate[0]!.play_addr.url_list=['https://fixture.invalid/new?x-expires=1000000000'];
- for(const row of [old,expired,wire('other')]){
+ for(const row of [expired,wire('other')]){
   f.replies.push(response({aweme_list:[row]}));
   await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
  }
  expect(detailCount(f)).toBe(0);
- expect(f.requests).toHaveLength(4);
+ expect(f.requests).toHaveLength(6);
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));
