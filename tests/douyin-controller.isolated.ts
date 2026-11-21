@@ -1240,3 +1240,34 @@ for (const expired of ['audio', 'mirror'] as const) test(`DYFAV FIX1 automatic d
   expect(f.source()).toBe(previous);
   expect(invalidated).toEqual([]);
 });
+
+for (const expired of [false, true]) test(`DYFAV FIX2 saved stall ${expired ? 'refreshes a source that expired during backoff' : 'reuses the source without needing a feed match'}`, async () => {
+  const f = fixture(), original = item('saved-stall');
+  const selected: DouyinItem = {...original, variants: [{
+    playUrl: original.playUrl, audioUrl: 'https://video/audio', format: 'dash', codec: 'h264',
+    width: 480, height: 854, bitrate: 300_000,
+  }]};
+  f.controller.douyinPlay({item: selected, playback: selected, savedPlayback: true, detailPlayback: true});
+  await f.controller.douyinNavigate({name: 'player', awemeId: selected.awemeId});
+  const entry = f.stack().at(-1)!;
+  const expiry = Date.now() + (expired ? -60_000 : 60_000);
+  const previous = entry.playback = {...entry.playback!, expiresAtMs: expiry};
+  const fresh = {...original, playUrl: 'https://video/new'};
+  let detailCalls = 0;
+  client.resolvePlayback = async (id, options) => {
+    expect(id).toBe(selected.awemeId);
+    expect(options).toEqual({forceRefresh: true, allowDetail: true, freshRequest: true});
+    detailCalls++;
+    return {ok: true, data: fresh};
+  };
+  await f.controller.reloadVideo(entry, 321, () => true, 'feed');
+  expect(detailCalls).toBe(expired ? 1 : 0);
+  expect(f.source()).not.toBe(previous);
+  expect(f.source()).toMatchObject({
+    awemeId: selected.awemeId, resumePositionMs: 321,
+    url: expired ? fresh.playUrl : selected.playUrl,
+    expiresAtMs: expired ? undefined : expiry,
+    audioUrl: expired ? undefined : selected.variants[0]!.audioUrl,
+  });
+  expect(invalidated).toEqual(expired ? [selected.awemeId] : []);
+});

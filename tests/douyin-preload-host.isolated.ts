@@ -1,5 +1,6 @@
 import {test,expect,mock} from 'bun:test';
 import {dispatchMemoryPressure} from '@podjs/framework/memory';
+import type {DouyinItem} from '../src/douyin/types.ts';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 let registrationWait:((uri:string)=>Promise<void>|undefined)|undefined;
@@ -376,6 +377,22 @@ test('NOPLAY local cache registration failure preserves the same authorized HTTP
   try{expect(await host.playback(item as any,{})).toBe(item.playUrl);expect(host.sourceFor(item.playUrl)).toBe(item);}finally{registrationFailure=undefined;host.stop();}
  }
 });
+test('DYFAV FIX2 an expired mirror bounds registration but leaves direct video and audio usable',async()=>{
+ const playUrl='https://fixture/video?expires=4102444800';
+ const audioUrl='https://fixture/audio?expires=4102444800';
+ const mirror='https://fixture/mirror?expires=1000000000';
+ const item:DouyinItem={...items[0]!,playUrl,variants:[{playUrl,playUrls:[playUrl,mirror],audioUrl,format:'dash',codec:'h264',width:480,height:854,bitrate:1000}]};
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
+ const host=createHostDouyinPreload(local as Parameters<typeof createHostDouyinPreload>[0]);
+ try {
+  await host.playback(item,{});
+  expect(registrations.at(-1)).toMatchObject({alternates:[mirror],audioUrl,expiresAt:1000000000*1000-30000});
+  await host.invalidate(item.awemeId);
+  registrationFailure={code:'unsupported_method'};
+  expect(await host.playback(item,{})).toBe(playUrl);
+  expect(host.sourceFor(playUrl)?.variants?.[0]?.audioUrl).toBe(audioUrl);
+ }finally{registrationFailure=undefined;host.stop();}
+});
 test('NOPLAY cache lookup and preview failures cannot block ordinary foreground resolution',async()=>{
  const item=items[0]!,client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
  const host=createHostDouyinPreload(client as any,{playbackReady:async()=>{throw {code:'cache_error'};},lookup:async()=>{throw {code:'cache_error'};}} as any);
@@ -395,6 +412,7 @@ test('NOPLAY direct fallback retains explicit URL deadlines and audio source val
  const video='https://fixture/video';
  for(const item of [{...items[0],playUrl:video+'?x-expires=1000000000'},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://user:password@fixture/audio'}]},
+  {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://fixture/audio?expires=1000000000'}]},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}]){
   const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})},host=createHostDouyinPreload(client as any);registrationFailure={code:'cache_error'};
   try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:'cache_error'});}finally{registrationFailure=undefined;host.stop();}

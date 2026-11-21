@@ -4,6 +4,7 @@ import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
 import {reloadDouyinPlayback,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
+import {videoSourceExpired} from '../video-reload.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
 import {playerFailureFields} from '../../media/player-errors.ts';
@@ -1141,13 +1142,19 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed')=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,requestedMode:DouyinReloadMode='feed')=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
     const previous=entry.playback;
+    const savedStall=entry.queue&&previous.savedPlayback&&requestedMode==='feed';
+    // A saved item may never appear in the recommendation feed. Its current
+    // source already owns the validated media, including local files and DASH.
+    const mode=savedStall&&videoSourceExpired(previous)?'detail':requestedMode;
     let next:PlaybackSource;
-    if(entry.queue){
+    if(savedStall&&mode==='feed'){
+      next=freshVideoSource(previous,previous,positionMs);
+    }else if(entry.queue){
       const item=entry.queue.itemAtOffset();
       if(!item)throw new Error('Missing Douyin playback item');
       const queue=entry.queue;let queueGeneration=queue.playbackGeneration();

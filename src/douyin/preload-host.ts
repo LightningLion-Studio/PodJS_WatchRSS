@@ -1,7 +1,7 @@
 import {douyinCacheUnavailable,directDouyinMediaUrl} from './cache-availability.ts';
 import {douyinPrestoreConfig} from './prestore-policy.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
-import {douyinMediaExpiry,douyinPlaybackAddresses} from './media-expiry.ts';
+import {douyinMediaExpiry,douyinMediaNetworkDeadline,douyinPlaybackAddresses} from './media-expiry.ts';
 import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
@@ -251,8 +251,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    return uri;
   }catch(error){
    if(!current())throw cancelled();
-   const {audioUrl,expiresAtMs}=douyinPlaybackAddresses(item);
+   const audioUrl=douyinPlaybackAudio(item);
    const urls=audioUrl?[item.playUrl,audioUrl]:[item.playUrl];
+   const expiresAtMs=douyinMediaNetworkDeadline(urls);
    if(douyinCacheUnavailable(error)&&urls.every(directDouyinMediaUrl)&&(expiresAtMs===undefined||Date.now()<expiresAtMs)){
     appLogger.w('DouyinProxy','cache registration unavailable; using authorized media source');return remember(item.playUrl,item);
    }

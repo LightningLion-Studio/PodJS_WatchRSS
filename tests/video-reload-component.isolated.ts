@@ -341,6 +341,28 @@ test('NOPLAY a rendered but nonloading buffered player gets a bounded normal rel
  stateEvents.forEach(fn=>fn(current));await flush();await tick(19999);expect(retries).toBe(0);
  await tick(1);await tick(351);expect(retries).toBe(1);expect(prepares.at(-1)).toMatchObject({bypassCache:true,resumePositionMs:1});
 });
+for(const expired of [false,true])test(`DYFAV FIX2 saved buffered stall after detail uses ${expired?'detail for expiry':'the same valid source'}`,async()=>{
+ const previous={platform:'douyin' as const,awemeId:'saved-buffered-stall',savedPlayback:true,detailPlayback:true,title:'fixture',url:'https://fixture/old'};
+ const active={...previous,url:'https://fixture/active',expiresAtMs:fakeNow+(expired?10_000:60_000)};
+ const refreshed={...active,url:'https://fixture/refreshed',expiresAtMs:fakeNow+60_000};
+ const modes:(string|undefined)[]=[];
+ nextError={code:'source_expired'};
+ const f=reloadMount(previous,async(position,current,mode)=>{
+  modes.push(mode);
+  if(current())f.publish({...((modes.length===1||!expired)?active:refreshed),resumePositionMs:position});
+ });
+ await flush();await tick(351);
+ expect(modes).toEqual(['detail']);
+ expect(current.state).toBe('playing');
+ expect(f.firstFrames()).toBe(1);
+ current={...state('paused'),positionMs:321,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+ stateEvents.forEach(fn=>fn(current));await flush();await tick(20_000);await tick(701);
+ expect(modes).toEqual(['detail',expired?'detail':'feed']);
+ expect(prepares.at(-1)).toMatchObject({url:expired?refreshed.url:active.url,resumePositionMs:321});
+ expect(current.state).toBe('playing');
+ expect(f.text()).not.toContain('重试');
+});
+
 test('NOPLAY a fresh native progress read cancels a stale buffered stall observation',async()=>{
  reloadMount({platform:'douyin',immersive:true,awemeId:'fresh-progress',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
  current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};

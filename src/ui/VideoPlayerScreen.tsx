@@ -498,21 +498,25 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const reload=async(manual:boolean,cause:unknown={code:'source_expired'},userInitiated=manual)=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
-    if(props.source.previewOnly)videoSessionOwner=sessionOwner;
+    const from=props.source;
+    if(from.previewOnly)videoSessionOwner=sessionOwner;
     if(videoSessionOwner!==sessionOwner)return;
-    if(!userInitiated&&manualDetailSource===props.source){
+    const savedStall=from.savedPlayback&&ready()&&firstFrame()&&playerFailureCode(cause)==='not_ready';
+    if(!userInitiated&&!savedStall&&manualDetailSource===from){
       if(!error())failed(cause,true,'recovery');
       return;
     }
     const ticket=reloadPolicy.begin(manual);
     if(!ticket){if(!reloadPolicy.busy)failed(cause,true,'recovery');return;}
     needsFreshResolution=true;
-    const position=checkpointPosition,from=props.source;
+    const position=checkpointPosition;
     if (manual) resumeAutoplay = true;
     else if (resumeAutoplay === undefined && from.platform === 'douyin' && resumingRoute() && !autoplayAllowed) resumeAutoplay = false;
     const retryCurrent=!manual&&from.platform==='douyin'&&from.immersive===true&&(cause as {code?:string})?.code==='timeout'&&!videoSourceExpired(from);
-    const mode:DouyinReloadMode=douyinPlayback()&&(userInitiated||from.savedPlayback)?'detail':retryCurrent?'current':'feed';
+    const savedDetail=from.savedPlayback&&(!savedStall||videoSourceExpired(from));
+    const mode:DouyinReloadMode=douyinPlayback()&&(userInitiated||savedDetail)?'detail':retryCurrent?'current':'feed';
     if(mode==='detail')manualDetailSource=from;
+    else if(savedStall&&manualDetailSource===from)manualDetailSource=undefined;
     generation++;const own=generation;prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();autoAdvance.cancel();
     neighborRevision++;dragRevision++;forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;clearDrag();
     setReconnecting(true);setError('');setNetworkFailure(false);setReady(false);setFirstFrame(false);
