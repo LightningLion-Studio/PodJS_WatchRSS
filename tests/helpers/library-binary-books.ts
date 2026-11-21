@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {open} from 'node:fs/promises';
 import {join} from 'node:path';
 import {lengthPrefix} from '@podjs/framework/crypto';
-import {bookId,BOOK_MAX_PACKAGE_BYTES,type BookState} from '../../src/books/protocol';
+import {bookId,bookFingerprint,chapterHash,BOOK_MAX_PACKAGE_BYTES,type BookState} from '../../src/books/protocol';
 import type {BookFiles} from '../../src/books/files';
 import type {BinaryBookFiles} from '../../src/sync/library-binary/book-import';
 import {BOOK_SEGMENT_BYTES,bookObject} from '../../src/sync/library-binary/book-plan';
@@ -51,23 +51,38 @@ export async function attachBinaryBooks(f:Awaited<ReturnType<typeof binaryRuntim
  return {repository,files};
 }
 
-export async function sampleBook(f:Awaited<ReturnType<typeof binaryRuntime>>,files:BinaryBookFiles,bytes:number,title='Chapter one'){
- const sourceUrl='https://watchrss.local/import-txt-novel/b2-fixture';
- const block=Buffer.alloc(CHUNK_BYTES,120);
- const textHash=createHash('sha256').update(lengthPrefix('watchrss/book/chapter/v1',1,title));
- const length=Buffer.alloc(4);length.writeUInt32BE(bytes);textHash.update(length);
- for(let at=0;at<bytes;at+=CHUNK_BYTES)textHash.update(block.subarray(0,Math.min(bytes-at,block.length)));
- const fingerprint=hash(lengthPrefix('watchrss/book/fingerprint/v1',1,textHash.digest('hex')));
- const id=await bookId(fingerprint,async value=>hash(value));
- const state:BookState={bookId:id,fingerprint,title:'Sample book',chapterCount:1,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:20,sourceDeviceId:'phone',sourceUrl,kind:'txt'};
+export async function sampleBook(f:Awaited<ReturnType<typeof binaryRuntime>>,files:BinaryBookFiles,bytes:number,title='Chapter one',exactPackageChapters?:number){
+ const sourceUrl='https://watchrss.local/import-txt-novel/b2-fixture',chapterCount=exactPackageChapters??1;
+ const sha=async(value:Uint8Array)=>hash(value);
+ const header=JSON.stringify({format:'watchrss-book',version:1,title:'Sample book',chapterCount,sourceUrl,kind:'txt'})+'\n';
+ const chapter=(i:number,contentText:string)=>({chapterIndex:i,url:sourceUrl+'/chapter/'+i,title:chapterCount===1?title:'Chapter '+i,contentHtml:null,contentText});
+ let fingerprint:string;
+ let write:(path:string)=>Promise<void>;
+ if(exactPackageChapters){
+  const chapters=Array.from({length:chapterCount},(_,i)=>chapter(i+1,''));
+  const budget=bytes-utf8(header+chapters.map(value=>JSON.stringify(value)+'\n').join('')).length;
+  for(const [i,value] of chapters.entries())value.contentText='x'.repeat(Math.floor(budget/chapterCount)+(i<budget%chapterCount?1:0));
+  fingerprint=await bookFingerprint(await Promise.all(chapters.map(c=>chapterHash(c.chapterIndex,c.title,c.contentText,sha))),sha);
+  write=async path=>{await f.files.writeBytes(path,utf8(header+chapters.map(value=>JSON.stringify(value)+'\n').join('')));};
+ }else{
+  const block=Buffer.alloc(CHUNK_BYTES,120),textHash=createHash('sha256').update(lengthPrefix('watchrss/book/chapter/v1',1,title));
+  const length=Buffer.alloc(4);length.writeUInt32BE(bytes);textHash.update(length);
+  for(let at=0;at<bytes;at+=CHUNK_BYTES)textHash.update(block.subarray(0,Math.min(bytes-at,block.length)));
+  fingerprint=hash(lengthPrefix('watchrss/book/fingerprint/v1',1,textHash.digest('hex')));
+  write=async path=>{
+   const head=utf8(header+JSON.stringify(chapter(1,'')).slice(0,-2));
+   await f.files.writeBytes(path,head);
+   const file=await open(join(f.root,path),'a');
+   try{
+    for(let at=0;at<bytes;at+=CHUNK_BYTES)await file.write(block.subarray(0,Math.min(bytes-at,block.length)));
+    await file.write('"}\n');await file.sync();
+   }finally{await file.close();}
+  };
+ }
+ const id=await bookId(fingerprint,sha);
+ const state:BookState={bookId:id,fingerprint,title:'Sample book',chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:20,sourceDeviceId:'phone',sourceUrl,kind:'txt'};
  const path='books/'+id+'-source.jsonl';
- const head=utf8(JSON.stringify({format:'watchrss-book',version:1,title:state.title,chapterCount:1,sourceUrl,kind:'txt'})+'\n'+JSON.stringify({chapterIndex:1,url:sourceUrl+'/chapter/1',title,contentHtml:null,contentText:''}).slice(0,-2));
- await f.files.writeBytes(path,head);
- const file=await open(join(f.root,path),'a');
- try{
-  for(let at=0;at<bytes;at+=CHUNK_BYTES)await file.write(block.subarray(0,Math.min(bytes-at,block.length)));
-  await file.write('"}\n');await file.sync();
- }finally{await file.close();}
+ await write(path);
  const info=await f.files.hash(path);
  if(info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('fixture size');
  const index=await files.copyRanges({ranges:[{path,offset:0,size:info.size}],size:info.size,index:true,segmentBytes:BOOK_SEGMENT_BYTES});

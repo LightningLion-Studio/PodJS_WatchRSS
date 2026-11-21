@@ -32,7 +32,7 @@ async function connect(f:Fixture){
   await session.connection.writeFrame({action:'ack',success:true,applied:true});
   return reply;
  };
- const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
+ const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],...(f.ports.guardedRuntime?{supportedGuardedLibraryVersions:[1]}:{}),supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
  await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});
  const cap=probe.libraryBinary as unknown as Capability;
  return {session,cap,switch:async()=>{
@@ -191,6 +191,51 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
   const source=await assets.source('scope',snapshot.witness,peer.description.selection);
   const second=source.objects.find(d=>d.kind==='bookPackageSegment'&&JSON.parse(d.metadataUtf8).segmentIndex===1)!;
   expect(source.range?.(second,0)).toMatchObject({offset:BOOK_SEGMENT_BYTES,size:CHUNK_BYTES});
+ }finally{await f.dispose();}
+},60000);
+
+test('guarded BT-R receives an 8 MiB book by missing ranges without replaying 27 durable frames',async()=>{
+ const f=await binaryRuntime({fileRefs:true,...v2Identity});
+ try{
+  const {repository,files}=await attachBinaryBooks(f);
+  const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
+  const {LocalBodyClaims}=await import('../../src/sync-v2/local-body-claims');
+  const {canonical}=await import('../../src/sync-v2/protocol');
+  const {scope,account}=await import('../sync-v2/fixture');
+  const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,v2Identity.watchId);
+  const before=await guard.store.readState(),head={...account,generation:'0'};
+  await guard.store.controlUpdate(before,{...before,account:head,cloud:{current:{commitOid:head.oid,treeRoot:'tree:sha256:'+'a'.repeat(64),rowCount:0}}});
+  f.ports.intake=guard.intake;f.ports.guardedRuntime=async()=>true;f.ports.assetIndex=new NoteAssetFileIndex(f.db);
+  f.ports.sessionTransaction=async(context,statements)=>{context.checkCancelled?.();await f.db.transaction(statements);return statements.map(()=>0);};
+  f.ports.guardedTransaction=async(_channel,_epoch,statements)=>{await f.db.transaction(statements);return statements.map(()=>0);};
+  const book=await sampleBook(f,files,8*1024*1024,'Chapter one',32),part=book.segments[0]!;
+  expect(book.info.size).toBe(8388608);expect(part.chunkHashes.length).toBe(128);
+  let peer=await receiver(f,book.objects);
+  const receipts=new Map<string,AppliedReceipt>();
+  const apply=async(d:ObjectDescriptor)=>{const result=await peer.operation('apply',{objectId:d.objectId});receipts.set(d.objectId,result.result!.receipt as AppliedReceipt);};
+  await peer.manifest();
+  await transfer(peer,book.stateObject,book.read);await apply(book.stateObject);
+  await transfer(peer,book.reading,book.read);await apply(book.reading);
+  const chunksBefore=f.stats().stageCalls;
+  await transfer(peer,part,book.read,0,27);
+  await peer.session.pair.close();await peer.session.running.catch(()=>{});
+  const previous=peer;peer=await receiver(f,book.objects,previous);
+  expect(peer.epoch).toBeGreaterThan(previous.epoch);
+  const missing=await peer.operation('missing',{afterObjectId:null,afterChunkIndex:null,limit:16});
+  const ranges=(missing.result!.items as Row[]).find(row=>row.objectId===part.objectId)!.missingRanges as [number,number][];
+  expect(ranges).toEqual([[27,128]]);
+  for(const [from,to] of ranges)await transfer(peer,part,book.read,from,to);
+  await apply(part);
+  expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
+  await apply(book.commit);
+  const witness=await repository.cloudBookWitness(book.state.bookId,book.state);
+  expect(witness).toEqual(book.info);
+  const claims=new LocalBodyClaims(f.db);
+  expect(await claims.received(canonical(scope),{kind:'book',logicalId:book.state.bookId,entityKey:'',bodyRevision:''},book.info.sha256)).toBe(true);
+  const complete=await peer.operation('complete',{objectCount:book.objects.length,receiptsRoot:receiptsRoot(book.objects.map(d=>receipts.get(d.objectId)!)),ackToInclusive:0});
+  expect(complete.result?.state).toBe('COMPLETE');await peer.session.running;
+  expect(f.stats().stageCalls-chunksBefore).toBe(128);
+  expect(await f.db.query('SELECT count(*) AS count FROM sync_book_chapters')).toEqual([{count:32}]);
  }finally{await f.dispose();}
 },60000);
 

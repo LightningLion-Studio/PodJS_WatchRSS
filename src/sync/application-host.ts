@@ -1,3 +1,4 @@
+import {LocalBodyClaims} from '../sync-v2/local-body-claims';
 import {cancellableSql} from '../core/sql-cancellation';
 import {syncHistory} from '../debug/sync-diagnostics-host';
 import {BinaryApplicationService} from './library-binary/host';
@@ -79,8 +80,19 @@ export function startApplicationForegroundSync(){
   try{const r=await framedStreams.runtime();return r.version===1&&r.codec==='length-prefixed-chunks-v1'&&r.chunkBytes===65536&&r.windows.includes(1)&&r.windows.includes(8)&&['open','next','register','enable','bind','applied','control','ack','data','state','retire','send','sendRejected','revoke','guardSql'].every(m=>r.methods.includes(m));}
   catch{return false;}
  };
+ const claims=new LocalBodyClaims(db);
  const binary=new BinaryApplicationService({b2BooksEnabled:RELEASE_B2_ENABLED,intake,bookRuntime:guardedRuntime,
-  ...(SYNC_V2_PRODUCT.syncV2?{guardedRuntime,assetIndex:noteAssetFiles,sessionTransaction:async(context,statements)=>{
+  ...(SYNC_V2_PRODUCT.syncV2?{guardedRuntime,assetIndex:noteAssetFiles,receiveClaims:async(scope,owner,records)=>{
+   let stopped=false,timer:ReturnType<typeof delay>|undefined,renewal:Promise<void>|undefined;
+   const resumeCloud=()=>{timer=delay(20000);void timer.result.then(()=>{
+    if(stopped)return;
+    renewal=claims.replace(scope,owner,records);
+    return renewal.then(()=>{if(!stopped)resumeCloud();});
+   }).catch(()=>{});};
+   await claims.replace(scope,owner,records);
+   const holdCloud=localTransferActivity.allowCloudControl();resumeCloud();
+   return async()=>{stopped=true;holdCloud();timer?.cancel();await renewal?.catch(()=>{});await claims.release(owner).catch(()=>{});};
+  },sessionTransaction:async(context,statements)=>{
    const check=Object.assign(()=>context.checkCancelled?.(),{onCancel:context.onCancel});
    await db.execute('PRAGMA synchronous=FULL');
    return cancellableSql(db,check).transactionChanges!([...statements,{sql:"UPDATE library_binary_guard SET ok=CASE WHEN (SELECT synchronous FROM pragma_synchronous)=2 THEN 1 ELSE 0 END WHERE id=1"}]);

@@ -11,6 +11,7 @@ import {jsonBytes,parseCanonicalJson,canonical,entityKey} from '../../src/sync-v
 import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,validateCarrier,type Carrier} from '../../src/sync-v2/body-channel-codec';
 import {BodyChannelHttp} from '../../src/sync-v2/body-channel-http';
 import {WatchBodyChannel} from '../../src/sync-v2/body-channel';
+import {LocalBodyClaims} from '../../src/sync-v2/local-body-claims';
 import type {WatchProjectionStore} from '../../src/sync-v2/store';
 import {toWire} from '../../src/sync-v2/business';
 import {refreshNoteAssets,NOTE_ASSET_SCHEMA} from '../../src/sync-v2/note-assets';
@@ -167,6 +168,32 @@ test('frozen legacy bridge selects only required attachment bytes and ignores bu
  const descriptor=await signControl(signer,'key','wrss.cloud.body.v1/carrier-sign',{...p.descriptor.body,sourceSnapshotId:sourceId,manifest:{sha256:sha256Hex(source.encryptedManifest),sizeBytes:source.encryptedManifest.length},chunks:selected.chunks.map(c=>({sha256:c.ciphertextSha256,sizeBytes:c.ciphertextBytes}))}) as Carrier;
  const reads:string[]=[],out=await openCarrier({descriptor,scope,binding:p.binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>key.slice(),read:async h=>{reads.push(h);return h===descriptor.body.manifest.sha256?source.encryptedManifest:source.newChunks.get(h)!;}});
  expect([...out.keys()]).toEqual(['notes/assets/image.png']);expect(out.get('notes/assets/image.png')).toEqual(p.raw);expect(reads).not.toContain(source.manifest.objects.find(o=>o.name==='notes-state.json')!.chunks[0]!.ciphertextSha256);
+});
+test('a matching guarded Bluetooth manifest allows carrier control reads and defers the body',async()=>{
+ const f=new SqlFixture(),p=await prepared(),b=backend();
+ try{
+  await b.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
+  const scopeKey=canonical(scope),claims=new LocalBodyClaims(f);
+  const claim={kind:p.binding.kind,logicalId:p.binding.logicalId,sha256:sha256Hex(p.raw)};
+  const entry={row:{...p.binding,deleted:false},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};
+  const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
+  let installed:Uint8Array|undefined,installs=0;
+  const start=b.calls.length;
+  const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'guarded-test',repository:{read:async()=>installed,validate:async()=>{},install:async(_kind,_id,raw)=>{installs++;installed=raw;}},localReceiving:binding=>claims.has(scopeKey,binding),check:async()=>{}});
+  await claims.replace(scopeKey,'receiver',[claim]);
+  expect(await claims.has('another scope',p.binding)).toBe(false);
+  expect(await channel.sync()).toEqual({pending:1,errors:['body_channel_bluetooth_pending']});
+  expect(b.calls.slice(start).map(call=>new URL(call.url).pathname)).toEqual(['/functions/v1/cloud/bodies/v1/carriers']);
+  expect(installs).toBe(0);
+  await claims.release('receiver');
+  expect(await channel.sync()).toEqual({pending:0,errors:[]});
+  expect(installs).toBe(1);
+  expect(installed).toEqual(p.raw);
+  const completed=b.calls.length;
+  expect(await channel.sync()).toEqual({pending:0,errors:[]});
+  expect(installs).toBe(1);
+  expect(b.calls.slice(completed).map(call=>new URL(call.url).pathname)).toEqual(['/functions/v1/cloud/bodies/v1/carriers']);
+ }finally{f.close();}
 });
 test('current account changes during download prevent native installation and leave original bytes',async()=>{
  const p=await prepared(),b=backend(),cache=files();await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);let changed=false,installed=0;

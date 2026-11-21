@@ -1,4 +1,6 @@
 import type {SqlCancellationCheck} from '../../core/types';
+import type {LocalBodyClaim} from '../../sync-v2/local-body-claims';
+import {bookDescription} from './book-plan';
 import type {NoteAssetFileIndex} from '../../notes/asset-files';
 import config from '../../../pod.config.json';
 import {noteAssetIntake} from '../../sync-v2/local-transfer-intake';
@@ -33,6 +35,7 @@ export interface BinaryApplicationPorts {
  /** Presence requires a guarded proposal for every B2 connection. */
  guardedRuntime?:()=>Promise<boolean>;
  assetIndex?:NoteAssetFileIndex;
+ receiveClaims?(scope:string,connection:string,claims:LocalBodyClaim[]):Promise<()=>Promise<void>>;
  sessionTransaction?:(context:SyncActionContext,statements:Parameters<BinaryStore['db']['transaction']>[0])=>Promise<number[]>;
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
@@ -161,6 +164,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    native=await stream.openFramed?.();
   });}
   catch(error){await stream.close();throw error;}
+  let releaseClaims:(()=>Promise<void>)|undefined;
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
    protectNoteAsset:protectAsset?(job,object,stage,apply)=>{
     let file:ReturnType<typeof stage>|undefined;
@@ -172,12 +176,24 @@ export class BinaryApplicationService implements BinarySessionPort {
    }:undefined,
    ...(initial?{guarded:{accountAnchor:initial.anchor,stamp,transaction:statements=>sessionTransaction!({...context,checkCancelled:owner.commitCheck,onCancel:owner.commitCheck.onCancel},statements)}}:{}),
    stopLocalWork:fileWork?.stop,guardedTransaction:this.ports.guardedTransaction,durableTransaction:this.ports.durableTransaction,
-   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
+   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);
+    if(initial&&this.ports.receiveClaims&&!releaseClaims){
+     const claims:LocalBodyClaim[]=[];
+     for(const object of objects){
+      if(object.kind==='noteAsset')claims.push({kind:'asset',logicalId:object.businessId,sha256:object.sha256});
+      if(object.kind==='bookPackageCommit'){
+       const book=bookDescription(object,j.description.selection.limits);
+       if(book.kind==='bookPackageCommit')claims.push({kind:'book',logicalId:book.metadata.bookId,sha256:book.metadata.packageSha256});
+      }
+     }
+     if(claims.length)releaseClaims=await this.ports.receiveClaims(initial.scope,connectionId,claims);
+    }
+    if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(stream,this.ports.now,undefined,native));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});
   try{await owner.run();this.recovery.detach(connectionId);this.reconnected=false;}
   catch(e){throw this.failed(e,context);}
 
-  finally{off?.();accountOff();this.sessions.delete(context.session);}
+  finally{off?.();accountOff();this.sessions.delete(context.session);await releaseClaims?.();}
  }
 }

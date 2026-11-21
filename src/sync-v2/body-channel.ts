@@ -42,7 +42,7 @@ const fatalBodyCheck=(code:string)=>['feature_disabled','cloud_account_busy','cl
 /** Every source comes from an already authenticated current account tree.
  * Carrier success never advances a business ACK or rewrites a v2 row. */
 export class WatchBodyChannel {
- constructor(private readonly o:{http:BodyChannelHttp;scope:Scope;projection:WatchProjectionStore;crypto:SnapshotCrypto;signer:SigningPort;author:()=>Promise<{deviceId:string;alias:string}>;approved:(id:string)=>Promise<ApprovedKey>;key:(v:number)=>Promise<Uint8Array>;currentKey:()=>Promise<{key:Uint8Array;version:number}>;files:CloudBlobStore;root:string;repository:BodyChannelRepository;check:()=>Promise<void>;now?:()=>number;yieldControl?:()=>Promise<void>}){}
+ constructor(private readonly o:{http:BodyChannelHttp;scope:Scope;projection:WatchProjectionStore;crypto:SnapshotCrypto;signer:SigningPort;author:()=>Promise<{deviceId:string;alias:string}>;approved:(id:string)=>Promise<ApprovedKey>;key:(v:number)=>Promise<Uint8Array>;currentKey:()=>Promise<{key:Uint8Array;version:number}>;files:CloudBlobStore;root:string;repository:BodyChannelRepository;localReceiving?:(binding:BodyBinding)=>Promise<boolean>;receivedFromPeer?:(binding:BodyBinding,sha256:string)=>Promise<boolean>;check:()=>Promise<void>;now?:()=>number;yieldControl?:()=>Promise<void>}){}
  private now(){return (this.o.now??Date.now)();}
  private async current(entry:any,anchor:any){
   await this.o.check();const state=await this.o.projection.readState(),head=state.cloud?.current;
@@ -148,7 +148,7 @@ export class WatchBodyChannel {
      }
     }catch(error){
      last=error;
-     if(fatalBodyCheck((error as Error).message))throw error;
+     if(fatalBodyCheck((error as Error).message)||(error as Error).message==='body_channel_bluetooth_pending')throw error;
      continue;
     }
     await clearRetry();
@@ -161,7 +161,9 @@ export class WatchBodyChannel {
    if(page.nextAfter===null)break;
    cursor=page.nextAfter;
   }
+  if(await this.o.localReceiving?.(binding))throw Error('body_channel_bluetooth_pending');
   if(last||!local)throw last??localFailure??Error('body_channel_pending');
+  if(await this.o.receivedFromPeer?.(binding,local.witness.sha256))throw Error('body_channel_source_pending');
   let raw=local.raw;
   if(!raw){
    raw=await this.o.repository.read(kind,id);
@@ -187,7 +189,13 @@ export class WatchBodyChannel {
  }
  private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,checkWindow:()=>void,deadline?:PublicationDeadline){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId};
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:(hash,size)=>{checkWindow();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
+  const checkTransfer=async()=>{
+   checkWindow();
+   if(await this.o.localReceiving?.(binding))throw Error('body_channel_bluetooth_pending');
+   checkWindow();
+  };
+  await checkTransfer();
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:async(hash,size)=>{await checkTransfer();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
   await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
   const incomingHash=sha256Hex(raw);
@@ -197,7 +205,7 @@ export class WatchBodyChannel {
   checkWindow();
   if(old&&sha256Hex(old)===incomingHash)return;
   if(binding.kind==='book'&&old)throw Error('body_revision_changed');
-  await this.current(entry,anchor);checkWindow();
+  await this.current(entry,anchor);await checkTransfer();
   await this.o.repository.install(binding.kind,binding.logicalId,raw,null,deadline);await this.current(entry,anchor);checkWindow();
  }
 }

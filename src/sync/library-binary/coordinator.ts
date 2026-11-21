@@ -1,4 +1,6 @@
 import type {SqlCancellationCheck} from '../../core/types';
+import {LocalBodyClaims} from '../../sync-v2/local-body-claims';
+import {bookDescription} from './book-plan';
 import type {GuardedLibraryStamp} from '../../sync-v2/local-transfer-intake';
 import {VerifiedChunkStore,type ObjectLease,type VerifiedObject,type VerifiedPublication} from '@podjs/framework/verified-chunk-store';
 import {BinaryConnection} from './connection';
@@ -661,6 +663,17 @@ export class LibraryBinaryConnection {
   if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await (this.guardedCommit(stamp,j)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
   const boundary=this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,this.commitCheck);
+  if(stamp&&(o.descriptor.kind==='noteAsset'||o.descriptor.kind==='bookPackageCommit')){
+   const d=o.descriptor;
+   let original;
+   if(d.kind==='noteAsset')original=LocalBodyClaims.receipt(stamp.scope,'asset',d.businessId,d.sha256);
+   else{
+    const book=bookDescription(d,j.description.selection.limits);
+    if(book.kind!=='bookPackageCommit')fail('PLAN_CONFLICT');
+    original=LocalBodyClaims.receipt(stamp.scope,'book',book.metadata.bookId,book.metadata.packageSha256);
+   }
+   const receipt=boundary.after;boundary.after=outcome=>outcome==='merged'?[...receipt(outcome),...original]:receipt(outcome);
+  }
   const commit=stamp?this.guardedChanges(stamp,j,true):o.descriptor.kind.startsWith('book')?this.nativeChanges(j):undefined;
   if(commit){
    boundary.transactionChanges=commit;
