@@ -315,7 +315,7 @@ test('D2 probe preserves the v14 response for 120 and enables a single guarded p
   expect(guarded.libraryBinary).toBeDefined();
   await probe(); // A later legacy probe invalidates the old switch on this connection.
   await s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(guarded.libraryBinary as unknown as Capability)}});
-  await expect(s.running).rejects.toThrow('AUTH_REVOKED');
+  await expect(s.running).rejects.toThrow('CAPABILITY_MISMATCH');
  }finally{await f.dispose();}
 });
 
