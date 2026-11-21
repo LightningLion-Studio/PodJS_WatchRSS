@@ -1,7 +1,7 @@
 import {expect,test} from 'bun:test';
 import {URL as NodeURL} from 'node:url';
 import {DouyinClient} from '../../src/douyin/client.ts';
-import {reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
+import {assertDouyinAddresses,failedDouyinAddresses,reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
 import {utf8Encode} from '../../src/cloud/types.ts';
@@ -35,39 +35,38 @@ test('manual retry resolves the selected aweme through detail despite fresh feed
  const retries=f.requests.slice(1).map(request=>new NodeURL(request.url));
  expect(retries.map(url=>[url.pathname,url.searchParams.get('aweme_id')])).toEqual([['/aweme/v1/web/aweme/detail/','selected']]);
 });
-test('detail retry refuses the previous URL, its mirror, expired URLs and a mismatched aweme',async()=>{
- const f=fixture(),original=wire('selected'),oldMirror='https://fixture.invalid/old-mirror';
- original.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
+test('detail resolution leaves the effective address decision to playback registration',async()=>{
+ const f=fixture(),original=wire('selected'),mirror='https://fixture.invalid/old-mirror';
+ original.video.bit_rate[0]!.play_addr.url_list.push(mirror);
  f.replies.push(response({aweme_list:[original]}));
  const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
  const item=page.data.items[0]!;
- const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
- const expired=wire('selected');expired.video.bit_rate[0]!.play_addr.url_list=['https://fixture.invalid/new?x-expires=1000000000'];
- f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}),response({aweme_detail:expired}));
- for(let i=0;i<4;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
- expect(detailCount(f)).toBe(4);expect(f.requests).toHaveLength(5);
+ const promoted=wire('selected');
+ promoted.video.bit_rate[0]!.play_addr.url_list=[mirror];
+ f.replies.push(response({aweme_detail:promoted}));
+ expect((await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail'))?.item.playUrl).toBe(mirror);
 });
-test('feed recovery reuses a valid address only when a new address is optional',async()=>{
- const f=fixture(),old=wire('selected');
- const oldMirror='https://fixture.invalid/old-mirror';
- old.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
- f.replies.push(response({aweme_list:[old]}));
+test('detail fallback without a freshness requirement accepts the same valid URL for the selected aweme',async()=>{
+ const f=fixture(),original=wire('selected');
+ f.replies.push(response({aweme_list:[original]}));
  const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
  const item=page.data.items[0]!;
- f.replies.push(response({aweme_list:[old]}));
- expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
- const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
- for(const row of [old,mirror]){
-  f.replies.push(response({aweme_list:[row]}));
-  await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed',[],true)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
- }
- const expired=wire('selected');expired.video.bit_rate[0]!.play_addr.url_list=['https://fixture.invalid/new?x-expires=1000000000'];
- for(const row of [expired,wire('other')]){
-  f.replies.push(response({aweme_list:[row]}));
-  await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'feed')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
- }
- expect(detailCount(f)).toBe(0);
- expect(f.requests).toHaveLength(6);
+ f.replies.push(response({aweme_detail:original}),response({aweme_detail:wire('other')}));
+ expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
+ await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+});
+test('actual address validation keeps valid previous components and rejects invalid ones',()=>{
+ const now=1_800_000_120_000;
+ const main='https://fixture.invalid/main?expires=1800003600';
+ const mirror='https://fixture.invalid/mirror?expires=1800003600';
+ const audio='https://fixture.invalid/audio?expires=1800003600';
+ const expired='https://fixture.invalid/expired?expires=1800000090';
+ expect(failedDouyinAddresses([main,mirror,expired],true,now)).toEqual([expired]);
+ expect(failedDouyinAddresses([main,audio],false,now)).toEqual([]);
+ expect(()=>assertDouyinAddresses([main,audio],failedDouyinAddresses([main,audio],true,now),now))
+  .toThrow('播放地址已过期');
+ expect(()=>assertDouyinAddresses([mirror,audio],[expired],now)).not.toThrow();
+ expect(()=>assertDouyinAddresses([main,audio,expired],[],now)).toThrow('播放地址已过期');
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));

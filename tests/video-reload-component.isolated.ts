@@ -406,8 +406,8 @@ test('RVDYA2-01 a rendered but nonloading buffered player resumes from the same 
  const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
  if(!feed.ok)throw Error(feed.code);
  const source={platform:'douyin' as const,immersive:true,awemeId:id,url,title:'fixture'};
- const f=reloadMount(source,async(position,guard,mode,requireFreshAddress)=>{
-  const resolved=await reloadDouyinPlayback(client,id,guard,feed.data.items[0]!,mode,[],requireFreshAddress);
+ const f=reloadMount(source,async(position,guard,mode)=>{
+  const resolved=await reloadDouyinPlayback(client,id,guard,feed.data.items[0]!,mode);
   if(resolved)f.publish(freshVideoSource(source,{url:resolved.item.playUrl,headers:resolved.headers},position));
  });
  await flush();expect(f.firstFrames()).toBe(1);
@@ -617,6 +617,22 @@ test('manual retry can fall back to detail once when feed has no usable source',
  expect(player.text()).toContain('重试');
 });
 
+test('rejecting a detail address combination leaves the original expiry and one feed attempt',async()=>{
+ nextError={code:'source_expired'};
+ const source={platform:'douyin' as const,immersive:true,awemeId:'expired-candidate',url:'podjs-media-cache://play/old',title:'fixture'};
+ const calls:unknown[]=[];
+ const player=reloadMount(source,async(position,guard,mode,requireFreshAddress)=>{
+  calls.push([mode,requireFreshAddress]);
+  if(mode==='detail')throw {code:'source_expired'};
+  if(guard())player.publish({...source,url:'podjs-media-cache://play/renewed',resumePositionMs:position});
+ });
+ await flush();await tick(351);
+ expect(calls).toEqual([['detail',true],['feed',true]]);
+ expect(player.reloadAttempts()).toBe(2);
+ expect(prepares.at(-1)?.url).toBe('podjs-media-cache://play/renewed');
+ expect(current.state).toBe('playing');
+});
+
 test('PERFVIDEO repeated resource denial exhausts the finite cache-only retry budget',async()=>{
  nextError={code:'resource_exhausted'};
  const source={platform:'douyin',immersive:true,awemeId:'retry-budget',url:'file:///fixture.mp4',title:'fixture'};
@@ -722,9 +738,9 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
   const root=createRoot(stop=>{
    stops.push(stop);
    return MediaRoutes({...controller,entry,playingSource,page:()=>entry.page,active:()=>true,width:233,height:233,round:true,backOffset:()=>0,setError,
-    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>{
+    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,nativeSourceExpired?:boolean)=>{
      reloadAddressRequirements.push(requireFreshAddress);
-     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress);
+     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress,nativeSourceExpired);
     },
     services:{} as Parameters<typeof MediaRoutes>[0]['services'],
    } as unknown as Parameters<typeof MediaRoutes>[0]);

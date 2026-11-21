@@ -402,6 +402,17 @@ test('NOPLAY direct fallback retains explicit URL deadlines and audio source val
  }
 });
 
+test('reload binding reports the direct result for post-registration validation',async()=>{
+ const selected={...items[0]!,playUrl:'https://fixture/expired?expires=1000000000'};
+ const port={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:selected})};
+ const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ registrationFailure={code:'unsupported_method'};
+ try{
+  await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'source_expired'});
+  expect(await host.playbackForReload(selected,{},()=>true)).toEqual({url:selected.playUrl,item:selected});
+ }finally{registrationFailure=undefined;host.stop();}
+});
+
 test('NOPLAY a late optional cache failure cannot publish a replaced foreground source',async()=>{
  let rejectLookup!:(error:unknown)=>void,requests=0;
  const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>{requests++;return {ok:true,data:items[0]};}};

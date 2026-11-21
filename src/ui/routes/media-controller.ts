@@ -1,7 +1,7 @@
 import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
-import {reloadDouyinPlayback,retryableDouyinSourceFailure,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
+import {assertDouyinAddresses,failedDouyinAddresses,reloadDouyinPlayback,retryableDouyinSourceFailure,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import {douyinMediaNetworkDeadline,douyinPlaybackAddresses} from '../../douyin/media-expiry.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
@@ -361,19 +361,19 @@ export function createMediaRouteController(
     const override=douyinDebug.playbackUrl(item.awemeId,item.playUrl,forward);
     return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers,intent):item.playUrl;
   };
-  const playbackProfile=(item:DouyinItem,url?:string)=>{
-    const registered=url?douyinPreload.sourceFor?.(url):undefined;
+  const playbackProfile=(item:DouyinItem,url?:string,useSourceCache=true)=>{
+    const registered=url&&useSourceCache?douyinPreload.sourceFor?.(url):undefined;
     const rendition=registered?.awemeId===item.awemeId?registered:item;
     // A verified complete file contains its own audio track. Even if the
     // metadata LRU has advanced, never attach a remote DASH companion to it.
     const complete=url?.startsWith('file:');
     const profile=douyinDecoderProfile(rendition,complete?url:rendition.playUrl);
     const audioUrl=complete?undefined:profile.audioUrl;
-    const expiresAtMs=!url||complete?undefined:url.startsWith('podjs-media-cache:')
-      ?douyinPlaybackAddresses(rendition).expiresAtMs
-      :douyinMediaNetworkDeadline([url,...(audioUrl?[audioUrl]:[])]);
+    const cache=url?.startsWith('podjs-media-cache:')?douyinPlaybackAddresses(rendition):undefined;
+    const douyinReadUrls=cache?[rendition.playUrl,...cache.mirrors,...(cache.audioUrl?[cache.audioUrl]:[])]:undefined;
+    const expiresAtMs=cache?.expiresAtMs??(!url||complete?undefined:douyinMediaNetworkDeadline([url,...(audioUrl?[audioUrl]:[])]));
     return {videoMime:profile.videoMime,videoWidth:profile.videoWidth,videoHeight:profile.videoHeight,
-      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl,expiresAtMs};
+      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl,expiresAtMs,douyinReadUrls};
   };
   // Only the verified local first item owns a hidden decoder on the title page.
   // Nothing plays before the user enters; navigation adopts this exact pool.
@@ -741,7 +741,7 @@ export function createMediaRouteController(
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
     let selected:PlaybackSource={...old,startupSeq:undefined,releaseStartupPreview:undefined,recoveryDeadlineMs:undefined,resumePositionMs:0,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
-      previewFrame:undefined,url:undefined,videoUrl:undefined,expiresAtMs:undefined,previewOnly:true,preparationError:undefined,
+      previewFrame:undefined,url:undefined,videoUrl:undefined,expiresAtMs:undefined,douyinReadUrls:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
     const current=()=>dependencies.current()===entry&&entry.queue===queue&&entry.playback===selected&&queue.itemAtOffset()?.awemeId===item.awemeId;
@@ -945,7 +945,7 @@ export function createMediaRouteController(
         if(resolutionRejected){
           const source=entry.playback;
           if(source){
-            entry.playback={...source,url:undefined,expiresAtMs:undefined,previewFrame:undefined,previewOnly:true,preparationError:error};
+            entry.playback={...source,url:undefined,expiresAtMs:undefined,douyinReadUrls:undefined,previewFrame:undefined,previewOnly:true,preparationError:error};
             dependencies.setPlayingSource(entry.playback);
           }
           if(!currentRun())return;
@@ -1103,7 +1103,7 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed',requireFreshAddress=false)=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed',requireFreshAddress=false,nativeSourceExpired=requireFreshAddress)=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
@@ -1116,30 +1116,39 @@ export function createMediaRouteController(
       let queueGeneration=queue.playbackGeneration();
       const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
         &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
-      const previousItem=requireFreshAddress&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
-      const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
+      const previousUrl=previous.url??previous.videoUrl??'';
+      const previousReadUrls=previous.douyinReadUrls??(previousUrl.startsWith('podjs-media-cache:')
+        ?playbackProfile(item,previousUrl).douyinReadUrls
+        :[previousUrl,...(previous.audioUrl?[previous.audioUrl]:[])].filter(Boolean));
+      const failed=requireFreshAddress?failedDouyinAddresses(previousReadUrls??[],nativeSourceExpired):[];
       if(mode==='current')await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls,requireFreshAddress)).catch(async error=>{
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode)).catch(async error=>{
         if(mode!=='current'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
       });
       if(!resolved||!selected())return;
-      let url=resolved.item.playUrl;
+      let playback=resolved.item,url=playback.playUrl;
       if(mode!=='current'){
-        await douyinPreload.invalidate(item.awemeId);
+        if(!requireFreshAddress)await douyinPreload.invalidate(item.awemeId);
         if(!selected())return;
-        url=await douyinPreload.playbackResolved(resolved.item,resolved.headers,selected);
+        if(douyinPreload.playbackForReload){
+          const binding=await douyinPreload.playbackForReload(playback,resolved.headers,selected);
+          url=binding.url;
+          playback=binding.item;
+        }else url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
         if(!selected())return;
       }
-      next=freshVideoSource(previous,{url,...playbackProfile(resolved.item,url),headers:resolved.headers},positionMs);
+      const profile=playbackProfile(playback,url,false);
+      assertDouyinAddresses(profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])],failed);
+      next=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
       if(mode!=='current')next.bypassCache=false;
-      entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
+      entry.queue.refreshPrefetchItem(item.awemeId,playback);
       // This reload owns the metadata mutation. Continue guarding against later
       // pager changes while persistence yields, using our new generation.
       queueGeneration=queue.playbackGeneration();
-      entry.queue.updateCurrentUrl(resolved.item.playUrl);
+      entry.queue.updateCurrentUrl(playback.playUrl);
       await entry.queue.persist();
       if(!selected())return;
     }else if(entry.rssDouyinRecovery){

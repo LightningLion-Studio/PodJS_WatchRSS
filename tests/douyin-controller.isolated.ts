@@ -1134,6 +1134,58 @@ test('manual reload publishes fresh detail in a new managed source at the curren
  expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'podjs-media-cache://play/fresh',resumePositionMs:321,bypassCache:false});
 });
 
+for(const outcome of ['renewed audio','expired audio','promoted mirror','expired cache mirror','unused direct mirror','only a direct mirror changed'] as const)
+test(`strict reload validates the read address combination: ${outcome}`,async()=>{
+ const f=fixture(),clock=Date.now,start=1_800_000_000_000,id='address-rotation';
+ const live='https://fixture.invalid/video?expires=1800003600';
+ const mirror='https://fixture.invalid/mirror?expires=1800003600';
+ const expiring='https://fixture.invalid/video?expires=1800000090';
+ const oldAudio='https://fixture.invalid/audio?expires=1800000090';
+ const newAudio='https://fixture.invalid/audio?expires=1800003600';
+ const managed='podjs-media-cache://play/rotation';
+ const make=(playUrl:string,audioUrl:string,playUrls:string[]=[playUrl]):DouyinItem=>({
+  ...item(id),playUrl,variants:[{playUrl,audioUrl,playUrls,format:'dash',codec:'h264',width:480,height:854,bitrate:300_000}],
+ });
+ const promoted=outcome==='promoted mirror';
+ const mirrorOnly=outcome==='only a direct mirror changed';
+ const direct=outcome==='unused direct mirror'||mirrorOnly;
+ const old=promoted?make(expiring,newAudio,[expiring,mirror]):make(live,mirrorOnly?newAudio:oldAudio);
+ const candidate=promoted?make(mirror,newAudio):make(live,outcome==='expired audio'?oldAudio:newAudio,
+  mirrorOnly?[live,mirror]:outcome==='expired cache mirror'||direct?[live,expiring]:[live]);
+ const rejected=outcome==='expired audio'||outcome==='expired cache mirror'||mirrorOnly;
+ try{
+  Date.now=()=>start;
+  if(promoted){proxyOverride=async()=>managed;canonicalSource=old;}
+  f.controller.douyinPlay({item:old,playback:old,playlist:[old],immersive:true,hasMore:false});
+  await f.controller.douyinNavigate({name:'player',awemeId:id});
+  const entry=f.stack().at(-1)!,previous=entry.playback;
+  expect(previous).toMatchObject({url:promoted?managed:live,audioUrl:promoted||mirrorOnly?newAudio:oldAudio});
+  Date.now=()=>start+120_000;
+  client.resolvePlayback=async(awemeId,options)=>{
+   expect(awemeId).toBe(id);
+   expect(options).toMatchObject({forceRefresh:true,allowDetail:true});
+   return {ok:true,data:candidate};
+  };
+  const registrations:string[]=[];
+  proxyOverride=async resolved=>{
+   registrations.push(resolved.playUrl);
+   return direct?resolved.playUrl:managed;
+  };
+  const result=f.controller.reloadVideo(entry,321,()=>true,'detail',true);
+  if(rejected){
+   await expect(result).rejects.toMatchObject({code:'source_expired'});
+   expect(f.source()).toBe(previous);
+   expect(entry.queue!.itemAtOffset()).toMatchObject({playUrl:old.playUrl});
+  }else{
+   await result;
+   expect(f.source()).toMatchObject({awemeId:id,url:direct?live:managed,audioUrl:newAudio,resumePositionMs:321});
+   expect(entry.queue!.itemAtOffset()).toMatchObject({playUrl:candidate.playUrl});
+  }
+  expect(registrations).toEqual([candidate.playUrl]);
+  expect(invalidated).toEqual([]);
+ }finally{Date.now=clock;}
+});
+
 test('idle release video requests no guest frames and debug playback still sees the current and next items', async()=>{
  for (const enabled of [false,true]) {
   debugAllowed=enabled;
