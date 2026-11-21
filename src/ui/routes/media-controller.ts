@@ -777,7 +777,7 @@ export function createMediaRouteController(
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
     let selected:PlaybackSource={...old,startupSeq:undefined,releaseStartupPreview:undefined,recoveryDeadlineMs:undefined,resumePositionMs:0,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
-      previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,preparationError:undefined,
+      previewFrame:undefined,url:undefined,videoUrl:undefined,expiresAtMs:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
     const current=()=>dependencies.current()===entry&&entry.queue===queue&&entry.playback===selected&&queue.itemAtOffset()?.awemeId===item.awemeId;
@@ -941,7 +941,7 @@ export function createMediaRouteController(
         if(!remote.ok){if(remote.code===DOUYIN_RESOLUTION_LIMIT)throw Object.assign(new Error(remote.message),remote);dependencies.setError(remote.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders();
         if(!currentRun()||entry.queue.itemAtOffset()?.awemeId!==id)return;
-        const source={...entry.playback,url:remote.data.playUrl,...douyinDecoderProfile(remote.data),headers};
+        const source={...entry.playback,url:remote.data.playUrl,...playbackProfile(remote.data,remote.data.playUrl),headers};
         entry.queue.updateCurrentUrl(remote.data.playUrl);await entry.queue.persist();
         if(!currentRun()||entry.queue.itemAtOffset()?.awemeId!==id)return;
         entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');

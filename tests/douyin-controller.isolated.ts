@@ -430,10 +430,11 @@ test('DYINTENT selects through delayed URL registration and rejects every stale 
  const f=fixture(),items=Array.from({length:60},(_,i)=>item(String(i)));
  f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'0'});
  const entry=f.stack().at(-1)!,pending=new Map<string,(url:string)=>void>();
+ entry.playback!.expiresAtMs=1;
  proxyOverride=async value=>new Promise(resolve=>pending.set(value.awemeId,resolve));
  for(let n=1;n<=50;n++){
   f.controller.selectDouyinTarget(entry,'next',1);
-  expect(entry.queue!.snapshot().index).toBe(n);expect(f.source()).toMatchObject({awemeId:String(n),previewOnly:true,url:undefined,previewFrame:undefined});
+  expect(entry.queue!.snapshot().index).toBe(n);expect(f.source()).toMatchObject({awemeId:String(n),previewOnly:true,url:undefined,previewFrame:undefined,expiresAtMs:undefined});
   for(let k=0;k<20;k++)await Promise.resolve();
  }
  expect(pending.size).toBe(50);
