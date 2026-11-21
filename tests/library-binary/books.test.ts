@@ -14,7 +14,7 @@ import {bookFileWork} from '../../src/sync/library-binary/book-import';
 import type {Job} from '../../src/sync/library-binary/store';
 import {BinaryAssets} from '../../src/sync/library-binary/assets';
 import {BOOK_SEGMENT_BYTES,bookObject,validateBookPlan} from '../../src/sync/library-binary/book-plan';
-import {capabilityDigest,pageDigest,objectsRoot,planDigest,preparationDigest,receiptsRoot,requestDigest,selectionDigest} from '../../src/sync/library-binary/digests';
+import {appliedReceipt,capabilityDigest,completion,pageDigest,objectsRoot,planDigest,preparationDigest,receiptsRoot,requestDigest,selectionDigest} from '../../src/sync/library-binary/digests';
 import {decodeFrame,encodeFrame} from '../../src/sync/library-binary/codec';
 import {negotiate} from '../../src/sync/library-binary/routing';
 import {BOOK_KINDS,CHUNK_BYTES,HARD_LIMITS,hash,type AppliedReceipt,type BeginPayload,type Binding,type Capability,type Envelope,type ObjectDescriptor,type Row,type Snapshot} from '../../src/sync/library-binary/wire';
@@ -236,6 +236,102 @@ test('guarded BT-R receives an 8 MiB book by missing ranges without replaying 27
   expect(complete.result?.state).toBe('COMPLETE');await peer.session.running;
   expect(f.stats().stageCalls-chunksBefore).toBe(128);
   expect(await f.db.query('SELECT count(*) AS count FROM sync_book_chapters')).toEqual([{count:32}]);
+ }finally{await f.dispose();}
+},60000);
+
+test('guarded BT-R watch source queries durable chunks after a disconnect and commits one peer ACK',async()=>{
+ const f=await binaryRuntime({fileRefs:true,...v2Identity});
+ try{
+  const {repository,files}=await attachBinaryBooks(f);
+  const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
+  const {account}=await import('../sync-v2/fixture');
+  const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,v2Identity.watchId);
+  const before=await guard.store.readState(),head={...account,generation:'0'};
+  await guard.store.controlUpdate(before,{...before,account:head,cloud:{current:{commitOid:head.oid,treeRoot:'tree:sha256:'+'a'.repeat(64),rowCount:0}}});
+  f.ports.intake=guard.intake;f.ports.guardedRuntime=async()=>true;f.ports.assetIndex=new NoteAssetFileIndex(f.db);
+  f.ports.sessionTransaction=async(context,statements)=>{context.checkCancelled?.();await f.db.transaction(statements);return statements.map(()=>0);};
+  f.ports.guardedTransaction=async(_channel,_epoch,statements)=>{await f.db.transaction(statements);return statements.map(()=>0);};
+  const book=await sampleBook(f,files,8*1024*1024,'Chapter one',32);
+  await repository.books!.merge(book.state);
+  await f.db.execute('UPDATE sync_books SET package_path=?,package_sha256=?,package_bytes=?,registration_complete=1 WHERE book_id=?',[book.path,book.info.sha256,book.info.size,book.state.bookId]);
+  const job=nonce(),phoneSnapshot={snapshotId:'phone-source-test',manifestDigest:'1'.repeat(64),fromExclusive:0,toInclusive:0};
+  const objects:ObjectDescriptor[]=[],receipts=new Map<string,AppliedReceipt>(),durable=new Map<string,Set<number>>();
+  let watchSnapshot:unknown=null,description:BeginPayload|undefined,plan:string|undefined,pageCount=0,bodyFrames=0;
+  const exchange=async(epoch:number)=>{
+   const peer=await connect(f),io=await peer.switch();
+   if(epoch>1)for(const object of objects)for(const index of durable.get(object.objectId)??[]){
+    expect((await f.files.hash('fixture-phone/'+object.objectId+'/'+index)).sha256).toBe(object.chunkHashes[index]!);
+   }
+   const kinds=peer.cap.kinds.filter(k=>BOOK_KINDS.some(kind=>k.kind===kind));
+   const phoneCap={...peer.cap,kinds,limits:{...peer.cap.limits,maxInFlightChunks:1,maxInFlightBytes:CHUNK_BYTES}};
+   const selection=negotiate(phoneCap,peer.cap)!;expect(selection.limits.maxInFlightChunks).toBe(1);
+   const control=async(envelope:Envelope)=>await io.writeFrame(encodeFrame({kind:'control',envelope}));
+   const call=async(r:Envelope)=>{
+    await control(r);const a=decodeFrame(await io.readFrame());
+    if(a.kind!=='control'||a.envelope.success!==true)throw Error('prepare failed '+JSON.stringify(a));
+    return a.envelope.result!;
+   };
+   const offer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId:v2Identity.watchId,phoneCapabilities:phoneCap,phoneSnapshot,watchSnapshot});
+   const offered=await call(offer);watchSnapshot=offered.watchSnapshot;
+   const binding:Binding={jobId:job,direction:'watchToPhone',intent:epoch===1?'create':'resume',selection};
+   await call(request('prepare',{step:'confirm',offerRequestId:offer.requestId,bindings:[binding],preparationDigest:preparationDigest(String(offered.offerDigest),[binding])}));
+   const ttl=10000000;let ackSeq=0;
+   while(true){
+    const frame=decodeFrame(await io.readFrame());
+    if(frame.kind==='data'){
+     expect(frame.streamId).toBe(2);expect(frame.epoch).toBe(epoch);
+     const object=objects[frame.objectSlot]!,bits=durable.get(object.objectId)??new Set<number>();
+     expect(hash(frame.payload)).toBe(object.chunkHashes[frame.chunkIndex]);
+     expect(bits.has(frame.chunkIndex)).toBe(false);
+     await f.files.writeBytes('fixture-phone/'+object.objectId+'/'+frame.chunkIndex,frame.payload);
+     bits.add(frame.chunkIndex);durable.set(object.objectId,bits);
+     await io.writeFrame(encodeFrame({kind:'ack',streamId:2,epoch,ackSeq:++ackSeq,entries:[{txSeq:frame.txSeq,disposition:1}]}));
+     if(object.kind==='bookPackageSegment'&&++bodyFrames===27){
+      expect(epoch).toBe(1);
+      await peer.session.pair.close();await peer.session.running.catch(()=>{});
+      return false;
+     }
+     continue;
+    }
+    if(frame.kind!=='control')throw Error('unexpected window frame');
+    const {payload,...r}=frame.envelope,params=payload!;
+    const reply=(result:Row)=>control({...r,type:'response',epoch,result,success:true});
+    if(r.phase==='begin'){
+     const incoming=params as unknown as BeginPayload;
+     expect(r.jobId).toBe(job);expect(incoming.direction).toBe('watchToPhone');
+     if(epoch===1){description=incoming;plan=r.planDigest!;}else{expect(incoming.intent).toBe('resume');expect(r.planDigest).toBe(plan);}
+     await reply({disposition:epoch===1?'CREATED':'RESUMED',selectionDigest:incoming.selectionDigest,state:epoch===1?'PLANNING':'TRANSFERRING',expiresAtMillis:ttl,nextManifestPage:pageCount,completion:null});
+    }else if(r.phase==='manifestPage'){
+     expect(epoch).toBe(1);
+     objects.push(...params.entries as ObjectDescriptor[]);
+     const last=++pageCount===description!.pageObjectCounts.length;
+     await reply({pageIndex:params.pageIndex,pageDigest:params.pageDigest,nextManifestPage:pageCount,manifestVerified:last,state:last?'READY':'PLANNING'});
+    }else if(r.phase==='missing'){
+     const items=Number(params.limit)===0?[]:objects.map(object=>{
+      const received=durable.get(object.objectId)?.size??0,receipt=receipts.get(object.objectId)??null;
+      return {objectId:object.objectId,state:receipt?'APPLIED':received===object.chunkHashes.length?'STAGED':received?'PARTIAL':'PENDING',
+       missingRanges:received===object.chunkHashes.length?[]:[[received,object.chunkHashes.length]],receipt};
+     });
+     await reply({state:'READY',nextManifestPage:pageCount,expiresAtMillis:ttl,items,next:null,done:true,completion:null});
+    }else if(r.phase==='apply'){
+     const object=objects.find(d=>d.objectId===params.objectId)!;
+     expect(durable.get(object.objectId)?.size??0).toBe(object.chunkHashes.length);
+     expect(receipts.has(object.objectId)).toBe(false);
+     const receipt=appliedReceipt(frame.envelope,object.objectId,'phone','merged');receipts.set(object.objectId,receipt);
+     await reply({state:'APPLIED',receipt});
+    }else if(r.phase==='complete'){
+     const root=receiptsRoot(objects.map(d=>receipts.get(d.objectId)!));expect(params.receiptsRoot).toBe(root);
+     await reply(completion(job,plan!,objects.length,root,0) as unknown as Row);
+     await peer.session.running;return true;
+    }else throw Error('unexpected '+r.phase);
+   }
+  };
+  expect(await exchange(1)).toBe(false);
+  expect(await f.db.query('SELECT * FROM library_binary_peer_ack')).toEqual([]);
+  expect(await exchange(2)).toBe(true);
+  expect(bodyFrames).toBe(128);
+  expect(receipts.size).toBe(objects.length);
+  expect((await f.db.query('SELECT job_id FROM library_binary_peer_ack')).map(row=>row.job_id)).toEqual([job]);
  }finally{await f.dispose();}
 },60000);
 
