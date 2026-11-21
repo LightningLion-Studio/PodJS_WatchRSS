@@ -2,6 +2,7 @@ import {expect,test} from 'bun:test';
 import {URL as NodeURL} from 'node:url';
 import {DouyinClient} from '../../src/douyin/client.ts';
 import {reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
+import type {DouyinItem} from '../../src/douyin/types.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
 import {utf8Encode} from '../../src/cloud/types.ts';
@@ -54,6 +55,24 @@ test('detail fallback without a freshness requirement accepts the same valid URL
  f.replies.push(response({aweme_detail:original}),response({aweme_detail:wire('other')}));
  expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
  await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+});
+for(const target of ['cache','direct','missing-audio'] as const)
+test(`strict mirror replacement only counts in a complete cache source (${target})`,async()=>{
+ const main='https://fixture.invalid/main?expires=4102444800',audio='https://fixture.invalid/audio?expires=4102444800';
+ const oldMirror='https://fixture.invalid/mirror?expires=1000000000',newMirror='https://fixture.invalid/mirror?expires=4102444800';
+ const original:DouyinItem={
+  awemeId:'selected',description:'',authorId:'',authorName:'',createdAtSeconds:0,durationMs:0,
+  likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:main,
+  variants:[{playUrl:main,playUrls:[main,oldMirror],audioUrl:audio,format:'dash',codec:'h264',width:480,height:854,bitrate:300_000}],
+ };
+ const next={...original,variants:[{...original.variants[0]!,playUrls:[main,newMirror],audioUrl:target==='missing-audio'?undefined:audio}]};
+ const client={
+  resolvePlayback:async()=>({ok:true as const,data:next}),
+  buildPlaybackHeaders:async()=>({}),
+ };
+ const reloading=reloadDouyinPlayback(client,original.awemeId,()=>true,original,'detail',[],true,{includeMirrors:target!=='direct'});
+ if(target==='cache')expect((await reloading)?.item).toEqual(next);
+ else await expect(reloading).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));

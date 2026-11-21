@@ -1272,3 +1272,54 @@ for (const expired of [false, true]) test(`DYFAV FIX2 saved stall ${expired ? 'r
   });
   expect(invalidated).toEqual(expired ? [selected.awemeId] : []);
 });
+
+for (const replacement of ['valid-audio', 'expired-audio', 'expired-mirror'] as const)
+test(`DYFAV FIX3 saved DASH reload checks the full replacement set (${replacement})`, async () => {
+  const f = fixture(), selected = item('saved-audio-rotation');
+  const now = Date.now, origin = 1_800_000_000_000;
+  const main = 'https://fixture.invalid/main?expires=1800003600';
+  const oldAudio = 'https://fixture.invalid/audio?expires=1800000090';
+  const freshAudio = 'https://fixture.invalid/audio?expires=1800003600';
+  const expired = 'https://fixture.invalid/expired?expires=1800000090';
+  const binding = (audioUrl: string, mirror?: string): DouyinItem => ({
+    ...selected, playUrl: main, variants: [{
+      playUrl: main, playUrls: mirror ? [main, mirror] : [main], audioUrl,
+      codec: 'h264', format: 'dash', width: 480, height: 854, bitrate: 300_000,
+    }],
+  });
+  try {
+    Date.now = () => origin;
+    const before = binding(oldAudio);
+    f.controller.douyinPlay({item: before, playback: before, savedPlayback: true, detailPlayback: true});
+    await f.controller.douyinNavigate({name: 'player', awemeId: selected.awemeId});
+    const entry = f.stack().at(-1)!, original = entry.playback;
+    expect(original).toMatchObject({url: main, audioUrl: oldAudio});
+    Date.now = () => origin + 120_000;
+    const next = binding(replacement === 'expired-audio' ? expired : freshAudio,
+      replacement === 'expired-mirror' ? expired : undefined);
+    const registrations: DouyinItem[] = [];
+    proxyOverride = async playback => {
+      registrations.push(playback);
+      return 'podjs-media-cache://play/renewed';
+    };
+    client.resolvePlayback = async (id, options) => {
+      expect(id).toBe(selected.awemeId);
+      expect(options).toMatchObject({allowDetail: true, forceRefresh: true});
+      return {ok: true, data: next};
+    };
+    const reloading = f.controller.reloadVideo(entry, 321, () => true, 'detail', true);
+    if (replacement === 'valid-audio') {
+      await reloading;
+      expect(registrations).toEqual([next]);
+      expect(entry.playback).toMatchObject({awemeId: selected.awemeId, audioUrl: freshAudio, resumePositionMs: 321});
+      expect(entry.queue?.itemAtOffset()?.variants?.[0]?.audioUrl).toBe(freshAudio);
+    } else {
+      await expect(reloading).rejects.toMatchObject({code: 'source_expired'});
+      expect(registrations).toEqual([]);
+      expect(invalidated).toEqual([]);
+      expect(entry.playback).toBe(original);
+    }
+  } finally {
+    Date.now = now;
+  }
+});

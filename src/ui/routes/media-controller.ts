@@ -1159,11 +1159,17 @@ export function createMediaRouteController(
       if(!item)throw new Error('Missing Douyin playback item');
       const queue=entry.queue;let queueGeneration=queue.playbackGeneration();
       const selected=()=>current()&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId&&queue.playbackGeneration()===queueGeneration;
-      const previousItem=freshAddress&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
-      const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
+      const register=mode==='detail'||previous.previewOnly||(mode==='feed'&&freshAddress);
+      const previousUrl=previous.url??previous.videoUrl??'';
+      const previousItem=freshAddress&&(!previousUrl||previousUrl.startsWith('podjs-media-cache:'))
+        ?douyinPreload.sourceFor?.(previousUrl)??item:undefined;
+      const previousAddresses=previousItem
+        ?{playUrl:previousItem.playUrl,...douyinPlaybackAddresses(previousItem)}
+        :{playUrl:previousUrl,audioUrl:previous.audioUrl,mirrors:[]};
+      const previousUrls=[previousAddresses.playUrl,...previousAddresses.mirrors];
       if(mode!=='detail'&&!freshAddress&&!previous.previewOnly)await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls,freshAddress)).catch(async error=>{
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls,freshAddress,{previousAddresses,includeMirrors:register})).catch(async error=>{
         if(mode==='detail'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
@@ -1171,7 +1177,6 @@ export function createMediaRouteController(
       if(!resolved||!selected())return;
       const playback = mode === 'detail' && previous.savedPlayback ? preserveSelectedDouyinItem(resolved.item) : resolved.item;
       let url=playback.playUrl;
-      const register=mode==='detail'||previous.previewOnly||(mode==='feed'&&freshAddress);
       if(register){
         const {expiresAtMs}=douyinPlaybackAddresses(playback);
         if(previous.savedPlayback && expiresAtMs!==undefined && expiresAtMs<=Date.now()){
