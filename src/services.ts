@@ -67,7 +67,7 @@ import {normalizeAddChannelUrl,validAddChannelUrl} from "./rss/add-channel.ts";
 import { MemoRepository } from "./notes/index.ts";
 import { uri, sqlite, textInput, http, hostOperation, type DownloadResult, fileChunks, base64ToBytes, utf8ToString, delay } from "@podjs/framework/services";
 import { initializeSchema, WatchRssRepository, htmlToText, parseFeed, resolveUrl } from "./core/index.ts";
-import type { SqlDatabase } from "./core/types.ts";
+import type { SqlCancellationCheck, SqlDatabase } from "./core/types.ts";
 import type { AppServices, Article, ArticleQuery, Note, AddChannelPreview } from "./ui/service.ts";
 
 export async function getTokenUsagePageForSync(options:Parameters<typeof readTokenUsagePage>[1]){await init();return readTokenUsagePage(db,options);}
@@ -104,6 +104,13 @@ export async function commitDurableLibraryTransfer(statements:Parameters<SqlData
  assertLibraryWritable();
  const counts=await sqlite.transactionChangesFull(statements as Parameters<typeof sqlite.transactionChangesFull>[0]);
  notifyLibrarySqlCommit(statements,counts);
+}
+export async function commitGuardedLibrarySession(statements:Parameters<SqlDatabase['transaction']>[0],check:SqlCancellationCheck){
+ assertLibraryWritable();check();
+ const operation=hostOperation<number[]>('sql.transactionFull',{statements,reportChanges:true});
+ const stop=check.onCancel?.(()=>operation.cancel('user_back'));
+ try{const counts=await operation.result;notifyLibrarySqlCommit(statements,counts);return counts;}
+ finally{stop?.();}
 }
 export const noteAssetFiles=new NoteAssetFileIndex(db);
 registerNoteAssetPath(key=>noteAssetFiles.path(key));
