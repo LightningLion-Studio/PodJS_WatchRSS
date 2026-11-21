@@ -50,8 +50,6 @@ test('v2 preparation never completes the round before actual v2 work settles', a
 
 test.each([
  ['object_missing','云端资料暂缺，\n请稍后重试'],
- ['cloud_v2_repo_missing','请先在手机或小程序\n完成首次云同步'],
- ['feature_disabled','云同步暂未开放，\n请稍后重试'],
  ['network_timeout','连接云端超时，\n请重试'],
  ['cloud_v2_start_unavailable','云同步未能启动，\n请重试'],
  ['unexpected_fixture_failure','云同步未能完成，\n请重试'],
@@ -75,25 +73,30 @@ test.each([
 });
 
 test.each([
- ['choice_pending','需要选择','查看并选择'],
- ['cloud_v2_read_only','已暂停上传',undefined],
- ['body_channel_write_disabled','已暂停上传',undefined],
- ['body_channel_waiting_wifi','等待 Wi-Fi','立即同步'],
- ['cloud_v2_pending','还有资料待同步','立即同步'],
-])('incomplete v2 round %s shows attention and does not publish success', async (code,title,button) => {
+ ['choice_pending','需要选择','查看并选择','请选择要保留的资料'],
+ ['cloud_v2_read_only','已暂停上传',undefined,'云端当前只读，\n本机修改已保留'],
+ ['body_channel_write_disabled','已暂停上传',undefined,'正文上传暂未开放，\n本机正文已保留'],
+ ['body_channel_waiting_wifi','等待 Wi-Fi','立即同步','正文等待 Wi-Fi，\n也可手动同步'],
+ ['cloud_v2_pending','还有资料待同步','立即同步','还有资料待同步'],
+ ['cloud_v2_repo_missing','需要先同步',undefined,'请先在手机或小程序\n完成首次云同步'],
+ ['feature_disabled','暂未开放',undefined,'云同步暂未开放，\n开放后自动同步'],
+])('incomplete v2 round %s shows attention and does not publish success', async (code,title,button,detail) => {
  let completionError:string|null=code;
  const service = await setup(async () => ({completionError}));
  expect(await service.syncNow()).toBe(false);
  expect(service.status).toMatchObject({phase:'idle',v2Attention:code,lastCompletedAt:0});
  const status = {cloud:service.status,refreshTokenStatus:'valid'} as Parameters<typeof cloudSyncView>[0];
  const view = cloudSyncView(status,true,false,10_000,'waiting');
- expect(view).toMatchObject({title,tone:'attention'});
+ expect(view).toMatchObject({title,detail,tone:'attention'});
  expect(view.button?.label).toBe(button);
  if (code==='choice_pending') expect(view.button?.action).toBe('choice');
  completionError = null;
  expect(await service.syncNow()).toBe(true);
  expect(service.status.lastCompletedAt).toBe(10_000);
  expect(service.status.v2Attention).toBeUndefined();
+ expect(cloudSyncView({...status!,cloud:service.status},true,false,10_000)).toMatchObject({
+  title:'已同步',detail:'手表与云端已一致',
+ });
 });
 
 test('missing announcement ends this round with a reason and a finite retry', async () => {

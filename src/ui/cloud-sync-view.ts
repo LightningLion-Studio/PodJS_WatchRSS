@@ -47,6 +47,10 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   if (cloud.v2Attention === 'cloud_v2_read_only' || cloud.v2Attention === 'body_channel_write_disabled') {
     return {...base,title:'已暂停上传',detail:cloud.message,tone:'attention',button:undefined};
   }
+  if (cloud.v2Attention === 'cloud_v2_repo_missing' || cloud.v2Attention === 'feature_disabled') {
+    const title = cloud.v2Attention === 'cloud_v2_repo_missing' ? '需要先同步' : '暂未开放';
+    return {...base,title,detail:cloud.message,tone:'attention',button:undefined};
+  }
   if (cloud.v2Attention === 'body_channel_waiting_wifi' || cloud.v2Attention === 'cloud_v2_pending') {
     const title = cloud.v2Attention === 'body_channel_waiting_wifi' ? '等待 Wi-Fi' : '还有资料待同步';
     return {...base,title,detail:cloud.message,tone:'attention',button:{label:'立即同步',action:'sync',enabled:!pending}};
@@ -60,7 +64,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     return {...base,title:'同步失败',detail:cloud.message,tone:'error',button:{label:'重试',action:'sync',enabled:!pending}};
   }
   if (pending || BUSY.has(phase)) return {...base, title: '正在同步', detail: BUSY.has(phase) ? cloud.message : '正在连接云空间', tone: 'busy', button: {label: '同步中…', action: 'sync', enabled: false}};
-  if (phase === 'complete') return {...base, title: '已同步', detail: cloud.message.includes('正文') ? '阅读状态已同步，文章正文会在连上 Wi-Fi 后同步。' : cloud.message.includes('只读') ? '已恢复云端资料；云空间当前只读。' : cloud.message.includes('部分') ? '已同步，部分公共 RSS 稍后重试。' : '手表与云端已一致。'};
+  if (phase === 'complete') return {...base, title: '已同步', detail: cloud.message.includes('正文') ? '阅读状态已同步，文章正文会在连上 Wi-Fi 后同步。' : cloud.message.includes('只读') ? '已恢复云端资料；云空间当前只读。' : cloud.message.includes('部分') ? '已同步，部分公共 RSS 稍后重试。' : '手表与云端已一致'};
   if(cloud.message.includes('重新登记本机'))return{...base,title:'需要重新登记本机',detail:'本机设备公钥与云端不一致，请确认后重新登记。',tone:'attention',button:undefined};
   if(cloud.message.includes('属于其他账号'))return{...base,title:'需要选择资料归属',detail:'请选择清空本机资料或明确合并，选择前不会上传。',tone:'attention',button:undefined};
   if(cloud.message.includes('请升级'))return{...base,title:'请升级腕上RSS',detail:'升级后继续云同步，本机资料保持不变。',tone:'attention',button:undefined};

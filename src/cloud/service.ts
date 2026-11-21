@@ -27,7 +27,7 @@ import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type 
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface CloudSyncResult {readonly ok:boolean; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
-export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'cloud_v2_pending';
+export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'cloud_v2_pending'|'cloud_v2_repo_missing'|'feature_disabled';
 export interface WatchCloudStatus {v2Failure?:true;v2Attention?:WatchV2Attention;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
@@ -106,9 +106,9 @@ export class WatchCloudSyncService {
   switch(code){
    case 'cloud_v2_offline': message='未连接网络，\n请联网后重试'; break;
    case 'cloud_v2_not_announced': message='云同步暂不可用，\n请稍后重试'; break;
-   case 'cloud_v2_repo_missing': message='请先在手机或小程序\n完成首次云同步'; break;
+   case 'cloud_v2_repo_missing': attention=code; message='请先在手机或小程序\n完成首次云同步'; break;
    case 'object_missing': message='云端资料暂缺，\n请稍后重试'; break;
-   case 'feature_disabled': message='云同步暂未开放，\n请稍后重试'; break;
+   case 'feature_disabled': attention=code; message='云同步暂未开放，\n开放后自动同步'; break;
    case 'cloud_v2_start_unavailable': message='云同步未能启动，\n请重试'; break;
    case 'cloud_v2_read_only': attention=code; message='云端当前只读，\n本机修改已保留'; break;
    case 'cloud_v2_pending': attention=code; message='还有资料待同步'; break;
