@@ -1202,16 +1202,18 @@ export function createMediaRouteController(
         entry.queue.updateCurrentUrl(playback.playUrl);
         await entry.queue.persist();
         if(!selected())return;
+        if(staged){
+          await staged.commit();
+          if(!selected())return;
+        }
       }else if(entry.rssDouyinRecovery){
         const resolved=await entry.rssDouyinRecovery.reload(previous,current,mode==='detail');
         if(!resolved||!current())return;
         next=freshVideoSource(previous,resolved,positionMs);
       }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
       if(!current())return;
-      const releaseOld=staged?.commit();
       entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
       dependencies.onActivityStateChange?.();
-      await releaseOld;
     }finally{await staged?.discard();}
   };
 

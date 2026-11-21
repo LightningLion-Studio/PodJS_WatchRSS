@@ -1,11 +1,55 @@
 import {test,expect,mock} from 'bun:test';
 import {dispatchMemoryPressure} from '@podjs/framework/memory';
+import type {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
 import type {DouyinItem} from '../src/douyin/types.ts';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 let registrationWait:((uri:string)=>Promise<void>|undefined)|undefined;
 const result=(value:any)=>({result:value?.uri&&registrationWait?Promise.resolve(registrationWait(value.uri)).then(()=>value):Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{if(registrationFailure)throw registrationFailure;registrations.push({key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge:_maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+const stages=new Map<string,{uri:string;key:string;previous?:string}>();
+const live=new Map<string,string|undefined>();
+const discarded:string[]=[];
+let stageCount=0;
+const captureRegistration=(operation:'register'|'stage',key:string,url:string,headers:Record<string,string>,persistent=false,
+ alternates:readonly string[]=[],expiresAt?:number,audioUrl?:string,maxVideoShortEdge?:number,replacesUri?:string)=>{
+ if(registrationFailure)throw registrationFailure;
+ registrations.push({operation,key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}:{})});
+ return 'podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';
+};
+const publishNative=(uri:string,key:string,previous:string|undefined)=>{
+ const replacement=previous===undefined?undefined:previous!==uri&&live.get(previous)===key?previous:
+  [...live].find(([candidate,storedKey])=>candidate!==uri&&storedKey===key)?.[0];
+ if(!live.has(uri))live.set(uri,previous===undefined?undefined:key);
+ if(replacement){live.delete(replacement);removed.push(replacement);}
+ return result({uri});
+};
+mock.module('@podjs/framework/media-prefix-cache',()=>({
+ localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{
+  remove:(uri:string)=>{live.delete(uri);removed.push(uri);return result({});},
+  onResult:(fn:typeof resultListener)=>{resultListener=fn;return()=>{resultListener=undefined;};},
+  register:(...args:Parameters<typeof mediaPrefixCache.register>)=>{
+   const uri=captureRegistration('register',...args);
+   return publishNative(uri,args[0],args[8]);
+  },
+  stage:(...args:Parameters<typeof mediaPrefixCache.stage>)=>{
+   const uri=captureRegistration('stage',...args),stageId=String(++stageCount);
+   stages.set(stageId,{uri,key:args[0],previous:args[8]});
+   return result({uri,stageId});
+  },
+  commit:(stageId:string)=>{
+   const stage=stages.get(stageId)!;stages.delete(stageId);
+   return publishNative(stage.uri,stage.key,stage.previous);
+  },
+  discard:(stageId:string)=>{
+   const stage=stages.get(stageId);stages.delete(stageId);
+   if(stage)discarded.push(stage.uri);
+   return result({});
+  },
+  window:(items:readonly unknown[],foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},
+  stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),
+  clear:()=>{clears++;stages.clear();live.clear();return result({removedBytes:0});},
+ },
+}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -439,7 +483,7 @@ test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${
  const port={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
  const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
  const original=await host.playbackResolved(item,{},()=>true);
- const before=removed.length;
+ const before=removed.length, discardedBefore=discarded.length;
  let active=true;
  try{
   const candidate=await host.playbackForReload(decision==='same-uri'?item:updated,{},()=>active,original);
@@ -451,24 +495,45 @@ test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${
    expect(removed.slice(before)).toEqual([]);
    return;
   }
-  expect(registrations.at(-1)?.replacesUri).toBeUndefined();
+  expect(registrations.at(-1)).toMatchObject({operation:'stage',replacesUri:original});
   expect(candidate.url).not.toBe(original);
   expect(host.sourceFor(candidate.url)).toBeUndefined();
   if(decision==='commit'){
-   const cleanup=candidate.commit();
+   await candidate.commit();
    expect(host.sourceFor(candidate.url)).toBe(updated);
-   await cleanup;
    expect(removed.slice(before)).toEqual([original]);
    expect(host.sourceFor(original)).toBeUndefined();
   }else{
    if(decision==='superseded'){
     active=false;
-    expect(()=>candidate.commit()).toThrow('播放来源已更换');
+    await expect(candidate.commit()).rejects.toThrow('播放来源已更换');
    }
    await candidate.discard();
-   expect(removed.slice(before)).toEqual([candidate.url]);
+   expect(removed.slice(before)).toEqual([]);
+   expect(discarded.slice(discardedBefore)).toEqual([candidate.url]);
    expect(host.sourceFor(original)).toBe(item);
    expect(host.sourceFor(candidate.url)).toBeUndefined();
+  }
+ }finally{host.stop();}
+});
+
+test('DYFAV FIX5 host replaces the committed binding on each of three re-entries',async()=>{
+ const item={...items[0]!,awemeId:'review'};
+ const source=(index:number)=>({...item,playUrl:`https://fixture/reentry-${index}`});
+ const port={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
+ const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const bindingUris=()=>[...live].filter(([,key])=>key===item.awemeId).map(([uri])=>uri);
+ let current=await host.playbackResolved(source(0),{},()=>true);
+ try{
+  for(let index=0;index<3;index++){
+   const candidate=await host.playbackForReload(source(2*index+1),{},()=>true,current);
+   expect(bindingUris()).toEqual([current]);
+   await candidate.commit();
+   expect(bindingUris()).toEqual([candidate.url]);
+   host.stop();
+   expect(host.sourceFor(candidate.url)).toBeUndefined();
+   current=await host.playbackResolved(source(2*index+2),{},()=>true);
+   expect(bindingUris()).toEqual([current]);
   }
  }finally{host.stop();}
 });
