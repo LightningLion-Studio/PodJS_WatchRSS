@@ -1,6 +1,6 @@
 {
   "path": "../../PodJS/podjs-watch",
-  "revision": "2efa7b3d967597452d61f826c7113d6ff8dd8f0e",
+  "revision": "7246d5403c81c3c2be90bdbba991ec384c2eab19",
   "requiresLocalChanges": false,
   "pocketjsRevision": "75d79c5b6bd6a56d42ee78b7f61552a4371b8ab6",
   "branch": "fix/media-cache-stage-commit"

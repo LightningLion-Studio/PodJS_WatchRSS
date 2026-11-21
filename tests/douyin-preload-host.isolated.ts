@@ -480,6 +480,7 @@ test('DYFAV FIX4 reload binding exposes an actual direct result for the route ex
 });
 
 const rejectUnexpectedFallback=()=>{throw new Error('unexpected fallback');};
+const rejectUnexpectedRetirement=()=>{throw new Error('unexpected authorization change');};
 
 for (const decision of ['discard', 'commit', 'superseded', 'same-uri'] as const)
 test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${decision})`,async()=>{
@@ -505,7 +506,7 @@ test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${
   expect(host.sourceFor(candidate.url)).toBeUndefined();
   if(decision==='commit'){
    let published:string|undefined;
-   await candidate.commit({validateFallback:rejectUnexpectedFallback,publish:binding=>{published=binding.url;}});
+   await candidate.commit({validateFallback:rejectUnexpectedFallback,retire:rejectUnexpectedRetirement,publish:binding=>{published=binding.url;}});
    expect(published).toBe(candidate.url);
    expect(host.sourceFor(candidate.url)).toBe(updated);
    expect(removed.slice(before)).toEqual([original]);
@@ -513,7 +514,7 @@ test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${
   }else{
    if(decision==='superseded'){
     active=false;
-    await expect(candidate.commit({validateFallback:rejectUnexpectedFallback,publish:()=>{}})).rejects.toThrow('播放来源已更换');
+    await expect(candidate.commit({validateFallback:rejectUnexpectedFallback,retire:rejectUnexpectedRetirement,publish:()=>{}})).rejects.toThrow('播放来源已更换');
    }
    await candidate.discard();
    expect(removed.slice(before)).toEqual([]);
@@ -536,7 +537,7 @@ test('DYFAV FIX5 host replaces the committed binding on each of three re-entries
    const candidate=await host.playbackForReload(source(2*index+1),{},()=>true,current);
    expect(bindingUris()).toEqual([current]);
    let published:string|undefined;
-   await candidate.commit({validateFallback:rejectUnexpectedFallback,publish:binding=>{published=binding.url;}});
+   await candidate.commit({validateFallback:rejectUnexpectedFallback,retire:rejectUnexpectedRetirement,publish:binding=>{published=binding.url;}});
    expect(bindingUris()).toEqual([candidate.url]);
    expect(published).toBe(candidate.url);
    host.stop();
