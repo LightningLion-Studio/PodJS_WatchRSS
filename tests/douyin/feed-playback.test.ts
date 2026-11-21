@@ -35,7 +35,7 @@ test('manual retry resolves the selected aweme through detail despite fresh feed
  const retries=f.requests.slice(1).map(request=>new NodeURL(request.url));
  expect(retries.map(url=>[url.pathname,url.searchParams.get('aweme_id')])).toEqual([['/aweme/v1/web/aweme/detail/','selected']]);
 });
-test('manual detail retry refuses the previous playback URL, its mirror and a mismatched aweme',async()=>{
+test('detail refresh that requires a new address refuses the old URL, its mirror and a mismatched aweme',async()=>{
  const f=fixture(),original=wire('selected'),oldMirror='https://fixture.invalid/old-mirror';
  original.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
  f.replies.push(response({aweme_list:[original]}));
@@ -43,8 +43,17 @@ test('manual detail retry refuses the previous playback URL, its mirror and a mi
  const item=page.data.items[0]!;
  const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
  f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}));
- for(let i=0;i<3;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+ for(let i=0;i<3;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail',[],true)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
  expect(detailCount(f)).toBe(3);expect(f.requests).toHaveLength(4);
+});
+test('detail fallback without a freshness requirement accepts the same valid URL for the selected aweme',async()=>{
+ const f=fixture(),original=wire('selected');
+ f.replies.push(response({aweme_list:[original]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ f.replies.push(response({aweme_detail:original}),response({aweme_detail:wire('other')}));
+ expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
+ await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));

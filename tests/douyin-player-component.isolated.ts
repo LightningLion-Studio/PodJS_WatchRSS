@@ -1651,14 +1651,18 @@ test('DYFAV FIX1 Home click enters through the real cover and restores playback 
   expect(prepares).toHaveLength(2);
 });
 
-test('DYFAV FIX1 pending production reload cannot publish after actions open and close', async () => {
+test('DYFAV FIX1 actions resume the same item without preparing its rejected source', async () => {
   const f = await productionRoutes();
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   f.client.resolvePlayback = async (id) => {
+    if (id === f.b.awemeId) return { ok: true, data: f.b };
     f.requests.push(id);
-    await pending;
-    return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/late' } };
+    if (f.requests.length === 1) {
+      await pending;
+      return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/late' } };
+    }
+    return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/recovered' } };
   };
   nextError = { code: 'source_expired' };
   await f.enter();
@@ -1670,9 +1674,11 @@ test('DYFAV FIX1 pending production reload cannot publish after actions open and
   await f.settle();
   expect(f.activeRoute().douyinRoute?.name).toBe('actions');
   f.press('取消');
-  await f.settle();
+  await f.settle(() => current.state === 'playing');
+  expect(current.state).toBe('playing');
   release();
   await f.settle();
   expect((await f.activeRoute().player!.shellState!()).state).toBe('playing');
-  expect(prepares.map(value => value.url)).toEqual([f.a.playUrl, f.a.playUrl]);
+  expect(f.requests).toEqual([f.a.awemeId, f.a.awemeId]);
+  expect(prepares.map(value => value.url)).toEqual([f.a.playUrl, 'https://mock.invalid/recovered']);
 });

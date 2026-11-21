@@ -43,8 +43,8 @@ test('RSS Douyin reload force resolves each time and drops stale audio even with
 test('immersive reload uses feed only and rejects a stale completion',async()=>{
  const {reloadDouyinPlayback}=await import('../src/douyin/reload-playback.ts');let calls=0;
  const item={awemeId:'selected',playUrl:'old-url',variants:[]} as any;
- const client={resolvePlayback:async(id:string,options:any)=>{calls++;expect(id).toBe('selected');expect(options).toEqual({forceRefresh:true,allowDetail:false,freshRequest:true,feedItem:item});return {ok:true,data:{awemeId:id,playUrl:'new-url',variants:[]}} as any;},buildPlaybackHeaders:async()=>({})};
- expect((await reloadDouyinPlayback(client,'selected',()=>true,item))?.item.playUrl).toBe('new-url');
+ const client={resolvePlayback:async(id:string,options:any)=>{calls++;expect(id).toBe('selected');expect(options).toEqual({forceRefresh:true,allowDetail:false,freshRequest:true,feedItem:item});return {ok:true,data:{awemeId:id,playUrl:'https://fixture.invalid/new',variants:[]}} as any;},buildPlaybackHeaders:async()=>({})};
+ expect((await reloadDouyinPlayback(client,'selected',()=>true,item))?.item.playUrl).toBe('https://fixture.invalid/new');
  expect(await reloadDouyinPlayback(client,'selected',()=>false,item)).toBeUndefined();expect(calls).toBe(1);
  const unavailable={...client,resolvePlayback:async()=>({ok:false,code:'TEMPORARILY_UNAVAILABLE',message:'not in refreshed feed'} as any)};
  await expect(reloadDouyinPlayback(unavailable,'selected',()=>true,item)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});

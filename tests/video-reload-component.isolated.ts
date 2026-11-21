@@ -408,7 +408,7 @@ test('NOPLAY only an automatic unexpired Douyin timeout may retry the current so
  for(const [expiry,reuse]of [[4102444800,true],[1000000000,false]]as const){
   nextError={code:'timeout'};let f:ReturnType<typeof reloadMount>;const flags:unknown[]=[];
   f=reloadMount({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/current?x-expires='+expiry,title:'fixture'},async(position,current,retryCurrent)=>{flags.push(retryCurrent);if(current())f.publish({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/valid',title:'fixture',resumePositionMs:position});});
-  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'feed']);
+  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'detail']);
  }
 });
 
@@ -505,13 +505,16 @@ test('session decoder admission recovery keeps the session backend and same sour
  }finally{sessionPort.prepare=original;}
 });
 
-test('manual Douyin retry selects detail resolution',async()=>{
+test('manual Douyin retry starts with feed before detail',async()=>{
  nextError={code:'restricted'};
  const source={platform:'douyin',immersive:true,awemeId:'manual',url:'https://fixture.invalid/old',title:'fixture'};
  const modes:unknown[]=[];
- const player=reloadMount(source,async(_position,_current,mode)=>{modes.push(mode);throw {code:'RATE_LIMITED'};});
+ const player=reloadMount(source,async(_position,_current,mode)=>{
+  modes.push(mode);
+  throw {code:mode==='feed'?'TEMPORARILY_UNAVAILABLE':'RATE_LIMITED'};
+ });
  await flush();player.retry();await flush();
- expect(modes).toEqual(['detail']);
+ expect(modes).toEqual(['feed','detail']);
 });
 test('manual local resource retry keeps the selected source and requests cache-only native preparation',async()=>{
  for(const cause of [{code:'video_decoder_limit'},{name:'ByteAdmissionDenied'},{code:'resource_exhausted'}]){
@@ -544,11 +547,12 @@ test('a failed fresh manual detail prepare does not fall through to the recommen
  const modes:unknown[]=[];
  const player=reloadMount(source,async(_position,current,mode)=>{
   modes.push(mode);
-  nextError={code:'source_expired'};
+  if(mode==='feed')throw {code:'TEMPORARILY_UNAVAILABLE'};
+  nextError={code:'prepare_failed'};
   if(current())player.publish({...source,url:'https://fixture.invalid/fresh'});
  });
  await flush();player.retry();await flush();await tick(3000);
- expect(modes).toEqual(['detail']);
+ expect(modes).toEqual(['feed','detail']);
  expect(player.text()).toContain('重试');
 });
 

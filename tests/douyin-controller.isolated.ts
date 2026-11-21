@@ -1235,7 +1235,7 @@ for (const expired of ['audio', 'mirror'] as const) test(`DYFAV FIX1 automatic d
   let registrations = 0;
   proxyOverride = async () => { registrations++; return 'podjs-media-cache://play/detail'; };
   const entry = f.stack().at(-1)!;
-  await expect(f.controller.reloadVideo(entry, 321, () => true, 'detail')).rejects.toMatchObject({ code: 'source_expired' });
+  await expect(f.controller.reloadVideo(entry, 321, () => true, 'detail', true)).rejects.toMatchObject({ code: 'source_expired' });
   expect(registrations).toBe(0);
   expect(f.source()).toBe(previous);
   expect(invalidated).toEqual([]);
@@ -1260,7 +1260,7 @@ for (const expired of [false, true]) test(`DYFAV FIX2 saved stall ${expired ? 'r
     detailCalls++;
     return {ok: true, data: fresh};
   };
-  await f.controller.reloadVideo(entry, 321, () => true, 'feed');
+  await f.controller.reloadVideo(entry, 321, () => true, 'feed', false, true);
   expect(detailCalls).toBe(expired ? 1 : 0);
   expect(f.source()).not.toBe(previous);
   expect(f.source()).toMatchObject({

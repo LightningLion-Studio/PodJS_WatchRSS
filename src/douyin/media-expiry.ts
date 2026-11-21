@@ -21,6 +21,8 @@ export function douyinMediaNetworkDeadline(urls:readonly string[]):number|undefi
 export function douyinPlaybackAddresses(item:DouyinItem) {
  const mirrors=douyinPlaybackMirrors(item);
  const audioUrl=douyinPlaybackAudio(item);
- const expiresAtMs=douyinMediaNetworkDeadline([item.playUrl,...mirrors,...(audioUrl?[audioUrl]:[])]);
- return {mirrors,audioUrl,expiresAtMs};
+ const directUrls=audioUrl?[item.playUrl,audioUrl]:[item.playUrl];
+ const directExpiresAtMs=douyinMediaNetworkDeadline(directUrls);
+ const expiresAtMs=mirrors.length?douyinMediaNetworkDeadline([...directUrls,...mirrors]):directExpiresAtMs;
+ return {mirrors,audioUrl,expiresAtMs,directExpiresAtMs};
 }
