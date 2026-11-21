@@ -409,8 +409,63 @@ test('reload binding reports the direct result for post-registration validation'
  registrationFailure={code:'unsupported_method'};
  try{
   await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'source_expired'});
-  expect(await host.playbackForReload(selected,{},()=>true)).toEqual({url:selected.playUrl,item:selected});
+  const candidate=await host.playbackForReload(selected,{},()=>true);
+  expect(candidate).toMatchObject({url:selected.playUrl,item:selected});
+  expect(host.sourceFor(candidate.url)).toBeUndefined();
+  await candidate.discard();
  }finally{registrationFailure=undefined;host.stop();}
+});
+
+test('reload registers provisionally and releases only the rejected or superseded binding',async()=>{
+ const host=createHostDouyinPreload(client as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const old={...items[0]!,awemeId:'review',playUrl:'https://fixture/old'};
+ const fresh={...old,playUrl:'https://fixture/fresh'};
+ try{
+  const base=await host.playbackResolved(old,{},()=>true);
+  removed=[];registrations=[];
+  const rejected=await host.playbackForReload(fresh,{},()=>true,base);
+  expect(registrations[0].replacesUri).toBeUndefined();
+  expect(host.sourceFor(base)).toEqual(old);
+  expect(host.sourceFor(rejected.url)).toBeUndefined();
+  expect(removed).toEqual([]);
+  await rejected.discard();
+  await rejected.discard();
+  expect(removed).toEqual([rejected.url]);
+  expect(host.sourceFor(base)).toEqual(old);
+  const same=await host.playbackForReload(old,{},()=>true,base);
+  expect(same.url).toBe(base);
+  await same.discard();
+  expect(removed).toEqual([rejected.url]);
+  const accepted=await host.playbackForReload(fresh,{},()=>true,base);
+  expect(registrations.at(-1).replacesUri).toBeUndefined();
+  expect(host.sourceFor(base)).toEqual(old);
+  await accepted.commit();
+  await accepted.discard();
+  expect(host.sourceFor(base)).toBeUndefined();
+  expect(host.sourceFor(accepted.url)).toEqual(fresh);
+  expect(removed).toEqual([rejected.url,base]);
+ }finally{host.stop();}
+});
+
+test('a late reload registration is discarded when the current route changes',async()=>{
+ const host=createHostDouyinPreload(client as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const old={...items[0]!,awemeId:'review',playUrl:'https://fixture/old'};
+ const fresh={...old,playUrl:'https://fixture/cancelled'};
+ let current=true,release!:()=>void;
+ try{
+  const base=await host.playbackResolved(old,{},()=>true);
+  removed=[];registrations=[];
+  registrationWait=()=>new Promise<void>(resolve=>release=resolve);
+  const reloading=host.playbackForReload(fresh,{},()=>current,base);
+  await flush();
+  expect(release).toBeFunction();
+  expect(removed).toEqual([]);
+  current=false;
+  release();
+  await expect(reloading).rejects.toMatchObject({code:'CANCELLED'});
+  expect(host.sourceFor(base)).toEqual(old);
+  expect(removed).toEqual(['podjs-media-cache://play/review-cancelled.mp4']);
+ }finally{registrationWait=undefined;host.stop();}
 });
 
 test('NOPLAY a late optional cache failure cannot publish a replaced foreground source',async()=>{

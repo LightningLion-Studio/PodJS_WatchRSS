@@ -1171,7 +1171,7 @@ test(`strict reload validates the read address combination: ${outcome}`,async()=
    registrations.push(resolved.playUrl);
    return direct?resolved.playUrl:managed;
   };
-  const result=f.controller.reloadVideo(entry,321,()=>true,'detail',true);
+  const result=f.controller.reloadVideo(entry,321,()=>true,'detail',true,mirrorOnly);
   if(rejected){
    await expect(result).rejects.toMatchObject({code:'source_expired'});
    expect(f.source()).toBe(previous);

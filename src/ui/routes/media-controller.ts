@@ -1103,62 +1103,64 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed',requireFreshAddress=false,nativeSourceExpired=requireFreshAddress)=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,mode:DouyinReloadMode='feed',requireFreshAddress=false,nativeSourceExpired=false)=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
-    const previous=entry.playback;
-    let next:PlaybackSource;
-    if(entry.queue){
-      const item=entry.queue.itemAtOffset();
-      if(!item)throw new Error('Missing Douyin playback item');
-      const queue=entry.queue,authorization=douyinClient.playbackAuthorizationVersion();
-      let queueGeneration=queue.playbackGeneration();
-      const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
-        &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
-      const previousUrl=previous.url??previous.videoUrl??'';
-      const previousReadUrls=previous.douyinReadUrls??(previousUrl.startsWith('podjs-media-cache:')
-        ?playbackProfile(item,previousUrl).douyinReadUrls
-        :[previousUrl,...(previous.audioUrl?[previous.audioUrl]:[])].filter(Boolean));
-      const failed=requireFreshAddress?failedDouyinAddresses(previousReadUrls??[],nativeSourceExpired):[];
-      if(mode==='current')await douyinPreload.invalidate(item.awemeId);
-      if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode)).catch(async error=>{
-        if(mode!=='current'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
-        if(selected())await recoverDouyinVideo(entry,false,0,error);
-        return undefined;
-      });
-      if(!resolved||!selected())return;
-      let playback=resolved.item,url=playback.playUrl;
-      if(mode!=='current'){
-        if(!requireFreshAddress)await douyinPreload.invalidate(item.awemeId);
+    let staged:Awaited<ReturnType<typeof douyinPreload.playbackForReload>>|undefined;
+    try{
+      const previous=entry.playback;
+      let next:PlaybackSource;
+      if(entry.queue){
+        const item=entry.queue.itemAtOffset();
+        if(!item)throw new Error('Missing Douyin playback item');
+        const queue=entry.queue,authorization=douyinClient.playbackAuthorizationVersion();
+        let queueGeneration=queue.playbackGeneration();
+        const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
+          &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
+        const previousUrl=previous.url??previous.videoUrl??'';
+        const previousReadUrls=previous.douyinReadUrls??(previousUrl.startsWith('podjs-media-cache:')
+          ?playbackProfile(item,previousUrl).douyinReadUrls
+          :[previousUrl,...(previous.audioUrl?[previous.audioUrl]:[])].filter(Boolean));
+        const failed=requireFreshAddress?failedDouyinAddresses(previousReadUrls??[],nativeSourceExpired):[];
         if(!selected())return;
-        if(douyinPreload.playbackForReload){
-          const binding=await douyinPreload.playbackForReload(playback,resolved.headers,selected);
-          url=binding.url;
-          playback=binding.item;
-        }else url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
+        const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode)).catch(async error=>{
+          if(mode!=='current'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+          if(selected())await recoverDouyinVideo(entry,false,0,error);
+          return undefined;
+        });
+        if(!resolved||!selected())return;
+        let playback=resolved.item,url=playback.playUrl;
+        if(mode!=='current'){
+          if(douyinPreload.playbackForReload){
+            staged=await douyinPreload.playbackForReload(playback,resolved.headers,selected,previousUrl);
+            url=staged.url;
+            playback=staged.item;
+          }else url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
+          if(!selected())return;
+        }
+        const profile=playbackProfile(playback,url,false);
+        assertDouyinAddresses(profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])],failed);
+        next=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
+        if(mode!=='current')next.bypassCache=false;
+        entry.queue.refreshPrefetchItem(item.awemeId,playback);
+        // This reload owns the metadata mutation. Continue guarding against later
+        // pager changes while persistence yields, using our new generation.
+        queueGeneration=queue.playbackGeneration();
+        entry.queue.updateCurrentUrl(playback.playUrl);
+        await entry.queue.persist();
         if(!selected())return;
-      }
-      const profile=playbackProfile(playback,url,false);
-      assertDouyinAddresses(profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])],failed);
-      next=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
-      if(mode!=='current')next.bypassCache=false;
-      entry.queue.refreshPrefetchItem(item.awemeId,playback);
-      // This reload owns the metadata mutation. Continue guarding against later
-      // pager changes while persistence yields, using our new generation.
-      queueGeneration=queue.playbackGeneration();
-      entry.queue.updateCurrentUrl(playback.playUrl);
-      await entry.queue.persist();
-      if(!selected())return;
-    }else if(entry.rssDouyinRecovery){
-      const resolved=await entry.rssDouyinRecovery.reload(previous,current,mode==='detail');
-      if(!resolved||!current())return;
-      next=freshVideoSource(previous,resolved,positionMs);
-    }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
-    if(!current())return;
-    entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
-    dependencies.onActivityStateChange?.();
+      }else if(entry.rssDouyinRecovery){
+        const resolved=await entry.rssDouyinRecovery.reload(previous,current,mode==='detail');
+        if(!resolved||!current())return;
+        next=freshVideoSource(previous,resolved,positionMs);
+      }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
+      if(!current())return;
+      const releaseOld=staged?.commit();
+      entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
+      dependencies.onActivityStateChange?.();
+      await releaseOld;
+    }finally{await staged?.discard();}
   };
 
   const recoverRssDouyinVideo = async (entry: RouteEntry, manual = false,positionMs?:number,error?:unknown) => {
