@@ -1,3 +1,4 @@
+import {noteAssetVersionPath, type NoteAssetFileIndex} from './asset-files';
 import type {PublicationDeadline} from '../cloud/publication-deadline';
 import {retainAssetConflict} from './asset-conflict';
 import {encodeBase64,decodeBase64} from '@podjs/framework/bytes';
@@ -6,16 +7,16 @@ export type NoteAssetHost=<T>(method:string,args:Record<string,unknown>)=>Promis
 export const NOTE_IMAGE_LIMIT=5*1024*1024;
 export const NOTE_ARCHIVE_LIMIT=32*1024*1024;
 /** Read only stable complete assets; partial reads never become a publication. */
-export function createNoteAssetReader(host:NoteAssetHost){return async(key:string,check:()=>void=()=>{})=>{
+export function createNoteAssetReader(host:NoteAssetHost,index?:NoteAssetFileIndex){return async(key:string,check:()=>void=()=>{})=>{
  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(key))throw Error('cloud_note_asset_path_invalid');
- check();const path='notes/assets/'+key,stat=await host<{file:boolean;size:number}>('file.stat',{path});
+ check();const path=index?await index.path(key):'notes/assets/'+key,stat=await host<{file:boolean;size:number}>('file.stat',{path});
  if(!stat.file)throw Error('cloud_note_asset_missing');
  if(!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>NOTE_IMAGE_LIMIT)throw Error('cloud_note_asset_too_large');
  const hash=(await host<{sha256:string}>('file.hash',{path})).sha256,bytes=new Uint8Array(stat.size);
  for(let at=0;at<bytes.length;){check();const part=await host<{dataBase64:string;offset:number;size:number}>('file.read',{path,offset:at,maxBytes:Math.min(65536,bytes.length-at)}),raw=decodeBase64(part.dataBase64);
   if(part.offset!==at||part.size!==stat.size||raw.length!==Math.min(65536,bytes.length-at))throw Error('cloud_note_asset_read_incomplete');bytes.set(raw,at);at+=raw.length;
  }
- check();if(sha256Hex(bytes)!==hash||(await host<{sha256:string}>('file.hash',{path})).sha256!==hash)throw Error('cloud_note_asset_changed');return bytes;
+ check();if(sha256Hex(bytes)!==hash||(await host<{sha256:string}>('file.hash',{path})).sha256!==hash||index&&await index.path(key)!==path)throw Error('cloud_note_asset_changed');return bytes;
 };}
 /** Local attachment references in Markdown links/images and HTML images/anchors. */
 export function noteAssetKeys(markdown:string){
@@ -34,14 +35,25 @@ export function createNoteAssetCollector(host:NoteAssetHost){return async(refere
  }return removed;
 };}
 /** Atomic target publication, using the same directory as local phone sync. */
-export function createNoteAssetWriter(host:NoteAssetHost){return async(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline)=>{
+export function createNoteAssetWriter(host:NoteAssetHost,index?:NoteAssetFileIndex){return async(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline)=>{
  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(key))throw Error('cloud_note_asset_path_invalid');
- const target='notes/assets/'+key,digest=sha256Hex(bytes),stat=await host<{file:boolean;size:number}>('file.stat',{path:target});
- if(expectedTargetSha256===undefined&&stat.file&&stat.size===bytes.length&&(await host<{sha256:string}>('file.hash',{path:target})).sha256===digest)return 0;
+ const previous=await index?.version(key),digest=sha256Hex(bytes);
+ const currentPath=previous?noteAssetVersionPath(key,previous.sha256):'notes/assets/'+key;
+ const target=previous?noteAssetVersionPath(key,digest):currentPath;
+ const stat=await host<{file:boolean;size:number}>('file.stat',{path:currentPath});
+ if(expectedTargetSha256===undefined&&stat.file&&stat.size===bytes.length&&(await host<{sha256:string}>('file.hash',{path:currentPath})).sha256===digest)return 0;
  const {path}=await host<{path:string}>('file.createTemp',{directory:'notes/assets'});
  try{for(let at=0;at<bytes.length;at+=65535){const part=bytes.subarray(at,at+65535),r=await host<{size:number}>('file.write',{path,dataBase64:encodeBase64(part),append:true,expectedOffset:at});if(r.size!==at+part.length)throw Error('cloud_note_asset_write_incomplete');}
   deadline?.check();
-  try{await host('file.commit',{path,target,expectedSize:bytes.length,expectedSha256:digest,expectedTargetSha256:expectedTargetSha256??null});}
+  try{
+   if(previous){
+    const actual=stat.file?(await host<{sha256:string}>('file.hash',{path:currentPath})).sha256:null;
+    deadline?.check();
+    if(actual!==(expectedTargetSha256??null)&&actual!==digest)throw Error('file_target_changed');
+   }
+   await host('file.commit',{path,target,expectedSize:bytes.length,expectedSha256:digest,expectedTargetSha256:previous&&target!==currentPath?null:expectedTargetSha256??null});
+   if(previous){deadline?.check();await index!.commit(key,previous,{sha256:digest,size:bytes.length});}
+  }
   catch(error){if(!String(error).includes('file_target_changed'))throw error;
    await retainAssetConflict({hash:p=>host('file.hash',{path:p}),write:(p,dataBase64)=>{deadline?.check();return host('file.write',{path:p,dataBase64,atomicReplace:true});},commit:(p,target,size,sha256,wanted)=>{deadline?.check();return host('file.commit',{path:p,target,expectedSize:size,expectedSha256:sha256,expectedTargetSha256:wanted});}},path,key,digest,bytes.length,expectedTargetSha256??null);
    throw Error('note_asset_conflict');

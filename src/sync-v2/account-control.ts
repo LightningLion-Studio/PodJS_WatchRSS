@@ -48,6 +48,7 @@ export interface AccountControlOptions {
  trustedNow:()=>number|null;rebuildProjection?:()=>Promise<void>;historyRestore?:boolean;choiceApply?:boolean;
  /** Product entries authenticate the winning head before reconciling an intent. */
  preserveStalePublication?:boolean;
+ prepareArchivedAsset?:(key:string,archive:LegacyBodyArchive)=>Promise<Statement[]>;
  prepareArchivedBook?:(book:BookState,archive:LegacyBodyArchive)=>Promise<Statement[]>;
 }
 export class WatchAccountControl {
@@ -83,6 +84,7 @@ export class WatchAccountControl {
  }
  private async prepareArchivedChoice(keys:readonly string[],rows:Map<string,RecordRow>,archive:LegacyBodyArchive){
   const row=keys.length===1?rows.get(keys[0]!):undefined,prepare=this.o.prepareArchivedBook;
+  if(row?.candidate.meta.kind==='asset'&&this.o.prepareArchivedAsset)return this.o.prepareArchivedAsset(row.candidate.meta.logicalId,archive);
   if(row?.candidate.meta.kind!=='book'||!prepare)throw Error('closure_incomplete');
   const book=fromWire('book',row.candidate.meta.payload,row.candidate.state.payload) as BookState;
   return prepare(book,archive);
@@ -191,7 +193,7 @@ export class WatchAccountControl {
    const known=out.get(id),identity=known?{kind:known.candidate.meta.kind,logicalId:known.candidate.meta.logicalId}:entry.identitiesByEntity?.[id]??await this.o.store.identityForEntity(id);
    const {identity:logicalId,...value}=raw;if(logicalId!==identity.logicalId)throw Error('identity_conflict');this.o.store.validateEntityIdentity(id,identity.kind,identity.logicalId);const candidate=candidates(identity.kind,identity.logicalId,id,value,known?.candidate.meta.addedAtSource==='original'?known.candidate.addedAtMillis:undefined,this.o.store.segmentOptions());
    // Unknown body closures are preserved, never treated as an empty body.
-   const archived=keys.length===1&&['book','article'].includes(identity.kind)&&entry.transferBody;
+   const archived=keys.length===1&&['book','article','asset'].includes(identity.kind)&&entry.transferBody;
    if(['article','book','asset'].includes(identity.kind)&&!entry.bodyRefsByEntity?.[id]?.length&&!archived&&!entry.localTransfer)throw Error('closure_incomplete');
    const prior=cloudBy.get(id),versions=[known,prior].filter(r=>r?.manifest?.bodyRevision);
    let manifest=known?.manifest;
@@ -281,7 +283,9 @@ export class WatchAccountControl {
   let effects:Statement[]=[];
   if(ref){
    effects=await this.prepareArchivedChoice(legacy.entityKeys,new Map(rows.map(r=>[r.entityKey,r])),{ref,read:visit=>this.o.store.legacyBodies.verify(ref,visit)});
-   const id=legacy.entityKeys[0],bodyRevision=carrierBodyRevision('book',id,ref.sha256);
+   const id=legacy.entityKeys[0],kind=rows.find(row=>row.entityKey===id)?.candidate.meta.kind;
+   if(kind!=='book'&&kind!=='asset')throw Error('closure_incomplete');
+   const bodyRevision=carrierBodyRevision(kind,id,ref.sha256);
    rows=rows.map(r=>r.entityKey===id?{...r,archivedBody:true,manifest:{...emptyBodyDescription(),bodyRevision,promiseId:bodyRevision}}:r);
   }
   const independent=await this.independentReferences(s,rows);for(const r of rows)if(!r.archivedBody&&!r.metadataOnly&&!isBodyTombstone(r.candidate)&&['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid&&!independent.has(r.entityKey))throw Error('closure_incomplete');

@@ -1,6 +1,6 @@
 import {wrapAtlasText} from '@podjs/framework/text-wrap';
 import {createKeyedMemo} from '@podjs/framework/keyed-memo';
-import {For,Show,createSignal,onCleanup} from 'solid-js';
+import {For,Show,createSignal,createResource,onCleanup} from 'solid-js';
 import {View,Text,type NodeMirror} from '@pocketjs/framework/components';
 import {createGesture} from '@pocketjs/framework/gesture';
 import {createScroller} from '@pocketjs/framework/kinetics';
@@ -9,7 +9,7 @@ import {getOps} from '@pocketjs/framework/host';
 import {layoutText} from '../reader/index.ts';
 import {prepareNotePreview,noteBlockSourceOffsets,type NotePreviewBlock} from '../notes/preview.ts';
 import type {NoteLineAnchor,NotePositionedAnchor} from '../notes/editor-anchor.ts';
-import {noteImageSource,noteTableCellText,noteTableCellPresentation,noteTableCodeFragments,noteTextRows} from '../notes/presentation.ts';
+import {resolveNoteImageSource,noteTableCellText,noteTableCellPresentation,noteTableCodeFragments,noteTextRows} from '../notes/presentation.ts';
 import {RemoteImage} from './RemoteImage.tsx';
 import type {ScrollEntry} from './ScrollEntries.tsx';
 import {presetContentFont,readerColor} from '../reader/content-layout.ts';
@@ -33,7 +33,8 @@ function rowFont(row:NoteTextRow,preset?:ReaderPreset):NoteFont {
 }
 const wrap=(text:string,width:number,font:NoteFont)=>wrapAtlasText(text,{width,fontSlot:font.fontSlot,scale:font.scale,tracking:font.tracking,measure:s=>getOps().measureText(s,font.fontSlot)*font.scale+(font.tracking?Math.max(0,Array.from(s).length-1)*font.tracking:0)});
 function NotePreviewImage(props:{block:NoteImage;width:number;height:number;onOpen?:(path:string)=>void;onDownload?:()=>void;onSize?:(path:string,width:number,height:number)=>void;textColor:string;preset?:ReaderPreset}){
- const [failed,setFailed]=createSignal(false),[loaded,setLoaded]=createSignal(false),source=()=>noteImageSource(props.block.path);
+ const [failed,setFailed]=createSignal(false),[loaded,setLoaded]=createSignal(false);
+ const [source]=createResource(()=>props.block.path,path=>resolveNoteImageSource(path).catch(()=>{setFailed(true);return undefined;}));
  const subtitle=props.preset?presetContentFont(props.preset,'subtitle'):{fontSlot:22,scale:1,lineHeight:23};
  const muted=`${props.textColor.slice(0,7)}c2`;
  const pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;
@@ -43,7 +44,7 @@ function NotePreviewImage(props:{block:NoteImage;width:number;height:number;onOp
   const fallback=<Text class="absolute text-center" style={{width:props.width/subtitle.scale,height:subtitle.lineHeight/subtitle.scale,lineHeight:subtitle.lineHeight/subtitle.scale,fontSlot:subtitle.fontSlot,scale:subtitle.scale,originX:-.5,originY:-.5,textColor:muted}}>{value}</Text>;
   return <View class="absolute left-[0] right-[0]" style={{insetT:(failed()?85:112)+index*subtitle.lineHeight+(index>0?0.5:0),height:subtitle.lineHeight}}>{hasCapability('text.raster')?<SystemTextLine pixelScale={pixelScale} options={{text:value,widthPx:Math.ceil(props.width*pixelScale),heightPx:Math.ceil(subtitle.lineHeight*pixelScale),baselinePx:Math.ceil(subtitle.lineHeight*.8*pixelScale),fontSizePx,colorArgb,align:'center',textMotion:'static'}} fallback={fallback}/>:fallback}</View>;
  };
- return <View class="absolute inset-0"><View onPress={()=>props.onOpen?.(props.block.path)} focusable class="absolute left-[0] right-[0] top-[0] items-center justify-center" style={{height:props.height}}><RemoteImage {...source()} width={props.width} height={props.height} fit="contain" onSize={(width,height)=>{setLoaded(true);props.onSize?.(props.block.path,width,height);}} onError={()=>setFailed(true)}/><Show when={!loaded()}>{(failed()?['图片未同步','请在手机端重新同步']:['加载中…']).map(line)}</Show></View><Show when={failed()&&props.onDownload}><View onPress={props.onDownload} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] h-[46] items-center justify-center active:scale-96" style={{insetT:136.5}}><Text class="text-xs text-center leading-[14]" style={{textColor:'#b6b6b6'}}>{'下载手机端app以在手机上编辑和同步\n内容'}</Text><View class="absolute" style={{insetL:3,insetT:22,width:props.width-6,height:.5,bgColor:'#b6b6b6'}}/><View class="absolute" style={{insetL:(props.width-24)/2,insetT:36,width:24,height:.5,bgColor:'#b6b6b6'}}/></View></Show><Show when={props.block.description}><Text class="absolute left-[0] right-[0] text-xs" style={{insetT:props.height+4,textColor:props.textColor}}>{props.block.description}</Text></Show></View>;
+ return <View class="absolute inset-0"><View onPress={()=>props.onOpen?.(props.block.path)} focusable class="absolute left-[0] right-[0] top-[0] items-center justify-center" style={{height:props.height}}><Show when={source()} keyed>{value=><RemoteImage {...value} width={props.width} height={props.height} fit="contain" onSize={(width,height)=>{setLoaded(true);props.onSize?.(props.block.path,width,height);}} onError={()=>setFailed(true)}/>}</Show><Show when={!loaded()}>{(failed()?['图片未同步','请在手机端重新同步']:['加载中…']).map(line)}</Show></View><Show when={failed()&&props.onDownload}><View onPress={props.onDownload} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] h-[46] items-center justify-center active:scale-96" style={{insetT:136.5}}><Text class="text-xs text-center leading-[14]" style={{textColor:'#b6b6b6'}}>{'下载手机端app以在手机上编辑和同步\n内容'}</Text><View class="absolute" style={{insetL:3,insetT:22,width:props.width-6,height:.5,bgColor:'#b6b6b6'}}/><View class="absolute" style={{insetL:(props.width-24)/2,insetT:36,width:24,height:.5,bgColor:'#b6b6b6'}}/></View></Show><Show when={props.block.description}><Text class="absolute left-[0] right-[0] text-xs" style={{insetT:props.height+4,textColor:props.textColor}}>{props.block.description}</Text></Show></View>;
 }
 function tableRows(block:NoteTable,font:NoteFont,headerFont:NoteFont){return block.rows.map((row,index)=>row.map(value=>wrap(noteTableCellText(value),112,index<block.headerRows?headerFont:font)));}
 function tableHeights(rows:string[][][],lineHeight:number,headerRows:number){return rows.map((row,index)=>Math.max(1,...row.map(cell=>cell.length))*lineHeight+(index<headerRows?13:14));}

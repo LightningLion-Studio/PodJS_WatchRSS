@@ -1,3 +1,5 @@
+import {NoteAssetFileIndex} from './notes/asset-files';
+import {registerNoteAssetPath} from './notes/presentation';
 import {idleHit} from './diagnostics/idle-counters';
 import {clearCloudSqlState} from './cloud/state-sql';
 import {createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from './notes/cloud-assets';
@@ -102,6 +104,8 @@ export async function commitDurableLibraryTransfer(statements:Parameters<SqlData
  const counts=await sqlite.transactionChangesFull(statements as Parameters<typeof sqlite.transactionChangesFull>[0]);
  notifyLibrarySqlCommit(statements,counts);
 }
+export const noteAssetFiles=new NoteAssetFileIndex(db);
+registerNoteAssetPath(key=>noteAssetFiles.path(key));
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
 /** Start database setup at JS start, in parallel with the startup gate; later calls share it. */
@@ -475,8 +479,8 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
  return libraryRepository();
 }
 function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
-  noteAssetReader:createNoteAssetReader(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
-  noteAssetWriter:createNoteAssetWriter(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
+  noteAssetReader:createNoteAssetReader(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,noteAssetFiles),
+  noteAssetWriter:createNoteAssetWriter(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,noteAssetFiles),
   noteAssetCollector:createNoteAssetCollector(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
   reencodeStoredBodies:reencodeStoredArticleBodies,codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},

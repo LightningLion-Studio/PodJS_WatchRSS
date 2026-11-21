@@ -54,7 +54,7 @@ import {watchSpaceV2} from './space-runtime';
 
 /** Product assembly over the original v1 library and authenticated account.
  * The caller serializes this opener after v1 releases its writer lease. */
-export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock}){
+export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedAsset?:import('./account-control').AccountControlOptions['prepareArchivedAsset'];prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock}){
  const {account,repository}=options,lifetime=options.lifetime??new SyncV2Lifetime();
  // Retain the writer lease through SQL. Read/crypto/network waits can unwind
  // immediately; their late results cannot cross another guarded IO boundary.
@@ -126,7 +126,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    const plain=await readArticlePlain(id);
    return plain?articleBodyRevision(entity,plain):undefined;
   });await business.initialize();
-  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now(),preserveStalePublication:true,prepareArchivedBook:options.prepareArchivedBook});
+  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now(),preserveStalePublication:true,prepareArchivedBook:options.prepareArchivedBook,prepareArchivedAsset:options.prepareArchivedAsset});
   const recoverConflict=async()=>{
    // Confirm the same immutable request first. Only a recorded CAS rejection
    // authorizes refreshing the winning identity/account and retiring its journal.

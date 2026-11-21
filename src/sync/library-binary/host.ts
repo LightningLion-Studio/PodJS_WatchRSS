@@ -1,3 +1,4 @@
+import type {NoteAssetFileIndex} from '../../notes/asset-files';
 import config from '../../../pod.config.json';
 import {noteAssetIntake} from '../../sync-v2/local-transfer-intake';
 import type {WatchAccountStore} from '../../account/store';
@@ -30,6 +31,7 @@ interface Negotiation {peer:string;capability:Capability;account?:WatchAccountSt
 export interface BinaryApplicationPorts {
  /** Presence requires a guarded proposal for every B2 connection. */
  guardedRuntime?:()=>Promise<boolean>;
+ assetIndex?:NoteAssetFileIndex;
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  books?:BinaryBookFiles;
@@ -134,7 +136,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work,write):undefined;
   const fileWork=this.ports.bookWork?.(work),bookFiles=fileWork?.files??this.ports.books;
   const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work,this.ports.bookExcluded,write):undefined;
-  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined);
+  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined,this.ports.assetIndex);
   await authorize(()=>this.ports.store.exclusive(async()=>{
    await this.ports.store.collect(scope,async job=>{
     await this.ports.chunks.collect(D('wrss.library-binary.v2/native-scope',[scope,job.jobId]),false);

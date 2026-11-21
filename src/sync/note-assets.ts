@@ -1,3 +1,4 @@
+import type {NoteAssetFileIndex} from '../notes/asset-files';
 import {digest} from '../sync-v2/protocol';
 import type {NoteAssetIntake} from '../sync-v2/local-transfer-intake';
 import {retainAssetConflict} from '../notes/asset-conflict';
@@ -31,10 +32,10 @@ export class NoteAssetReceiver {
  private queue:Promise<unknown>=Promise.resolve();
  private readonly staged=new WeakMap<object,Map<string,StagedNoteAsset>>();
  private serial=0;
- constructor(private readonly files:NoteAssetFiles){}
+ constructor(private readonly files:NoteAssetFiles,private readonly index?:NoteAssetFileIndex){}
  async inventory(input:unknown):Promise<NoteAssetInventory[]> {
   const rows=parseNoteAssetInventory(input),verified:NoteAssetInventory[]=[];
-  for(const r of rows){const path='notes/assets/'+r.storageKey;try{const stat=await this.files.stat(path);if(!stat.file||stat.size!==r.size)continue;const hash=await this.files.hash(path);const after=await this.files.stat(path);if(after.file&&after.size===r.size&&(stat.modified===undefined||after.modified===stat.modified)&&hash.size===r.size&&hash.sha256.toLowerCase()===r.sha256)verified.push(r);}catch{/* Missing or concurrently removed files are sent again. */}}
+  for(const r of rows){try{const path=this.index?await this.index.path(r.storageKey):'notes/assets/'+r.storageKey;const stat=await this.files.stat(path);if(!stat.file||stat.size!==r.size)continue;const hash=await this.files.hash(path);const after=await this.files.stat(path);if(after.file&&after.size===r.size&&(stat.modified===undefined||after.modified===stat.modified)&&hash.size===r.size&&hash.sha256.toLowerCase()===r.sha256)verified.push(r);}catch{/* Missing or concurrently removed files are sent again. */}}
   return verified;
  }
  apply(request:JsonObject,intake?:NoteAssetIntake,check?:()=>void,session:object=this):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request,intake,check,session));this.queue=job.catch(()=>{});return job;}
@@ -52,7 +53,7 @@ export class NoteAssetReceiver {
   const index=wireFields.optInt(request,'chunkIndex',-1),count=wireFields.optInt(request,'chunkCount',-1);
   if(count<=0||index<0||index>=count)throw new Error('备忘录图片分块序号无效');
   check?.();
-  const target='notes/assets/'+key,offset=index*CHUNK_BYTES,complete=index===count-1;
+  const target=this.index?await this.index.path(key):'notes/assets/'+key,offset=index*CHUNK_BYTES,complete=index===count-1;
   let part='notes/assets/.'+key+'.part',data:string|undefined;
   let state:StagedNoteAsset|undefined,replay=false;
   const readData=()=>{

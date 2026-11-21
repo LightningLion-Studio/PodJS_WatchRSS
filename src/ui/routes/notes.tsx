@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { noteImageSource } from "../../notes/presentation.ts";
+import { resolveNoteImageSource } from "../../notes/presentation.ts";
 import { memoRepository } from "../../services.ts";
 import {
   NoteActionsScreen,
@@ -60,8 +60,9 @@ export function NotesRoutes(props: NotesRoutesProps) {
           preset={props.preset()}
           backgroundSnapshot={props.backgroundSnapshot()}
           active={props.active()}
-          onImage={(path) => {
-            const source = noteImageSource(path);
+          onImage={async (path) => {
+            const source = await resolveNoteImageSource(path).catch(error=>{props.setError(String(error));return null;});
+            if(!source)return;
             props.setPage("reader-image", {
               imageUrl: source.url,
               imageFilePath: source.filePath,

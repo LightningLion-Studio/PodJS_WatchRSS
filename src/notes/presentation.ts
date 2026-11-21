@@ -2,6 +2,13 @@ import {memoPlainText} from './text.ts';
 import {noteCodeLines} from './code.ts';
 export interface NoteTextRow {text:string;role:'body'|'heading'|'quote'|'code';size:number;lineHeight:number;sourceMarkup:string;sourceStart:number;mappingText:string;mappingStart:number}
 export function noteImageSource(path:string):{url:string;filePath?:string}{return path.startsWith('assets/')?{url:path,filePath:'notes/'+path}:{url:path};}
+let assetPath:((key:string)=>Promise<string>)|undefined;
+export function registerNoteAssetPath(resolve:(key:string)=>Promise<string>){assetPath=resolve;}
+export async function resolveNoteImageSource(path:string){
+ const source=noteImageSource(path);
+ if(!source.filePath||!assetPath)return source;
+ return {...source,filePath:await assetPath(path.slice('assets/'.length))};
+}
 /** Compose Image uses the intrinsic aspect ratio within its 96–260 dp height bound. */
 export function noteImageDisplayHeight(width:number,imageWidth:number,imageHeight:number):number {
  if(!Number.isFinite(width)||!Number.isFinite(imageWidth)||!Number.isFinite(imageHeight)||width<=0||imageWidth<=0||imageHeight<=0)return 260;

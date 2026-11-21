@@ -56,3 +56,53 @@ test('abandoned native scratch is charged until collection succeeds',async()=>{
   expect(calls).toEqual([false,true,false,true,false]);
  }finally{await f.dispose();}
 });
+
+test('D2 noteAsset publication is invisible until the same transaction commits APPLIED',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const {NOTE_ASSET_FILES_SCHEMA,NoteAssetFileIndex,noteAssetVersionPath}=await import('../../src/notes/asset-files');
+  await f.store.initialize();
+  await f.db.execute(NOTE_ASSET_FILES_SCHEMA);
+  const index=new NoteAssetFileIndex(f.db),assets=new BinaryAssets(f.files,f.store,f.chunks,undefined,undefined,undefined,undefined,index);
+  const d=object('picture.png',new Uint8Array([4,6,8])),candidate=noteAssetVersionPath(d.businessId,d.sha256);
+  await f.files.writeBytes(candidate,new Uint8Array([4,6,8]));
+  expect(await index.path(d.businessId)).toBe('notes/assets/picture.png');
+  const boundary={before:[],after:(outcome:string)=>[{sql:'INSERT INTO asset_test_receipt VALUES(?)',params:[outcome]}],transaction:f.db.transaction.bind(f.db)};
+  await expect(assets.apply(d,candidate,boundary)).rejects.toThrow('asset_test_receipt');
+  expect(await index.path(d.businessId)).toBe('notes/assets/picture.png');
+  expect(await f.db.query('SELECT * FROM library_binary_assets')).toEqual([]);
+  await f.db.execute('CREATE TABLE asset_test_receipt(outcome TEXT)');
+  await assets.apply(d,candidate,boundary);
+  expect(await index.path(d.businessId)).toBe(candidate);
+  expect(await f.db.query('SELECT outcome FROM asset_test_receipt')).toEqual([{outcome:'merged'}]);
+  const frozen=await assets.freeze('scope',nonce(),limits);
+  expect(frozen.inventory.objects).toEqual([d]);
+ }finally{await f.dispose();}
+});
+
+test('D2 archived attachment stages privately and D1 reads only the committed winner',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
+  const {prepareArchivedNoteAsset}=await import('../../src/notes/archive-restore');
+  const {createNoteAssetReader}=await import('../../src/notes/cloud-assets');
+  const {encodeBase64}=await import('@podjs/framework/bytes');
+  const index=new NoteAssetFileIndex(f.db),bytes=new Uint8Array([7,8,9]);
+  const archive={ref:{owner:'a'.repeat(64),size:3,sha256:hash(bytes)},read:async(visit:(part:Uint8Array,offset:number)=>Promise<void>)=>{await visit(bytes,0);}};
+  const reader=createNoteAssetReader(async<T>(method:string,args:Record<string,unknown>)=>{
+   const path=String(args.path);
+   if(method==='file.stat')return await f.files.stat(path) as T;
+   if(method==='file.hash')return await f.files.hash(path) as T;
+   if(method!=='file.read')throw Error(method);
+   const offset=Number(args.offset),raw=await f.files.readBytes(path,offset,Number(args.maxBytes));
+   return {offset,size:raw.size,dataBase64:encodeBase64(raw.bytes)} as T;
+  },index);
+  const statements=await prepareArchivedNoteAsset(index,f.files,'picture.png',archive,()=>{});
+  await expect(reader('picture.png')).rejects.toThrow('cloud_note_asset_missing');
+  await f.db.transaction(statements);
+  expect(await reader('picture.png')).toEqual(bytes);
+  const newer=new Uint8Array([0,1,2]);
+  await expect(prepareArchivedNoteAsset(index,f.files,'picture.png',{...archive,ref:{...archive.ref,sha256:hash(newer)}},()=>{})).rejects.toThrow('note_asset_conflict');
+  expect(await reader('picture.png')).toEqual(bytes);
+ }finally{await f.dispose();}
+});

@@ -1,4 +1,5 @@
 import type {VerifiedChunkStore,ObjectLease,VerifiedObject} from '@podjs/framework/verified-chunk-store';
+import {noteAssetVersionPath, type NoteAssetFileIndex} from '../../notes/asset-files';
 import type {SourceFileRange} from './codec';
 import type {BinaryBooks,FrozenBookFile} from './books';
 import type {BinaryStore,Job,ReceiptBoundary} from './store';
@@ -24,14 +25,14 @@ export interface BinarySourcePlan {objects:readonly ObjectDescriptor[];read(obje
  * block. Frozen spools are immutable, persisted before their witness is offered. */
 export class BinaryAssets {
  private outcomes=new Map<string,'merged'|'alreadyPresent'|'retainedLocal'>();
- constructor(private readonly files:BinaryAssetFiles,private readonly store:BinaryStore,private readonly chunks:VerifiedChunkStore,private readonly check:()=>void=()=>{},private readonly unit:()=>void=()=>{},private readonly kinds?:BinaryLibraryKinds,private readonly books?:BinaryBooks){}
+ constructor(private readonly files:BinaryAssetFiles,private readonly store:BinaryStore,private readonly chunks:VerifiedChunkStore,private readonly check:()=>void=()=>{},private readonly unit:()=>void=()=>{},private readonly kinds?:BinaryLibraryKinds,private readonly books?:BinaryBooks,private readonly assetIndex?:NoteAssetFileIndex){}
  private metadata(d:ObjectDescriptor){const m=exact(strictJson(d.metadataUtf8,false),['storageKey','sha256','size']);if(d.kind!=='noteAsset'||d.encoding!=='raw'||!/^([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/.test(String(m.storageKey))||m.storageKey!==d.businessId||m.sha256!==d.sha256||m.size!==d.size||d.size>5*1024*1024||d.dependsOn.length)fail('BUSINESS_REJECTED');return m;}
  private conflict(d:ObjectDescriptor){return 'notes/asset-conflicts/'+hash(utf8(d.businessId))+'-'+d.sha256+'.bin';}
  private async verified(path:string,d:Pick<ObjectDescriptor,'size'|'sha256'>,code='SOURCE_CHANGED'){const h=await this.files.hash(path);this.check();if(h.size!==d.size||h.sha256!==d.sha256)fail(code);this.unit();}
  async freeze(scope:string,id:string,limits:Limits,send?:ReadonlySet<Kind>):Promise<{witness:Snapshot;inventory:Row}>{
   const objects:ObjectDescriptor[]=[],paths:Record<string,string>={};let manifestBytes=2;
   const entries=send&&!send.has('noteAsset')?[]:await this.noteEntries();
-  for(const e of entries){this.check();if(!e.file||!e.path.startsWith('notes/assets/'))continue;const key=e.path.slice(13);if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(key)||/\.(?:part|pending|async-\d+|kv-migration)$/.test(key))continue;
+  for(const e of entries){this.check();const key=e.key;if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(key)||/\.(?:part|pending|async-\d+|kv-migration)$/.test(key))continue;
    if(objects.length>=limits.maxPlanObjects)fail('LIMIT_EXCEEDED');
    const before=await this.files.hash(e.path);this.unit();if(before.size>limits.maxObjectBytes||before.size>5*1024*1024)fail('LIMIT_EXCEEDED');
    await this.peak(limits,before.size*2+8192);
@@ -58,7 +59,11 @@ export class BinaryAssets {
  }
  private async noteEntries(){
   const exists=await this.files.stat('notes/assets');if(exists.file)fail('LOCAL_IO');
-  return (await this.files.list('notes/assets')).entries;
+  const legacy=(await this.files.list('notes/assets')).entries.filter(e=>e.file&&e.path.startsWith('notes/assets/'))
+   .map(e=>({key:e.path.slice(13),path:e.path}));
+  if(!this.assetIndex)return legacy;
+  const current=await this.assetIndex.entries(),keys=new Set(current.map(e=>e.key));
+  return [...legacy.filter(e=>!keys.has(e.key)),...current];
  }
  private validate(d:ObjectDescriptor,limits:Limits){
   if(d.kind.startsWith('book')){
@@ -124,11 +129,32 @@ export class BinaryAssets {
    if(!this.books||!job)fail('UNSUPPORTED_KIND');
    return this.books.publish(job,lease,object,d);
   }
-  if(d.kind!=='noteAsset')return this.chunks.finalize(lease,object);this.metadata(d);this.check();const target='notes/assets/'+d.businessId;let present=false;if((await this.files.stat(target)).file){const h=await this.files.hash(target);present=h.sha256===d.sha256&&h.size===d.size;}this.outcomes.set(d.objectId,present?'alreadyPresent':'merged');try{return await this.chunks.finalize(lease,object,target);}catch(e){if(!(e instanceof Error)||e.message!=='PUBLICATION_CONFLICT')throw e;this.outcomes.set(d.objectId,'retainedLocal');return this.chunks.finalize(lease,object,this.conflict(d));}}
+  if(d.kind!=='noteAsset')return this.chunks.finalize(lease,object);
+  this.metadata(d);this.check();
+  if(this.assetIndex)return this.chunks.finalize(lease,object,noteAssetVersionPath(d.businessId,d.sha256));
+  const target='notes/assets/'+d.businessId;let present=false;if((await this.files.stat(target)).file){const h=await this.files.hash(target);present=h.sha256===d.sha256&&h.size===d.size;}this.outcomes.set(d.objectId,present?'alreadyPresent':'merged');try{return await this.chunks.finalize(lease,object,target);}catch(e){if(!(e instanceof Error)||e.message!=='PUBLICATION_CONFLICT')throw e;this.outcomes.set(d.objectId,'retainedLocal');return this.chunks.finalize(lease,object,this.conflict(d));}}
  async apply(d:ObjectDescriptor,path:string,boundary:ReceiptBoundary,peer?:string,job?:Job){
   if(d.kind.startsWith('book')){
    if(!this.books||!job)fail('UNSUPPORTED_KIND');
    return this.books.apply(job,d,path,boundary);
   }
-  if(d.kind!=='noteAsset'){if(!this.kinds||!peer)fail('UNSUPPORTED_KIND');return this.kinds.apply(d,path,peer,boundary,job?.jobId);}this.metadata(d);const conflict=path===this.conflict(d);if(path!=='notes/assets/'+d.businessId&&!conflict)fail('OBJECT_CONFLICT');await this.verified(path,d,'HASH_MISMATCH');boundary.check?.();const outcome=conflict?'retainedLocal':this.outcomes.get(d.objectId)??'alreadyPresent';await this.store.db.transaction([...boundary.before,{sql:'INSERT INTO library_binary_assets VALUES(?,?,?,?,?) ON CONFLICT(storage_key,sha256) DO UPDATE SET path=excluded.path,outcome=excluded.outcome',params:[d.businessId,d.sha256,d.size,path,outcome]},...boundary.after(outcome)]);this.unit();}
+  if(d.kind!=='noteAsset'){if(!this.kinds||!peer)fail('UNSUPPORTED_KIND');return this.kinds.apply(d,path,peer,boundary,job?.jobId);}
+  this.metadata(d);
+  let outcome:'merged'|'alreadyPresent'|'retainedLocal',effects:ReceiptBoundary['before']=[];
+  if(this.assetIndex){
+   if(path!==noteAssetVersionPath(d.businessId,d.sha256))fail('OBJECT_CONFLICT');
+   const before=await this.assetIndex.version(d.businessId),legacy='notes/assets/'+d.businessId;
+   const current=before??((await this.files.stat(legacy)).file?await this.files.hash(legacy):undefined);
+   outcome=!current?'merged':current.sha256===d.sha256&&current.size===d.size?'alreadyPresent':'retainedLocal';
+   if(outcome!=='retainedLocal')effects=this.assetIndex.statements(d.businessId,before,d);
+  }else{
+   const conflict=path===this.conflict(d);if(path!=='notes/assets/'+d.businessId&&!conflict)fail('OBJECT_CONFLICT');
+   outcome=conflict?'retainedLocal':this.outcomes.get(d.objectId)??'alreadyPresent';
+  }
+  await this.verified(path,d,'HASH_MISMATCH');boundary.check?.();
+  await (boundary.transaction??(statements=>this.store.db.transaction(statements)))([...boundary.before,...effects,
+   {sql:'INSERT INTO library_binary_assets VALUES(?,?,?,?,?) ON CONFLICT(storage_key,sha256) DO UPDATE SET path=excluded.path,outcome=excluded.outcome',params:[d.businessId,d.sha256,d.size,path,outcome]},
+   ...boundary.after(outcome)]);
+  this.unit();
+ }
 }
