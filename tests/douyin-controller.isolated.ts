@@ -1273,7 +1273,7 @@ for (const expired of [false, true]) test(`DYFAV FIX2 saved stall ${expired ? 'r
   expect(invalidated).toEqual([]);
 });
 
-for (const replacement of ['valid-audio', 'expired-audio', 'expired-mirror'] as const)
+for (const replacement of ['valid-audio', 'expired-audio', 'expired-mirror', 'native-and-explicit'] as const)
 test(`DYFAV FIX3 saved DASH reload checks the full replacement set (${replacement})`, async () => {
   const f = fixture(), selected = item('saved-audio-rotation');
   const now = Date.now, origin = 1_800_000_000_000;
@@ -1307,7 +1307,7 @@ test(`DYFAV FIX3 saved DASH reload checks the full replacement set (${replacemen
       expect(options).toMatchObject({allowDetail: true, forceRefresh: true});
       return {ok: true, data: next};
     };
-    const reloading = f.controller.reloadVideo(entry, 321, () => true, 'detail', true);
+    const reloading = f.controller.reloadVideo(entry, 321, () => true, 'detail', true, false, replacement === 'native-and-explicit');
     if (replacement === 'valid-audio') {
       await reloading;
       expect(registrations).toEqual([next]);
@@ -1358,7 +1358,7 @@ test(`DYFAV FIX4 validates the registered playback addresses (${scenario})`, asy
       return scenario === 'direct-fallback' ? playback.playUrl : replacementUri;
     };
     client.resolvePlayback = async () => ({ok: true, data: next});
-    const reload = f.controller.reloadVideo(entry,321,()=>true,'detail',true,false,true);
+    const reload = f.controller.reloadVideo(entry,321,()=>true,'detail',true,false,scenario === 'direct-fallback');
     if (scenario === 'direct-fallback') {
       await expect(reload).rejects.toMatchObject({code:'source_expired'});
       expect(entry.playback).toBe(source);

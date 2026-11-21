@@ -426,8 +426,51 @@ test('DYFAV FIX4 reload binding exposes an actual direct result for the route ex
  registrationFailure={code:'unsupported_method'};
  try{
   await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'unsupported_method'});
-  expect(await host.playbackForReload(selected,{},()=>true)).toEqual({url:selected.playUrl,item:selected});
+  const candidate=await host.playbackForReload(selected,{},()=>true);
+  expect(candidate).toMatchObject({url:selected.playUrl,item:selected});
+  await candidate.discard();
  }finally{registrationFailure=undefined;host.stop();}
+});
+
+for (const decision of ['discard', 'commit', 'superseded', 'same-uri'] as const)
+test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${decision})`,async()=>{
+ const item={...items[0]!,awemeId:'review',playUrl:'https://fixture/original'};
+ const updated={...item,playUrl:'https://fixture/fresh'};
+ const port={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
+ const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const original=await host.playbackResolved(item,{},()=>true);
+ const before=removed.length;
+ let active=true;
+ try{
+  const candidate=await host.playbackForReload(decision==='same-uri'?item:updated,{},()=>active,original);
+  expect(host.sourceFor(original)).toBe(item);
+  expect(removed.slice(before)).toEqual([]);
+  if(decision==='same-uri'){
+   expect(candidate.url).toBe(original);
+   await candidate.discard();
+   expect(removed.slice(before)).toEqual([]);
+   return;
+  }
+  expect(registrations.at(-1)?.replacesUri).toBeUndefined();
+  expect(candidate.url).not.toBe(original);
+  expect(host.sourceFor(candidate.url)).toBeUndefined();
+  if(decision==='commit'){
+   const cleanup=candidate.commit();
+   expect(host.sourceFor(candidate.url)).toBe(updated);
+   await cleanup;
+   expect(removed.slice(before)).toEqual([original]);
+   expect(host.sourceFor(original)).toBeUndefined();
+  }else{
+   if(decision==='superseded'){
+    active=false;
+    expect(()=>candidate.commit()).toThrow('播放来源已更换');
+   }
+   await candidate.discard();
+   expect(removed.slice(before)).toEqual([candidate.url]);
+   expect(host.sourceFor(original)).toBe(item);
+   expect(host.sourceFor(candidate.url)).toBeUndefined();
+  }
+ }finally{host.stop();}
 });
 
 test('NOPLAY a late optional cache failure cannot publish a replaced foreground source',async()=>{

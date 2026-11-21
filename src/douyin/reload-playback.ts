@@ -30,10 +30,9 @@ export async function reloadDouyinPlayback(
 }
 
 export function failedDouyinAddresses(addresses:readonly string[],nativeExpired:boolean,now=Date.now()):readonly string[] {
-  const expired=addresses.filter(url=>isExpired([url],now));
-  // A CDN deadline identifies the failed addresses even when native reports
-  // expiry for the entire cache capability. Otherwise keep the failed binding.
-  return expired.length||!nativeExpired?expired:addresses;
+  // Native expiry invalidates the entire read set, including signed addresses
+  // whose explicit deadlines have not elapsed.
+  return [...new Set(addresses.filter(url=>nativeExpired||isExpired([url],now)))];
 }
 
 export function assertDouyinAddresses(addresses:readonly string[],failed:readonly string[],now=Date.now()):void {

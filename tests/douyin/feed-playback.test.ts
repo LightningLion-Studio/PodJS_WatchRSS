@@ -61,7 +61,8 @@ test('actual address validation keeps valid previous components and rejects inva
  const mirror='https://fixture.invalid/mirror?expires=1800003600';
  const audio='https://fixture.invalid/audio?expires=1800003600';
  const expired='https://fixture.invalid/expired?expires=1800000090';
- expect(failedDouyinAddresses([main,mirror,expired],true,now)).toEqual([expired]);
+ expect(failedDouyinAddresses([main,mirror,expired],true,now)).toEqual([main,mirror,expired]);
+ expect(failedDouyinAddresses([main,mirror,expired],false,now)).toEqual([expired]);
  expect(failedDouyinAddresses([main,audio],false,now)).toEqual([]);
  expect(()=>assertDouyinAddresses([main,audio],failedDouyinAddresses([main,audio],true,now),now))
   .toThrow('播放地址已过期');
