@@ -31,6 +31,7 @@ type PlaybackBinding={url:string;item:DouyinItem};
 type ReloadPublication={
  validateFallback:(binding:PlaybackBinding)=>void;
  publish:(binding:PlaybackBinding)=>void;
+ retire:(reason:Error)=>void;
 };
 type ReloadBinding=PlaybackBinding&{commit:(publication:ReloadPublication)=>Promise<void>;discard:()=>Promise<void>;settled:Promise<void>};
 type RegisteredBinding={uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number};
@@ -84,8 +85,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   registerVideoResolution(url,takeVideoResolution(item.playUrl,'douyin'));
   remember(url,item);
  };
- const stageBinding=(binding:PlaybackBinding,current:()=>boolean,previousUri:string|undefined,previous?:RegisteredBinding,record?:RegisteredBinding,stageId?:string):ReloadBinding=>{
+ const stageBinding=(binding:PlaybackBinding,current:()=>boolean,authorization:number,previousUri:string|undefined,previous?:RegisteredBinding,record?:RegisteredBinding,stageId?:string):ReloadBinding=>{
   const id=binding.item.awemeId;
+  const authorized=()=>authorization===(client.playbackAuthorizationVersion?.()??0);
   let open=true,finish!:()=>void;
   const settled=new Promise<void>(resolve=>finish=resolve);
   const discardStage=async()=>{
@@ -95,12 +97,13 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   };
   return {...binding,settled,
    async commit(publication){
-    if(!open||!current())throw cancelled();
+    if(!open||!current()||!authorized())throw cancelled();
     let accepted=binding,acceptedRecord=record;
+    let nativeCommitted=false;
     if(stageId){
-     try{await mediaPrefixCache.commit(stageId).result;}
+     try{await mediaPrefixCache.commit(stageId).result;nativeCommitted=true;}
      catch(error){
-      if(!current())throw cancelled();
+      if(!current()||!authorized())throw cancelled();
       const direct=directBinding(binding.item,error,true);
       if(!direct)throw error;
       publication.validateFallback(direct);
@@ -108,11 +111,22 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
       acceptedRecord=undefined;
      }
     }
+    const selected=current(),sameAuthorization=authorized();
+    if(!nativeCommitted&&(!selected||!sameAuthorization))throw cancelled();
     open=false;
     try{
      const old=new Set([previousUri,previous?.uri].filter((uri):uri is string=>
        !!uri&&uri!==accepted.url&&uri.startsWith('podjs-media-cache:')));
      for(const uri of old)forget(id,uri);
+     if(!sameAuthorization){
+      const reason=cancelled();
+      forget(id,accepted.url);
+      // The host already retired the predecessor. Retire its guest references
+      // and revoke this unpublished URI while the registration lane is held.
+      try{publication.retire(reason);}
+      finally{await mediaPrefixCache.remove(accepted.url).result;}
+      throw reason;
+     }
      if(acceptedRecord)publishBinding(accepted,acceptedRecord);
      else remember(accepted.url,accepted.item);
      // A successful host receipt has already retired the old URI. Publish
@@ -160,7 +174,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&Date.now()<previous.expires){
     if(previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors)){
      const binding={url:previous.uri,item:selected};
-     if(reload)return stageBinding(binding,current,reload.previousUri,previous,previous);
+     if(reload)return stageBinding(binding,current,authorization,reload.previousUri,previous,previous);
      remember(binding.url,selected);
      return binding;
     }
@@ -185,13 +199,13 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
     }
    }catch(error){
     const direct=reload&&current()?directBinding(selected,error,true):undefined;
-    if(direct)return stageBinding(direct,current,reload?.previousUri,previous);
+    if(direct)return stageBinding(direct,current,authorization,reload?.previousUri,previous);
     throw error;
    }
    const binding={url:uri,item:selected};
    const record={uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires};
    if(reload){
-    const candidate=stageBinding(binding,current,reload.previousUri,previous,record,stageId);
+    const candidate=stageBinding(binding,current,authorization,reload.previousUri,previous,record,stageId);
     if(current())return candidate;
     await candidate.discard();
     return;

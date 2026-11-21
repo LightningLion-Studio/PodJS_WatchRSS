@@ -1262,7 +1262,7 @@ test('PERFVIDEO reverse paging uses a verified bundle while the redundant previe
  expect(f.requests()).toBe(0);
 });
 
-for(const scenario of ['before commit','during commit','after commit','stage failure','commit failure','commit rejection'] as const){
+for(const scenario of ['before commit','during commit','after commit','stage failure','commit failure','commit rejection','authorization change'] as const){
  test(`native reload settles the route and host together after ${scenario}`,async()=>{
   const id='commit-lifecycle',oldUri='podjs-media-cache://play/old',newUri='podjs-media-cache://play/new';
   const oldItem={...item(id),playUrl:'https://fixture.invalid/old?expires=4102444800'};
@@ -1304,17 +1304,23 @@ for(const scenario of ['before commit','during commit','after commit','stage fai
   reloadHost=host;
   proxyOverride=(entry,headers)=>host.playbackResolved(entry,headers,()=>true);
   try{
-   f.controller.douyinPlay({item:oldItem,playback:oldItem,playlist:[oldItem],immersive:true,hasMore:false});
+   const neighbour=item('commit-neighbour');
+   if(scenario==='authorization change')await client.applyCookie('sid=fixture-before');
+   f.controller.douyinPlay({item:oldItem,playback:oldItem,playlist:[oldItem,neighbour],immersive:true,hasMore:false});
    await f.controller.douyinNavigate({name:'player',awemeId:id});
    const entry=f.stack().at(-1)!;
    expect(entry.playback?.url).toBe(oldUri);
    client.resolvePlayback=async()=>({ok:true,data:fresh});
    const recovery=f.controller.reloadVideo(entry,321,()=>current,'feed',true,false);
    const result=recovery.then(()=>undefined,error=>(error as {code:string}).code);
-   if(scenario==='before commit'||scenario==='during commit'||scenario==='after commit'){
+   if(scenario==='before commit'||scenario==='during commit'||scenario==='after commit'||scenario==='authorization change'){
     await hostReached;
     expect(entry.playback?.url).toBe(oldUri);
-    if(scenario!=='after commit')current=false;
+    if(scenario==='authorization change'){
+     const authorization=client.playbackAuthorizationVersion();
+     await client.applyCookie('sid=fixture-after');
+     expect(client.playbackAuthorizationVersion()).toBe(authorization+1);
+    }else if(scenario!=='after commit')current=false;
     release();
    }
    if(scenario==='before commit'||scenario==='commit rejection'){
@@ -1323,6 +1329,16 @@ for(const scenario of ['before commit','during commit','after commit','stage fai
     expect(entry.queue?.itemAtOffset()?.playUrl).toBe(oldItem.playUrl);
     expect([...live]).toEqual([oldUri]);
     expect(discarded).toBe(1);
+   }else if(scenario==='authorization change'){
+    expect(await result).toBe('CANCELLED');
+    expect(f.source()).toBe(entry.playback);
+    expect(entry.playback).toMatchObject({url:undefined,videoUrl:undefined,audioUrl:undefined,
+     headers:undefined,previewOnly:true,resumePositionMs:321});
+    expect(entry.queue?.snapshot().playlist.map(row=>[row.awemeId,row.playUrl,row.variants])).toEqual([
+     [id,'',[]],[neighbour.awemeId,'',[]],
+    ]);
+    expect([...live]).toEqual([]);
+    expect(host.sourceFor(newUri)).toBeUndefined();
    }else{
     const direct=scenario==='stage failure'||scenario==='commit failure';
     expect(await result).toBeUndefined();

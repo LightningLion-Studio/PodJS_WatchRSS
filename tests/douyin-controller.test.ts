@@ -6,7 +6,7 @@ const controllerFixture=resolve(import.meta.dir,'douyin-controller.isolated.ts')
 test('D2 route controller reconstruction and same-item recovery',async()=>{
  const child=Bun.spawn([process.execPath,'--conditions=browser','test',controllerFixture],{stdout:'pipe',stderr:'pipe'});
  const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
- expect(code,out+err).toBe(0);expect(out+err).toMatch(/116 pass/);
+ expect(code,out+err).toBe(0);expect(out+err).toMatch(/117 pass/);
 });
 
 for(const boundary of ['prepare','publish']){

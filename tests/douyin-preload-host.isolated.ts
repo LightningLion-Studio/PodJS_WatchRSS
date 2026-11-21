@@ -483,6 +483,7 @@ test('reload registers provisionally and releases only the rejected or supersede
   await accepted.commit({
    validateFallback:()=>{throw new Error('unexpected fallback');},
    publish:binding=>{committed=binding.url;},
+   retire:()=>{throw new Error('unexpected authorization change');},
   });
   await accepted.discard();
   expect(committed).toBe(accepted.url);
