@@ -74,13 +74,15 @@ export class WatchCloudIndex {
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
+  // A queued explicit action observes its read-only window afresh.
+  const cache=readOnly?undefined:this.options.indexObjects;
   const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
   const get=async(id:string)=>{
    const existing=objects.get(id);if(existing)return existing;
-   const raw=await (this.options.indexObjects?.read(id,fetch)??fetch(id));objects.set(id,raw);return raw;
+   const raw=await (cache?.read(id,fetch)??fetch(id));objects.set(id,raw);return raw;
   };
   const batch=async(ids:string[])=>{
-   const values=await (this.options.indexObjects?.batch(ids,fetchBatch)??fetchBatch(ids));
+   const values=await (cache?.batch(ids,fetchBatch)??fetchBatch(ids));
    for(const [id,raw]of values)objects.set(id,raw);
    return values;
   };
