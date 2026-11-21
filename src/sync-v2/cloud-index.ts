@@ -74,8 +74,8 @@ export class WatchCloudIndex {
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
-  // A queued explicit action observes its read-only window afresh.
-  const cache=readOnly?undefined:this.options.indexObjects;
+  // Observe queued explicit actions through the current network window.
+  const cache=readOnly||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
   const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
   const get=async(id:string)=>{
    const existing=objects.get(id);if(existing)return existing;
