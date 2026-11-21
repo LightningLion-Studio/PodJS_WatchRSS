@@ -47,17 +47,18 @@ test('a warm v2 round refreshes cached read admission before retrying a checkpoi
 });
 test('CL0 watch host counts complete warm control rounds independently of indexes and body traffic',async()=>{
  const f=await fixture(),base=f.options.transport;
- const traffic:{category:'control'|'index'|'body';up:number;down:number}[]=[];
+ const traffic:{category:'control'|'index'|'body';path:string;up:number;down:number}[]=[];
  f.options.transport={async request(request){
   const response=await base.request(request),path=new URL(request.url).pathname;
   const category=path.includes('/bodies/v1/')&&path.includes('/objects/')?'body':
    /\/(?:objects|state-refs|trees|commits)(?:\/|$)/.test(path)?'index':'control';
-  traffic.push({category,up:request.body?.length??0,down:response.body.length});
+  traffic.push({category,path,up:request.body?.length??0,down:response.body.length});
   return response;
  }};
  const opened=await openApplicationSyncV2(f.options);
  try{
   expect(opened).not.toBeNull();
+  expect(await opened!.sync()).toEqual({completionError:null}); // Complete the first publication and its applied ACK.
   const revision=f.server.account.revision,rounds=[];
   for(let round=1;round<=5;round++){
    traffic.length=0;
@@ -67,7 +68,7 @@ test('CL0 watch host counts complete warm control rounds independently of indexe
     return {n:rows.length,up:rows.reduce((total,item)=>total+item.up,0),down:rows.reduce((total,item)=>total+item.down,0)};
    };
    const control=sum('control'),index=sum('index'),body=sum('body');
-   expect(control.n).toBeLessThanOrEqual(8);
+   expect(control.n,traffic.map(item=>item.path).join(' ')).toBeLessThanOrEqual(8);
    expect(control.up).toBeLessThanOrEqual(16*1024);
    expect(control.down).toBeLessThanOrEqual(64*1024);
    expect(index).toEqual({n:0,up:0,down:0});

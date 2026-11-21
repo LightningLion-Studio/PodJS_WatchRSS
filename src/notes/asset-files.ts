@@ -45,9 +45,10 @@ export class NoteAssetFileIndex {
    {sql:'INSERT INTO note_asset_files VALUES(?,?,?) ON CONFLICT(storage_key) DO UPDATE SET sha256=excluded.sha256,size=excluded.size',params:[key,after.sha256,after.size]},
   ];
  }
- async commit(key:string,before:NoteAssetVersion|undefined,after:NoteAssetVersion,check?:SqlCancellationCheck){
-  if(!check)return this.db.transaction(this.statements(key,before,after));
+ async commit(key:string,before:NoteAssetVersion|undefined,after:NoteAssetVersion,check?:SqlCancellationCheck,receipt:readonly Statement[]=[]){
+  const statements=[...this.statements(key,before,after),...receipt];
+  if(!check)return this.db.transaction(statements);
   const db=cancellableSql({...this.db,execute:async(sql,params)=>this.db.transaction([{sql,params}])},check);
-  await db.transaction(this.statements(key,before,after));
+  await db.transaction(statements);
  }
 }

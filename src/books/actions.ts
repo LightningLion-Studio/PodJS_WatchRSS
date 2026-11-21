@@ -91,7 +91,7 @@ export class BookSyncActions {
    try{
     requireThat(info.size===request.byteCount&&info.sha256===key[1]);
     await protectPackage(info);
-    applied=await this.store.installPackage(info,key[0],undefined,false,cancel);
+    applied=await this.store.installPackage(info,key[0],undefined,false,cancel,undefined,check?.bodyReceipt?.({kind:'book',logicalId:key[0],sha256:info.sha256}));
    }
    catch(error){if(/book_request_invalid|book_package_|book_sync_invalid/.test(String(error)))await this.discard(key,parts,false,db);throw error;}
    await this.discard(key,parts,true,db);

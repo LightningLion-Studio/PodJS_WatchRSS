@@ -1,6 +1,7 @@
 import {noteAssetVersionPath,type NoteAssetFileIndex} from '../notes/asset-files';
 import type {SqlCancellationCheck} from '../core/types';
 import {digest} from '../sync-v2/protocol';
+import type {LocalBodyClaims} from '../sync-v2/local-body-claims';
 import type {NoteAssetIntake} from '../sync-v2/local-transfer-intake';
 import {retainAssetConflict} from '../notes/asset-conflict';
 import type {JsonObject} from './protocol.ts';
@@ -81,7 +82,7 @@ export class NoteAssetReceiver {
    }
    intake=state.intake;part=state.path;
   }
-  const commit=async(path:string,size:number,apply:()=>Promise<void>)=>{
+  const commit=async(path:string,size:number,apply:(receipt?:ReturnType<typeof LocalBodyClaims.receipt>)=>Promise<void>)=>{
    check?.();
    if(!intake)return apply();
    const body={size,sha256,read:async(offset:number,length:number)=>{
@@ -92,7 +93,7 @@ export class NoteAssetReceiver {
    }};
    await intake({logicalId:key,cursor:digest(['syncNoteAsset',key,sha256,size]),body},apply);
   };
-  const publish=async(path:string,size:number,apply:()=>Promise<void>)=>{
+  const publish=async(path:string,size:number,apply:(receipt?:ReturnType<typeof LocalBodyClaims.receipt>)=>Promise<void>)=>{
    try{await commit(path,size,apply);}
    catch(error){
     if(state&&(error as Error).message==='BUSINESS_REJECTED'){
@@ -125,7 +126,7 @@ export class NoteAssetReceiver {
    written+=bytes;if(value.size!==offset+written)throw new Error('备忘录图片写入不完整');at+=piece.length;
   }while(at<data.length);
   if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==sha256)throw new Error('备忘录图片校验失败');
-   await publish(part,actual.size,async()=>{
+   await publish(part,actual.size,async receipt=>{
    check?.();
    if(state&&this.index){
     const previous=await this.index.version(key),current=previous?noteAssetVersionPath(key,previous.sha256):target;
@@ -134,7 +135,7 @@ export class NoteAssetReceiver {
     }
     const candidate=noteAssetVersionPath(key,sha256);
     check?.();await this.files.commit(part,candidate,actual.size,sha256,null);
-    check?.();await this.index.commit(key,previous,actual,check);
+    check?.();await this.index.commit(key,previous,actual,check,receipt);
     return;
    }
    try{await this.files.commit(part,target,actual.size,sha256,null);}catch(error){if(!String(error).includes('file_target_changed'))throw error;check?.();await retainAssetConflict(this.files,part,key,sha256,actual.size,null);throw Error('note_asset_conflict');}

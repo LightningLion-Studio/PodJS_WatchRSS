@@ -1,3 +1,4 @@
+import {LocalBodyClaims,type LocalBodyClaim} from './local-body-claims';
 import type {SqlCancellationCheck} from '../core/types';
 import {unhex} from '@podjs/framework/crypto';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
@@ -35,12 +36,12 @@ export interface GuardedLibraryStamp {
  epoch:string;
  revision:string;
 }
-export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {transferFence?:(reading?:boolean)=>Promise<string>;guardedStamp?:()=>Promise<GuardedLibraryStamp>};
+export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {transferFence?:(reading?:boolean)=>Promise<string>;guardedStamp?:()=>Promise<GuardedLibraryStamp>;bodyReceipt?:(claim:LocalBodyClaim)=>ReturnType<typeof LocalBodyClaims.receipt>};
 export type BoundLocalTransferIntake=(<T>(apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>) & {
  capture?:(requireAccount?:boolean)=>Promise<BoundLocalTransferIntake>;
 };
 export type LocalTransferIntake=<T>(account:WatchAccountIdentity|null,deviceId:string,apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>;
-export type NoteAssetIntake=((input:{cursor:string;logicalId:string;body:LegacyBodySource},apply:()=>Promise<void>)=>Promise<void>) & {
+export type NoteAssetIntake=((input:{cursor:string;logicalId:string;body:LegacyBodySource},apply:(receipt?:ReturnType<typeof LocalBodyClaims.receipt>)=>Promise<void>)=>Promise<void>) & {
  capture?:()=>Promise<NoteAssetIntake>;
 };
 
@@ -134,7 +135,7 @@ export function noteAssetIntake(intake:BoundLocalTransferIntake,version:1|2,peer
   const id=input.logicalId;
   const value={assetId:id,mime:noteAssetMime(id),originalFilename:id,updatedAt:0,sourceDeviceId:peer,deleted:false,deletedAt:0};
   await protect({peer,version,cursor:input.cursor,records:[{kind:'asset',logicalId:id,value}],body:input.body,check});
-  check();await apply();
+  check();await apply(version===1?protect.bodyReceipt?.({kind:'asset',logicalId:id,sha256:input.body.sha256}):undefined);
  });
  if(intake.capture)run.capture=async()=>noteAssetIntake(await intake.capture!(true),version,peer,check);
  return run;
@@ -176,6 +177,7 @@ export function watchLocalTransferIntake(db:ProjectionSql,host:CloudHostRequest)
     const protect:LocalTransferWrite=async input=>{input.check?.();if(await store.protectLocalInput({...input,reserveBody}))throw Error('BUSINESS_REJECTED');};
     protect.transferFence=reading=>store.localTransferFence(reading);
     protect.guardedStamp=()=>store.guardedLibraryStamp();
+    protect.bodyReceipt=claim=>LocalBodyClaims.receipt(String(row.scope),claim.kind,claim.logicalId,claim.sha256);
     return await apply(protect);
    }finally{key.fill(0);await gate.close();}
   }finally{await host('cloud.release',{});}

@@ -180,7 +180,12 @@ export class WatchBodyChannel {
     descriptor=prepared.descriptor;await this.o.files.writeAtomic(path+'/pending.json',jsonBytes(descriptor));
    }
   }finally{key.key.fill(0);}
-  await this.current(entry,anchor);checkWindow();await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);checkWindow();if(!b)throw Error('closure_incomplete');return b;});await clearRetry();await this.current(entry,anchor);checkWindow();
+  await this.current(entry,anchor);checkWindow();
+  if(await this.o.localReceiving?.(binding))throw Error('body_channel_bluetooth_pending');
+  if(await this.o.receivedFromPeer?.(binding,local.witness.sha256))throw Error('body_channel_source_pending');
+  const latest=await readLocal();checkWindow();
+  if(latest?.witness.sha256!==local.witness.sha256||latest.witness.size!==local.witness.size)throw Error('body_revision_changed');
+  await this.o.http.upload(descriptor,async hash=>{const b=await this.o.files.read(path+'/'+hash);checkWindow();if(!b)throw Error('closure_incomplete');return b;});await clearRetry();await this.current(entry,anchor);checkWindow();
  }
  private async carrierPublicKey(descriptor:Carrier){
   const key=await this.o.approved(descriptor.body.authorDeviceId);
@@ -195,7 +200,7 @@ export class WatchBodyChannel {
    checkWindow();
   };
   await checkTransfer();
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:async(hash,size)=>{await checkTransfer();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:async(hash,size)=>{await checkTransfer();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash,checkTransfer);}});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
   const value=fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload);
   await this.o.repository.validate(binding.kind,binding.logicalId,value,raw);

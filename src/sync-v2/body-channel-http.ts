@@ -43,10 +43,10 @@ export class BodyChannelHttp {
   const completed=await this.json('POST','/carriers/'+id+'/complete',{scope:this.options.scope});exact(completed,['version','purpose','scope','carrierId','state']);if(completed.carrierId!==id||completed.state!=='ready')throw Error('closure_incomplete');
  }
  /** Checkpoint only ciphertext. Final size/hash verification precedes decode. */
- async download(id:string,hash:string,size:number,files:CloudBlobStore,path:string){
+ async download(id:string,hash:string,size:number,files:CloudBlobStore,path:string,check?:()=>Promise<void>){
   hexId(id,32);hexId(hash,64);uint(size,16777216);const old=await files.read(path);if(old?.length===size&&sha256Hex(old)===hash)return old;
   const partial=path+'.part';let data=await files.read(partial)??new Uint8Array();if(data.length>size){data=new Uint8Array();await files.writeAtomic(partial,data);}
-  for(let at=data.length;at<size;){const r=await this.request('GET','/carriers/'+id+'/objects/'+hash+'?offset='+at),header=(name:string)=>Object.entries(r.headers).find(([k])=>k.toLowerCase()===name)?.[1];
+  for(let at=data.length;at<size;){await check?.();const r=await this.request('GET','/carriers/'+id+'/objects/'+hash+'?offset='+at),header=(name:string)=>Object.entries(r.headers).find(([k])=>k.toLowerCase()===name)?.[1];
    if(header('x-watchrss-body-total-bytes')!==String(size)||header('x-watchrss-body-offset')!==String(at)||r.body.length!==Math.min(65536,size-at))throw Error('invalid_range');
    if(files.append){await files.append(partial,r.body,at);}else{const next=new Uint8Array(at+r.body.length);next.set(data);next.set(r.body,at);data=next;await files.writeAtomic(partial,data);}at+=r.body.length;
   }

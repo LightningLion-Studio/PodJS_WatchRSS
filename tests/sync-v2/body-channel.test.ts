@@ -195,6 +195,34 @@ test('a matching guarded Bluetooth manifest allows carrier control reads and def
   expect(b.calls.slice(completed).map(call=>new URL(call.url).pathname)).toEqual(['/functions/v1/cloud/bodies/v1/carriers']);
  }finally{f.close();}
 });
+test('BC1 only the Bluetooth source publishes a missing carrier, then an empty third receiver restores it once',async()=>{
+ const f=new SqlFixture(),p=await prepared(),b=backend();
+ try{
+  const scopeKey=canonical(scope),claims=new LocalBodyClaims(f);
+  const entry={row:{...p.binding,deleted:false},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};
+  const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
+  const actor=(role:'receiver'|'source'|'third')=>{
+   let original=role==='third'?undefined:p.raw,installs=0;
+   const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'source-'+role,repository:{read:async()=>original,validate:async()=>{},install:async(_kind,_id,raw)=>{installs++;original=raw;}},receivedFromPeer:(binding,sha256)=>role==='receiver'?claims.received(scopeKey,binding,sha256):Promise.resolve(false),check:async()=>{}});
+   return {channel,installs:()=>installs,original:()=>original};
+  };
+  await f.transaction(LocalBodyClaims.receipt(scopeKey,'asset','image.png',sha256Hex(p.raw)));
+  const receiver=actor('receiver'),source=actor('source'),third=actor('third');
+  expect(await receiver.channel.sync()).toEqual({pending:1,errors:['body_channel_source_pending']});
+  expect(b.calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  expect(await source.channel.sync()).toEqual({pending:0,errors:[]});
+  expect(b.ready.size).toBe(1);
+  expect(b.calls.filter(call=>call.method==='PUT').length).toBeGreaterThan(0);
+  const published=b.calls.length;
+  expect(await receiver.channel.sync()).toEqual({pending:0,errors:[]});
+  expect(receiver.installs()).toBe(0);
+  expect(b.calls.slice(published).every(call=>call.method==='GET'&&call.url.includes('/carriers?'))).toBe(true);
+  expect(await third.channel.sync()).toEqual({pending:0,errors:[]});
+  expect(third.original()).toEqual(p.raw);
+  expect(await third.channel.sync()).toEqual({pending:0,errors:[]});
+  expect(third.installs()).toBe(1);
+ }finally{f.close();}
+});
 test('current account changes during download prevent native installation and leave original bytes',async()=>{
  const p=await prepared(),b=backend(),cache=files();await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);let changed=false,installed=0;
  const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};

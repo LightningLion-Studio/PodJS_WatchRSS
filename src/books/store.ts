@@ -273,7 +273,7 @@ export class SqlBookStore {
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }
- async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint,cloud=false,check?:SqlCancellationCheck,deadline?:PublicationDeadline):Promise<number>{
+ async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint,cloud=false,check?:SqlCancellationCheck,deadline?:PublicationDeadline,bodyReceipt:readonly Statement[]=[]):Promise<number>{
   const db=cancellableSql(this.db,check);check?.();await this.capture(check);
   const startRevision=cloud?await libraryRevision(this.db):undefined;
   const existing=await this.record(id),expected=existing?this.state(existing):undefined;
@@ -386,7 +386,7 @@ export class SqlBookStore {
   if(await libraryRevision(this.db)!==revision)throw Error('book_library_changed_during_staging');
   check?.();deadline?.check();const published=await this.ports.files.publish(info,id,deadline);
   if(cloud)await checkpoint?.check();
-  const ss=this.packageStatements(next,published,stageKey,revision,binding);
+  const ss=this.packageStatements(next,published,stageKey,revision,binding,[],bodyReceipt);
   if(!db.transactionChanges)throw Error('Book install requires committed counts');deadline?.check();const counts=await db.transactionChanges(ss.map(s=>({...s,sql:onlyChangedSql(s.sql)})));await this.rememberDisplay(id,check);await this.captureReading(check);return (!expected||canonical(expected)!==canonical(next)?1:0)+counts[3]!+counts[6]!+(counts.slice(12,12+this.projectReadingStatements(id).length).some(x=>x>0)?1:0)+await this.applyDeletions(next,check);
  }
  /** Import into a job-owned shadow. No package path or chapter is readable
