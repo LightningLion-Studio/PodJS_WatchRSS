@@ -271,3 +271,39 @@ test('rolled-back DATA bindings survive reconnect and block conflicting control 
   await f.dispose();
  }
 },10000);
+
+test('D2 probe preserves the v14 response for 120 and enables a single guarded proposal',async()=>{
+ const f=await binaryRuntime();
+ try{
+  f.ports.guardedRuntime=async()=>true;
+  const request={action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],requestPersistentSession:true,supportsPersistentSession:true};
+  const s=f.session(),probe=async(extra:Row={})=>{await s.connection.writeFrame({...request,...extra});const response=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return response;};
+  const legacy=await probe();
+  expect(legacy).not.toHaveProperty('guardedLibraryVersion');
+  expect(legacy).not.toHaveProperty('libraryBinary');
+  expect(await f.db.query("SELECT name FROM sqlite_master WHERE name LIKE 'library_binary_%'")).toEqual([]);
+  expect(await probe({supportedGuardedLibraryVersions:[2]})).not.toHaveProperty('libraryBinary');
+  const guarded=await probe({supportedGuardedLibraryVersions:[1]});
+  expect(guarded.guardedLibraryVersion).toBe(1);
+  expect(guarded.libraryBinary).toBeDefined();
+  await probe(); // A later legacy probe invalidates the old switch on this connection.
+  await s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(guarded.libraryBinary as unknown as Capability)}});
+  await expect(s.running).rejects.toThrow('AUTH_REVOKED');
+ }finally{await f.dispose();}
+});
+
+test('D2 probe rejects ambiguous number tokens and malformed offers before storage',async()=>{
+ const f=await binaryRuntime();
+ try{
+  f.ports.guardedRuntime=async()=>true;
+  const {parseWireJson}=await import('../../src/sync/wire-json');
+  const request=(extension:string)=>parseWireJson('{"action":"syncLibrary","phase":"probe","version":14,"deviceId":"phone","supportedLibraryBinaryVersions":[2],'+extension+'}');
+  for(const value of ['null','[]','[1,1]','[2,1]','[true]','["1"]','[1.0]','[1e0]','[0]','[-0]','[9007199254740992]']){
+   await expect(f.service.probe(request('"supportedGuardedLibraryVersions":'+value),{session:{}})).rejects.toThrow('CAPABILITY_MISMATCH');
+  }
+  await expect(f.service.probe(request('"supportedGuardedLibraryVersions":[1],"supportedGuardedLibraryVersions":[1]'),{session:{}})).rejects.toThrow('CAPABILITY_MISMATCH');
+  f.ports.guardedRuntime=async()=>false;
+  expect(await f.service.probe(request('"supportedGuardedLibraryVersions":[1]'),{session:{}})).toEqual({});
+  expect(await f.db.query("SELECT name FROM sqlite_master WHERE name LIKE 'library_binary_%'")).toEqual([]);
+ }finally{await f.dispose();}
+});

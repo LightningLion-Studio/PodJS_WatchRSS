@@ -15,6 +15,7 @@ import {LibraryBinaryConnection} from './coordinator';
 import {SwitchGate,binaryCapability,negotiate,RELEASE_B2_ENABLED} from './routing';
 import {RecoveryRules} from './recovery';
 import {D} from './digests';
+import {supportsGuardedLibrary} from '../wire-json';
 import type {SqlLibrarySessionRepository} from '../library-repository';
 import {BOOK_KINDS,HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
 export interface BinarySessionPort {
@@ -25,8 +26,10 @@ export interface BinarySessionPort {
  business?(context:SyncActionContext):void;
  acceptsLegacySubset?(peer:string,context:SyncActionContext):boolean;
 }
-interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean;books:boolean}
+interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean;books:boolean;guarded:boolean;accountEpoch?:number}
 export interface BinaryApplicationPorts {
+ /** Presence requires a guarded proposal for every B2 connection. */
+ guardedRuntime?:()=>Promise<boolean>;
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  books?:BinaryBookFiles;
@@ -57,8 +60,11 @@ export class BinaryApplicationService implements BinarySessionPort {
  canSwitch(){return this.enabled();}
  async probe(r:Row,context:SyncActionContext):Promise<Row>{
   this.sessions.delete(context.session);if(!this.enabled())return {};
+  const guarded=this.ports.guardedRuntime!==undefined;
+  if(guarded&&(!supportsGuardedLibrary(r)||this.v1Sessions.has(context)))return {};
   if(r.supportedLibraryBinaryVersions===undefined)return {};
   const versions=r.supportedLibraryBinaryVersions;if(!Array.isArray(versions)||versions.some(v=>!Number.isSafeInteger(v)||v<1)||new Set(versions).size!==versions.length)fail('CAPABILITY_MISMATCH');if(!versions.includes(2))return {};
+  if(this.ports.guardedRuntime&&!await this.ports.guardedRuntime())return {};
   const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime?.chunkReceipt||!runtime.requestBindings)fail('CAPABILITY_MISMATCH');
   await this.ports.sampleClock?.();await this.ports.store.initialize();await this.ports.store.observeClock(runtime.elapsedMillis);
   const kinds:Capability['kinds']=[{kind:'noteAsset',schemaVersion:1,send:true,receive:true}];
@@ -78,7 +84,12 @@ export class BinaryApplicationService implements BinarySessionPort {
   const maxObjectBytes=Math.min(this.ports.library?HARD_LIMITS.maxObjectBytes:5242880,runtime.maxObjectBytes,Math.floor((maxStagingBytes-importBudget)/STAGING_COPIES));
   if(maxObjectBytes<1)fail('CAPABILITY_MISMATCH');
   const cap=binaryCapability(kinds,{...HARD_LIMITS,maxObjectBytes,maxPlanObjects:512,maxManifestBytes:books?786432:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:books?HARD_LIMITS.maxJournalBytes:33554432,maxInFlightObjects:books?1:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes});
-  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false,books});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
+  const connectionId=await this.ports.randomId();
+  context.checkCancelled?.();
+  if(!this.enabled())return {};
+  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();
+  this.sessions.set(context.session,{peer,capability:cap,connectionId,running:false,books,guarded});
+  return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap,...(guarded?{guardedLibraryVersion:1}:{})};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
  acceptsLegacySubset(peer:string,context:SyncActionContext){
@@ -87,7 +98,14 @@ export class BinaryApplicationService implements BinarySessionPort {
   if(n?.peer!==peer||!n.account||n.running)fail('AUTH_REVOKED');
   return true;
  }
- async accountConfirmed(r:Row,context:SyncActionContext){const n=this.sessions.get(context.session);if(!n)return;const account=await this.ports.account.read();if(!account||!r.account||(r.account as Row).userId!==account.userId||r.deviceId!==undefined&&r.deviceId!==n.peer)fail('ACCOUNT_MISMATCH');n.account=account;this.recovery.accountReady(n.connectionId,this.reconnected);}
+ async accountConfirmed(r:Row,context:SyncActionContext){
+  const n=this.sessions.get(context.session);if(!n)return;
+  const epoch=this.ports.account.librarySessionGeneration(),account=await this.ports.account.read();
+  context.checkCancelled?.();
+  if(!account||!r.account||(r.account as Row).userId!==account.userId||r.deviceId!==undefined&&r.deviceId!==n.peer)fail('ACCOUNT_MISMATCH');
+  if(n.guarded&&(this.sessions.get(context.session)!==n||epoch!==this.ports.account.librarySessionGeneration()))fail('AUTH_REVOKED');
+  n.account=account;n.accountEpoch=epoch;this.recovery.accountReady(n.connectionId,this.reconnected);
+ }
  failed(error:unknown,context?:SyncActionContext):unknown {
   const e=error as Error&{code?:string;b2Handled?:boolean;stopAutomaticRecovery?:boolean};if(e?.b2Handled)return e;
   const n=context?this.sessions.get(context.session):undefined;if(!n&&!this.reconnected)return error;
@@ -100,10 +118,10 @@ export class BinaryApplicationService implements BinarySessionPort {
  }
 
  async run(r:Row,connection:SyncFrameConnection,context:SyncActionContext){
-  const n=this.sessions.get(context.session);if(!this.enabled()||!n?.account||this.v1Sessions.has(context)||!connection.detachStream)fail('AUTH_REVOKED');
+  const n=this.sessions.get(context.session);if(!this.enabled()||!n?.account||n.running||this.v1Sessions.has(context)||!connection.detachStream)fail('AUTH_REVOKED');
   n.running=true;const account=n.account,watch=await this.ports.deviceId(),connectionId=n.connectionId;
   const gate=new SwitchGate(true,n.capability),reply=gate.accept(r,{identityVerified:true,accountConfirmed:true,legacyAcksDrained:true});
-  const check=()=>{context.checkCancelled?.();if(!this.enabled())fail('AUTH_REVOKED');};
+  const check=()=>{context.checkCancelled?.();if(!this.enabled()||n.guarded&&(this.sessions.get(context.session)!==n||n.accountEpoch!==this.ports.account.librarySessionGeneration()))fail('AUTH_REVOKED');};
   const authorize=<T>(run:()=>Promise<T>)=>this.ports.account.withLibraryAccount(account,async()=>{check();return run();});
   await authorize(()=>connection.writeFrame(reply));gate.responseFullyWritten();
   const accountScope=D('wrss.library-resume.v1/account',[account.backendBaseUrl,account.userId]);
