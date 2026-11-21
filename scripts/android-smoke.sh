@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 app_root="$(cd "$(dirname "$0")/.." && pwd)"
-framework_root="$(cd "$app_root/../../PodJS/podjs-watch" && pwd)"
+framework_root="$(python3 -c 'import json, pathlib, sys; lock = pathlib.Path(sys.argv[1]); print((lock.parent / json.loads(lock.read_text())["path"]).resolve())' "$app_root/framework.lock.json")"
 device="${ANDROID_SERIAL:-$(adb -d get-serialno 2>/dev/null || true)}"
 if [[ -z "$device" || "$device" == unknown ]]; then
   device="$(adb -e get-serialno 2>/dev/null || true)"

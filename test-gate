@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-framework=$(cd "$here/../../PodJS/podjs-watch" && pwd)
+framework=$(python3 -c 'import json, pathlib, sys; lock = pathlib.Path(sys.argv[1]); print((lock.parent / json.loads(lock.read_text())["path"]).resolve())' "$here/framework.lock.json")
 exec python3 "$framework/scripts/test-gate.py" --project "$here" "$@"
