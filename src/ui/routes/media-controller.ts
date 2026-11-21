@@ -1112,25 +1112,25 @@ export function createMediaRouteController(
       let queueGeneration=queue.playbackGeneration();
       const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
         &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
-      const previousItem=mode==='detail'&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
+      const previousItem=mode!=='current'&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
       const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
-      if(mode!=='detail')await douyinPreload.invalidate(item.awemeId);
+      if(mode==='current')await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
       const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls)).catch(async error=>{
-        if(mode==='detail'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+        if(mode!=='current'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
       });
       if(!resolved||!selected())return;
       let url=resolved.item.playUrl;
-      if(mode==='detail'){
+      if(mode!=='current'){
         await douyinPreload.invalidate(item.awemeId);
         if(!selected())return;
         url=await douyinPreload.playbackResolved(resolved.item,resolved.headers,selected);
         if(!selected())return;
       }
       next=freshVideoSource(previous,{url,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
-      if(mode==='detail')next.bypassCache=false;
+      if(mode!=='current')next.bypassCache=false;
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       // This reload owns the metadata mutation. Continue guarding against later
       // pager changes while persistence yields, using our new generation.

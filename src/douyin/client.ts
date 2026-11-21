@@ -201,6 +201,14 @@ export class DouyinClient {
     const policy=this.recoveryPolicy(cookie,generation);
     if(policy){const limited=await policy.cooldown(api);if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
+    const rateLimited=async(retryAfterMs=0):Promise<DouyinResult<never>>=>{
+      if(api==='detail'){
+        const decision=await policy.coolEndpoint(api,retryAfterMs);
+        if(decision.kind!=='limited'||!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        retryAfterMs=decision.retryAfterMs;
+      }
+      return {...fail('RATE_LIMITED',formatDouyinError('RATE_LIMITED')),httpStatus:429,...(retryAfterMs?{retryAfterMs}:{})};
+    };
     const attempt=async():Promise<DouyinResult<DouyinWireBody>|{forbidden:true}>=>{
       if(background&&!background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));
       const observed:Parameters<typeof douyinRequestDiagnostic>[0]={request_queue_ms:elapsed(requestStarted),request_sign_ms:0,request_transport_ms:0,request_text_ms:0,request_status_ms:0,response_bytes:0,category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:0,error_code:'cancelled'};
@@ -230,7 +238,7 @@ export class DouyinClient {
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(r.status===429){
           observed.error_code='http';
-          return {...fail('RATE_LIMITED',formatDouyinError('RATE_LIMITED')),httpStatus:429,...(observed.retry_after_ms?{retryAfterMs:observed.retry_after_ms}:{})};
+          return rateLimited(observed.retry_after_ms);
         }
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
         decodingResponse=true;
@@ -271,7 +279,7 @@ export class DouyinClient {
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(typeof body==='string'&&isDouyinHtmlChallenge(body)){observed.challenge=true;observed.error_code='challenge';
           appLogger.w('DouyinDetail',JSON.stringify({event:'challenge',api:'detail',count:1,mode:'abogus_only'}));
-          const decision=await policy?.challenge(api);
+          const decision=await policy.coolEndpoint(api);
           if(!this.currentAuth(generation)||decision?.kind==='cancelled')return fail('CANCELLED',formatDouyinError('CANCELLED'));
           observed.retry_after_ms=decision?.kind==='limited'?decision.retryAfterMs:30000;return {...fail('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:observed.retry_after_ms};
         }
@@ -292,7 +300,7 @@ export class DouyinClient {
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         const failure=mediaRequestFailure(error);observed.error_code=decodingResponse?'decode':failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
         if(failure.response){observed.http_status=failure.response.httpStatus;observed.response_bytes=failure.response.responseBytes;}
-        if(failure.status===429)return {...fail('RATE_LIMITED',formatDouyinError('RATE_LIMITED')),httpStatus:429};
+        if(failure.status===429)return rateLimited();
         if(failure.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category} status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
         return {...fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`),...(failure.category!=='decode'&&isTransportFailure(error)?{networkFailure:true}:{})};
