@@ -89,16 +89,21 @@ export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path
  const prepared=preparedPrefix??(cache?cache.get('parse',[markup],()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};}):(()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};})());
  const {blocks,offsets}=prepared;let emitted=0;
  const spacer=(height:number):NotePreviewEntry=>({height,render:()=>null});
+ const sameTextFlow=(before:NotePreviewBlock|undefined,after:NotePreviewBlock|undefined)=>before?.kind==='rich'&&after?.kind==='rich'&&before.html===after.html
+  && !(before.html&&(/^<img\b/i.test(before.markup)||/^<img\b/i.test(after.markup)));
  for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){
   const block=blocks[blockIndex]!,blockStart=offsets[blockIndex]??null;
   const textRows=block.kind==='rich'?(cache?cache.get('text:'+blockIndex,[block],()=>noteTextRows(block.markup,block.html)):noteTextRows(block.markup,block.html)):[];
   const dependencies=[block,width,preset,onImage,onDownload,onImageSize,block.kind==='image'?imageHeights?.get(block.path):undefined,...textRows.map(row=>nativeBody?.get(row.text))];
   const cached=cache?.peek<NotePreviewEntry[]>('block:'+blockIndex,dependencies);
-  if(cached){for(const entry of cached){emitted++;yield entry;}continue;}
+  const trailing=block.kind==='rich'&&!sameTextFlow(block,blocks[blockIndex+1]);
+  if(cached){for(const entry of cached){emitted++;yield entry;}if(trailing)yield spacer(5);continue;}
   const entries:NotePreviewEntry[]=[];
   (()=>{
-  if(blockIndex)entries.push(spacer(10));
-  entries.push(spacer(5));
+  if(!sameTextFlow(blocks[blockIndex-1],block)){
+   if(blockIndex)entries.push(spacer(10));
+   entries.push(spacer(5));
+  }
   if(block.kind==='image'){const height=imageHeights?.get(block.path)??260;entries.push({key:cache?.get('image-key:'+blockIndex,[block,width,preset],()=>({})),data:height,height:height+(block.description?34:4),render:current=> <NotePreviewImage block={block} width={width} height={current?Number(current().data):height} onOpen={onImage} onDownload={onDownload} onSize={onImageSize} textColor={bodyColor} preset={preset}/>});entries.push(spacer(5));return;}
   if(block.kind==='table'){
    const rows=tableRows(block,tableFont,tableHeaderFont),heights=tableHeights(rows,tableFont.lineHeight,block.headerRows),height=heights.reduce((a,b)=>a+b,0);
@@ -134,10 +139,10 @@ export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path
     }});
    }
   }
-  entries.push(spacer(5));
   })();
   cache?.get('block:'+blockIndex,dependencies,()=>entries);
   for(const entry of entries){emitted++;yield entry;}
+  if(trailing)yield spacer(5);
  }
  if(!emitted)yield {height:32,render:()=> <Text class="text-sm" style={{textColor:bodyColor}}>这条备忘录还没有正文。</Text>};
 }

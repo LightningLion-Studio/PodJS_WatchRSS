@@ -14,7 +14,51 @@ export function nativeEntities(value:string):string{
 }
 /** Native watchPlainText pipeline: selected HTML tags, HTML entities, Markdown. */
 export function memoPlainText(value:string):string{return projectNoteText(value,false);}
-// Literal ordered-list numbers count as words only in the title projection.
+
+/** Preview keeps literal numbers and expands ordered HTML list markers. */
+export function notePreviewPlainText(value:string):string {
+ return projectNoteText(value.includes('<')&&/<ol\b/i.test(value)?numberHtmlListItems(value):value,true);
+}
+
+function integerAttribute(tag:string,name:string):number|undefined {
+ const match=new RegExp(`\\s${name}\\s*=\\s*(?:"([+-]?\\d+)"|'([+-]?\\d+)'|([+-]?\\d+)(?=[\\s>]))`,'i').exec(tag);
+ const value=Number(match?.[1]??match?.[2]??match?.[3]);
+ return Number.isSafeInteger(value)?value:undefined;
+}
+
+function numberHtmlListItems(value:string):string {
+ interface List {ordered:boolean;step:number;start?:number;items:{index:number;value?:number}[]}
+ const parts:string[]=[],lists:List[]=[];
+ const finish=(list:List|undefined)=>{
+  if(!list?.ordered)return;
+  let number=list.start??(list.step===-1?list.items.length:1);
+  for(const item of list.items){
+   number=item.value??number;
+   parts[item.index]=`\n${number}. `;
+   number+=list.step;
+  }
+ };
+ let cursor=0;
+ for(const match of value.matchAll(/<(\/?)(ol|ul|li)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)){
+  parts.push(value.slice(cursor,match.index));
+  cursor=match.index+match[0].length;
+  const [,closing,name]=match,tag=name.toLowerCase();
+  if(tag==='li'&&!closing&&lists.at(-1)?.ordered){
+   lists.at(-1)!.items.push({index:parts.length,value:integerAttribute(match[0],'value')});
+   parts.push('');
+  }else{
+   parts.push(match[0]);
+   if(tag!=='li'){
+    if(closing)finish(lists.pop());
+    else lists.push({ordered:tag==='ol',start:integerAttribute(match[0],'start'),step:/\sreversed(?=[\s=>])/i.test(match[0])?-1:1,items:[]});
+   }
+  }
+ }
+ while(lists.length)finish(lists.pop());
+ parts.push(value.slice(cursor));
+ return parts.join('');
+}
+// Title and preview projections retain ordered markers in the source.
 function projectNoteText(value:string,preserveListNumbers:boolean):string{
  const html=value
   .replace(/<img\b[^>]*alt=["']([^"']*)["'][^>]*>/gis,'[图片：$1]')
