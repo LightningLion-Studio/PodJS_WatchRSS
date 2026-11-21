@@ -1621,7 +1621,7 @@ test('DYFAV FIX1 Home click enters through the real cover and restores playback 
   const pause = video.pause;
   video.pause = async () => (current = { ...current, state: 'paused' });
   try {
-    await handle.shellPlaying(false);
+    await handle.shellPlaying!(false);
   } finally {
     video.pause = pause;
   }
@@ -1673,6 +1673,6 @@ test('DYFAV FIX1 pending production reload cannot publish after actions open and
   await f.settle();
   release();
   await f.settle();
-  expect((await f.activeRoute().player!.shellState()).state).toBe('playing');
+  expect((await f.activeRoute().player!.shellState!()).state).toBe('playing');
   expect(prepares.map(value => value.url)).toEqual([f.a.playUrl, f.a.playUrl]);
 });
