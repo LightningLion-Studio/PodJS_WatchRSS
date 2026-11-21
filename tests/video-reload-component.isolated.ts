@@ -679,6 +679,11 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
     const [key,url,,,,,,limit]=args;
     registered.push({key,url,limit});return hostOperation({uri});
    },
+   stage:(...args:Parameters<typeof mediaPrefixCache.stage>)=>{
+    const [key,url,,,,,,limit]=args;
+    registered.push({key,url,limit});return hostOperation({uri,stageId:'fixture'});
+   },
+   commit:()=>hostOperation({uri}),discard:()=>hostOperation(undefined),
    window:()=>hostOperation(undefined),remove:()=>hostOperation(undefined),
   },
  }));

@@ -29,7 +29,7 @@ export interface DouyinPrefetchHooks {
 }
 type PlaybackBinding={url:string;item:DouyinItem};
 type ReloadBinding=PlaybackBinding&{commit:()=>Promise<void>;discard:()=>Promise<void>;settled:Promise<void>};
-type RegisteredBinding={uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number;staged?:boolean};
+type RegisteredBinding={uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number};
 
 /** Business window/consent only. Range transport, storage bounds and cancellation live in PodJS. */
 export function createHostDouyinPreload(client:DouyinClient,stock?:import('./stock.ts').DouyinStockService) {
@@ -80,28 +80,38 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   registerVideoResolution(url,takeVideoResolution(item.playUrl,'douyin'));
   remember(url,item);
  };
- const stageBinding=(binding:PlaybackBinding,current:()=>boolean,previousUri:string|undefined,previous?:RegisteredBinding,record?:RegisteredBinding):ReloadBinding=>{
+ const stageBinding=(binding:PlaybackBinding,current:()=>boolean,previousUri:string|undefined,previous?:RegisteredBinding,record?:RegisteredBinding,stageId?:string):ReloadBinding=>{
   const id=binding.item.awemeId;
-  const ownsCandidate=record!==undefined&&binding.url!==previousUri&&binding.url!==previous?.uri&&!sources.get(binding.url);
   let open=true,finish!:()=>void;
   const settled=new Promise<void>(resolve=>finish=resolve);
   return {...binding,settled,
-   commit(){
+   async commit(){
     if(!open||!current())throw cancelled();
+    if(stageId){
+     const committed=await mediaPrefixCache.commit(stageId).result;
+     if(committed.uri!==binding.url)throw new Error('Cache commit returned a different URI');
+    }
     open=false;
-    const old=new Set([previousUri,previous?.uri].filter((uri):uri is string=>
-      !!uri&&uri!==binding.url&&uri.startsWith('podjs-media-cache:')));
-    for(const uri of old)forget(id,uri);
-    if(record)publishBinding(binding,record);
-    else remember(binding.url,binding.item);
-    // The route publishes synchronously with commit and yields only for cleanup.
-    return Promise.resolve().then(async()=>{for(const uri of old)await releaseBinding(uri);}).finally(finish);
+    try{
+     const old=new Set([previousUri,previous?.uri].filter((uri):uri is string=>
+       !!uri&&uri!==binding.url&&uri.startsWith('podjs-media-cache:')));
+     for(const uri of old)forget(id,uri);
+     if(!current())throw cancelled();
+     if(record)publishBinding(binding,record);
+     else{
+      remember(binding.url,binding.item);
+      // A direct fallback has no staged native entry to replace its old URI.
+      for(const uri of old)await releaseBinding(uri);
+     }
+    }finally{finish();}
    },
    async discard(){
     if(!open)return;
     open=false;
     try{
-     if(ownsCandidate&&!sources.get(binding.url)&&registered.get(id)?.uri!==binding.url)await releaseBinding(binding.url);
+     if(stageId)await mediaPrefixCache.discard(stageId).result;
+    }catch{
+     appLogger.w('DouyinProxy','cache stage discard failed');
     }finally{finish();}
    },
   };
@@ -147,28 +157,26 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
     }
    }
    const expires=Math.min(expiresAtMs??Infinity,...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
-   const replacesUri=reload?undefined:previous?.uri??'';
-   let uri:string;
+   let uri:string,stageId:string|undefined;
    try{
-    ({uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,expiresAtMs,audioUrl,DOUYIN_MAX_SHORT_EDGE,replacesUri).result);
+    if(reload){
+     const replacesUri=reload.previousUri?.startsWith('podjs-media-cache:')?reload.previousUri:previous?.uri??'';
+     ({uri,stageId}=await mediaPrefixCache.stage(id,selected.playUrl,headers,false,mirrors,expiresAtMs,audioUrl,DOUYIN_MAX_SHORT_EDGE,replacesUri).result);
+    }else{
+     ({uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,expiresAtMs,audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result);
+    }
    }catch(error){
     const direct=reload&&current()?directBinding(selected,error,true):undefined;
     if(direct)return stageBinding(direct,current,reload?.previousUri,previous);
     throw error;
    }
    const binding={url:uri,item:selected};
-   const record={uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires,staged:!!reload};
+   const record={uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires};
    if(reload){
-    const candidate=stageBinding(binding,current,reload.previousUri,previous,record);
+    const candidate=stageBinding(binding,current,reload.previousUri,previous,record,stageId);
     if(current())return candidate;
     await candidate.discard();
     return;
-   }
-   // A committed candidate was registered without the native replacement key.
-   // Ordinary registrations must retire that predecessor explicitly.
-   if(previous?.staged&&previous.uri!==uri){
-    if(!current()){if(!sources.get(uri))await releaseBinding(uri);return;}
-    await releaseBinding(previous.uri);
    }
    if(previous&&previous.uri!==uri)forget(id,previous.uri);
    // Register is idempotent. A late reply can name the capability an active

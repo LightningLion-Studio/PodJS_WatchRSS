@@ -1,10 +1,48 @@
 import {test,expect,mock} from 'bun:test';
 import {dispatchMemoryPressure} from '@podjs/framework/memory';
+import type {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 let registrationWait:((uri:string)=>Promise<void>|undefined)|undefined;
 const result=(value:any)=>({result:value?.uri&&registrationWait?Promise.resolve(registrationWait(value.uri)).then(()=>value):Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{if(registrationFailure)throw registrationFailure;registrations.push({key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge:_maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+const stages=new Map<string,{uri:string;previous?:string}>();
+const discarded:string[]=[];
+let stageCount=0;
+const captureRegistration=(operation:'register'|'stage',key:string,url:string,headers:Record<string,string>,persistent=false,
+ alternates:readonly string[]=[],expiresAt?:number,audioUrl?:string,maxVideoShortEdge?:number,replacesUri?:string)=>{
+ if(registrationFailure)throw registrationFailure;
+ registrations.push({operation,key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}:{})});
+ return 'podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';
+};
+mock.module('@podjs/framework/media-prefix-cache',()=>({
+ localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{
+  remove:(uri:string)=>{removed.push(uri);return result({});},
+  onResult:(fn:typeof resultListener)=>{resultListener=fn;return()=>{resultListener=undefined;};},
+  register:(...args:Parameters<typeof mediaPrefixCache.register>)=>{
+   const uri=captureRegistration('register',...args),replacesUri=args[8];
+   if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);
+   return result({uri});
+  },
+  stage:(...args:Parameters<typeof mediaPrefixCache.stage>)=>{
+   const uri=captureRegistration('stage',...args),stageId=String(++stageCount);
+   stages.set(stageId,{uri,previous:args[8]});
+   return result({uri,stageId});
+  },
+  commit:(stageId:string)=>{
+   const stage=stages.get(stageId)!;stages.delete(stageId);
+   if(stage.previous&&stage.previous!==stage.uri)removed.push(stage.previous);
+   return result({uri:stage.uri});
+  },
+  discard:(stageId:string)=>{
+   const stage=stages.get(stageId);stages.delete(stageId);
+   if(stage)discarded.push(stage.uri);
+   return result({});
+  },
+  window:(items:readonly unknown[],foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},
+  stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),
+  clear:()=>{clears++;stages.clear();return result({removedBytes:0});},
+ },
+}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -422,28 +460,31 @@ test('reload registers provisionally and releases only the rejected or supersede
  const fresh={...old,playUrl:'https://fixture/fresh'};
  try{
   const base=await host.playbackResolved(old,{},()=>true);
-  removed=[];registrations=[];
+  removed=[];registrations=[];discarded.length=0;
   const rejected=await host.playbackForReload(fresh,{},()=>true,base);
-  expect(registrations[0].replacesUri).toBeUndefined();
+  expect(registrations[0]).toMatchObject({operation:'stage',replacesUri:base});
   expect(host.sourceFor(base)).toEqual(old);
   expect(host.sourceFor(rejected.url)).toBeUndefined();
   expect(removed).toEqual([]);
   await rejected.discard();
   await rejected.discard();
-  expect(removed).toEqual([rejected.url]);
+  expect(discarded).toEqual([rejected.url]);
+  expect(removed).toEqual([]);
   expect(host.sourceFor(base)).toEqual(old);
   const same=await host.playbackForReload(old,{},()=>true,base);
   expect(same.url).toBe(base);
   await same.discard();
-  expect(removed).toEqual([rejected.url]);
+  expect(discarded).toEqual([rejected.url]);
+  expect(removed).toEqual([]);
   const accepted=await host.playbackForReload(fresh,{},()=>true,base);
-  expect(registrations.at(-1).replacesUri).toBeUndefined();
+  expect(registrations.at(-1)).toMatchObject({operation:'stage',replacesUri:base});
   expect(host.sourceFor(base)).toEqual(old);
   await accepted.commit();
   await accepted.discard();
   expect(host.sourceFor(base)).toBeUndefined();
   expect(host.sourceFor(accepted.url)).toEqual(fresh);
-  expect(removed).toEqual([rejected.url,base]);
+  expect(removed).toEqual([base]);
+  expect(discarded).toEqual([rejected.url]);
  }finally{host.stop();}
 });
 
@@ -454,7 +495,7 @@ test('a late reload registration is discarded when the current route changes',as
  let current=true,release!:()=>void;
  try{
   const base=await host.playbackResolved(old,{},()=>true);
-  removed=[];registrations=[];
+  removed=[];registrations=[];discarded.length=0;
   registrationWait=()=>new Promise<void>(resolve=>release=resolve);
   const reloading=host.playbackForReload(fresh,{},()=>current,base);
   await flush();
@@ -464,7 +505,8 @@ test('a late reload registration is discarded when the current route changes',as
   release();
   await expect(reloading).rejects.toMatchObject({code:'CANCELLED'});
   expect(host.sourceFor(base)).toEqual(old);
-  expect(removed).toEqual(['podjs-media-cache://play/review-cancelled.mp4']);
+  expect(removed).toEqual([]);
+  expect(discarded).toEqual(['podjs-media-cache://play/review-cancelled.mp4']);
  }finally{registrationWait=undefined;host.stop();}
 });
 
