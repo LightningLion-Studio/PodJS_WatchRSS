@@ -1107,6 +1107,13 @@ export function createMediaRouteController(
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
+    const publish=(source:PlaybackSource)=>{
+      entry.playback=source;
+      if(dependencies.current()===entry){
+        dependencies.setPlayingSource(source);dependencies.setError('');
+        dependencies.onActivityStateChange?.();
+      }
+    };
     let staged:Awaited<ReturnType<typeof douyinPreload.playbackForReload>>|undefined;
     try{
       const previous=entry.playback;
@@ -1116,8 +1123,9 @@ export function createMediaRouteController(
         if(!item)throw new Error('Missing Douyin playback item');
         const queue=entry.queue,authorization=douyinClient.playbackAuthorizationVersion();
         let queueGeneration=queue.playbackGeneration();
-        const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
+        const sameSelection=()=>entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
           &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
+        const selected=()=>current()&&entry.playback===previous&&sameSelection();
         const previousUrl=previous.url??previous.videoUrl??'';
         const previousReadUrls=previous.douyinReadUrls??(previousUrl.startsWith('podjs-media-cache:')
           ?playbackProfile(item,previousUrl).douyinReadUrls
@@ -1139,10 +1147,35 @@ export function createMediaRouteController(
           }else url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
           if(!selected())return;
         }
-        const profile=playbackProfile(playback,url,false);
-        assertDouyinAddresses(profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])],failed);
-        next=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
-        if(mode!=='current')next.bypassCache=false;
+        const checkedSource=({item,url}:{item:DouyinItem;url:string})=>{
+          const profile=playbackProfile(item,url,false);
+          assertDouyinAddresses(profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])],failed);
+          const source=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
+          if(mode!=='current')source.bypassCache=false;
+          return source;
+        };
+        next=checkedSource({item:playback,url});
+        if(staged){
+          let saveQueue=false;
+          await staged.commit({
+            validateFallback:binding=>{next=checkedSource(binding);},
+            publish:binding=>{
+              const owned=entry.playback;
+              // Backgrounding cancels preparation. It does not undo a host commit.
+              // Leave a different selection alone while repairing any retained old URI.
+              if(owned!==previous&&(!previousUrl.startsWith('podjs-media-cache:')||
+                (owned?.url??owned?.videoUrl)!==previousUrl))return;
+              if(sameSelection()){
+                queue.refreshPrefetchItem(item.awemeId,binding.item);
+                queue.updateCurrentUrl(binding.item.playUrl);
+                saveQueue=true;
+              }
+              publish(next);
+            },
+          });
+          if(saveQueue)await queue.persist().catch(()=>appLogger.w('Douyin','reload queue save failed'));
+          return;
+        }
         entry.queue.refreshPrefetchItem(item.awemeId,playback);
         // This reload owns the metadata mutation. Continue guarding against later
         // pager changes while persistence yields, using our new generation.
@@ -1150,18 +1183,13 @@ export function createMediaRouteController(
         entry.queue.updateCurrentUrl(playback.playUrl);
         await entry.queue.persist();
         if(!selected())return;
-        if(staged){
-          await staged.commit();
-          if(!selected())return;
-        }
       }else if(entry.rssDouyinRecovery){
         const resolved=await entry.rssDouyinRecovery.reload(previous,current,mode==='detail');
         if(!resolved||!current())return;
         next=freshVideoSource(previous,resolved,positionMs);
       }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
       if(!current())return;
-      entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
-      dependencies.onActivityStateChange?.();
+      publish(next);
     }finally{await staged?.discard();}
   };
 

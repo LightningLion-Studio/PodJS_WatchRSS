@@ -28,7 +28,11 @@ export interface DouyinPrefetchHooks {
  quarantine(id:string,failure:PrefetchFailure):boolean|Promise<boolean>;
 }
 type PlaybackBinding={url:string;item:DouyinItem};
-type ReloadBinding=PlaybackBinding&{commit:()=>Promise<void>;discard:()=>Promise<void>;settled:Promise<void>};
+type ReloadPublication={
+ validateFallback:(binding:PlaybackBinding)=>void;
+ publish:(binding:PlaybackBinding)=>void;
+};
+type ReloadBinding=PlaybackBinding&{commit:(publication:ReloadPublication)=>Promise<void>;discard:()=>Promise<void>;settled:Promise<void>};
 type RegisteredBinding={uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number};
 
 /** Business window/consent only. Range transport, storage bounds and cancellation live in PodJS. */
@@ -84,35 +88,49 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   const id=binding.item.awemeId;
   let open=true,finish!:()=>void;
   const settled=new Promise<void>(resolve=>finish=resolve);
+  const discardStage=async()=>{
+   if(!stageId)return;
+   try{await mediaPrefixCache.discard(stageId).result;}
+   catch{appLogger.w('DouyinProxy','cache stage discard failed');}
+  };
   return {...binding,settled,
-   async commit(){
+   async commit(publication){
     if(!open||!current())throw cancelled();
+    let accepted=binding,acceptedRecord=record;
     if(stageId){
-     const committed=await mediaPrefixCache.commit(stageId).result;
-     if(committed.uri!==binding.url)throw new Error('Cache commit returned a different URI');
+     try{await mediaPrefixCache.commit(stageId).result;}
+     catch(error){
+      if(!current())throw cancelled();
+      const direct=directBinding(binding.item,error,true);
+      if(!direct)throw error;
+      publication.validateFallback(direct);
+      accepted=direct;
+      acceptedRecord=undefined;
+     }
     }
     open=false;
     try{
      const old=new Set([previousUri,previous?.uri].filter((uri):uri is string=>
-       !!uri&&uri!==binding.url&&uri.startsWith('podjs-media-cache:')));
+       !!uri&&uri!==accepted.url&&uri.startsWith('podjs-media-cache:')));
      for(const uri of old)forget(id,uri);
-     if(!current())throw cancelled();
-     if(record)publishBinding(binding,record);
-     else{
-      remember(binding.url,binding.item);
+     if(acceptedRecord)publishBinding(accepted,acceptedRecord);
+     else remember(accepted.url,accepted.item);
+     // A successful host receipt has already retired the old URI. Publish
+     // before releasing the per-item registration lane, even after cancellation.
+     publication.publish(accepted);
+     if(!acceptedRecord){
       // A direct fallback has no staged native entry to replace its old URI.
       for(const uri of old)await releaseBinding(uri);
      }
-    }finally{finish();}
+    }finally{
+     if(stageId&&!acceptedRecord)await discardStage();
+     finish();
+    }
    },
    async discard(){
     if(!open)return;
     open=false;
-    try{
-     if(stageId)await mediaPrefixCache.discard(stageId).result;
-    }catch{
-     appLogger.w('DouyinProxy','cache stage discard failed');
-    }finally{finish();}
+    try{await discardStage();}finally{finish();}
    },
   };
  };

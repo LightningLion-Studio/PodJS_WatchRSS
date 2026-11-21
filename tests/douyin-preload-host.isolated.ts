@@ -479,8 +479,13 @@ test('reload registers provisionally and releases only the rejected or supersede
   const accepted=await host.playbackForReload(fresh,{},()=>true,base);
   expect(registrations.at(-1)).toMatchObject({operation:'stage',replacesUri:base});
   expect(host.sourceFor(base)).toEqual(old);
-  await accepted.commit();
+  let committed:string|undefined;
+  await accepted.commit({
+   validateFallback:()=>{throw new Error('unexpected fallback');},
+   publish:binding=>{committed=binding.url;},
+  });
   await accepted.discard();
+  expect(committed).toBe(accepted.url);
   expect(host.sourceFor(base)).toBeUndefined();
   expect(host.sourceFor(accepted.url)).toEqual(fresh);
   expect(removed).toEqual([base]);
