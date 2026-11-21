@@ -45,6 +45,39 @@ test('a warm v2 round refreshes cached read admission before retrying a checkpoi
   await expect(opened!.sync()).resolves.toEqual({completionError:null});
  }finally{await opened?.close();f.db.close();}
 });
+test('CL0 watch host counts complete warm control rounds independently of indexes and body traffic',async()=>{
+ const f=await fixture(),base=f.options.transport;
+ const traffic:{category:'control'|'index'|'body';up:number;down:number}[]=[];
+ f.options.transport={async request(request){
+  const response=await base.request(request),path=new URL(request.url).pathname;
+  const category=path.includes('/bodies/v1/')&&path.includes('/objects/')?'body':
+   /\/(?:objects|state-refs|trees|commits)(?:\/|$)/.test(path)?'index':'control';
+  traffic.push({category,up:request.body?.length??0,down:response.body.length});
+  return response;
+ }};
+ const opened=await openApplicationSyncV2(f.options);
+ try{
+  expect(opened).not.toBeNull();
+  const revision=f.server.account.revision,rounds=[];
+  for(let round=1;round<=5;round++){
+   traffic.length=0;
+   expect(await opened!.sync()).toEqual({completionError:null});
+   const sum=(category:typeof traffic[number]['category'])=>{
+    const rows=traffic.filter(item=>item.category===category);
+    return {n:rows.length,up:rows.reduce((total,item)=>total+item.up,0),down:rows.reduce((total,item)=>total+item.down,0)};
+   };
+   const control=sum('control'),index=sum('index'),body=sum('body');
+   expect(control.n).toBeLessThanOrEqual(8);
+   expect(control.up).toBeLessThanOrEqual(16*1024);
+   expect(control.down).toBeLessThanOrEqual(64*1024);
+   expect(index).toEqual({n:0,up:0,down:0});
+   expect(body).toEqual({n:0,up:0,down:0});
+   expect(f.server.account.revision).toBe(revision);
+   rounds.push({round,control,index,body});
+  }
+  console.info('D2 CL0 synthetic watch fixture',JSON.stringify(rounds));
+ }finally{await opened?.close();f.db.close();}
+});
 test('P6 product session rejects old UI calls after logout',async()=>{const f=await fixture();try{const opened=await openApplicationSyncV2(f.options);await opened!.close();await expect(opened!.ui.syncNow()).rejects.toThrow('feature_disabled');}finally{f.db.close();}});
 
 test('P6-1 sealed reads resolve exact header version; missing key never decrypts',async()=>{

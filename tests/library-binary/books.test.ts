@@ -299,7 +299,7 @@ test('guarded BT-R watch source queries durable chunks after a disconnect and co
     if(r.phase==='begin'){
      const incoming=params as unknown as BeginPayload;
      expect(r.jobId).toBe(job);expect(incoming.direction).toBe('watchToPhone');
-     if(epoch===1){description=incoming;plan=r.planDigest!;}else{expect(incoming.intent).toBe('resume');expect(r.planDigest).toBe(plan);}
+     if(epoch===1){description=incoming;plan=r.planDigest!;}else{expect(incoming.intent).toBe('resume');expect(r.planDigest).toBe(plan!);}
      await reply({disposition:epoch===1?'CREATED':'RESUMED',selectionDigest:incoming.selectionDigest,state:epoch===1?'PLANNING':'TRANSFERRING',expiresAtMillis:ttl,nextManifestPage:pageCount,completion:null});
     }else if(r.phase==='manifestPage'){
      expect(epoch).toBe(1);
