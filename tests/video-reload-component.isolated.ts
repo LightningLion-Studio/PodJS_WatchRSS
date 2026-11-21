@@ -65,11 +65,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:string)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:string,requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeExpired?:boolean)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:string)=>{retries++;if(resolver)await resolver(p,current,mode);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:string,fresh?:boolean,reuse?:boolean,nativeExpired?:boolean)=>{retries++;if(resolver)await resolver(p,current,mode,fresh,reuse,nativeExpired);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
  return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
@@ -380,6 +380,22 @@ test('NOPLAY buffered-stall recovery keeps the two-attempt budget and an explici
   if(i<2)expect((await f.diagnostics()).reloadCount).toBe(i+1);
  }
  expect(f.text()).toContain('播放失败');await tick(60000);expect(retries).toBe(2);
+});
+
+for(const nativeFailure of [false,true])test(`DYFAV FIX4 a rejected detail binding retries the feed with the original expiry provenance (${nativeFailure})`,async()=>{
+ const source={platform:'douyin' as const,immersive:true,awemeId:'after-registration',url:'https://fixture.invalid/old',
+  title:'fixture',expiresAtMs:nativeFailure?undefined:fakeNow-1};
+ const attempts:Array<{mode?:string;fresh?:boolean;native?:boolean}>=[];
+ nextError={code:nativeFailure?'source_expired':'prepare_failed'};
+ const f=reloadMount(source,async(position,guard,mode,fresh,_reuse,native)=>{
+  attempts.push({mode,fresh,native});
+  if(mode==='detail')throw {code:'source_expired'};
+  if(guard())f.publish({...source,url:'https://fixture.invalid/fresh',expiresAtMs:undefined,resumePositionMs:position});
+ });
+ await flush();await tick(351);await flush();
+ expect(attempts).toEqual([{mode:'detail',fresh:true,native:nativeFailure},{mode:'feed',fresh:true,native:nativeFailure}]);
+ expect(prepares.map(value=>value.url)).toEqual([source.url,'https://fixture.invalid/fresh']);
+ expect(current.state).toBe('playing');
 });
 
 test('NOPLAY an automatic Douyin resolution timeout uses the remaining bounded retry',async()=>{

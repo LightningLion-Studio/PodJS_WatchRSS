@@ -53,7 +53,7 @@ const MAX_AUTOMATIC_RESOURCE_RETRIES=2;
 type ExtendedVideoState = VideoState & { sessionId?:string; volume?: number; buffered?: boolean; isBuffering?: boolean };
 const liveFrame = (state:VideoState|null|undefined) => state?.hasRenderedFirstFrame===true&&state.hasCachedFirstFrame!==true;
 
-export interface PlaybackSource { bypassCache?:boolean; expiresAtMs?:number; preparationError?:unknown; releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; savedPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; maxVideoShortEdge?:number; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; /** Detail panel metadata already held by the source; omitted fields are not shown. */ author?: string; description?: string; resumePositionMs?: number; resumePaused?: boolean; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
+export interface PlaybackSource { douyinReadUrls?:readonly string[]; bypassCache?:boolean; expiresAtMs?:number; preparationError?:unknown; releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; savedPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; maxVideoShortEdge?:number; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; /** Detail panel metadata already held by the source; omitted fields are not shown. */ author?: string; description?: string; resumePositionMs?: number; resumePaused?: boolean; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
 export interface VideoPlayerHandle { reloadAttempts?():number; shellState():Promise<VideoState>; shellPlaying(playing:boolean):Promise<void>; invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; gestureRotation():number; canSwipeBack(): boolean; /** Right-to-left drag that opens the detail panel; begin() returns false when it cannot open. */ sideSwipe: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel(): void } }
 
 const LOOP_LABELS: Record<VideoLoopMode, string> = { off: "不循环", single: "单视频循环", next: "自动下一个" };
@@ -83,7 +83,7 @@ function PlayerTimeline(props: {positionMs: number; durationMs: number}) {
   </>;
 }
 
-export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; coveredByActions?: boolean; offset: number; offsetVector?: {x:number;y:number}; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onProgress?: (positionMs: number, durationMs: number) => void; onDouyinExit?: (source: PlaybackSource, positionMs: number, playing: boolean) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onRejectAdjacent?:(source:DouyinPreparedSource,mirrorIndex?:number)=>void; onAdjacentKey?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>; onBoundaryRelease?:(direction:"next"|"previous")=>void; canSelectTarget?:(direction:"next"|"previous")=>boolean; onSelectTarget?:(direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onReload?:(positionMs:number,current:()=>boolean,mode?:DouyinReloadMode,requireFreshAddress?:boolean,reuseSavedSource?:boolean)=>void|Promise<void>; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
+export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; coveredByActions?: boolean; offset: number; offsetVector?: {x:number;y:number}; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onProgress?: (positionMs: number, durationMs: number) => void; onDouyinExit?: (source: PlaybackSource, positionMs: number, playing: boolean) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onRejectAdjacent?:(source:DouyinPreparedSource,mirrorIndex?:number)=>void; onAdjacentKey?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>; onBoundaryRelease?:(direction:"next"|"previous")=>void; canSelectTarget?:(direction:"next"|"previous")=>boolean; onSelectTarget?:(direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onReload?:(positionMs:number,current:()=>boolean,mode?:DouyinReloadMode,requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeSourceExpired?:boolean)=>void|Promise<void>; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
   const network=useNetworkRecovery();
   const renderDiagnostics=videoOptEnabled('metrics');
   const [networkWaiting,setNetworkWaiting]=createSignal(false);
@@ -147,7 +147,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let reloadTimeout:HostOperation<void>|undefined;
   let reloadResume:number|undefined;
   let freshPrepare=false,needsReload=false;
-  let reloadReason:{source:PlaybackSource;reason:DouyinReloadReason}|undefined;
+  let reloadReason:{source:PlaybackSource;reason:DouyinReloadReason;nativeExpired:boolean}|undefined;
   let resumeAutoplay:boolean|undefined = props.source.resumePaused ? false : undefined;
   const [routeResumeSource, setRouteResumeSource] = createSignal<PlaybackSource>();
   const resumingRoute = () => props.source.resumePositionMs !== undefined || routeResumeSource() === props.source;
@@ -508,15 +508,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(from.previewOnly)videoSessionOwner=sessionOwner;
     if(videoSessionOwner!==sessionOwner)return;
     const douyin=douyinPlayback();
-    const previousReason=reloadReason?.source===from?reloadReason.reason:undefined;
+    const recorded=reloadReason?.source===from?reloadReason:undefined;
+    const nativeExpired=recorded?.nativeExpired===true||playerFailureCode(cause)==='source_expired';
     const input={
-      cause:cause??from.preparationError,previousReason,expired:videoSourceExpired(from),firstFrame:recoveredSources.has(from)||firstFrame(),
+      cause:cause??from.preparationError,previousReason:recorded?.reason,expired:videoSourceExpired(from),firstFrame:recoveredSources.has(from)||firstFrame(),
       saved:from.savedPlayback,manual:userInitiated,endpoint:fallback,
       retryCurrent:from.immersive===true&&playerFailureCode(cause)==='timeout'&&!fallback,
     };
     let plan=douyinReloadPlan(input);
     let mode=douyin?plan.mode:'feed';
-    if(douyin)reloadReason={source:from,reason:plan.reason};
+    if(douyin)reloadReason={source:from,reason:plan.reason,nativeExpired};
     if(!userInitiated&&!resume&&!fallback&&manualDetailSource===from&&!plan.requireFreshAddress&&!plan.reuseSavedSource){
       if(!error())failed(cause,true,'recovery');
       return;
@@ -546,10 +547,10 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(douyin&&!plan.requireFreshAddress&&videoSourceExpired(from)){
         plan=douyinReloadPlan({...input,expired:true});
         mode=plan.mode;
-        reloadReason={source:from,reason:plan.reason};
+        reloadReason={source:from,reason:plan.reason,nativeExpired};
         if(mode==='detail')manualDetailSource=from;
       }
-      await Promise.race([Promise.resolve(props.onReload?.(position,current,mode,douyin&&plan.requireFreshAddress,douyin&&plan.reuseSavedSource)),resolutionTimeout.result.then(()=>{throw Object.assign(new Error('Video resolution timed out'),{code:'timeout'});})]);
+      await Promise.race([Promise.resolve(props.onReload?.(position,current,mode,douyin&&plan.requireFreshAddress,douyin&&plan.reuseSavedSource,douyin&&nativeExpired)),resolutionTimeout.result.then(()=>{throw Object.assign(new Error('Video resolution timed out'),{code:'timeout'});})]);
       resolutionTimeout.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;
       if(!current())return;
       if(props.source===from)throw Object.assign(new Error('Video resolution did not publish a source'),{code:'prepare_failed'});
@@ -564,9 +565,10 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(current()){
         reloadPolicy.finish(ticket);
         const fault=playerFailureCode(value);
-        if(douyin&&resolutionTimeout&&(!fallback||resume)){
-          if(mode==='detail'&&(fault==='timeout'||douyinDetailRestricted(value)))nextEndpoint='feed';
+        if(douyin&&resolutionTimeout&&(!fallback||resume)&&(manual||reloadPolicy.hasAutomaticAttempt)){
+          if(mode==='detail'&&(fault==='timeout'||fault==='source_expired'||douyinDetailRestricted(value)))nextEndpoint='feed';
           else if(userInitiated&&mode==='feed'&&['not_ready','timeout','prepare_failed','source_expired'].includes(fault))nextEndpoint='detail';
+          else if(!manual&&mode==='feed'&&fault==='source_expired')nextEndpoint='feed';
         }
         if(!nextEndpoint){
           setReconnecting(false);
@@ -1176,7 +1178,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if (resumed && props.onReload && resourceRetry?.source !== props.source && manualDetailSource !== props.source && untrack(() => videoSourceExpired(props.source))) {
       videoSessionOwner = sessionOwner;
-      void reload(false, {code: 'source_expired'});
+      void reload(false);
       return;
     }
     if (!active) {

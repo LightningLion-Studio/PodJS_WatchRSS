@@ -60,6 +60,7 @@ export class VideoReloadPolicy {
   finish(ticket:ReloadTicket){if(this.current(ticket))this.running=false;}
   cancel(){if(this.running&&this.automatic&&!this.requestStarted)this.attempts=Math.max(0,this.attempts-1);this.revision++;this.running=false;}
   get busy(){return this.running;}
+  get hasAutomaticAttempt(){return this.attempts<2;}
   observe(generation:number,positionMs:number,playing:boolean){
     if(!playing){this.progress=undefined;return;}
     if(!this.progress||this.progress.generation!==generation||positionMs<this.progress.positionMs)this.progress={generation,positionMs};

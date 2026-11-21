@@ -2,7 +2,7 @@ import {douyinPlaybackAddresses} from '../../douyin/media-expiry.ts';
 import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
-import {reloadDouyinPlayback,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
+import {assertDouyinAddresses,failedDouyinAddresses,reloadDouyinPlayback,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {videoSourceExpired} from '../video-reload.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
@@ -378,16 +378,17 @@ export function createMediaRouteController(
     const override=douyinDebug.playbackUrl(item.awemeId,item.playUrl,forward);
     return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers,intent):item.playUrl;
   };
-  const playbackProfile=(item:DouyinItem,url?:string)=>{
-    const registered=url?douyinPreload.sourceFor?.(url):undefined;
+  const playbackProfile=(item:DouyinItem,url?:string,useSourceCache=true)=>{
+    const registered=url&&useSourceCache?douyinPreload.sourceFor?.(url):undefined;
     const rendition=registered?.awemeId===item.awemeId?registered:item;
     // A verified complete file contains its own audio track. Even if the
     // metadata LRU has advanced, never attach a remote DASH companion to it.
     const complete=url?.startsWith('file:');
     const profile=douyinDecoderProfile(rendition,complete?url:rendition.playUrl);
-    const expiresAtMs=url?.startsWith('podjs-media-cache:')?douyinPlaybackAddresses(rendition).expiresAtMs:undefined;
+    const cache=url?.startsWith('podjs-media-cache:')?douyinPlaybackAddresses(rendition):undefined;
+    const douyinReadUrls=cache?[rendition.playUrl,...cache.mirrors,...(cache.audioUrl?[cache.audioUrl]:[])]:undefined;
     return {videoMime:profile.videoMime,videoWidth:profile.videoWidth,videoHeight:profile.videoHeight,
-      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl:complete?undefined:profile.audioUrl,expiresAtMs};
+      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl:complete?undefined:profile.audioUrl,expiresAtMs:cache?.expiresAtMs,douyinReadUrls};
   };
   // Only the verified local first item owns a hidden decoder on the title page.
   // Nothing plays before the user enters; navigation adopts this exact pool.
@@ -777,7 +778,7 @@ export function createMediaRouteController(
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
     let selected:PlaybackSource={...old,startupSeq:undefined,releaseStartupPreview:undefined,recoveryDeadlineMs:undefined,resumePositionMs:0,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
-      previewFrame:undefined,url:undefined,videoUrl:undefined,expiresAtMs:undefined,previewOnly:true,preparationError:undefined,
+      previewFrame:undefined,url:undefined,videoUrl:undefined,expiresAtMs:undefined,douyinReadUrls:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
     const current=()=>dependencies.current()===entry&&entry.queue===queue&&entry.playback===selected&&queue.itemAtOffset()?.awemeId===item.awemeId;
@@ -1141,7 +1142,7 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,requestedMode:DouyinReloadMode='feed',requireFreshAddress=false,reuseSavedSource=false)=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,requestedMode:DouyinReloadMode='feed',requireFreshAddress=false,reuseSavedSource=false,nativeSourceExpired=requireFreshAddress)=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
@@ -1161,34 +1162,39 @@ export function createMediaRouteController(
       const selected=()=>current()&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId&&queue.playbackGeneration()===queueGeneration;
       const register=mode==='detail'||previous.previewOnly||(mode==='feed'&&freshAddress);
       const previousUrl=previous.url??previous.videoUrl??'';
-      const previousItem=freshAddress&&(!previousUrl||previousUrl.startsWith('podjs-media-cache:'))
-        ?douyinPreload.sourceFor?.(previousUrl)??item:undefined;
-      const previousAddresses=previousItem
-        ?{playUrl:previousItem.playUrl,...douyinPlaybackAddresses(previousItem)}
-        :{playUrl:previousUrl,audioUrl:previous.audioUrl,mirrors:[]};
-      const previousUrls=[previousAddresses.playUrl,...previousAddresses.mirrors];
+      const previousReadUrls=previous.douyinReadUrls
+        ?? (previousUrl.startsWith('podjs-media-cache:')
+          ? playbackProfile(item,previousUrl).douyinReadUrls
+          : [previousUrl,...(previous.audioUrl?[previous.audioUrl]:[])].filter(Boolean));
+      const failed=freshAddress?failedDouyinAddresses(previousReadUrls??[],nativeSourceExpired):[];
       if(mode!=='detail'&&!freshAddress&&!previous.previewOnly)await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode,previousUrls,freshAddress,{previousAddresses,includeMirrors:register})).catch(async error=>{
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,mode)).catch(async error=>{
         if(mode==='detail'||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
       });
       if(!resolved||!selected())return;
-      const playback = mode === 'detail' && previous.savedPlayback ? preserveSelectedDouyinItem(resolved.item) : resolved.item;
+      let playback=register?preserveSelectedDouyinItem(resolved.item):resolved.item;
       let url=playback.playUrl;
       if(register){
-        const {expiresAtMs}=douyinPlaybackAddresses(playback);
-        if(previous.savedPlayback && expiresAtMs!==undefined && expiresAtMs<=Date.now()){
-          throw Object.assign(new Error('Expired saved playback address'),{code:'source_expired'});
-        }
-        await douyinPreload.invalidate(item.awemeId);
+        // A strict candidate must not invalidate the selected source before
+        // the effective playback addresses are known.
+        if(!freshAddress)await douyinPreload.invalidate(item.awemeId);
         if(!selected())return;
-        url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
+        if(douyinPreload.playbackForReload){
+          const binding=await douyinPreload.playbackForReload(playback,resolved.headers,selected);
+          url=binding.url;
+          playback=binding.item;
+        }else{
+          url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
+        }
         if(!selected())return;
       }
-      next=freshVideoSource(previous,{url,...playbackProfile(playback,url),headers:resolved.headers},positionMs);
-      if(videoSourceExpired(next))throw Object.assign(new Error('Expired playback address'),{code:'source_expired'});
+      const profile=playbackProfile(playback,url,false);
+      const readUrls=profile.douyinReadUrls??[url,...(profile.audioUrl?[profile.audioUrl]:[])];
+      assertDouyinAddresses(readUrls,failed);
+      next=freshVideoSource(previous,{url,...profile,headers:resolved.headers},positionMs);
       if(register)next.bypassCache=false;
       entry.queue.refreshPrefetchItem(item.awemeId,playback);
       // This reload owns the metadata mutation. Continue guarding against later
@@ -1203,7 +1209,6 @@ export function createMediaRouteController(
       next=freshVideoSource(previous,resolved,positionMs);
     }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
     if(!current())return;
-    if(entry.queue&&videoSourceExpired(next))throw Object.assign(new Error('Expired playback address'),{code:'source_expired'});
     entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
     dependencies.onActivityStateChange?.();
   };

@@ -60,7 +60,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   return ready?.uri;
  };
  const optionalCache=async<T>(work:()=>Promise<T>):Promise<T|undefined>=>{try{return await work();}catch(error){if(!douyinCacheUnavailable(error))throw error;appLogger.w('DouyinProxy','optional cache unavailable');return undefined;}};
- const pending=new Map<string,Promise<string|undefined>>();
+ const pending=new Map<string,Promise<{url:string;item:DouyinItem}|undefined>>();
  const forget=(id:string,uri:string)=>{
   sources.delete(uri);
   if(registered.get(id)?.uri===uri)registered.delete(id);
@@ -77,14 +77,14 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const {audioUrl,mirrors,expiresAtMs}=douyinPlaybackAddresses(selected);
    const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort()),previous=registered.get(id);
    if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&Date.now()<previous.expires){
-    if(previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors))return remember(previous.uri,selected);
+    if(previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors))return {url:remember(previous.uri,selected),item:selected};
     if(speculative){
      // Changing the preferred tier for a future prepare cannot revoke a valid
      // capability that a current or warming player may already be reading.
      const variant=selected.variants?.find(v=>v.playUrl===previous.playUrl);
      if(variant&&selectPreferredDouyinVariant([variant])){
       const existing={...selected,playUrl:previous.playUrl};
-      if(previous.audioUrl===douyinPlaybackAudio(existing)&&sameMirrors(previous.mirrors,douyinPlaybackMirrors(existing)))return remember(previous.uri,existing);
+      if(previous.audioUrl===douyinPlaybackAudio(existing)&&sameMirrors(previous.mirrors,douyinPlaybackMirrors(existing)))return {url:remember(previous.uri,existing),item:existing};
      }
     }
    }
@@ -95,7 +95,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    // player already holds. Only explicit invalidation may revoke that URI.
    if(!current())return;
    registered.delete(id);registered.set(id,{uri,playUrl:selected.playUrl,audioUrl,mirrors,authorization,headersKey,expires});
-   registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return remember(uri,selected);
+   registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return {url:remember(uri,selected),item:selected};
   })();
   pending.set(id,work);
   void work.finally(()=>{if(pending.get(id)===work)pending.delete(id);}).catch(()=>{});
@@ -173,7 +173,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(!stocked&&douyinMediaExpiry(preserveSelectedDouyinItem(item).playUrl,Date.now())<=Date.now())continue;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
    if(!result.ok){published.delete(item.awemeId);prepared.delete(item.awemeId);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
-   const uri=stocked??await register(result.data,headers,()=>own===generation,true);if(own!==generation)return;if(!uri)continue;
+   const uri=stocked??(await register(result.data,headers,()=>own===generation,true))?.url;if(own!==generation)return;if(!uri)continue;
    const source=sources.get(uri)??result.data;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(source.variants??[]).find(v=>v.playUrl===source.playUrl)?.bitrate??0;
    if(prepareTarget(source,uri,!!stocked))unpublished++;
@@ -208,7 +208,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const item=currentPlan.items.find(value=>value.awemeId===binding.id);if(!item)return;
    const fresh=await client.resolvePlayback(binding.id,{forceRefresh:true,prefetch:!foreground(binding.id),feedItem:item,allowDetail:false});
    if(own!==generation||plan!==currentPlan||!results.current(binding)||!fresh.ok)return;
-   const headers=await headersForOwner(),uri=await register(fresh.data,headers,()=>own===generation&&plan===currentPlan&&results.current(binding));
+   const headers=await headersForOwner(),uri=(await register(fresh.data,headers,()=>own===generation&&plan===currentPlan&&results.current(binding)))?.url;
    if(!uri||own!==generation||plan!==currentPlan||!results.current(binding))return;
    currentPlan.items=currentPlan.items.map(item=>item.awemeId===binding.id?fresh.data:item);
    await currentPlan.hooks?.sourceRefreshed(binding.id,binding.uri,fresh.data,uri,headers);
@@ -243,23 +243,26 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  managedCache.registerProducer('douyin-preload',{pins:()=>new Set<string>(),async clear(){if(migrating)return;trafficStoppedUntil=0;stop();await mediaPrefixCache.clear().result;await video.clearFrames?.();kv.delete?.('watchrss.douyin.prefetch-failures');stock?.clear();}});
  client.subscribeAuth?.(state=>{if(state!=='logged-in'){trafficStoppedUntil=0;stop();}});
  const cancelled=()=>Object.assign(new Error('播放来源已更换'),{code:'CANCELLED'});
- const playbackResolved=async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,speculative=false)=>{
+ const playbackBinding=async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,speculative=false,reload=false)=>{
   try{
-   const uri=await register(item,headers,current,speculative);
+   const binding=await register(item,headers,current,speculative);
    if(!current())throw cancelled();
-   if(!uri)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
-   return uri;
+   if(!binding)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
+   return binding;
   }catch(error){
    if(!current())throw cancelled();
    const audioUrl=douyinPlaybackAudio(item);
    const urls=audioUrl?[item.playUrl,audioUrl]:[item.playUrl];
-   const expiresAtMs=douyinMediaNetworkDeadline(urls);
+   const expiresAtMs=reload?undefined:douyinMediaNetworkDeadline(urls);
    if(douyinCacheUnavailable(error)&&urls.every(directDouyinMediaUrl)&&(expiresAtMs===undefined||Date.now()<expiresAtMs)){
-    appLogger.w('DouyinProxy','cache registration unavailable; using authorized media source');return remember(item.playUrl,item);
+    appLogger.w('DouyinProxy','cache registration unavailable; using authorized media source');
+    return {url:remember(item.playUrl,item),item};
    }
    throw error;
   }
  };
+ const playbackResolved=async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,speculative=false)=>
+  (await playbackBinding(item,headers,current,speculative)).url;
  return {
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   capabilities:()=>({coverCache:true,actualFrame:true,prefixBytes:true,completeVideo:true}),
@@ -274,6 +277,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   sourceFor:(uri:string)=>sources.get(uri),
   lookup:async(id:string):Promise<string|undefined>=>optionalCache(()=>playbackLookup(id)),
   playbackResolved,
+  playbackForReload:(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>playbackBinding(item,headers,current,false,true),
   async playback(item:DouyinItem,headers:Record<string,string>,intent:'playback'|'prewarm'='playback'){
    const windowItem=()=>plan?.items.find(value=>value.awemeId===item.awemeId);
    const initial=windowItem(),current=()=>{const latest=windowItem();return latest===initial||!latest||latest.playUrl===initial?.playUrl;};
