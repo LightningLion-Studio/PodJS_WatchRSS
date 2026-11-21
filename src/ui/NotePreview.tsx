@@ -1,6 +1,6 @@
 import {wrapAtlasText} from '@podjs/framework/text-wrap';
 import {createKeyedMemo} from '@podjs/framework/keyed-memo';
-import {For,Show,createSignal,createResource,onCleanup} from 'solid-js';
+import {For,Show,createEffect,createSignal,onCleanup} from 'solid-js';
 import {View,Text,type NodeMirror} from '@pocketjs/framework/components';
 import {createGesture} from '@pocketjs/framework/gesture';
 import {createScroller} from '@pocketjs/framework/kinetics';
@@ -34,7 +34,14 @@ function rowFont(row:NoteTextRow,preset?:ReaderPreset):NoteFont {
 const wrap=(text:string,width:number,font:NoteFont)=>wrapAtlasText(text,{width,fontSlot:font.fontSlot,scale:font.scale,tracking:font.tracking,measure:s=>getOps().measureText(s,font.fontSlot)*font.scale+(font.tracking?Math.max(0,Array.from(s).length-1)*font.tracking:0)});
 function NotePreviewImage(props:{block:NoteImage;width:number;height:number;onOpen?:(path:string)=>void;onDownload?:()=>void;onSize?:(path:string,width:number,height:number)=>void;textColor:string;preset?:ReaderPreset}){
  const [failed,setFailed]=createSignal(false),[loaded,setLoaded]=createSignal(false);
- const [source]=createResource(()=>props.block.path,path=>resolveNoteImageSource(path).catch(()=>{setFailed(true);return undefined;}));
+ const [source,setSource]=createSignal<Awaited<ReturnType<typeof resolveNoteImageSource>>>();
+ createEffect(()=>{
+  const path=props.block.path;
+  let live=true;
+  onCleanup(()=>{live=false;});
+  setSource(undefined);setLoaded(false);setFailed(false);
+  void resolveNoteImageSource(path).then(value=>{if(live)setSource(value);},()=>{if(live)setFailed(true);});
+ });
  const subtitle=props.preset?presetContentFont(props.preset,'subtitle'):{fontSlot:22,scale:1,lineHeight:23};
  const muted=`${props.textColor.slice(0,7)}c2`;
  const pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;
