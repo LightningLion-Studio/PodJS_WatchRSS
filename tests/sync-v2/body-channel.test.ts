@@ -202,7 +202,8 @@ test('BC1 only the Bluetooth source publishes a missing carrier, then an empty t
   const entry={row:{...p.binding,deleted:false},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};
   const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
   const actor=(role:'receiver'|'source'|'third')=>{
-   let original=role==='third'?undefined:p.raw,installs=0;
+   let original:Uint8Array|undefined=role==='third'?undefined:p.raw;
+   let installs=0;
    const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'source-'+role,repository:{read:async()=>original,validate:async()=>{},install:async(_kind,_id,raw)=>{installs++;original=raw;}},receivedFromPeer:(binding,sha256)=>role==='receiver'?claims.received(scopeKey,binding,sha256):Promise.resolve(false),check:async()=>{}});
    return {channel,installs:()=>installs,original:()=>original};
   };

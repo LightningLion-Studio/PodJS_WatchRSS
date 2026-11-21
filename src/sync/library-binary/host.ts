@@ -125,7 +125,9 @@ export class BinaryApplicationService implements BinarySessionPort {
  }
 
  async run(r:Row,connection:SyncFrameConnection,context:SyncActionContext){
-  const n=this.sessions.get(context.session);if(!this.enabled()||!n?.account||n.running||this.v1Sessions.has(context)||!connection.detachStream)fail('AUTH_REVOKED');
+  const n=this.sessions.get(context.session);
+  if(this.ports.guardedRuntime&&!n)fail('CAPABILITY_MISMATCH');
+  if(!this.enabled()||!n?.account||n.running||this.v1Sessions.has(context)||!connection.detachStream)fail('AUTH_REVOKED');
   n.running=true;const account=n.account,watch=await this.ports.deviceId(),connectionId=n.connectionId;
   const gate=new SwitchGate(true,n.capability),reply=gate.accept(r,{identityVerified:true,accountConfirmed:true,legacyAcksDrained:true});
   const check=()=>{context.checkCancelled?.();if(!this.enabled()||n.guarded&&(this.sessions.get(context.session)!==n||n.accountEpoch!==this.ports.account.librarySessionGeneration()))fail('AUTH_REVOKED');};
