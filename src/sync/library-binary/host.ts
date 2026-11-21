@@ -1,3 +1,4 @@
+import type {SqlCancellationCheck} from '../../core/types';
 import type {NoteAssetFileIndex} from '../../notes/asset-files';
 import config from '../../../pod.config.json';
 import {noteAssetIntake} from '../../sync-v2/local-transfer-intake';
@@ -32,6 +33,7 @@ export interface BinaryApplicationPorts {
  /** Presence requires a guarded proposal for every B2 connection. */
  guardedRuntime?:()=>Promise<boolean>;
  assetIndex?:NoteAssetFileIndex;
+ sessionTransaction?:(context:SyncActionContext,statements:Parameters<BinaryStore['db']['transaction']>[0])=>Promise<number[]>;
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  books?:BinaryBookFiles;
@@ -125,18 +127,26 @@ export class BinaryApplicationService implements BinarySessionPort {
   const gate=new SwitchGate(true,n.capability),reply=gate.accept(r,{identityVerified:true,accountConfirmed:true,legacyAcksDrained:true});
   const check=()=>{context.checkCancelled?.();if(!this.enabled()||n.guarded&&(this.sessions.get(context.session)!==n||n.accountEpoch!==this.ports.account.librarySessionGeneration()))fail('AUTH_REVOKED');};
   const authorize=<T>(run:()=>Promise<T>)=>this.ports.account.withLibraryAccount(account,async()=>{check();return run();});
+  const intake=this.ports.intake,sessionTransaction=this.ports.sessionTransaction;
+  if(n.guarded&&(!intake||!sessionTransaction||!this.ports.guardedTransaction||!this.ports.assetIndex))fail('CAPABILITY_MISMATCH');
+  const stamp=async()=>await intake!(account,watch,async protect=>{
+   if(!protect.guardedStamp)fail('BUSINESS_REJECTED');
+   return protect.guardedStamp();
+  });
+  const initial=n.guarded?await authorize(stamp):undefined;
   await authorize(()=>connection.writeFrame(reply));gate.responseFullyWritten();
   const accountScope=D('wrss.library-resume.v1/account',[account.backendBaseUrl,account.userId]);
   const scope=D('wrss.library-binary.v2/storage',[accountScope,n.peer,watch]);
   let owner:LibraryBinaryConnection;
-  const work=()=>{check();owner?.workUnit();};
-  const intake=this.ports.intake;
+  const work:SqlCancellationCheck=Object.assign(()=>{check();owner?.commitCheck();owner?.workUnit();},{
+   onCancel:(cancel:()=>void)=>owner?.commitCheck.onCancel?.(cancel)??context.onCancel?.(cancel)??(()=>{}),
+  });
   const write:import('../../sync-v2/local-transfer-intake').BoundLocalTransferIntake|undefined=intake?apply=>intake(account,watch,apply):undefined;
   const protectAsset=write?noteAssetIntake(write,2,n.peer,work):undefined;
   const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work,write):undefined;
   const fileWork=this.ports.bookWork?.(work),bookFiles=fileWork?.files??this.ports.books;
   const books=bookFiles&&this.ports.library?new BinaryBooks(this.ports.store,async()=>(await this.ports.library!.repository()).books,bookFiles,this.ports.chunks,work,this.ports.bookExcluded,write):undefined;
-  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined,this.ports.assetIndex);
+  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds,n.books?books:undefined,n.guarded?this.ports.assetIndex:undefined);
   await authorize(()=>this.ports.store.exclusive(async()=>{
    await this.ports.store.collect(scope,async job=>{
     await this.ports.chunks.collect(D('wrss.library-binary.v2/native-scope',[scope,job.jobId]),false);
@@ -146,7 +156,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   }));
   const stream=connection.detachStream() as FileStream;
   let native:NativeFramePort|undefined;
-  if(n.books&&stream.claimBinary)try{await authorize(async()=>{
+  if((n.books||n.guarded)&&stream.claimBinary)try{await authorize(async()=>{
    await stream.claimBinary!();
    native=await stream.openFramed?.();
   });}
@@ -160,6 +170,7 @@ export class BinaryApplicationService implements BinarySessionPort {
     }};
     return protectAsset({cursor:job.jobId+':'+object.objectId,logicalId:object.businessId,body},apply);
    }:undefined,
+   ...(initial?{guarded:{accountAnchor:initial.anchor,stamp,transaction:statements=>sessionTransaction!({...context,checkCancelled:owner.commitCheck,onCancel:owner.commitCheck.onCancel},statements)}}:{}),
    stopLocalWork:fileWork?.stop,guardedTransaction:this.ports.guardedTransaction,durableTransaction:this.ports.durableTransaction,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(stream,this.ports.now,undefined,native));

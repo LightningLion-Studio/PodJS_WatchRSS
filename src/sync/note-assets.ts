@@ -1,4 +1,5 @@
-import type {NoteAssetFileIndex} from '../notes/asset-files';
+import {noteAssetVersionPath,type NoteAssetFileIndex} from '../notes/asset-files';
+import type {SqlCancellationCheck} from '../core/types';
 import {digest} from '../sync-v2/protocol';
 import type {NoteAssetIntake} from '../sync-v2/local-transfer-intake';
 import {retainAssetConflict} from '../notes/asset-conflict';
@@ -38,7 +39,7 @@ export class NoteAssetReceiver {
   for(const r of rows){try{const path=this.index?await this.index.path(r.storageKey):'notes/assets/'+r.storageKey;const stat=await this.files.stat(path);if(!stat.file||stat.size!==r.size)continue;const hash=await this.files.hash(path);const after=await this.files.stat(path);if(after.file&&after.size===r.size&&(stat.modified===undefined||after.modified===stat.modified)&&hash.size===r.size&&hash.sha256.toLowerCase()===r.sha256)verified.push(r);}catch{/* Missing or concurrently removed files are sent again. */}}
   return verified;
  }
- apply(request:JsonObject,intake?:NoteAssetIntake,check?:()=>void,session:object=this):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request,intake,check,session));this.queue=job.catch(()=>{});return job;}
+ apply(request:JsonObject,intake?:NoteAssetIntake,check?:SqlCancellationCheck,session:object=this):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request,intake,check,session));this.queue=job.catch(()=>{});return job;}
  closeSession(session:object):Promise<void>{
   const job=this.queue.then(async()=>{
    const entries=this.staged.get(session);this.staged.delete(session);
@@ -46,7 +47,7 @@ export class NoteAssetReceiver {
   });
   this.queue=job.catch(()=>{});return job;
  }
- private async receive(request:JsonObject,intake:NoteAssetIntake|undefined,check:(()=>void)|undefined,session:object):Promise<JsonObject>{
+ private async receive(request:JsonObject,intake:NoteAssetIntake|undefined,check:SqlCancellationCheck|undefined,session:object):Promise<JsonObject>{
   if(wireFields.optInt(request,'version')!==1)throw new Error('不支持的备忘录图片同步版本');
   const key=required(request,'storageKey');if(key.length<1||key.length>160||!/^[A-Za-z0-9]/.test(key)||/[^A-Za-z0-9._-]/.test(key))throw new Error('备忘录图片文件名无效');
   const sha256=required(request,'sha256').toLowerCase();if(sha256.length!==64||!/^[0-9a-f]{64}$/.test(sha256))throw new Error('备忘录图片校验值无效');
@@ -124,11 +125,22 @@ export class NoteAssetReceiver {
    written+=bytes;if(value.size!==offset+written)throw new Error('备忘录图片写入不完整');at+=piece.length;
   }while(at<data.length);
   if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==sha256)throw new Error('备忘录图片校验失败');
-   if(state)state.final={dataHash:digest(data),rejected:false};
    await publish(part,actual.size,async()=>{
    check?.();
+   if(state&&this.index){
+    const previous=await this.index.version(key),current=previous?noteAssetVersionPath(key,previous.sha256):target;
+    if((await this.files.stat(current)).file&&(await this.files.hash(current)).sha256!==sha256){
+     check?.();await retainAssetConflict(this.files,part,key,sha256,actual.size,null);throw Error('note_asset_conflict');
+    }
+    const candidate=noteAssetVersionPath(key,sha256);
+    check?.();await this.files.commit(part,candidate,actual.size,sha256,null);
+    check?.();await this.index.commit(key,previous,actual,check);
+    return;
+   }
    try{await this.files.commit(part,target,actual.size,sha256,null);}catch(error){if(!String(error).includes('file_target_changed'))throw error;check?.();await retainAssetConflict(this.files,part,key,sha256,actual.size,null);throw Error('note_asset_conflict');}
-  });}
+  });
+   if(state)state.final={dataHash:digest(data),rejected:false};
+  }
   return result(complete);
  }
 }

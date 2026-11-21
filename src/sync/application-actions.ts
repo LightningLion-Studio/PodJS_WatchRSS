@@ -28,8 +28,8 @@ export function createApplicationActionHandler(ports:{domainVectors?:DomainVecto
    return {success:true,action:ACTION_OPEN_PAIRING,opened};
   }
   try{
+   const check=context?.checkCancelled&&Object.assign(()=>context.checkCancelled!(),{onCancel:context.onCancel});
    if(request.action==='syncBooks'&&ports.books){
-    const check=context?.checkCancelled&&Object.assign(()=>context.checkCancelled!(),{onCancel:context.onCancel});
     return await ports.books.apply(request,context?.session??fallbackSession,context?.afterAppliedAck,check);
    }
    if(request.action==='ping')return {success:true,action:'pong',nonce:typeof request.nonce==='string'?request.nonce:''};
@@ -42,8 +42,8 @@ export function createApplicationActionHandler(ports:{domainVectors?:DomainVecto
    if(request.action==='syncLlmTokenUsage'&&request.afterId!==undefined){if(!ports.readTokenUsagePage)throw Error('Usage cursors unavailable');return {success:true,action:'syncLlmTokenUsage',...await ports.readTokenUsagePage({limit:request.limit===undefined?200:request.limit as number,afterId:request.afterId as number,usageEpoch:request.usageEpoch as string|undefined})};}
    if(request.action==='syncLlmTokenUsage'&&ports.readTokenUsage){const records=await ports.readTokenUsage(tokenUsageOptInt(request,'limit',200));return {success:true,action:'syncLlmTokenUsage',count:records.length,records};}
    if(request.action==='pullDebugLog'&&ports.readDebugLog)return await ports.readDebugLog(debugLogMaxChars(request));
-   if(request.action==='syncNoteAsset'&&ports.noteAssets){const check=context?.checkCancelled??(()=>{}),intake=SYNC_V2_PRODUCT.syncV2&&ports.legacyIntake?noteAssetIntake(ports.legacyIntake,1,String(request.deviceId??'phone'),check):undefined;const response=await ports.noteAssets.apply(request,intake,check,context?.session??fallbackSession);if(response.complete&&!response.alreadyPresent)ports.notesChanged();return response;}
-   if(request.action==='syncNotes'){const assets=request.assetManifest===undefined?undefined:await ports.noteAssets?.inventory?.(request.assetManifest);const response=await syncNotes(request,ports.notes,ports.deviceId,ports.legacyIntake,context?.checkCancelled);if(Number(response.applied)>0)ports.notesChanged();return assets?{...response,assetManifest:assets}:response;}
+   if(request.action==='syncNoteAsset'&&ports.noteAssets){const intake=SYNC_V2_PRODUCT.syncV2&&ports.legacyIntake?noteAssetIntake(ports.legacyIntake,1,String(request.deviceId??'phone'),check??(()=>{})):undefined;const response=await ports.noteAssets.apply(request,intake,check,context?.session??fallbackSession);if(response.complete&&!response.alreadyPresent)ports.notesChanged();return response;}
+   if(request.action==='syncNotes'){const assets=request.assetManifest===undefined?undefined:await ports.noteAssets?.inventory?.(request.assetManifest);const response=await syncNotes(request,ports.notes,ports.deviceId,ports.legacyIntake,check);if(Number(response.applied)>0)ports.notesChanged();return assets?{...response,assetManifest:assets}:response;}
    return {success:false,message:'未知蓝牙同步动作：'+String(request.action??''),errorCode:'unsupported_action'};
   }catch(error){if(request.action==='clearLibrary'){const failure=classifyLibraryClear(error,'database');diagnostic?.event('clearLibrary.failed',{errorCode:failure.code},'E');return {success:false,action:'clearLibrary',errorCode:failure.code,retryable:true,message:libraryClearMessage(failure.code)};}diagnostic?.event("request.handle.failed",{message:"<redacted>"},"E");const message=error instanceof Error?error.message:String(error);return {success:false,message,...(message==='BUSINESS_REJECTED'?{errorCode:message}:{})};}
  };

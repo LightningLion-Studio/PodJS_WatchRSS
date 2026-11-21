@@ -108,7 +108,7 @@ export class SyncArticleReceiver {
   if(existing)await this.migrateReading(Number(existing.id));
   const revision=await libraryRevision(this.db),liveClock=Math.max(article.updatedAt,(article as IncomingArticle&{independentChangedAt?:number}).independentChangedAt??0,article.favoriteChangedAt,article.watchLaterChangedAt);
   const deleted=(await this.db.query('SELECT changed_at,source_order FROM sync_article_deletions WHERE article_id=?',[article.articleId]))[0];
-  if(!authoritative&&deleted&&(Number(deleted.changed_at)>liveClock||Number(deleted.changed_at)===liveClock&&String(deleted.source_order)>=deviceOrder(article.sourceDeviceId||remoteDeviceId))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
+  if(!authoritative&&deleted&&(Number(deleted.changed_at)>liveClock||Number(deleted.changed_at)===liveClock&&String(deleted.source_order)>=deviceOrder(article.sourceDeviceId||remoteDeviceId))){if(receipt){receipt.check?.();await (receipt.transaction??this.db.transaction)([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
   const now=this.now(),updated=Math.max(article.updatedAt,article.importedAt),fetched=updated>0?updated:now,progress=Math.fround(Math.max(0,Math.min(1,article.readingProgress)));
   const prior=binary&&existing?(await this.db.query(`SELECT updated_at,source_device_id FROM (
    SELECT updated_at,source_device_id FROM article_sync_encoding_cache WHERE item_id=?
@@ -207,7 +207,7 @@ export class SyncArticleReceiver {
   statements.push(...this.keeps.record(article.articleId,article.url,Math.max(article.updatedAt,keep.independentChangedAt??0,article.favoriteChangedAt,article.watchLaterChangedAt),article.sourceDeviceId||remoteDeviceId,idSql,idParams,keep.legacyArticleIds??[]));
   phase('receive.statements');
   const guarded=[...(receipt?.before??[]),...statements.map(s=>({...s,sql:onlyChangedSql(s.sql)})),...(receipt?.after(retainContent?'retainedLocal':'merged')??[])];
-  receipt?.check?.();if(counted){const committed=await this.db.transactionChanges!(guarded);phase('receive.commit');if(committed.length!==guarded.length)throw new Error("Invalid committed transaction change receipt");const changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);const saves=countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);return changes[1]!>0||saves||changes.slice(keepStart).some(n=>n>0)||changes.some((n,i)=>n>0&&/^(?:INSERT INTO articles\b|INSERT INTO article_reading_state\b|UPDATE articles\b)/.test(statements[i]!.sql))?Math.max(1,saves):0;}
-  receipt?.check?.();await this.db.transaction(guarded);return 0;
+  receipt?.check?.();if(counted){const committed=await (receipt?.transactionChanges??this.db.transactionChanges!)(guarded);phase('receive.commit');if(committed.length!==guarded.length)throw new Error("Invalid committed transaction change receipt");const changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);const saves=countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);return changes[1]!>0||saves||changes.slice(keepStart).some(n=>n>0)||changes.some((n,i)=>n>0&&/^(?:INSERT INTO articles\b|INSERT INTO article_reading_state\b|UPDATE articles\b)/.test(statements[i]!.sql))?Math.max(1,saves):0;}
+  receipt?.check?.();await (receipt?.transaction??this.db.transaction)(guarded);return 0;
  }
 }

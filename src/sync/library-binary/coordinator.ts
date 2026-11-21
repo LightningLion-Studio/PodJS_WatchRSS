@@ -1,3 +1,5 @@
+import type {SqlCancellationCheck} from '../../core/types';
+import type {GuardedLibraryStamp} from '../../sync-v2/local-transfer-intake';
 import {VerifiedChunkStore,type ObjectLease,type VerifiedObject,type VerifiedPublication} from '@podjs/framework/verified-chunk-store';
 import {BinaryConnection} from './connection';
 import {SwitchGate,checkSelectedLimits} from './routing';
@@ -29,8 +31,13 @@ export interface BinaryPorts {
  protectNoteAsset?(job:Job,object:ObjectDescriptor,stage:()=>Promise<VerifiedPublication>,apply:()=>Promise<void>):Promise<void>;
  cleanupCompleted?(job:Job):Promise<void>;
  stopLocalWork?():void;
- guardedTransaction?(channel:string,epoch:number,statements:import('./store').Statement[]):Promise<void>;
+ guardedTransaction?(channel:string,epoch:number,statements:import('./store').Statement[]):Promise<number[]>;
  durableTransaction?(statements:import('./store').Statement[]):Promise<void>;
+ guarded?:{
+  accountAnchor:string;
+  stamp():Promise<GuardedLibraryStamp>;
+  transaction(statements:import('./store').Statement[]):Promise<number[]>;
+ };
  supportsRange?(p:BeginPayload):Promise<boolean>;
  applied?(kind:ObjectDescriptor['kind']):void;
  reserve(job:Job,objects:readonly ObjectDescriptor[]):Promise<void>;
@@ -89,6 +96,7 @@ export class LibraryBinaryConnection {
  private preparedSource?:BinarySourcePlan;
  private readonly sourcePlans=new Map<string,BeginPayload>();
  private readonly sourceDescriptions=new Map<string,readonly ObjectDescriptor[]>();
+ private readonly commitCancels=new Set<()=>void>();
  private stopped=false;
  private closeReason:unknown;private cancelling?:Promise<void>;
  constructor(private readonly ports:BinaryPorts,gate:SwitchGate,private readonly io:ByteTransport){
@@ -98,12 +106,20 @@ export class LibraryBinaryConnection {
   this.preparation=new Preparation(ports.capability);this.stateBucket=new TokenBucket(8,4,ports.now());
  }
  private check(){this.ports.check();if(this.stopped||this.cancelling)throw this.closeReason??new ResumeError('USER_CANCELLED');}
+ readonly commitCheck:SqlCancellationCheck=Object.assign(()=>this.check(),{onCancel:(cancel:()=>void)=>{
+  if(this.stopped||this.cancelling){cancel();return ()=>{};}
+  this.commitCancels.add(cancel);return ()=>{this.commitCancels.delete(cancel);};
+ }});
+ private revokeCommits(){
+  for(const cancel of this.commitCancels)cancel();
+  this.commitCancels.clear();
+ }
  workUnit(){this.lastLocalUnit=this.ports.now();}
  private write(value:Envelope,started?:()=>void):Promise<void>{this.check();return this.binary.write({kind:'control',envelope:value},value.phase==='missing'&&value.payload?.limit===0?'urgent':'ordinary',started);}
  private reply(r:Envelope,result:Row|null,epoch:number|null,error?:ResumeError):Envelope{const {payload,...base}=r;return {...base,type:'response',success:!error,result,...(error?{error:error.wire()}:{}),epoch};}
- async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.io.waitRevoked?.();await this.ports.store.revokeConnection(this.ports.connectionId);}
+ async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.revokeCommits();this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.io.waitRevoked?.();await this.ports.store.revokeConnection(this.ports.connectionId);}
  cancel():Promise<void>{
-  if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;this.ports.stopLocalWork?.();
+  if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;this.revokeCommits();this.ports.stopLocalWork?.();
   this.receive?.window.grant.fence();const draining=this.receive?.pipeline?.fence();this.send?.window.close();
   for(const j of [this.receive?.job,this.send?.job])if(j)try{void this.binary.write({kind:'control',envelope:this.makeRequest('cancel',j.jobId,j.planDigest,j.epoch,{reason:'USER_CANCEL'})},'urgent').catch(()=>{});}catch{/* The transport may already be closed; tombstones remain mandatory. */}this.binary.close();
   for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);
@@ -237,6 +253,7 @@ export class LibraryBinaryConnection {
    const j=this.receive?.job;
    if(!j||j.jobId!==r.jobId||!this.begun.has(j.jobId)||j.connectionId!==this.ports.connectionId||j.epoch!==r.epoch||j.planDigest!==r.planDigest)fail('AUTH_REVOKED');
    this.checkReceiveBinding(r);
+   if(this.ports.guarded&&j.completion)await this.ports.authorize(()=>this.guardedStamp(j));
    await this.write(this.reply(r,{state:j.state,nextManifestPage:j.nextPage,expiresAtMillis:j.expiresAt,completion:j.completion,items:[],next:null,done:true},j.epoch));
    if(j.lease&&!this.regrant&&!this.nativeHeartbeat&&!this.stopped){
     this.nativeHeartbeat=this.ports.chunks.check(j.lease as unknown as ObjectLease).catch(e=>{
@@ -246,10 +263,41 @@ export class LibraryBinaryConnection {
    }
   }catch(e){const error=resumeError(e);await this.write(this.reply(r,null,r.epoch,error));if(error.wire().recovery==='STOP')throw error;}
  }
+ private async guardedStamp(job?:Job|null){
+  const guarded=this.ports.guarded;if(!guarded)return;
+  const stamp=await guarded.stamp();
+  this.check();
+  if(stamp.anchor!==guarded.accountAnchor)fail('BUSINESS_REJECTED');
+  if(job)await this.ports.store.validateGuardedJob(job,stamp);
+  this.check();
+  return stamp;
+ }
+ private guardedChanges(stamp:GuardedLibraryStamp,job?:Job,advance=false):NonNullable<ReceiptBoundary['transactionChanges']>{
+  const commit=(job&&this.nativeChanges(job))??this.ports.guarded!.transaction;
+  return async statements=>{
+   this.check();
+   try{
+    const counts=await commit([this.ports.store.guardProjection(stamp),...statements,...(job&&advance?[this.ports.store.advanceGuardedJob(job)]:[])]);
+    this.check();
+    return counts.slice(1,statements.length+1);
+   }catch(error){if(/CHECK constraint failed: ok=1/.test(String(error)))fail('BUSINESS_REJECTED');throw error;}
+  };
+ }
+ private guardedCommit(stamp:GuardedLibraryStamp|undefined,job?:Job):ReceiptBoundary['transaction']{
+  const commit=stamp?this.guardedChanges(stamp,job):job?this.nativeChanges(job):undefined;
+  if(commit)return async statements=>{await commit(statements);};
+ }
  private async answer(r:Envelope){let after:(()=>void)|undefined,charged=false;const charge=()=>{if(!charged){this.stateBucket.take(this.ports.now());charged=true;}};
   try{this.localWorkAt=this.ports.now();this.workUnit();
    if(r.phase==='begin'||r.phase==='cancel')await this.regrant?.work;
-   const result=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.handle(r,charge)));this.check();await this.write(this.reply(r,result.result,result.epoch),()=>{
+   const result=await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{
+    const result=await this.handle(r,charge);
+    if(this.ports.guarded&&r.phase!=='cancel'){
+     const job=r.jobId?await this.ports.store.job(this.scope,r.jobId):null;
+     await this.guardedStamp(job);
+    }
+    return result;
+   }));this.check();await this.write(this.reply(r,result.result,result.epoch),()=>{
     if(r.phase==='begin'){this.regrant=undefined;this.dataReady=!!this.receive?.pipeline;}
     if(r.phase==='manifestPage'&&result.result.manifestVerified)this.dataReady=true;
     if(this.nativeReceive&&(r.phase==='begin'||r.phase==='manifestPage'&&result.result.manifestVerified))this.io.activateReceive?.();
@@ -300,7 +348,7 @@ export class LibraryBinaryConnection {
   const receive=this.receive!,j=receive.job,index=receive.index!,requests=receive.requests;
   if(receive.pipeline&&!this.regrant)return;
   receive.window.admit();
-  if(this.io.native&&j.description.selection.kinds.some(k=>BOOK_KINDS.includes(k.kind as typeof BOOK_KINDS[number]))){
+  if(this.io.native&&(this.ports.guarded||j.description.selection.kinds.some(k=>BOOK_KINDS.includes(k.kind as typeof BOOK_KINDS[number])))){
    const entries: ObjectDescriptor[]=[];
    for(let slot=0;slot<j.description.objectCount;slot++)entries.push(index.at(slot)!);
    for(let at=0;at<entries.length;at+=4){
@@ -390,7 +438,7 @@ export class LibraryBinaryConnection {
  }
  private async handle(r:Envelope,charge:()=>void):Promise<{result:Row;epoch:number|null;after?:()=>void}>{
   const p=r.payload!;
-  if(r.phase==='prepare')return this.prepare(r);
+  if(r.phase==='prepare'){await this.guardedStamp();return this.prepare(r);}
   const b=this.bindings.find(v=>v.jobId===r.jobId);if(!b||!this.selectedOffer)fail('CAPABILITY_MISMATCH');
   if(r.phase==='begin')return this.begin(r,p as unknown as BeginPayload,b);
   const j=await this.ports.store.job(this.scope,r.jobId!);if(!j)fail('NOT_FOUND');
@@ -398,6 +446,7 @@ export class LibraryBinaryConnection {
   if(j.connectionId!==this.ports.connectionId||j.epoch!==r.epoch)fail('STALE_EPOCH');
   if(j.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(j.role!=='receiver'&&r.phase!=='cancel')fail();
+  const stamp=r.phase==='cancel'&&j.state!=='COMPLETE'?undefined:await this.guardedStamp(j);
   const receive=this.receive?.job.jobId===j.jobId?this.receive:undefined;
   if(receive){
    this.checkReceiveBinding(r);
@@ -424,10 +473,10 @@ export class LibraryBinaryConnection {
     const id=String(p.objectId);
     if(receive?.index&&receive.pipeline?.busyOn(receive.index.slot(id)))fail('BUSY');
     this.applying=id;
-    try{result=await this.apply(j,r);}catch(error){
+    try{result=await this.apply(j,r,stamp);}catch(error){
      if(error instanceof BookMetadataRejected){
       this.check();
-      await this.ports.store.rejectBookMetadata(j,this.ports.phoneDeviceId,r,this.nativeCommit(j));
+      await this.ports.store.rejectBookMetadata(j,this.ports.phoneDeviceId,r,this.guardedCommit(stamp,j));
      }
      throw error;
     }finally{this.applying=undefined;}
@@ -435,12 +484,12 @@ export class LibraryBinaryConnection {
    }
    case 'complete':{
     const released=await this.cleanupApplied(j);
-    result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.nativeCommit(j)) as unknown as Row;if(released){
+    result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.guardedCommit(stamp,j)) as unknown as Row;if(released){
     let clean=true;
     try{await this.ports.cleanupCompleted?.(j);}catch(e){clean=false;this.ports.diagnostic?.(e);}
     if(clean)await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}this.ports.recovery?.confirm('COMPLETE','phoneToWatch:'+j.description.objectsRoot);break;
    }
-   case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId,this.io.native?this.ports.durableTransaction:undefined);if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
+   case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId,this.guardedCommit(stamp,j)??(this.io.native?this.ports.durableTransaction:undefined));if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
    default:fail();
   }
   await this.ports.store.touch(j);
@@ -479,6 +528,7 @@ export class LibraryBinaryConnection {
  private checkSelection(b:Binding,phone:Capability){
   const watch=this.ports.capability;
   for(const k of b.selection.kinds){const w=watch.kinds.find(v=>v.kind===k.kind&&v.schemaVersion===k.schemaVersion),p=phone.kinds.find(v=>v.kind===k.kind&&v.schemaVersion===k.schemaVersion);if(!w||!p||!(b.direction==='phoneToWatch'?w.receive&&p.send:w.send&&p.receive))fail('CAPABILITY_MISMATCH');}
+  if(this.ports.guarded&&b.selection.kinds.length>6)fail('CAPABILITY_MISMATCH');
   if(b.selection.kinds.some(k=>k.kind.startsWith('book'))&&
     !BOOK_KINDS.every(kind=>b.selection.kinds.some(k=>k.kind===kind)&&[phone,watch].every(c=>c.kinds.some(k=>k.kind===kind&&k.send&&k.receive))))fail('CAPABILITY_MISMATCH');
   checkSelectedLimits(b,phone,watch);
@@ -492,11 +542,12 @@ export class LibraryBinaryConnection {
   if(old&&old.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(terminal(old??({state:'READY'} as Job))&&p.intent==='create')fail('JOB_CONFLICT');
   const source=p.phoneSnapshot;if(source.toInclusive!==0&&!await this.ports.supportsRange?.(p))fail('BUSINESS_REJECTED');
+  const stamp=await this.guardedStamp(old);
   await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection),maxStagingBytes:Math.min(134217728,b.selection.limits.maxStagingBytes),...(this.regrant&&this.io.native?{forceNewEpoch:true as const}:{})});
   if(this.regrant?.unsettled&&lease.epoch<=this.regrant.epoch)fail('STALE_EPOCH');
   const requests=await this.restoreReceiveBindings(lease,old,b.selection);
   requests.remember(r);
-  const job=await this.ports.store.begin(this.scope,r,p,this.ports.connectionId,lease.epoch,lease as unknown as Row);this.begun.add(b.jobId);
+  const job=await this.ports.store.begin(this.scope,r,p,this.ports.connectionId,lease.epoch,lease as unknown as Row,'receiver',stamp,this.guardedCommit(stamp));this.begun.add(b.jobId);
   await this.ports.store.db.transaction(this.ports.store.bind(job,this.ports.phoneDeviceId,r));
   const rows=await this.verifyRestored(job);await this.cleanupApplied(job);
   const objects=rows.map(o=>o.descriptor);
@@ -602,16 +653,19 @@ export class LibraryBinaryConnection {
   if(this.activeReceive.has(d.objectId))return;
   if(this.activeReceive.size>=this.receiverSlots(j))fail('WINDOW_FULL');this.activeReceive.add(d.objectId);
  }
- private nativeCommit(job:Job):ReceiptBoundary['transaction']{
+ private nativeChanges(job:Job):ReceiptBoundary['transactionChanges']{
   const channel=this.io.native,guard=this.ports.guardedTransaction;
   if(this.nativeReceive&&channel&&guard)return statements=>guard(channel.id,job.epoch,statements);
  }
- private async apply(j:Job,r:Envelope):Promise<Row>{
-  if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await this.ports.store.db.transaction([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
+ private async apply(j:Job,r:Envelope,stamp?:GuardedLibraryStamp):Promise<Row>{
+  if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await (this.guardedCommit(stamp,j)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
-  const boundary=this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check());
-  const guarded=this.nativeCommit(j);
-  if(guarded&&o.descriptor.kind.startsWith('book'))boundary.transaction=guarded;
+  const boundary=this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,this.commitCheck);
+  const commit=stamp?this.guardedChanges(stamp,j,true):o.descriptor.kind.startsWith('book')?this.nativeChanges(j):undefined;
+  if(commit){
+   boundary.transactionChanges=commit;
+   boundary.transaction=async statements=>{await commit(statements);};
+  }
   const lease=j.lease as unknown as ObjectLease,object=nativeObject(o.descriptor);
   const stage=()=>this.ports.chunks.finalize(lease,object);
   const apply=async()=>{
@@ -763,10 +817,14 @@ export class LibraryBinaryConnection {
   this.sourceEpoch=undefined;await this.sourceHeartbeat?.catch(()=>{});this.sourcePlans.set(b.jobId,p);const plan=planDigest(p);this.slots=new ControlSlots({streamId:2,jobId:b.jobId,planDigest:plan,selectionDigest:p.selectionDigest},this.ports.phoneDeviceId);const beginId=D('wrss.library-binary.v2/source-request',[b.jobId,requestDigest(b.jobId,plan,'begin',p as unknown as Row)]).slice(0,32);
   const fake:Envelope={action:ACTION,version:VERSION,phase:'begin',type:'request',jobId:b.jobId,planDigest:plan,epoch:null,requestId:beginId,requestDigest:requestDigest(b.jobId,plan,'begin',p as unknown as Row),payload:p as unknown as Row};
   // Persist source intent BEFORE sending a begin that the receiver may commit.
-  let local=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.begin(this.scope,fake,p,this.ports.connectionId,old?.epoch??1,null,'source')));
+  const bindSource=async(intent:BeginPayload,epoch:number)=>await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{
+   const stamp=await this.guardedStamp();
+   return this.ports.store.begin(this.scope,fake,intent,this.ports.connectionId,epoch,null,'source',stamp,this.guardedCommit(stamp));
+  }));
+  let local=await bindSource(p,old?.epoch??1);
   const began=await this.request('begin',b.jobId,plan,null,p as unknown as Row),epoch=Number(began.epoch),beginResult=began.result!;
   if(!Number.isSafeInteger(epoch)||epoch<1||beginResult.selectionDigest!==p.selectionDigest)fail('CAPABILITY_MISMATCH');
-  local=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.begin(this.scope,fake,{...p,intent:'resume'},this.ports.connectionId,epoch,null,'source')));
+  local=await bindSource({...p,intent:'resume'},epoch);
   this.sourceEpoch={job:b.jobId,plan,epoch,last:this.ports.now()};
   if(this.send)this.send.job=local;
   else this.send={job:local,window:new SendWindow(this.binding(local),epoch,this.ports.now(),this.binary.staleAckBudget,p.selection.limits)};
@@ -824,5 +882,5 @@ export class LibraryBinaryConnection {
   }
  }
  private validateReceipt(r:AppliedReceipt,job:string,plan:string,id:string){exact(r,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);if(r.jobId!==job||r.planDigest!==plan||r.objectId!==id||r.receiverDeviceId!==this.ports.phoneDeviceId||!['merged','retainedLocal','alreadyPresent'].includes(r.outcome)||r.resultDigest!==D('wrss.library-binary.v2/applied',[r.jobId,r.planDigest,r.objectId,hex(r.applyRequestId,32),hex(r.applyRequestDigest),r.receiverDeviceId,r.outcome]))fail('RECEIPT_CONFLICT');}
- private async acceptCompletion(j:Job,c:Completion){this.settled.add(j.jobId);this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));}
+ private async acceptCompletion(j:Job,c:Completion){this.settled.add(j.jobId);this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const stamp=await this.guardedStamp(latest);await (this.guardedCommit(stamp)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));}
 }

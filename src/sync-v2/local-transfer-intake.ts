@@ -25,10 +25,17 @@ export interface LocalTransferInput {
  body?:LegacyBodySource;
  /** Retained wire semantics that cannot be projected as entity fields. */
  wire?:()=>string;
- check?:()=>void;
+ check?:SqlCancellationCheck;
  reserveBody?:(size:number)=>Promise<void>;
 }
-export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {transferFence?:(reading?:boolean)=>Promise<string>};
+export interface GuardedLibraryStamp {
+ scope:string;
+ anchor:string;
+ stateVersion:string;
+ epoch:string;
+ revision:string;
+}
+export type LocalTransferWrite=((input:LocalTransferInput)=>Promise<void>) & {transferFence?:(reading?:boolean)=>Promise<string>;guardedStamp?:()=>Promise<GuardedLibraryStamp>};
 export type BoundLocalTransferIntake=(<T>(apply:(check:LocalTransferWrite)=>Promise<T>)=>Promise<T>) & {
  capture?:(requireAccount?:boolean)=>Promise<BoundLocalTransferIntake>;
 };
@@ -91,7 +98,7 @@ export function watchBookSyncAction(
  };
 }
 
-export async function applyLegacyTransfer<T>(intake:BoundLocalTransferIntake|undefined,peer:string,operation:string,records:SourceRecord[],apply:()=>Promise<T>,check?:()=>void,wire?:()=>unknown):Promise<T>{
+export async function applyLegacyTransfer<T>(intake:BoundLocalTransferIntake|undefined,peer:string,operation:string,records:SourceRecord[],apply:()=>Promise<T>,check?:SqlCancellationCheck,wire?:()=>unknown):Promise<T>{
  if(!intake||!SYNC_V2_PRODUCT.syncV2||(!records.length&&!wire))return apply();
  return intake(async protect=>{
   const byIdentity=new Map<string,SourceRecord>();
@@ -108,7 +115,7 @@ export async function applyLegacyTransfer<T>(intake:BoundLocalTransferIntake|und
  });
 }
 
-export function noteAssetIntake(intake:BoundLocalTransferIntake,version:1|2,peer:string,check:()=>void):NoteAssetIntake{
+export function noteAssetIntake(intake:BoundLocalTransferIntake,version:1|2,peer:string,check:SqlCancellationCheck):NoteAssetIntake{
  const run:NoteAssetIntake=(input,apply)=>intake(async protect=>{
   const id=input.logicalId;
   const value={assetId:id,mime:noteAssetMime(id),originalFilename:id,updatedAt:0,sourceDeviceId:peer,deleted:false,deletedAt:0};
@@ -154,6 +161,7 @@ export function watchLocalTransferIntake(db:ProjectionSql,host:CloudHostRequest)
     };
     const protect:LocalTransferWrite=async input=>{input.check?.();if(await store.protectLocalInput({...input,reserveBody}))throw Error('BUSINESS_REJECTED');};
     protect.transferFence=reading=>store.localTransferFence(reading);
+    protect.guardedStamp=()=>store.guardedLibraryStamp();
     return await apply(protect);
    }finally{key.fill(0);await gate.close();}
   }finally{await host('cloud.release',{});}

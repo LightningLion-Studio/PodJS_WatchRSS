@@ -98,6 +98,7 @@ export async function commitGuardedLibraryTransfer(channel:string,epoch:number,s
  assertLibraryWritable();
  const counts=await sqlite.transactionChangesGuarded(channel,epoch,statements as Parameters<typeof sqlite.transactionChangesGuarded>[2]);
  notifyLibrarySqlCommit(statements,counts);
+ return counts;
 }
 export async function commitDurableLibraryTransfer(statements:Parameters<SqlDatabase['transaction']>[0]){
  assertLibraryWritable();

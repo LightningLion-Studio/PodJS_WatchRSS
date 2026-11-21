@@ -22,12 +22,12 @@ export class SyncArticleDeletionStore {
   if(!metadataTombstone){if(payload.metadataOnly)await requireMetadataOnlyBody(payload,body?.body??null,!!body?.available,!!body?.hasStoredBody,this.codec);
   else await rebuildArticleBody(payload,body?.available?body.body:null,this.codec);}
   const incomingClock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
-  if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
+  if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer))){if(receipt){receipt.check?.();await (receipt.transaction??this.db.transaction)([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
   // A delayed delete must not undo a later, durably received keep decision.
   // Encoding-cache provenance is an accepted sync receipt, not a feed fetch.
   if(local&&!authoritative){const live=(await this.db.query('SELECT updated_at,source_device_id FROM article_sync_encoding_cache WHERE item_id=?',[local.itemId]))[0];
    const clock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
-   if(live&&(Number(live.updated_at)>clock||Number(live.updated_at)===clock&&deviceOrder(String(live.source_device_id))>deviceOrder(article.sourceDeviceId||peer))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
+   if(live&&(Number(live.updated_at)>clock||Number(live.updated_at)===clock&&deviceOrder(String(live.source_device_id))>deviceOrder(article.sourceDeviceId||peer))){if(receipt){receipt.check?.();await (receipt.transaction??this.db.transaction)([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
   }
   const statements:{sql:string;params?:SqlParams}[]=[revisionGuard(revision)],counted:number[]=[];let deletionIndex=-1;
   if(authoritative||article.deletedAt>0){
@@ -44,6 +44,6 @@ export class SyncArticleDeletionStore {
     ON CONFLICT(article_id) DO UPDATE SET url=excluded.url,changed_at=excluded.changed_at,source_device_id=excluded.source_device_id,source_order=excluded.source_order`,params:[article.articleId,article.url,article.deletedAt,peer,deviceOrder(peer),...flags]});
   }
   for(const type of ['favorite','watchLater'] as const){const next=this.saved.remoteStatements({articleId:article.articleId,url:article.url,type,saved:article[`${type}Saved`],changedAt:article[`${type}ChangedAt`],sortOrder:0,sourceDeviceId:peer},{authoritative,tombstone:true});if(next.length)counted.push(statements.length);statements.push(...next);}
-  receipt?.check?.();const committed=await this.db.transactionChanges([...(receipt?.before??[]),...statements,...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0);if(local&&deletionIndex>=0&&changes[deletionIndex]!>0)await this.onItemsRemoved?.([local.itemId]);return counted.some(i=>changes[i]!>0)?1:0;
+  receipt?.check?.();const committed=await (receipt?.transactionChanges??this.db.transactionChanges)([...(receipt?.before??[]),...statements,...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0);if(local&&deletionIndex>=0&&changes[deletionIndex]!>0)await this.onItemsRemoved?.([local.itemId]);return counted.some(i=>changes[i]!>0)?1:0;
  }
 }

@@ -1,7 +1,8 @@
 import {onlyChangedSql} from '@podjs/framework/sql-changes';
 import type {ReceiptBoundary} from './library-resume/store';
 import {querySyncPages} from "./sql-pages.ts";
-import type {SqlDatabase,SqlParams} from '../core/types.ts';
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck,SqlDatabase,SqlParams} from '../core/types.ts';
 import type {SyncedSource} from './library-wire.ts';
 import {nativeTrim,type SyncTextPort} from './local-manifest.ts';
 import {libraryRevision,revisionGuard} from './revision.ts';
@@ -47,7 +48,8 @@ export class SqlSourceSyncStore {
   return this.hasBinaryProjection;
  }
  private async hostLabel(url:string):Promise<string>{const t=nativeTrim(url),u=t.startsWith('http://')||t.startsWith('https://')?t:'https://'+t;const p=await this.uri.parseUri(u);return nativeTrim((p.valid?p.host??'':'').replace(/^www\./,''));}
- async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary,preserveLiveArticles=false):Promise<number>{
+ async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary,preserveLiveArticles=false,check?:SqlCancellationCheck):Promise<number>{
+  const db=cancellableSql(this.db,check);
   if(receipt&&sources.length!==1)throw Error('BUSINESS_REJECTED');
   if(!this.db.transactionChanges)throw new Error('Source sync requires committed transaction counts');let applied=0;
   const projection=sources.length>0&&await this.binaryProjectionAvailable();
@@ -60,12 +62,12 @@ export class SqlSourceSyncStore {
    // local edit invalidates the transaction instead of accepting a stale delete.
    const revision=await libraryRevision(this.db),old=(await this.db.query('SELECT * FROM sync_source_states WHERE url=?',[url]))[0];
    const clock=source.updatedAt||source.deletedAt||source.sortOrder||source.createdAt;
-   if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id)))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
+   if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id)))){if(receipt){receipt.check?.();await (receipt.transaction??this.db.transaction)([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
    const local=old&&!n(old.deleted)?undefined:(await this.db.query(projection?
     `SELECT c.created_at,c.sort_order,c.last_fetched_at,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current FROM channels c ${articleProjectionJoin} WHERE c.url=?`:
     'SELECT created_at,sort_order FROM channels WHERE url=?',[url]))[0];
    const provisional=local?.provisional===1&&local.marker_current===1;
-   if(!authoritative&&!old&&local&&!provisional&&clock<Math.max(n(local.created_at),-n(local.sort_order),local.provisional===1?n(local.last_fetched_at):-Infinity)){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
+   if(!authoritative&&!old&&local&&!provisional&&clock<Math.max(n(local.created_at),-n(local.sort_order),local.provisional===1?n(local.last_fetched_at):-Infinity)){if(receipt){receipt.check?.();await (receipt.transaction??this.db.transaction)([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
    if(source.deleted){
     const updated=source.updatedAt>0?source.updatedAt:source.deletedAt>0?source.deletedAt:source.sortOrder>0?source.sortOrder:source.createdAt,deletedAt=source.deletedAt>0?source.deletedAt:updated;
     const channel=this.onChannelRemoved?(await this.db.query('SELECT id,url FROM channels WHERE url=?',[url]))[0]:undefined;
@@ -97,7 +99,7 @@ export class SqlSourceSyncStore {
     }
     receipt?.check?.();
     const prefix=[...(receipt?.before??[]),revisionGuard(revision)];
-    const committed=await this.db.transactionChanges([...prefix,...changes,...(receipt?.after('merged')??[])]);
+    const committed=await (receipt?.transactionChanges??db.transactionChanges!)([...prefix,...changes,...(receipt?.after('merged')??[])]);
     if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});
     if(committed.slice(prefix.length,prefix.length+changes.length).some(n=>n>0))applied++;continue;
    }
@@ -112,7 +114,7 @@ export class SqlSourceSyncStore {
    const statements:{sql:string;params:SqlParams}[]=[revisionGuard(revision),channelWrite,
     {sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,order,source.isPinned?1:0,0,0]}];
    if(provisional)statements.push({sql:'UPDATE library_binary_channel_projection SET provisional=0 WHERE channel_id=(SELECT id FROM channels WHERE url=?)',params:[url]});
-   receipt?.check?.();const committed=await this.db.transactionChanges([...(receipt?.before??[]),...statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})),...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);applied+=changes.slice(1).some(n=>n>0)?1:0;
+   receipt?.check?.();const committed=await (receipt?.transactionChanges??db.transactionChanges!)([...(receipt?.before??[]),...statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})),...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);applied+=changes.slice(1).some(n=>n>0)?1:0;
   }return applied;
  }
  async export(localDeviceId:string,urls?:readonly string[],readOnly=false):Promise<SyncedSource[]>{

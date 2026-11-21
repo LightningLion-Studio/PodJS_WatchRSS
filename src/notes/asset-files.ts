@@ -1,6 +1,7 @@
 import {encodeUtf8} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
-import type {SqlDatabase,SqlParams} from '../core/types';
+import {cancellableSql} from '../core/sql-cancellation';
+import type {SqlCancellationCheck,SqlDatabase,SqlParams} from '../core/types';
 
 export const NOTE_ASSET_FILES_SCHEMA="CREATE TABLE IF NOT EXISTS note_asset_files(storage_key TEXT PRIMARY KEY,sha256 TEXT NOT NULL,size INTEGER NOT NULL)";
 export const NOTE_ASSET_VERSIONS='notes/asset-versions';
@@ -15,7 +16,7 @@ export function noteAssetVersionPath(key:string,sha256:string):string{
 /** Physical files in asset-versions are private candidates. Only the committed
  * SQL row makes one visible. Older installations still read their old path. */
 export class NoteAssetFileIndex {
- constructor(private readonly db:Pick<SqlDatabase,'query'|'transaction'>){}
+ constructor(private readonly db:Pick<SqlDatabase,'query'|'transaction'|'transactionChangesCancellable'>){}
  private async rows(key?:string){
   try{return await this.db.query('SELECT storage_key,sha256,size FROM note_asset_files'+(key===undefined?'':' WHERE storage_key=?'),key===undefined?[]:[key]);}
   catch(error){if(/no such table: note_asset_files/.test(String(error)))return [];throw error;}
@@ -44,7 +45,9 @@ export class NoteAssetFileIndex {
    {sql:'INSERT INTO note_asset_files VALUES(?,?,?) ON CONFLICT(storage_key) DO UPDATE SET sha256=excluded.sha256,size=excluded.size',params:[key,after.sha256,after.size]},
   ];
  }
- async commit(key:string,before:NoteAssetVersion|undefined,after:NoteAssetVersion){
-  await this.db.transaction(this.statements(key,before,after));
+ async commit(key:string,before:NoteAssetVersion|undefined,after:NoteAssetVersion,check?:SqlCancellationCheck){
+  if(!check)return this.db.transaction(this.statements(key,before,after));
+  const db=cancellableSql({...this.db,execute:async(sql,params)=>this.db.transaction([{sql,params}])},check);
+  await db.transaction(this.statements(key,before,after));
  }
 }

@@ -25,7 +25,7 @@ export class SqlLibrarySequenceStore {
    params:[this.peer(pending.remoteDeviceId),Math.max(0,pending.localSeqToInclusive),Math.max(0,pending.remoteSeqToInclusive),pending.fullSnapshot?now:0,pending.remoteProtocolVersion,now,pending.fullSnapshot?1:0]};
  }
  async markSuccess(pending:PendingSyncSuccess):Promise<void>{const s=this.successStatement(pending);await this.db.execute(s.sql,s.params);}
- async reset():Promise<void>{await this.db.execute('DELETE FROM sync_peer_state');}
+ async reset(db=this.db):Promise<void>{await db.execute('DELETE FROM sync_peer_state');}
  async fastPathRequiresFull(peer:string):Promise<boolean>{
   const s=(await this.db.query('SELECT * FROM sync_peer_state WHERE peer_device_id=?',[this.peer(peer)]))[0],now=exact(this.now()),last=Number(s?.last_full_sync_at??0);
   return !s||Number(s.last_protocol_version)<13||last<=0||last>now||now-last>=WEEK;

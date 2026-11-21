@@ -42,14 +42,14 @@ export interface LibrarySessionRepository {
  cursor(peer:string,check?:()=>void):Promise<SyncCursor>;
  /** R47.1 peers always exchange manifest windows; this cursor reads published journal state only. */
  exchangeCursor?(peer:string):Promise<SyncCursor>;
- mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean):Promise<number>;
+ mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean,check?:SqlCancellationCheck):Promise<number>;
  prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>;
  exportSources(peer?:string,check?:()=>void):Promise<readonly SyncedSource[]>;
- receiveArticle(article:ReceivedArticle,remote:string,authoritative:boolean):Promise<number>;
+ receiveArticle(article:ReceivedArticle,remote:string,authoritative:boolean,check?:SqlCancellationCheck):Promise<number>;
  configurePeer?(peer:string,capabilities:ProbeCapabilities):void;
  exportRequested(requests:readonly RequestedArticleBody[],peer?:string):Promise<readonly PreparedArticle[]>;
- finalizeSnapshot(articleIds:readonly string[],sourceUrls:readonly string[],peer?:string):Promise<void>;
- resetPeerState():Promise<void>;
+ finalizeSnapshot(articleIds:readonly string[],sourceUrls:readonly string[],peer?:string,check?:SqlCancellationCheck):Promise<void>;
+ resetPeerState(check?:SqlCancellationCheck):Promise<void>;
  markSuccess(pending:PendingSyncSuccess,check?:SqlCancellationCheck):Promise<void>;
 }
 export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'handoff'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
@@ -275,10 +275,12 @@ export class LibrarySyncSession {
   const legacySubset=remoteRange.fallbackReason==='binarySubset'&&this.options.binary?.acceptsLegacySubset?.(peer,this.actionContext)===true;
   if(legacySubset&&(mode!=='merge'||remoteRange.fromSeqExclusive!==0||remoteRange.toSeqInclusive!==0||remoteRange.fullSnapshot||remoteCursor.lastRemoteSeqApplied!==0||remoteCursor.lastLocalSeqAckedByPeer!==0||!bool(request.forceFull)))throw Error('CAPABILITY_MISMATCH');
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
-  const intake=this.options.handleAction?.legacyIntake,check=()=>this.check();
-  const ackIntake=legacySubset?undefined:await intake?.capture?.();check();
+  const intake=this.options.handleAction?.legacyIntake;
+  const check:SqlCancellationCheck=Object.assign(()=>this.check(),{onCancel:this.actionContext.onCancel});
+  const captured=await intake?.capture?.(),write=captured??intake;
+  const ackIntake=legacySubset?undefined:captured;check();
   const sourceRecords=sources.map(value=>{const url=normalizeSourceUrl(value.url);return {kind:'source' as const,logicalId:url,value:{...value,url}};});
-  let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>applyLegacyTransfer(intake,peer,'mergeSources',sourceRecords,()=>this.repository.mergeSources(sources,peer,false),check)):0;this.check();
+  let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>applyLegacyTransfer(write,peer,'mergeSources',sourceRecords,()=>this.repository.mergeSources(sources,peer,false,check),check)):0;this.check();
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
   const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied,()=>this.check()));this.check();
   const force=bool(request.forceFull),full=force||mode!=='merge'||!bool(request.supportsChangeSequences)||optLong(request.version)<8;
@@ -292,20 +294,20 @@ export class LibrarySyncSession {
   this.status({phase:'receiving'});let applied=0;
   const receiver=new ArticleBatchReceiver(selected,async entry=>{
    check();if(source)return;
-   const apply=()=>this.repository.receiveArticle(entry,peer,target);
+   const apply=()=>this.repository.receiveArticle(entry,peer,target,check);
    if(!intake||!SYNC_V2_PRODUCT.syncV2){applied+=await apply();return;}
    // The cloud row cannot attest a v1 body's delta, article alias, or
    // book-chapter rewrite. Save the received form before resolving any of them.
    const {article,body}=entry,wire=()=>({operation:'receiveArticle',target,article,body:{...body,chunks:body.chunks.map(chunk=>({...chunk,bytes:bytesToBase64(chunk.bytes)}))}});
-   applied+=await applyLegacyTransfer(intake,peer,'receiveArticle',[{kind:'article',logicalId:article.articleId,value:knownRecordValue('article',article)}],apply,check,wire);
+   applied+=await applyLegacyTransfer(write,peer,'receiveArticle',[{kind:'article',logicalId:article.articleId,value:knownRecordValue('article',article)}],apply,check,wire);
    check();
   },{ignoreIncoming:source,flushCompleteArticles:this.checkpointed});
   let receipt,mergeMs=0;do{const incoming=await this.read(180000),mergeStart=this.monotonic();receipt=await receiver.consume(incoming);this.status({phase:'receiving',receivedArticles:receiver.committedArticles});mergeMs+=this.monotonic()-mergeStart;if(this.checkpointed&&incoming.libraryCheckpoint===true){if(!receiver.checkpointReady)throw new Error('Library checkpoint splits an incomplete article');await this.write(libraryBatchAck('phoneToWatch',Number(incoming.batchIndex??0),receiver.committedArticles));this.log.event('library.batch.applied',{confirmedArticles:receiver.committedArticles,batchIndex:Number(incoming.batchIndex??0)});}}while(!receipt);receiver.finish();this.log.event("library.articles.parsed",{incomingArticles:receipt.receivedArticles});this.log.event("library.articles.merged",{incomingArticles:receipt.receivedArticles,articlesApplied:applied,chunked:true,elapsedMs:Math.max(0,Math.round(mergeMs))});
   if(target){
-   await applyLegacyTransfer(intake,peer,'replaceSnapshot',sourceRecords,async()=>{
-    sourcesApplied=await this.repository.mergeSources(sources,peer,true);check();
+   await applyLegacyTransfer(write,peer,'replaceSnapshot',sourceRecords,async()=>{
+    sourcesApplied=await this.repository.mergeSources(sources,peer,true,check);check();
     this.log.event('library.sources.merged',{incomingSources:sources.length,sourcesApplied});
-    await this.repository.finalizeSnapshot(remoteManifest.map(a=>a.articleId),[...sources.map(s=>s.url),'watchrss://phone-imports'],peer);
+    await this.repository.finalizeSnapshot(remoteManifest.map(a=>a.articleId),[...sources.map(s=>s.url),'watchrss://phone-imports'],peer,check);
    },check,()=>({operation:'replaceSnapshot',manifest:remoteManifest}));
    check();
   }
@@ -322,7 +324,7 @@ export class LibrarySyncSession {
    this.status({phase:'sending',receivedArticles:receipt.receivedArticles,sentArticles:sentIds.size,totalArticles:outgoing.length});
    if(checkpoint){requireLibraryBatchAck(await this.read(120000),'watchToPhone',index);this.log.event('library.batch.confirmed',{batchIndex:index});}
   }
-  if(source){await this.repository.resetPeerState();this.check();}
+  if(source){const reset=()=>this.repository.resetPeerState(check);await (write?write(reset):reset());this.check();}
   // Keep the same response summary as native without retaining body byte arrays.
   const first=responses[0]!,response:JsonObject={success:responses.every(f=>bool(f.success,true)),version:optLong(first.version,14),action:ACTION_SYNC_LIBRARY,phase:string(first.phase)||'complete',deviceId:string(first.deviceId),sentAt:optLong(first.sentAt),batchCount:responses.length,totalArticles:responses.reduce((n,f)=>n+(Array.isArray(f.articles)?f.articles.length:0),0)};if(first.stats)response.stats=first.stats;
   this.log.event("library.manifest.handle.complete",{incomingArticles:receipt.receivedArticles,outgoingSources:window.rssSources.length,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,remoteSeqPendingAck:remoteRange.toSeqInclusive,fullSnapshot:window.fullSnapshot,peerStatePendingAck:true});

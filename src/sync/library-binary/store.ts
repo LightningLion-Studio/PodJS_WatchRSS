@@ -1,3 +1,4 @@
+import type {GuardedLibraryStamp} from '../../sync-v2/local-transfer-intake';
 import {readSqlText} from '@podjs/framework/sql';
 import type {SqlDatabase,SqlParams} from '../../core/types';
 import {bindingCapacity} from './receive-index';
@@ -8,6 +9,7 @@ export type Statement={sql:string;params?:SqlParams};
 export interface ReceiptBoundary {
  check?():void;
  transaction?(statements:Statement[]):Promise<void>;
+ transactionChanges?(statements:Statement[]):Promise<number[]>;
  json?(value:unknown):unknown;
  sourceOrder?(value:string):unknown;
  before:Statement[];
@@ -40,6 +42,7 @@ export class BinaryStore {
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_request_quota(id INTEGER PRIMARY KEY CHECK(id=1),bytes INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_cancellations(scope TEXT NOT NULL,job_id TEXT NOT NULL,reason TEXT NOT NULL,expires_at INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_peaks(scope TEXT NOT NULL,job_id TEXT NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
+   {sql:'CREATE TABLE IF NOT EXISTS library_binary_guarded_jobs(scope TEXT NOT NULL,job_id TEXT NOT NULL,anchor TEXT NOT NULL,business_epoch TEXT NOT NULL,business_revision TEXT NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_assets(storage_key TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(storage_key,sha256))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_states(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,state_json TEXT NOT NULL,PRIMARY KEY(scope,job_id,book_id))"},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_book_text(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,field INTEGER NOT NULL,ordinal INTEGER NOT NULL,value TEXT NOT NULL,PRIMARY KEY(scope,job_id,object_id,field,ordinal))'},
@@ -119,7 +122,7 @@ export class BinaryStore {
  }
  async collect(scope:string,cleanup:(job:Job)=>Promise<void>):Promise<void>{
   const expired=await this.db.query('SELECT job_id FROM library_binary_jobs WHERE scope=? AND expires_at<? LIMIT 4',[scope,this.now()]);
-  for(const r of expired){const job=await this.job(scope,String(r.job_id));if(!job)continue;await cleanup(job);await this.db.transaction(['library_binary_snapshot_refs','library_binary_peaks','library_binary_reservations','library_binary_requests','library_binary_pages','library_binary_objects','library_binary_peer_ack','library_binary_jobs'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:[scope,job.jobId]})));}
+  for(const r of expired){const job=await this.job(scope,String(r.job_id));if(!job)continue;await cleanup(job);await this.db.transaction(['library_binary_snapshot_refs','library_binary_peaks','library_binary_reservations','library_binary_requests','library_binary_pages','library_binary_objects','library_binary_peer_ack','library_binary_guarded_jobs','library_binary_jobs'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:[scope,job.jobId]})));}
   await this.db.transaction([
    {sql:'INSERT OR REPLACE INTO library_binary_request_quota SELECT 1,COUNT(*)*1024 FROM library_binary_requests'},
    {sql:'DELETE FROM library_binary_cancellations WHERE expires_at<?',params:[this.now()]},
@@ -188,10 +191,28 @@ export class BinaryStore {
   if(!await this.job(scope,id))await this.budget(0,p.selection.limits.maxJournalBytes,{scope,jobId:id,bytes:this.planReservation(p)});
   else await this.budget(0,p.selection.limits.maxJournalBytes);
  }
- async begin(scope:string,r:Envelope,p:BeginPayload,connectionId:string,epoch:number,lease:Row|null,role:Job['role']='receiver'):Promise<Job>{
+ async validateGuardedJob(job:Job,stamp:GuardedLibraryStamp){
+  const [saved]=await this.db.query('SELECT anchor,business_epoch,business_revision FROM library_binary_guarded_jobs WHERE scope=? AND job_id=?',[job.scope,job.jobId]);
+  if(!saved||saved.anchor!==stamp.anchor||job.role==='receiver'&&(saved.business_epoch!==stamp.epoch||saved.business_revision!==stamp.revision))fail('BUSINESS_REJECTED');
+ }
+ guardProjection(stamp:GuardedLibraryStamp):Statement{
+  return {sql:`UPDATE library_binary_guard SET ok=CASE WHEN
+   EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=?)
+   AND EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?)
+   AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?)
+   THEN 1 ELSE 0 END WHERE id=1`,params:[stamp.scope,stamp.scope,stamp.stateVersion,stamp.epoch,stamp.revision]};
+ }
+ advanceGuardedJob(job:Job):Statement{
+  return {sql:`UPDATE library_binary_guarded_jobs
+   SET business_epoch=(SELECT epoch FROM business_sync_revision WHERE id=1),
+       business_revision=(SELECT CAST(revision AS TEXT) FROM business_sync_revision WHERE id=1)
+   WHERE scope=? AND job_id=?`,params:[job.scope,job.jobId]};
+ }
+ async begin(scope:string,r:Envelope,p:BeginPayload,connectionId:string,epoch:number,lease:Row|null,role:Job['role']='receiver',stamp?:GuardedLibraryStamp,commit:NonNullable<ReceiptBoundary['transaction']>=statements=>this.db.transaction(statements)):Promise<Job>{
   if(p.objectCount===0&&p.objectsRoot!==objectsRoot([]))fail('PLAN_CONFLICT');
   const old=await this.job(scope,r.jobId!);
   if(old){
+   if(stamp)await this.validateGuardedJob(old,stamp);
    if(old.planDigest!==r.planDigest||old.role!==role||JSON.stringify(old.description.pageObjectCounts)!==JSON.stringify(p.pageObjectCounts))fail('JOB_CONFLICT');
    if(old.expiresAt<this.now())fail('EXPIRED');
    if(['COMPLETE','CANCELLED'].includes(old.state)&&p.intent==='create')fail('JOB_CONFLICT');
@@ -208,7 +229,8 @@ export class BinaryStore {
   const state=old?.state??(p.objectCount===0?'READY':'PLANNING'),expiration=Math.max(old?.expiresAt??0,this.now()+RETENTION);
   const statement={sql:`INSERT INTO library_binary_jobs(scope,job_id,plan_digest,description,state,connection_id,epoch,expires_at,next_page,completion,lease,role) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
    ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,params:[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]};
-  await this.db.transaction([statement,...[p.phoneSnapshot,p.watchSnapshot].map(s=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_refs VALUES(?,?,?)',params:[scope,r.jobId,s.snapshotId]})),...(!old?[{sql:'INSERT INTO library_binary_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
+  const guard=stamp?[this.guardProjection(stamp),...(!old?[{sql:'INSERT INTO library_binary_guarded_jobs VALUES(?,?,?,?,?)',params:[scope,r.jobId,stamp.anchor,stamp.epoch,stamp.revision]}]:[])]:[];
+  await commit([...guard,statement,...[p.phoneSnapshot,p.watchSnapshot].map(s=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_refs VALUES(?,?,?)',params:[scope,r.jobId,s.snapshotId]})),...(!old?[{sql:'INSERT INTO library_binary_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
  }
  async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{
   const objects:{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]=[];

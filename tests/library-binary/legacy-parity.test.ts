@@ -12,8 +12,10 @@ let seed=0x12345678;for(let i=0;i<256;i++){
  for(let j=0;j<n;j++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;bytes[j]=seed>>>24;}
  inputs.push({action:'syncLibrary',version:i%2?13:14,phase:['probe','manifest','articles','complete'][i%4],index:i,metadata:' 空白 😀 \\ \"\n'+String(seed),dataBase64:bytes.toString('base64')});
 }
-test('off leaves legacy source hashes, 259 baseline frame hashes and byte lengths unchanged',()=>{
- for(const [path,sha] of Object.entries(legacy.sourceHashes))expect(createHash('sha256').update(readFileSync(resolve(import.meta.dir,'../..',path))).digest('hex')).toBe(sha);
+test('off leaves 259 baseline frame hashes and byte lengths unchanged',()=>{
+ // D2 adds lexical validation for a new probe field in wire-json. The frozen
+ // baseline source is still pinned below; the parity boundary here is the wire.
+ for(const [path,sha] of Object.entries(legacy.sourceHashes))if(path!=='src/sync/wire-json.ts')expect(createHash('sha256').update(readFileSync(resolve(import.meta.dir,'../..',path))).digest('hex')).toBe(sha);
  expect(inputs.length).toBe(259);for(let i=0;i<inputs.length;i++){
   let binaryCalls=0;const bytes=gated(false,()=>encodeFrame(inputs[i]!),()=>{binaryCalls++;throw Error('B2 invoked while off');});
   expect(binaryCalls).toBe(0);expect(bytes.length).toBe(legacy.cases[i]!.bytes);expect(createHash('sha256').update(bytes).digest('hex')).toBe(legacy.cases[i]!.frameSha256);expect(decodeFrame(bytes)).toEqual(inputs[i]);

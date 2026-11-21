@@ -1,3 +1,4 @@
+import {cancellableSql} from '../core/sql-cancellation';
 import {normalizeStoredNoteConflicts} from './conflict-migration';
 import {phoneNotePlainText} from './phone-text';
 import {trimNoteText} from './text';
@@ -6,7 +7,7 @@ import {noteConflictId} from './conflict-id';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {memoPlainText,memoTitle} from './text.ts';
 export {memoPlainText,memoTitle} from './text.ts';
-import type { SqlDatabase, SqlParams } from "../core/types.ts";
+import type { SqlCancellationCheck, SqlDatabase, SqlParams } from "../core/types.ts";
 import type { MemoFolder, MemoNote } from "./types.ts";
 import { utf8Encode } from "../cloud/types.ts";
 import { noteUnopenable } from "../sync-v2/note-rows.ts";
@@ -54,15 +55,15 @@ export class MemoRepository {
   async list(): Promise<MemoNote[]> { return (await this.db.query(`SELECT * FROM memo_notes WHERE deleted=0 ORDER BY pinned DESC,updated_at DESC`)).map(note); }
   async allIncludingDeleted(): Promise<MemoNote[]> { return (await this.db.query(`SELECT * FROM memo_notes ORDER BY updated_at DESC`)).map(note); }
   /** BLE and cloud share the same conflict-preserving transaction. */
-  async merge(incoming: readonly MemoNote[]): Promise<number> {
+  async merge(incoming: readonly MemoNote[], check?:SqlCancellationCheck): Promise<number> {
     let applied=0;
-    for(const remote of incoming)applied+=await this.applyRemote(remote);
+    for(const remote of incoming)applied+=await this.applyRemote(remote,check);
     return applied;
   }
   /** Cloud import follows Phone NoteRepository.applyRemote, including durable conflicts.
    * Each transaction checks the exact read basis; a concurrent editor/link mutation
    * aborts the import so its restore receipt cannot advance. */
-  async applyRemote(remote:MemoNote):Promise<number> {
+  async applyRemote(remote:MemoNote,check?:SqlCancellationCheck):Promise<number> {
     await (this.cloudSchema??=this.db.transaction([
       {sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},
       {sql:'CREATE TABLE IF NOT EXISTS note_merge_guard(id INTEGER PRIMARY KEY CHECK(id=1))'},
@@ -75,7 +76,7 @@ export class MemoRepository {
       if(local)statements.unshift({sql:'INSERT INTO note_merge_guard(id) SELECT CASE WHEN EXISTS(SELECT 1 FROM memo_notes WHERE '+NOTE_COLUMNS.split(',').map(c=>c+' IS ?').join(' AND ')+') THEN 1 ELSE 0 END',params:noteValues(local)});
       statements.push({sql:'INSERT INTO note_cloud_receipts VALUES(?,?)',params:[remoteHash,remote.noteId]});
       if(local)statements.push({sql:'DELETE FROM note_merge_guard WHERE id=1'});
-      await this.db.transaction(statements);return changed;
+      await cancellableSql(this.db,check).transaction(statements);return changed;
     };
     let value=remote,conflict=false;
     if(local){

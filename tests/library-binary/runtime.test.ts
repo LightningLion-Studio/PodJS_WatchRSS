@@ -7,15 +7,26 @@ import {hash,utf8,type Envelope,type Row,type ObjectDescriptor,type Capability,t
 import {negotiate,s2Capability} from '../../src/sync/library-binary/routing';
 import {HostServiceError} from '@podjs/framework/services';
 import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
-async function ready(f:Awaited<ReturnType<typeof binaryRuntime>>){const s=f.session(),legacy=async(r:Row)=>{await s.connection.writeFrame(r);const reply=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return reply;};const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true});await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});return {s,probe,legacy};}
+async function ready(f:Awaited<ReturnType<typeof binaryRuntime>>){const s=f.session(),legacy=async(r:Row)=>{await s.connection.writeFrame(r);const reply=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return reply;};const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true,...(f.ports.guardedRuntime?{supportedGuardedLibraryVersions:[1]}:{})});await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});return {s,probe,legacy};}
 function request(phase:Envelope['phase'],payload:Row,job:string|null=null,plan:string|null=null,epoch:number|null=null):Envelope{return {action:'syncLibraryBinary',version:2,type:'request',phase,jobId:job,planDigest:plan,epoch,requestId:nonce(),requestDigest:requestDigest(job,plan,phase,payload),payload};}
 export {ready,request};
-for(const rollback of [false,true])test(rollback?'B2 asset rollback retains bytes before publication or APPLIED':'real legacy session → switch → raw DATA → durable business receipt, with terminal resume',async()=>{
+for(const mode of ['ordinary','rollback','guarded','guarded-stale'] as const)test('B2 '+mode+' asset, durable receipt and protected terminal resume',async()=>{
+ const rollback=mode==='rollback',guarded=mode.startsWith('guarded');
  const watchDeviceId='22000000-0000-0000-0000-000000000000';
  let busy=true;const f=await binaryRuntime({userId:'11000000-0000-0000-0000-000000000000',watchId:watchDeviceId,fault:m=>{if(busy&&m.endsWith('.stage')){busy=false;throw Error('BUSY');}}});try{
   const guard=await localTransferIntakeFixture(f.db,(await f.ports.account.read())!,watchDeviceId);
   if(rollback)await guard.rollback();
   f.ports.intake=guard.intake;
+  if(guarded){
+   const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
+   const {account}=await import('../sync-v2/fixture');
+   const before=await guard.store.readState(),head={...account,generation:'0'};
+   await guard.store.controlUpdate(before,{...before,account:head,cloud:{current:{commitOid:head.oid,treeRoot:'tree:sha256:'+'a'.repeat(64),rowCount:0}}});
+   f.ports.assetIndex=new NoteAssetFileIndex(f.db);
+   f.ports.guardedRuntime=async()=>true;
+   f.ports.sessionTransaction=async(context,statements)=>{context.checkCancelled?.();await f.db.transaction(statements);return statements.map(()=>0);};
+   f.ports.guardedTransaction=async(_channel,_epoch,statements)=>{await f.db.transaction(statements);return statements.map(()=>0);};
+  }
   const {s,probe}=await ready(f);expect(probe.libraryBinary).toBeDefined();const cap=probe.libraryBinary as unknown as Capability;
   await s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});expect((await s.connection.readFrame(3000)).success).toBe(true);
   const io=new BinaryByteTransport(s.connection.detachStream()),call=async(r:Envelope,success=true)=>{await io.writeFrame(encodeFrame({kind:'control',envelope:r}));const a=decodeFrame(await io.readFrame());if(a.kind!=='control')throw Error('control expected');expect(a.envelope.success).toBe(success);return a.envelope;};
@@ -39,10 +50,22 @@ for(const rollback of [false,true])test(rollback?'B2 asset rollback retains byte
    await s.pair.close();await s.running.catch(()=>{});
    return;
   }
-  expect(applied.result!.state).toBe('APPLIED');const rows=await f.db.query('SELECT * FROM library_binary_assets');expect(rows.length).toBe(1);expect((await f.files.hash('notes/assets/picture.png')).sha256).toBe(d.sha256);
+  expect(applied.result!.state).toBe('APPLIED');const rows=await f.db.query('SELECT * FROM library_binary_assets');expect(rows.length).toBe(1);expect((await f.files.hash(await f.ports.assetIndex?.path('picture.png')??'notes/assets/picture.png')).sha256).toBe(d.sha256);
   const done=await call(request('complete',{objectCount:1,receiptsRoot:receiptsRoot([applied.result!.receipt as any]),ackToInclusive:0},job,plan,epoch));expect(done.result!.state).toBe('COMPLETE');await s.running;expect(f.stats().peak).toBe(65536);
+  if(mode==='guarded-stale'){
+   const before=await guard.store.readState();
+   await guard.store.controlUpdate(before,{...before,account:{...before.account!,revision:'9'}});
+  }
   // Both peers now advertise S3. The completed S2 job retains its original selection.
-  const resumed=await ready(f);await resumed.s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});await resumed.s.connection.readFrame(3000);const resumedIo=new BinaryByteTransport(resumed.s.connection.detachStream());const resumedCall=async(r:Envelope)=>{await resumedIo.writeFrame(encodeFrame({kind:'control',envelope:r}));const answer=decodeFrame(await resumedIo.readFrame());if(answer.kind!=='control')throw Error('control expected');expect(answer.envelope.success).toBe(true);return answer.envelope;};const resumedOffer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneCapabilities:cap,phoneSnapshot,watchSnapshot});const resumedOffered=await resumedCall(resumedOffer);const resumedBindings=[{jobId:job,direction:'phoneToWatch',intent:'resume',selection}];await resumedCall(request('prepare',{step:'confirm',offerRequestId:resumedOffer.requestId,bindings:resumedBindings,preparationDigest:preparationDigest(String(resumedOffered.result!.offerDigest),resumedBindings as any)}));const terminal=await resumedCall(request('begin',{...p,intent:'resume'} as unknown as Row,job,plan));expect(terminal.result!.state).toBe('COMPLETE');expect(terminal.result!.completion).toEqual(done.result);await resumed.s.running;expect((await f.db.query('SELECT * FROM library_binary_assets')).length).toBe(1);
+  const resumed=await ready(f);await resumed.s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});await resumed.s.connection.readFrame(3000);const resumedIo=new BinaryByteTransport(resumed.s.connection.detachStream());const resumedCall=async(r:Envelope,success=true)=>{await resumedIo.writeFrame(encodeFrame({kind:'control',envelope:r}));const answer=decodeFrame(await resumedIo.readFrame());if(answer.kind!=='control')throw Error('control expected');expect(answer.envelope.success).toBe(success);return answer.envelope;};const resumedOffer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneCapabilities:cap,phoneSnapshot,watchSnapshot});const resumedOffered=await resumedCall(resumedOffer);const resumedBindings=[{jobId:job,direction:'phoneToWatch',intent:'resume',selection}];await resumedCall(request('prepare',{step:'confirm',offerRequestId:resumedOffer.requestId,bindings:resumedBindings,preparationDigest:preparationDigest(String(resumedOffered.result!.offerDigest),resumedBindings as any)}));const terminal=await resumedCall(request('begin',{...p,intent:'resume'} as unknown as Row,job,plan),mode!=='guarded-stale');
+  if(mode==='guarded-stale'){
+   expect(terminal.error?.code).toBe('BUSINESS_REJECTED');
+   await expect(resumed.s.running).rejects.toThrow('BUSINESS_REJECTED');
+  }else{
+   expect(terminal.result!.state).toBe('COMPLETE');
+   expect(terminal.result!.completion).toEqual(done.result);
+   await resumed.s.running;
+  }expect((await f.db.query('SELECT * FROM library_binary_assets')).length).toBe(1);
 
  }finally{await f.dispose();}
 },15000);

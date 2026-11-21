@@ -3,7 +3,7 @@ import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
 export type Statement={sql:string;params?:SqlParams};
-export interface ReceiptBoundary {check?():void;before:Statement[];after(outcome:Outcome):Statement[]}
+export interface ReceiptBoundary {check?():void;transaction?(statements:Statement[]):Promise<void>;transactionChanges?(statements:Statement[]):Promise<number[]>;before:Statement[];after(outcome:Outcome):Statement[]}
 export type JobState='PLANNING'|'READY'|'TRANSFERRING'|'APPLIED'|'COMPLETE'|'CANCELLED';
 export interface Job {scope:string;jobId:string;planDigest:string;description:BeginPayload;state:JobState;connectionId:string;epoch:number;expiresAt:number;nextPage:number;completion:Completion|null;lease:Row|null;role:'receiver'|'source'}
 const lanes=new WeakMap<SqlDatabase,Promise<unknown>>();

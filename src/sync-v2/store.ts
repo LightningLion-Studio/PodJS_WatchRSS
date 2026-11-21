@@ -1,3 +1,4 @@
+import type {SqlCancellationCheck,SqlDatabase} from '../core/types';
 import {SqlAuthenticatedCache,SQL_AUTHENTICATED_CACHE_SCHEMA} from '@podjs/framework/sql-authenticated-cache';
 import {ResourceQuota,type ResourceReservation} from '@podjs/framework/resource-journal';
 import {ContentSha256} from '@podjs/framework/content-sha256';
@@ -20,7 +21,7 @@ import {arrayRecordFeed,arrayStatementFeed,feedPages,type RecordFeed,type Statem
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {publicationCurrent,queuedReadOnly,initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
 import {LEGACY_BODY_SCHEMA,WatchLegacyBody,type LegacyBodyRef,type LegacyBodySource} from './legacy-body';
-import type {LocalTransferInput} from './local-transfer-intake';
+import type {GuardedLibraryStamp,LocalTransferInput} from './local-transfer-intake';
 /** open authenticates with an existing key; it must never persist a new key. */
 export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>;
  /** N1: bounded single-call AES-GCM under the same key, for values stored as
@@ -174,8 +175,13 @@ export class WatchProjectionStore {
   if(!state.pendingChoice&&compareD64(state.editBase.generation,state.rollbackGeneration)<0&&(state.hasUnsentEdits||compareD64(state.localChangeRevision,state.acknowledgedLocalChangeRevision??'0')>0)){const next={...state,pendingChoice:{generation:state.rollbackGeneration,inboxKeys:[],accountOid:state.account!.oid,accountRevision:state.account!.revision,selectedLocalChangeRevision:state.localChangeRevision}};await this.commit(state,next);return next;}
   return state;
  }
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&(state.cloud?.pendingPublish?.explicit||state.cloud?.pendingCloudChoice))||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
-  try{await commitSqlCas(db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND (enabled=1 OR ?=1)) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,this.options.localIntake?1:0,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:SqlCancellationCheck,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&(state.cloud?.pendingPublish?.explicit||state.cloud?.pendingCloudChoice))||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+  const cancellable=(db as ProjectionSql&Pick<SqlDatabase,'transactionChangesCancellable'>).transactionChangesCancellable;
+  const onCancel=hook?.onCancel;
+  const commitDb=cancellable&&onCancel?{...db,transaction:async(statements:Statement[])=>{
+   hook();await cancellable.call(db,statements,onCancel);
+  }}:db;
+  try{await commitSqlCas(commitDb,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND (enabled=1 OR ?=1)) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,this.options.localIntake?1:0,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
   * Preparation runs outside SQL; all prepared statements commit at this CAS. */
@@ -512,7 +518,15 @@ export class WatchProjectionStore {
  async localTransferFence(reading=false){
   const state=await this.persistedState();
   if(reading&&state.pendingChoice)throw Error('BUSINESS_REJECTED');
-  return canonical([this.scopeKey,state.rollbackGeneration]);
+  return canonical([this.scopeKey,state.account?.oid??null,state.account?.revision??null,state.rollbackGeneration]);
+ }
+ async guardedLibraryStamp():Promise<GuardedLibraryStamp>{
+  await this.checkIdentity();
+  const state=await this.persistedState();
+  if(!state.account||state.cloud?.current?.commitOid!==state.account.oid)throw Error('BUSINESS_REJECTED');
+  const basis=await businessRevision(this.db);
+  return {scope:this.scopeKey,stateVersion:state.stateVersion,...basis,
+   anchor:digest([this.scopeKey,state.account.oid,state.account.revision,state.rollbackGeneration,state.activeGeneration,state.pendingChoice?.inboxKeys??[]])};
  }
  /** The local transport has no proof about the rollback's affected set. The
   * writer lease orders this check and the caller's business commit. */
