@@ -13,8 +13,8 @@
     "test-gate": "./test-gate"
   },
   "dependencies": {
-    "@pocketjs/framework": "file:../../PodJS/podjs-watch/vendor/pocketjs",
-    "@podjs/framework": "file:../../PodJS/podjs-watch/packages/framework",
+    "@pocketjs/framework": "file:../podjs-watch-framework-pinned.wt-1332-ui/vendor/pocketjs",
+    "@podjs/framework": "file:../podjs-watch-framework-pinned.wt-1332-ui/packages/framework",
     "entities": "7.0.1",
     "qrcode-generator": "1.4.4",
     "solid-js": "1.9.9"
@@ -28,7 +28,7 @@
     "typescript-eslint": "8.48.0"
   },
   "overrides": {
-    "@pocketjs/framework": "file:../../PodJS/podjs-watch/vendor/pocketjs"
+    "@pocketjs/framework": "file:../podjs-watch-framework-pinned.wt-1332-ui/vendor/pocketjs"
   },
   "imports": {
     "#sync-v2-build": {

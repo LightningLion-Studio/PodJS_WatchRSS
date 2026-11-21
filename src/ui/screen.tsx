@@ -56,7 +56,6 @@ import {
   type ReaderPresetState,
 } from "../reader/preset-store.ts";
 import { defaultReaderPreset } from "../reader/preset.ts";
-import { readerFontResolver } from "../reader/font-assets.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { shouldAutoRemoveWatchLater } from "../reader/watch-later-completion.ts";
 import { loadFeedWindow } from "./feed-window.ts";
@@ -726,9 +725,6 @@ export default function WatchRSS(props: {
     presetState()
       ? activeReaderPreset(presetState()!, presetClock())
       : defaultReaderPreset(undefined, undefined, true, settings().fontSizeSp),
-  );
-  const informationFonts = createMemo(() =>
-    readerFontResolver(presetState() ?? {}, presetRevision()),
   );
   const informationBackground = createMemo(() => ({
     state: presetState() ?? {},
@@ -1798,9 +1794,6 @@ export default function WatchRSS(props: {
               foreground={foreground}
               width={width}
               height={height}
-              preset={readerPreset}
-              fonts={informationFonts}
-              backgroundSnapshot={informationBackground}
               setPage={setPage}
               openInformation={informationNavigate}
               addRecommendation={addRecommendation}

@@ -1,19 +1,18 @@
 import { createEffect, createSignal, onCleanup, Show } from 'solid-js';
 import { Image, View, type NodeMirror } from '@pocketjs/framework/components';
 import { createGesture } from '@pocketjs/framework/gesture';
+import { clampDockCenter, edgeDockCenter } from '@podjs/framework/watch-ui';
 import { onFrame } from '@pocketjs/framework/lifecycle';
 import {
-  clampBubbleCenter,
   cappedDampedSnapStep,
   criticallyDampedStep,
   exponentialFlingEnd,
   exponentialFlingPosition,
-  nearestPoint,
-  readAloudSafeCorners,
   READ_ALOUD_FLING_MAX_SECONDS,
   READ_ALOUD_FLING_STOP_SPEED,
   READ_ALOUD_FLING_TAU,
   READ_ALOUD_TOUCH_SIZE,
+  READ_ALOUD_MAX_OVERSHOOT,
   type MotionState,
   type Point,
 } from '../reader/read-aloud-floating.ts';
@@ -29,16 +28,20 @@ interface Props {
   onOpen: () => void;
 }
 
-interface DockState { right: boolean; verticalFraction: number }
-const dock: DockState = { right: true, verticalFraction: 0.65 };
+const dock = { x: 0.9, y: 0.65 };
+const TOUCH_RADIUS = READ_ALOUD_TOUCH_SIZE / 2;
+const EDGE_MARGIN = 4;
 const now = () => globalThis.performance?.now?.() ?? Date.now();
 const SNAP_SETTLE_LIMIT_MS = 1_100;
 const statePoint = (position: Point, velocity: Point = { x: 0, y: 0 }): MotionState => ({ position, velocity });
-const clampPoint = (point: Point, props: Props) => clampBubbleCenter(point, props.width, props.height, props.round);
+const clampPoint = (point: Point, props: Props) =>
+  clampDockCenter(point, props.width, props.height, props.round, TOUCH_RADIUS + (props.round ? 0 : EDGE_MARGIN));
+const snapPoint = (point: Point, props: Props) =>
+  edgeDockCenter(point, props.width, props.height, props.round, TOUCH_RADIUS + EDGE_MARGIN + (props.round ? 0 : READ_ALOUD_MAX_OVERSHOOT));
 
 function initialPoint(props: Props): Point {
-  const x = dock.right ? props.width - READ_ALOUD_TOUCH_SIZE / 2 - 4 : READ_ALOUD_TOUCH_SIZE / 2 + 4;
-  return clampPoint({ x, y: props.height * dock.verticalFraction }, props);
+  const point = { x: props.width * dock.x, y: props.height * dock.y };
+  return props.round ? snapPoint(point, props) : clampPoint(point, props);
 }
 
 function titleFor(state?: SpeechPlaybackState): string {
@@ -121,7 +124,7 @@ export function ReadAloudFloatingBubble(props: Props) {
   });
 
   function beginSnap(velocity: Point, projectedEnd: Point = motion.position) {
-    snapTarget = nearestPoint(clampPoint(projectedEnd, props), readAloudSafeCorners(props.width, props.height, props.round));
+    snapTarget = snapPoint(projectedEnd, props);
     motion = { position: clampPoint(motion.position, props), velocity };
     snapOrigin = motion.position;
     snapCrossed = Math.hypot(snapOrigin.x - snapTarget.x, snapOrigin.y - snapTarget.y) < 1e-4;
@@ -133,8 +136,8 @@ export function ReadAloudFloatingBubble(props: Props) {
     motion = statePoint(snapTarget);
     updatePosition(snapTarget);
     phase = 'idle';
-    dock.right = snapTarget.x >= props.width / 2;
-    dock.verticalFraction = snapTarget.y / Math.max(1, props.height);
+    dock.x = snapTarget.x / Math.max(1, props.width);
+    dock.y = snapTarget.y / Math.max(1, props.height);
   }
 
   onFrame(() => {
@@ -172,7 +175,7 @@ export function ReadAloudFloatingBubble(props: Props) {
       if (safe.x !== motion.position.x || safe.y !== motion.position.y) motion = { position: safe, velocity: { x: 0, y: 0 } };
       setPosition(motion.position);
       const settled = Math.hypot(snapTarget.x - motion.position.x, snapTarget.y - motion.position.y) < 0.15 && Math.hypot(motion.velocity.x, motion.velocity.y) < 1;
-      // Avoid leaving the ball between corners if clamping prevents the spring
+      // Avoid leaving the ball between the release point and the edge if clamping prevents the spring
       // from meeting its strict numeric settling threshold.
       if (settled || frameNow - snapStartedAt >= SNAP_SETTLE_LIMIT_MS) finishSnap();
     }

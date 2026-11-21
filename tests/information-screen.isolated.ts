@@ -9,7 +9,6 @@ import type {SystemTextLineOptions} from "@podjs/framework/text";
 import type {InformationListAnchor} from "../src/ui/information-anchor.ts";
 import type {InformationDocumentHandle, InformationDocumentProps} from "../src/ui/InformationDocument.tsx";
 import type {InformationRef, InformationScreenProps, InformationSnapshot} from "../src/ui/InformationScreens.tsx";
-import {defaultReaderPreset} from "../src/reader/preset.ts";
 import {GROUP_NUMBER,GROUP_URL,informationText} from "../src/ui/information-data.ts";
 import {NetworkRecovery} from "../src/network/recovery.ts";
 import {NetworkRecoveryContext} from "../src/network/context.ts";
@@ -148,8 +147,7 @@ function mount(overrides: Partial<InformationScreenProps> = {}, network?:Network
   const snapshots: InformationSnapshot[] = [], navigation: string[] = [], events:string[] = [];
   const input: InformationScreenProps = {
     width: 233, height: 233, page: "privacy", legalBaseUrl: "https://legal.example.test/",
-    preset: defaultReaderPreset(), fonts: () => ({fontPath: "reader/fonts/custom.ttf", fontFaceIndex: 1}),
-    backgroundSnapshot: {state: {}, revision: 3}, active: () => true, accessibilityLabel: "协议正文",
+    active: () => true, accessibilityLabel: "协议正文",
     onNavigate: page => navigation.push(page), onSnapshotChange: snapshot => snapshots.push({...snapshot}),
     onRestorationEvent:event => events.push(event),
     ref: value => {ref = value;}, ...overrides,
@@ -415,16 +413,15 @@ test("covering and resuming a successful document preserves its instance, offset
   expect(requests[0]!.cancelled).toBe(false);
 });
 
-for (const page of ["info", "licenses"] as const) test(`static ${page} forwards the real reader inputs and renders only the document`, async () => {
+for (const page of ["info", "licenses"] as const) test(`static ${page} uses the fixed palette and renders only the document`, async () => {
   const mounted = mount({page});
   await settle();
   const document = renderedDocument(mounted), nodes = mounted.nodes();
   expect(requests).toHaveLength(0);
   expect(document.props.content).toBe(page === "info" ? informationText.intro : informationText.licenses);
   expect(document.props.title).toBe(page === "info" ? "项目自介" : "开源许可与清单");
-  expect(document.props.preset).toBe(mounted.input.preset);
-  expect(document.props.fonts).toBe(mounted.input.fonts);
-  expect(document.props.backgroundSnapshot).toBe(mounted.input.backgroundSnapshot);
+  expect(document.props.preset.body.colorArgb).toBe(0xfff2f2f2);
+  expect(document.props.fonts(document.props.preset.body).fontPath).toBeUndefined();
   expect(document.props.active).toBe(mounted.input.active);
   expect(document.props.accessibilityLabel).toBe("协议正文");
   expect(nodes.some(node => node.kind === "ScrollEntries" || typeof node.props.onPress === "function")).toBe(false);
@@ -649,3 +646,11 @@ for(const leave of ['inactive','disposed'] as const){
   reject(Error('delayed settings failure'));await settle();expect(hostRequests).toEqual([]);
  });
 }
+
+for (const page of ['privacy', 'useragreement'] as const) test(`${page} renders the fixed colors and defaults for typography`, async () => {
+  const mounted = mount({page, restoredState:state('本地协议正文', null)});
+  const document = renderedDocument(mounted);
+  expect(document.props.preset.background).toMatchObject({type:'SOLID', assetId:null, colorArgb:0xff000000});
+  expect(document.props.preset.body).toMatchObject({colorArgb:0xfff2f2f2, fontSizeSp:14});
+  expect(document.props.fonts(document.props.preset.body).fontPath).toBeUndefined();
+});

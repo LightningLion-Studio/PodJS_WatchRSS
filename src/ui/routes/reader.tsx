@@ -1,6 +1,6 @@
 import {View} from "@pocketjs/framework/components";
 import {readerColor} from "../../reader/content-layout.ts";
-import { Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { resolveUrl } from "../../core/parser.ts";
 import type {
   SpeechPlayback,
@@ -57,9 +57,11 @@ interface ReaderRoutesProps {
 
 export function ReaderRoutes(props: ReaderRoutesProps) {
   const frame=()=>({left:0,top:0,width:props.width,height:props.height});
+  const [pendingSpeech, setPendingSpeech] = createSignal(props.entry.speechStart);
+  const currentSpeechArticle = () => pendingSpeech()?.article ?? props.speechState()?.article;
   const speechReturnsToArticle = () => {
     const previous = props.stack()[props.stack().indexOf(props.entry) - 1];
-    const currentArticle = props.speechState()?.article;
+    const currentArticle = currentSpeechArticle();
     return (
       previous?.page === "reader" &&
       !!currentArticle &&
@@ -72,8 +74,19 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
       props.popPage();
       return;
     }
-    const currentArticle = props.speechState()?.article;
+    const currentArticle = currentSpeechArticle();
     if (currentArticle) void props.openArticle(currentArticle);
+  };
+
+  const toggleSpeech = () => {
+    const request = pendingSpeech();
+    if (!request) {
+      void props.speechPlayback.toggle();
+      return;
+    }
+    props.entry.speechStart = undefined;
+    setPendingSpeech(undefined);
+    void props.speechPlayback.start(request.article, props.speechPlayback.state.rate, request.anchor);
   };
 
   return (
@@ -109,7 +122,9 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
           height={props.height}
           active={props.active()}
           state={props.speechState() ?? props.speechPlayback.state}
-          onToggle={() => void props.speechPlayback.toggle()}
+          pendingArticle={pendingSpeech()?.article.title}
+          onToggle={toggleSpeech}
+          ref={(value) => { props.entry.list = value; }}
           onPrevious={() => void props.speechPlayback.previous()}
           onNext={() => void props.speechPlayback.next()}
           onStop={() => {
@@ -200,18 +215,12 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
               void props.toast("已开始朗读，长按文章可打开朗读页面");
             }}
             onSpeechControls={(article, anchor) => {
-              if (
-                props.speechState()?.phase === "idle" ||
-                !props.speechState() ||
-                props.speechState()?.article?.id !== article.id
-              ) {
-                void props.speechPlayback.start(
-                  article,
-                  props.speechPlayback.state.rate,
-                  anchor,
-                );
-              }
-              props.setPage("speech-playback");
+              const speech = props.speechPlayback.state;
+              props.setPage("speech-playback",
+                speech.phase !== "idle" && speech.article?.id === article.id
+                  ? undefined
+                  : { speechStart: { article, anchor } },
+              );
             }}
             onMedia={(article, block) => {
               if (block.type === "video") {

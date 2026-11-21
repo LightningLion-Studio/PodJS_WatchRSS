@@ -1,30 +1,27 @@
+import { safeCenteredSquareBelow, safeTopBlock } from "@podjs/framework/watch-ui";
+
 export const DEFAULT_SHARE_QR_WIDTH_RATIO = 0.88;
 export const DETAIL_SHARE_QR_WIDTH_RATIO = 0.7;
+const CANVAS = 233;
 
-export interface ShareQrLayout {
-  ratio: number;
-  qrSize: number;
-  qrLeft: number;
-  qrTop: number;
-  titleTop: number;
-  subtitleTop: number;
-}
-
-/** Matches ShareQrScreen's native 0.1..1 width contract on a 233dp canvas. */
-export function shareQrLayout(value = DEFAULT_SHARE_QR_WIDTH_RATIO): ShareQrLayout {
+export function shareQrLayout(value = DEFAULT_SHARE_QR_WIDTH_RATIO, round = true) {
   const ratio = Number.isFinite(value)
     ? Math.min(1, Math.max(0.1, value))
     : DEFAULT_SHARE_QR_WIDTH_RATIO;
-  const qrSize = 233 * ratio;
-  const panelTop = (233 - (60 + qrSize)) / 2;
-  return {
-    ratio,
-    qrSize,
-    qrLeft: (233 - qrSize) / 2,
-    qrTop: panelTop + 60,
-    titleTop: panelTop,
-    subtitleTop: panelTop + 32,
-  };
+  const title = round
+    ? safeTopBlock(CANVAS, CANVAS, () => 26, { minTop: 25, maxWidth: 152 })!
+    : { x: 56.5, y: 14, width: 120, height: 26 };
+  const subtitleTop = title.y + title.height + 6;
+  const subtitle = round
+    ? safeTopBlock(CANVAS, CANVAS, () => 17, { minTop: subtitleTop, maxWidth: 190 })!
+    : { x: 21.5, y: subtitleTop, width: 190, height: 17 };
+  const qrTop = subtitle.y + subtitle.height + 8;
+  const requestedSize = CANVAS * ratio;
+  const size = Math.floor(Math.min(requestedSize, CANVAS - qrTop - 2));
+  const qr = round
+    ? safeCenteredSquareBelow(CANVAS, CANVAS, qrTop, requestedSize)!
+    : { x: (CANVAS - size) / 2, y: Math.max(qrTop, (CANVAS - size) / 2), width: size, height: size };
+  return { ratio, title, subtitle, qr };
 }
 
 export function shareQrPixelSize(
@@ -34,4 +31,23 @@ export function shareQrPixelSize(
 ): number {
   const pixels = Math.round(logicalSize * canvasScale * density);
   return Math.min(512, Math.max(1, Number.isFinite(pixels) ? pixels : 1));
+}
+
+/** Keep both ends of a long caption inside its measured single-line width. */
+export function shareMiddleEllipsis(text: string, width: number, measure: (text: string) => number): string {
+  if (measure(text) <= width) return text;
+  if (measure("…") > width) return "";
+  const chars = Array.from(text);
+  const shorten = (count: number) => {
+    const prefix = Math.ceil(count / 2);
+    const suffix = Math.floor(count / 2);
+    return chars.slice(0, prefix).join("") + "…" + chars.slice(chars.length - suffix).join("");
+  };
+  let low = 0, high = chars.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (measure(shorten(mid)) <= width) low = mid;
+    else high = mid - 1;
+  }
+  return shorten(low);
 }

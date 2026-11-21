@@ -11,15 +11,13 @@ import {SystemTextLine, type SystemTextLineOptions} from '@podjs/framework/text'
 import {fetchLegalDocument} from "../onboarding/legal-document.ts";
 import {createScroller, type Scroller} from "@pocketjs/framework/kinetics";
 import {onFrame} from '@pocketjs/framework/lifecycle';
-import type {ReaderPreset} from "../reader/preset.ts";
-import type {ReaderFontResolver} from "../reader/font-assets.ts";
-import type {ReaderBackgroundSnapshot} from "../reader/background-assets.ts";
 import {logBrowserOpenFailure} from '../browser/open-failure.ts';
 import {scrollTextVisibility} from './scroll-text-visibility.ts';
 import {chunkLines} from "./round-rows.tsx";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { GROUP_NUMBER, GROUP_URL, informationText } from "./information-data.ts";
 import { SafeQrScreen } from "./SafeQrScreen.tsx";
+import {informationDocumentStyle} from './information-document-style.ts';
 import {BeianScreen} from './BeianScreen.tsx';
 import {InformationDocument, type InformationDocumentHandle} from './InformationDocument.tsx';
 import type {InformationListAnchor} from './information-anchor.ts';
@@ -39,7 +37,7 @@ export interface InformationSnapshot {
 }
 export type InformationRestorationEvent = 'document-mounted'|'document-unmounted'|'candidate-consumed'|'loading-committed'|'response-applied';
 export type InformationRef = (value: { scroller: Scroller;snapshot?:()=>InformationSnapshot }) => void;
-export interface InformationScreenProps { height: number; width?: number; preset:ReaderPreset; fonts:ReaderFontResolver; backgroundSnapshot:ReaderBackgroundSnapshot; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => Promise<void> | void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
+export interface InformationScreenProps { height: number; width?: number; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => Promise<void> | void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
 
 type LabelVisibility=(row?:()=>ScrollEntry)=>boolean;
 const button = (label: string, onPress?: () => void, labelVisible?:LabelVisibility): ScrollEntry => ({ height: 52, render: row => <View onPress={onPress} focusable={!!onPress} accessibilityLabel={label} class="absolute inset-0 rounded-[30] bg-[#2a2a2a] items-center justify-center active:scale-96"><Show when={labelVisible?.(row)??true}><Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></Show></View> });
@@ -207,7 +205,7 @@ export function InformationScreen(props: InformationScreenProps) {
     }
     default: result = [];
   } return result; });
-  return <View class="absolute inset-0" accessibilityHidden={!(props.active?.() ?? true)}><Show when={props.page === 'beian'} fallback={
+  return <View class="absolute inset-0 bg-black" accessibilityHidden={!(props.active?.() ?? true)}><Show when={props.page === 'beian'} fallback={
     <Show when={props.page === 'join-group'} fallback={
       <Show when={documentPage()} fallback={<ScrollEntries height={props.height} entries={result()} gap={8} inputActive={props.active} accessibilityLabel={props.accessibilityLabel} ref={value => setLegacyScroller(value.scroller)} />}>
         <Show when={documentVisible()} fallback={
@@ -220,7 +218,7 @@ export function InformationScreen(props: InformationScreenProps) {
           </Show>
         }>
           <InformationDocument title={documentTitle()} content={documentContent()!} width={props.width ?? 233} height={props.height}
-            preset={props.preset} fonts={props.fonts} backgroundSnapshot={props.backgroundSnapshot}
+            preset={informationDocumentStyle.preset} fonts={informationDocumentStyle.fonts}
             active={props.active} accessibilityLabel={props.accessibilityLabel} restoredScrollOffsetPx={restoreOffset()} restoredListAnchor={pendingAnchor() ?? undefined}
             onBeian={() => props.onNavigate('beian')} ref={mountDocument} onDispose={unmountDocument} />
         </Show>

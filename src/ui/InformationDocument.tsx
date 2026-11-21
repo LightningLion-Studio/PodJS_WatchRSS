@@ -12,8 +12,6 @@ import {requestReaderLayout} from '../reader/platform-layout.ts';
 import {systemTextOptions} from '../reader/system-text.ts';
 import {resolvedReaderStyle, type ReaderPreset, type ReaderTextStyle, type TypographyRole} from '../reader/preset.ts';
 import type {ReaderFontResolver} from '../reader/font-assets.ts';
-import type {ReaderBackgroundSnapshot} from '../reader/background-assets.ts';
-import {ReaderBackground} from './ReaderBackground.tsx';
 import {useReaderTitleEntry} from './ReaderTitleEntry.tsx';
 import {ScrollEntries, type ScrollEntry} from './ScrollEntries.tsx';
 import {visibleEntryRange} from './visible-range.ts';
@@ -44,7 +42,6 @@ export interface InformationDocumentProps {
   height: number;
   preset: ReaderPreset;
   fonts: ReaderFontResolver;
-  backgroundSnapshot: ReaderBackgroundSnapshot;
   onBeian: () => void;
   active?: () => boolean;
   accessibilityLabel?: string;
@@ -348,9 +345,7 @@ export function useInformationDocument(props: InformationDocumentProps): Informa
 /** Successful InfoActivity content. The caller owns network loading/error pages. */
 export function InformationDocument(props: InformationDocumentProps) {
   const document = useInformationDocument(props);
-  return <View class="absolute inset-0 overflow-hidden">
-    <ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot}
-      width={props.width} height={props.height} active={props.active?.() ?? true}/>
+  return <View class="absolute inset-0 overflow-hidden bg-black">
     <Show when={document.displayReady()}><ScrollEntries height={props.height} entries={document.entries()}
       controller={document.scroller} padding={14} verticalPadding={0} gap={0}
       inputActive={props.active} accessibilityLabel={props.accessibilityLabel}/></Show>

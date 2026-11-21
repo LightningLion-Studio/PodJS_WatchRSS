@@ -1,13 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { clampDockCenter } from '@podjs/framework/watch-ui';
 import {
-  clampBubbleCenter,
   cappedDampedSnapStep,
   criticallyDampedStep,
   dampedSnapStep,
   exponentialFlingEnd,
   exponentialFlingPosition,
-  nearestPoint,
-  readAloudSafeCorners,
   type MotionState,
 } from '../src/reader/read-aloud-floating.ts';
 
@@ -37,19 +35,6 @@ describe('read-aloud floating motion', () => {
     expect(Math.abs(nearEnd.y + 30)).toBeLessThan(1);
   });
 
-  test('round and rectangular bounds keep the touch target in the safe area', () => {
-    expect(clampBubbleCenter({ x: -20, y: 400 }, 320, 240, false)).toEqual({ x: 28, y: 212 });
-    const center = clampBubbleCenter({ x: 0, y: 0 }, 192, 192, true);
-    const maxRadius = 96 - 4 - 48 / Math.SQRT2;
-    expect(Math.hypot(center.x - 96, center.y - 96)).toBeLessThanOrEqual(maxRadius + 1e-8);
-  });
-
-  test('release endpoint selects the nearest of four safe corners', () => {
-    const corners = readAloudSafeCorners(320, 240, false);
-    expect(nearestPoint({ x: 300, y: 20 }, corners)).toEqual(corners[1]);
-    expect(corners).toHaveLength(4);
-  });
-
   test('spring snap stays bouncy but caps post-target travel at eight dp', () => {
     const target = { x: 284, y: 36 };
     const origin = { x: 160, y: 120 };
@@ -61,7 +46,7 @@ describe('read-aloud floating motion', () => {
       state = next.state;
       crossed = next.crossed;
       if (crossed && Math.hypot(state.position.x - target.x, state.position.y - target.y) > 0.1) passedTarget = true;
-      state = { ...state, position: clampBubbleCenter(state.position, 320, 240, false) };
+      state = { ...state, position: clampDockCenter(state.position, 320, 240, false, 28) };
     }
     expect(passedTarget).toBe(true);
     expect(crossed).toBe(true);

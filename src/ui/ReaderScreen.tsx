@@ -144,9 +144,61 @@ function ReaderScreenImpl(props:{
   const activeHighlight=()=>props.highlight?.articleId===props.article.id&&(imported()||props.highlight.useOriginalContent===source.enabled())?props.highlight:undefined;
   const titleRects=createMemo(()=>titleHighlightRects(props.article.title,titleRows().map(row=>row.text),activeHighlight(),chromeWidth()-28,titleFont(),(text,slot)=>getOps().measureText(text,slot),titleRows(),titleRows().map(row=>titleCarets().get(row))));
   const highlightColor=()=>readerColor(props.preset.accentColorArgb).slice(0,7)+(chrome().dark?"57":"38");
-  const actionLineHeight=()=>props.fontSize*17/14;
-  const actionsHeight=()=>Math.max(38,actionLineHeight()+12);
-  const pill=(label:()=>string,right:boolean,press:()=>void)=> <View ref={node=>{if(!right)bindOriginalButton(node);}} onPress={press} focusable class="absolute rounded-[20] items-center justify-center active:scale-96" style={{...(right?{insetR:0}:{insetL:0}),bgColor:right?chrome().activeAction:chrome().action,borderWidth:chrome().dark?0:1,borderColor:right?chrome().activeBorder:chrome().border,insetT:(actionsHeight()-(actionLineHeight()+12))/2,width:Math.min((chromeWidth()-28-38)/2,getOps().measureText(label(),bodyFont().fontSlot)*bodyFont().scale+18),height:actionLineHeight()+12}}><Text style={{fontSlot:bodyFont().fontSlot,scale:bodyFont().scale,lineHeight:actionLineHeight()/bodyFont().scale,textColor:right?readerColor(props.preset.accentColorArgb):readerColor(props.preset.body.colorArgb)}}>{label()}</Text></View>;
+  const actionsHeight = 38;
+  const summarySize = () => props.llmEnabled ? 32 : 0;
+  const actionGap = 4;
+  const chromeContentWidth = () => chromeWidth() - 28;
+  const actionWidth = () => {
+    if (getDisplayMetrics().shape !== "round") return chromeContentWidth();
+    // Leave room at the round edge for the floating playback control.
+    const limit = Math.min(chromeContentWidth(), Math.floor(props.width * .54));
+    if (pageMode()) return limit;
+    const top = 28 + titleLayout().height - (handle()?.scroller.offset() ?? 0);
+    const mid = props.height / 2;
+    const distance = Math.max(Math.abs(top - mid), Math.abs(top + actionsHeight - mid));
+    const radius = Math.min(props.width, props.height) / 2 - 3;
+    return Math.floor(Math.min(limit, 2 * Math.sqrt(Math.max(0, radius * radius - distance * distance))));
+  };
+  const pillWidth = () => (actionWidth() - summarySize() - 2 * actionGap) / 2;
+  const originalLabel = () => source.enabled() ? "阅读RSS" : "阅读原文";
+  const pill = (label: () => string, right: boolean, press: () => void) => {
+    const measure = (text: string) => getOps().measureText(text, bodyFont().fontSlot);
+    const preferredScale = () => Math.min(1, 16 / props.fontSize) * bodyFont().scale;
+    const lines = () => {
+      const text = label();
+      return measure(text) * preferredScale() <= pillWidth() - 8
+        ? [text] : [text.slice(0, 2), text.slice(2)];
+    };
+    const labelScale = () => Math.min(preferredScale(), (pillWidth() - 8) / Math.max(1, ...lines().map(measure)));
+    const lineHeight = () => Math.min(16, 19 * labelScale());
+    return <View ref={node=>{if(!right)bindOriginalButton(node);}} onPress={press} focusable
+      accessibilityRole="button" accessibilityLabel={label()}
+      class="absolute rounded-[20] active:scale-96"
+      style={{ ...(right ? { insetR:0 } : { insetL:0 }), width:pillWidth(), height:actionsHeight,
+        bgColor:right ? chrome().activeAction : chrome().action, borderWidth:chrome().dark ? 0 : 1,
+        borderColor:right ? chrome().activeBorder : chrome().border }}>
+      <Text class="absolute text-center" accessibilityHidden style={{
+        insetL:0, insetT:(actionsHeight - lines().length * lineHeight()) / 2, width:pillWidth() / labelScale(),
+        fontSlot:bodyFont().fontSlot, scale:labelScale(), originX:-.5, originY:-.5,
+        lineHeight:lineHeight() / labelScale(),
+        textColor:right ? readerColor(props.preset.accentColorArgb) : readerColor(props.preset.body.colorArgb),
+      }}>{lines().join("\n")}</Text>
+    </View>;
+  };
+  const actionRow: ScrollEntry = {
+    height: actionsHeight,
+    render: () => <Show when={pillWidth() >= 32}><View class="absolute"
+      style={{ insetL:(chromeContentWidth() - actionWidth()) / 2, width:actionWidth(), height:actionsHeight }}>
+      {!imported() && source.canRead() ? pill(originalLabel, false, source.toggle) : null}
+      {props.llmEnabled ? <View onPress={toggleSummary} focusable
+        class="absolute rounded-[16] items-center justify-center active:scale-96"
+        style={{ insetL:(actionWidth() - summarySize()) / 2, insetT:(actionsHeight - summarySize()) / 2,
+          width:summarySize(), height:summarySize(),
+          bgColor:expanded() ? chrome().summaryAction : chrome().action,
+          borderWidth:chrome().dark ? 0 : 1, borderColor:chrome().border }}>{summaryIcon(loading() ? 18 : 26)}</View> : null}
+      {!imported() ? pill(() => "大声朗读", true, () => { handle()?.pause(); props.onSpeak(speechArticle()); }) : null}
+    </View></Show>,
+  };
   const titleHeader=createMemo<ScrollEntry[]>(()=>{
     const entry:ScrollEntry={height:titleLayout().height,render:()=> <View onPress={()=>handle()?.tap()} class="absolute inset-0">{titleRects().map(rect=><View debugName="SpeechTitleHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:highlightColor()}}/>)}{titleRows().map(row=><View class="absolute left-[0] right-[0]" style={{insetT:row.top,height:row.lineHeight}}>{requiresReaderSystemText(row.text,props.preset,"title")&&hasCapability("text.raster")?<SystemTextLine pixelScale={getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth} options={systemTextOptions({...row,textAlign:1},"title",props.fontSize,chromeWidth()-28,getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth,props.preset,getFontMetrics(row.fontSlot),fonts())} onCarets={positions=>setTitleCarets(previous=>{const next=new Map(previous);if(positions)next.set(row,positions);else next.delete(row);return next;})} fallback={<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(chromeWidth()-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}/>:<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(chromeWidth()-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}</View>)}</View>};
     return props.pageMode?titleRows().map(row=>({height:row.height,render:()=> <View class="absolute inset-0 overflow-hidden"><View class="absolute left-[0] right-[0]" style={{insetT:-row.top,height:entry.height}}>{entry.render()}</View></View>})):[entry];
@@ -154,7 +206,7 @@ function ReaderScreenImpl(props:{
   const header=createMemo<ScrollEntry[]>(()=>[
    spacer(22),
    ...titleHeader(),
-   ...(!novel()&&(!imported()||props.llmEnabled)?[spacer(6),{height:actionsHeight(),render:()=> <View class="absolute inset-0">{!imported()&&source.canRead()?pill(()=>source.enabled()?"阅读RSS":"阅读原文",false,source.toggle):null}{props.llmEnabled?<View onPress={toggleSummary} focusable class="absolute top-[0] w-[38] h-[38] rounded-[19] items-center justify-center active:scale-96" style={{insetL:(chromeWidth()-28-38)/2,insetT:(actionsHeight()-38)/2,bgColor:expanded()?chrome().summaryAction:chrome().action,borderWidth:chrome().dark?0:1,borderColor:chrome().border}}>{summaryIcon(loading()?18:26)}</View>:null}{!imported()?pill(()=>"大声朗读",true,()=>{handle()?.pause();props.onSpeak(speechArticle());}):null}</View>}]:[]),
+   ...(!novel()&&(!imported()||props.llmEnabled)?[spacer(6),actionRow]:[]),
    ...(!novel()&&props.llmEnabled&&expanded()?[spacer(6),{height:20+summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text><Text class="absolute left-[4] right-[4] top-[20] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>},...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
    ...(source.notice()?[{height:40,render:()=> <Text class="absolute inset-0 text-xs leading-[16] text-[#aaa]">{source.notice()}</Text>}]:[]),
    ...(offlineFailures()||retryingOffline()?[{height:34,render:()=> <View onPress={()=>void retryOffline()} focusable={!retryingOffline()} class="absolute inset-0 items-center justify-center"><Text class="text-xs text-[#ffb88c]">{retryingOffline()?"重试中...":"离线媒体下载失败，点此重试"}</Text></View>}]:[]),spacer(6)

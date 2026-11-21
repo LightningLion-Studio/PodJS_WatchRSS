@@ -28,13 +28,10 @@ import {OnboardingController,type OnboardingSession} from '../onboarding/control
 import {observeHostInternet} from '../onboarding/network-host.ts';
 import {ReaderPresetStore,activeReaderPreset,onReaderPresetsChanged,notifyReaderPresetsChanged,type ReaderPresetState} from '../reader/preset-store.ts';
 import {defaultReaderPreset} from '../reader/preset.ts';
-import {readerFontResolver} from '../reader/font-assets.ts';
 import {readerChrome} from '../reader/chrome.ts';
 import {SettingsStore} from '../settings/store.ts';
 import {OnboardingScreen} from './OnboardingScreen.tsx';
 import {PrivacyPolicyConsentScreen} from './PrivacyPolicyConsentScreen.tsx';
-import {useReaderTitleEntry} from './ReaderTitleEntry.tsx';
-import {ReaderBackground} from './ReaderBackground.tsx';
 import {InformationScreen,type InformationPage,type InformationSnapshot,type InformationRestorationEvent} from './InformationScreens.tsx';
 import {BackMotion} from "@podjs/framework/navigation";
 import {ScrollEntries} from './ScrollEntries.tsx';
@@ -130,18 +127,14 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  const metrics=getDisplayMetrics(),width=metrics.logicalWidth,height=metrics.logicalHeight;
  const presets=new ReaderPresetStore(),settings=new SettingsStore();
  const [presetState,setPresetState]=createSignal<ReaderPresetState>();
- const [presetRevision,setPresetRevision]=createSignal(0);
  const [error,setError]=createSignal('');
- const readPresets=()=>{try{setPresetState(presets.load());setPresetRevision(v=>v+1);}catch(error){report(error);}};
+ const readPresets=()=>{try{setPresetState(presets.load());}catch(error){report(error);}};
  function report(error:unknown){setError(String(error));}
  readPresets();onCleanup(onReaderPresetsChanged(readPresets));
  const [active,setActive]=createSignal(lifecycle()==='active');
  const clock=useMinuteClock(()=>active()&&presetState()?.selection.mode==='SYSTEM');
  onCleanup(onLifecycleChange(value=>setActive(value==='active')));
  const preset=createMemo(()=>{const state=presetState();return state?.records.length?activeReaderPreset(state,clock()):defaultReaderPreset(undefined,undefined,true,settings.load().fontSizeSp);});
- const fonts=createMemo(()=>readerFontResolver(presetState()??{},presetRevision()));
- const backgroundSnapshot=createMemo(()=>({state:presetState()??presets.load(),revision:presetRevision()}));
- const privacyTitle=useReaderTitleEntry(()=>"隐私政策更新",()=>width-28,preset,fonts,()=>"#ffffff");
  type LegalEntry={page:StartupLegalPage;scroller?:Scroller;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
  const initialLegal=untrack(props.restoreLegal);
  const [legal,setLegal]=createSignal<LegalEntry[]>(initialLegal.pages.map((page,index)=>({page,restoredState:initialLegal.snapshots[index]??undefined,restoreMode:initialLegal.restoreModes?.[index]??'recreated'})));
@@ -197,9 +190,9 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  return <View class="relative bg-black overflow-hidden" style={{width,height}}>
   <View class="absolute inset-0" accessibilityHidden={!!currentLegal()||!!error()}>
    <Show when={destination()==='intro'}><OnboardingScreen width={width} height={height} state={props.session.intro} readerDark={readerChrome(preset()).dark} onToggleReaderTheme={toggleTheme} onAction={action=>operate(()=>props.controller.dispatch(action))} onOpenLegal={openLegal} restoreCustomization={props.restoreCustomization} saveCustomization={props.saveCustomization} active={()=>active()&&!currentLegal()&&!error()} ref={value=>{introHandle=value;}}/></Show>
-   <Show when={destination()==='privacy'}><PrivacyPolicyConsentScreen width={width} height={height} title={privacyTitle()} background={<Show when={presetState()}><ReaderBackground background={preset().background} snapshot={backgroundSnapshot()} width={width} height={height} active={active()&&!currentLegal()}/></Show>} onOpenPrivacy={()=>openLegal('privacy')} onAgree={()=>operate(()=>props.controller.agreePrivacy())} onDisagree={()=>props.controller.declinePrivacy()} active={()=>active()&&!currentLegal()&&!error()} ref={value=>{privacyScroller=value.scroller;}}/></Show>
+   <Show when={destination()==='privacy'}><PrivacyPolicyConsentScreen width={width} height={height} onOpenPrivacy={()=>openLegal('privacy')} onAgree={()=>operate(()=>props.controller.agreePrivacy())} onDisagree={()=>props.controller.declinePrivacy()} active={()=>active()&&!currentLegal()&&!error()} ref={value=>{privacyScroller=value.scroller;}}/></Show>
   </View>
-  <For each={legal()}>{entry=>{const network=createHostNetworkRecovery();return <NetworkRecoveryProvider network={network} active={()=>currentLegal()===entry&&active()&&!error()}><View accessibilityHidden={currentLegal()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentLegal()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} preset={preset()} fonts={fonts()} backgroundSnapshot={backgroundSnapshot()} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={url=>{void openBrowserUrl(url,"information",preset()).catch(error=>setError(browserOpenFailureMessage(error)));}} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentLegal()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>;}}</For>
+  <For each={legal()}>{entry=>{const network=createHostNetworkRecovery();return <NetworkRecoveryProvider network={network} active={()=>currentLegal()===entry&&active()&&!error()}><View accessibilityHidden={currentLegal()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentLegal()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={url=>{void openBrowserUrl(url,"information",preset()).catch(error=>setError(browserOpenFailureMessage(error)));}} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentLegal()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>;}}</For>
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
  </View>;
 }

@@ -1,4 +1,6 @@
-export interface Point { x: number; y: number }
+import type { DockPoint } from "@podjs/framework/watch-ui";
+
+export type Point = DockPoint;
 export interface MotionState { position: Point; velocity: Point }
 
 export const READ_ALOUD_TOUCH_SIZE = 48;
@@ -10,78 +12,6 @@ export const READ_ALOUD_FLING_MAX_SECONDS = 6 * READ_ALOUD_FLING_TAU;
 export const READ_ALOUD_SNAP_STIFFNESS = 200;
 export const READ_ALOUD_SNAP_DAMPING_RATIO = 0.5;
 export const READ_ALOUD_MAX_OVERSHOOT = 8;
-const EDGE_MARGIN = 4;
-
-const clamp = (value: number, low: number, high: number) =>
-  high < low ? (low + high) / 2 : Math.max(low, Math.min(high, value));
-
-export function clampBubbleCenter(
-  point: Point,
-  width: number,
-  height: number,
-  round: boolean,
-  size = READ_ALOUD_TOUCH_SIZE,
-  margin = EDGE_MARGIN,
-): Point {
-  if (round) {
-    const radius = Math.max(0, Math.min(width, height) / 2 - margin - size / Math.SQRT2);
-    const dx = point.x - width / 2;
-    const dy = point.y - height / 2;
-    const distance = Math.hypot(dx, dy);
-    if (distance > radius && distance > 0) {
-      const scale = radius / distance;
-      return { x: width / 2 + dx * scale, y: height / 2 + dy * scale };
-    }
-    return point;
-  }
-  const half = size / 2;
-  return {
-    x: clamp(point.x, half + margin, width - half - margin),
-    y: clamp(point.y, half + margin, height - half - margin),
-  };
-}
-
-export function readAloudSafeCorners(
-  width: number,
-  height: number,
-  round: boolean,
-  size = READ_ALOUD_TOUCH_SIZE,
-  margin = EDGE_MARGIN,
-  overshoot = READ_ALOUD_MAX_OVERSHOOT,
-): Point[] {
-  if (round) {
-    const radius = Math.max(0, Math.min(width, height) / 2 - margin - size / Math.SQRT2 - overshoot);
-    const diagonal = radius / Math.SQRT2;
-    return [
-      { x: width / 2 - diagonal, y: height / 2 - diagonal },
-      { x: width / 2 + diagonal, y: height / 2 - diagonal },
-      { x: width / 2 - diagonal, y: height / 2 + diagonal },
-      { x: width / 2 + diagonal, y: height / 2 + diagonal },
-    ];
-  }
-  const offset = size / 2 + margin + overshoot;
-  const left = clamp(offset, size / 2 + margin, width - size / 2 - margin);
-  const right = clamp(width - offset, size / 2 + margin, width - size / 2 - margin);
-  const top = clamp(offset, size / 2 + margin, height - size / 2 - margin);
-  const bottom = clamp(height - offset, size / 2 + margin, height - size / 2 - margin);
-  return [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: left, y: bottom },
-    { x: right, y: bottom },
-  ];
-}
-
-export function nearestPoint(point: Point, candidates: readonly Point[]): Point {
-  let nearest = candidates[0] ?? point;
-  let distance = Number.POSITIVE_INFINITY;
-  for (const candidate of candidates) {
-    const next = (candidate.x - point.x) ** 2 + (candidate.y - point.y) ** 2;
-    if (next < distance) { nearest = candidate; distance = next; }
-  }
-  return nearest;
-}
-
 /** Exact critical-damping step for a fixed target, preserving velocity on retarget. */
 export function criticallyDampedStep(
   state: MotionState,
@@ -122,7 +52,7 @@ export function exponentialFlingEnd(
   return { x: start.x + tau * velocity.x, y: start.y + tau * velocity.y };
 }
 
-/** Semi-implicit underdamped spring step used only for the corner snap. */
+/** Semi-implicit underdamped spring step used for edge docking. */
 export function dampedSnapStep(
   state: MotionState,
   target: Point,
@@ -147,7 +77,7 @@ export function dampedSnapStep(
   return { position: { x, y }, velocity: { x: vx, y: vy } };
 }
 
-/** Keep the underdamped corner snap visibly bouncy without letting it swing
+/** Keep the underdamped snap visibly bouncy without letting it swing
  * more than the specified distance past its target. */
 export function cappedDampedSnapStep(
   state: MotionState,

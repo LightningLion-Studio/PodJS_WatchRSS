@@ -70,6 +70,8 @@ export type RouteEntry = {
   reader?: ReaderBodyHandle;
   readerArticle?: Article;
   readerFromWatchLater?: boolean;
+  /** One-shot playback request. Opening the menu does not consume it. */
+  speechStart?: { article: Article; anchor?: import("../../reader/speech-segments.ts").SpeechAnchor };
   page: Page;
   /** One-shot authorization set only by the explicit log consent button; omitted from navigation snapshots. */
   logUploadConsent?: boolean;

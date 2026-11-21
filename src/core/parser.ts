@@ -34,7 +34,8 @@ function* feedSteps(root:XmlNode,fetchedAt:number,baseUrl?:string):Generator<voi
   if (rootName !== "feed" && !((rootName === "rss" || rootName === "rdf") && child(document, "channel"))) throw new Error("该地址不是有效的 RSS 或 Atom 订阅");
   const entries = rootName === "rdf" ? children(document, "item") : atom ? children(document, "entry") : children(channel, "item");
   const image = child(channel, "image");
-  const feed = { title: val(child(channel, "title")) || "Untitled feed", description: val(child(channel, "description") ?? child(channel, "subtitle")) || null, imageUrl: image ? resolveUrl(val(child(image,"url")),baseUrl) : resolveUrl(child(channel,"logo") ? val(child(channel,"logo")) : null,baseUrl), articles };
+  const title = val(child(channel, "title"));
+  const feed = { title: title && title !== "Untitled feed" && !/^https?:\/\/\S+$/i.test(title) ? title : (baseUrl ?? "Untitled feed"), description: val(child(channel, "description") ?? child(channel, "subtitle")) || null, imageUrl: image ? resolveUrl(val(child(image,"url")),baseUrl) : resolveUrl(child(channel,"logo") ? val(child(channel,"logo")) : null,baseUrl), articles };
   for(const e of entries){articles.push(traceServiceWork("refresh.entry",()=>{
     const content = child(e,"encoded") ?? child(e,"content") ?? child(e,"description" ) ?? child(e,"summary");
     const nativeVal = (n: Node | undefined) => n ? nativeRssTrim(decodeHtml(textContent(n))) : "";
