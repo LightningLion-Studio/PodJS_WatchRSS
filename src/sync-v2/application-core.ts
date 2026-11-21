@@ -167,12 +167,9 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     throw error;
    }
   };
-  let repeatRound=false;
   const round=async()=>{
    await assertCurrent();
-   // A reused HTTP port can remember read=false; refresh before its first guarded request.
-   if(repeatRound)await runtime.http.capabilities();
-   repeatRound=true;
+   await runtime.http.refreshClosedReadGate();
    await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));await runtime.refreshTrustedTime();const deferred=await flush();
    if(deferred){
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish,settings=await control.settings();
@@ -183,7 +180,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    const state=await local.store.readState();
    if(state.cloud?.pendingPublish){await flush();return {...pulled,refreshBodies:true};}
    if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
-    try{await runtime.publish();}catch(error){
+    try{await runtime.publish(true);}catch(error){
      if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
      await recoverConflict();
     }
