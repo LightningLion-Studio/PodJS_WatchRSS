@@ -1,4 +1,5 @@
 import {playerFailureCode} from '../media/player-errors.ts';
+import {isTransportFailure} from '../network/recovery.ts';
 import {directDouyinMediaUrl} from './cache-availability.ts';
 import {douyinPlaybackFailure} from './errors.ts';
 import {douyinMediaNetworkDeadline} from './media-expiry.ts';
@@ -44,6 +45,13 @@ export function assertDouyinAddresses(addresses:readonly string[],failed:readonl
 function isExpired(addresses:readonly string[],now:number):boolean {
   const expiry=douyinMediaNetworkDeadline(addresses);
   return expiry!==undefined&&expiry<=now;
+}
+
+export function retryableDouyinSourceFailure(error:unknown):boolean {
+  if(douyinPlaybackFailure(error).retryAfterMs!==undefined)return false;
+  const fault=playerFailureCode(error);
+  if(fault==='cancelled'||fault==='stale'||fault==='restricted'||fault==='permission_denied')return false;
+  return isTransportFailure(error)||['source_expired','cdn_error','network_error','timeout','cache_error','prepare_failed','video_error'].includes(fault);
 }
 
 export function douyinDetailRestricted(error:unknown):boolean {

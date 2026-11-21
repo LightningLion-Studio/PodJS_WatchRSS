@@ -12,6 +12,7 @@ mock.module('../src/ui/douyin/index.tsx',()=>({DouyinScreen:()=>null}));
 mock.module('../src/ui/PlatformNotice.tsx',()=>({PendingDisclosure:()=>null}));
 import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinStateStorage } from '../src/douyin/state-storage.ts';
+import type { createHostDouyinPreload } from '../src/douyin/preload-host.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { PlaybackSource } from '../src/ui/VideoPlayerScreen.tsx';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
@@ -21,8 +22,9 @@ mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let adjacentPreview:((item:DouyinItem,uri:string)=>unknown)|undefined;let prefetchHooks:any;
+let reloadHost:ReturnType<typeof createHostDouyinPreload>|undefined;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async(item:DouyinItem,uri:string)=>adjacentPreview?.(item,uri),sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,playbackResolved:async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>{expect(current()).toBe(true);return proxyOverride?proxyOverride(item,headers):item.playUrl;},lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{get playbackForReload(){return reloadHost?.playbackForReload;},readySource:async()=>readyOverride?.(),previewFrame:async(item:DouyinItem,uri:string)=>adjacentPreview?.(item,uri),sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,playbackResolved:async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean)=>{expect(current()).toBe(true);return proxyOverride?proxyOverride(item,headers):item.playUrl;},lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 let debugAllowed = false, debugTicks = 0;
 const debugContexts: string[][] = [];
 const frameObservers: {run: () => void; needsFrame: () => boolean}[] = [];
@@ -32,7 +34,7 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{
  updateContext(current:string,next:string){ debugContexts.push([current,next]); },
  tick:async()=>{ debugTicks++; }
 }}));
-mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
+mock.module('../src/cache/host.ts',()=>({managedCache:{registerProducer(){}}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(run:()=>void,needsFrame:()=>boolean){frameObservers.push({run,needsFrame});}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
 mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{restoreFrame:async()=>({available:false}),captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
@@ -1374,3 +1376,83 @@ test(`DYFAV FIX4 validates the registered playback addresses (${scenario})`, asy
     Date.now = now;
   }
 });
+
+for(const scenario of ['before commit','during commit','after commit','stage failure','commit failure','commit rejection'] as const){
+ test(`saved reload settles the route and host together after ${scenario}`,async()=>{
+  const id='commit-lifecycle',oldUri='podjs-media-cache://play/old',newUri='podjs-media-cache://play/new';
+  const oldItem={...item(id),playUrl:'https://fixture.invalid/old?expires=4102444800'};
+  const fresh={...oldItem,playUrl:'https://fixture.invalid/new?expires=4102444800'};
+  let current=true,commits=0,discarded=0,staged=false;
+  const live=new Set<string>();
+  let reached!:()=>void,release!:()=>void;
+  const hostReached=new Promise<void>(resolve=>{reached=resolve;});
+  const reply=new Promise<void>(resolve=>{release=resolve;});
+  const handle=<T>(result:Promise<T>)=>({result,cancel(){}});
+  const f=fixture(false,undefined,{publish:source=>{
+   if(scenario==='after commit'&&source?.url===newUri)current=false;
+  }});
+  mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{},mediaPrefixCache:{
+   register:()=>{live.add(oldUri);return handle(Promise.resolve({uri:oldUri}));},
+   stage:()=>{
+    if(scenario==='stage failure')return handle(Promise.reject({code:'resource_exhausted'}));
+    staged=true;
+    const receipt={uri:newUri,stageId:'candidate'};
+    if(scenario!=='before commit')return handle(Promise.resolve(receipt));
+    reached();
+    return handle(reply.then(()=>receipt));
+   },
+   commit:()=>{
+    commits++;
+    if(scenario==='commit failure'||scenario==='commit rejection'){
+     const code=scenario==='commit failure'?'resource_exhausted':'permission_denied';
+     return handle(Promise.reject({code}));
+    }
+    staged=false;live.delete(oldUri);live.add(newUri);
+    reached();
+    return handle(reply.then(()=>({uri:newUri})));
+   },
+   discard:()=>{discarded++;staged=false;return handle(Promise.resolve(undefined));},
+   remove:(uri:string)=>{live.delete(uri);return handle(Promise.resolve(undefined));},
+   window:()=>handle(Promise.resolve(undefined)),
+  }}));
+  const host=(await import('../src/douyin/preload-host.ts')).createHostDouyinPreload(client);
+  reloadHost=host;
+  proxyOverride=(entry,headers)=>host.playbackResolved(entry,headers,()=>true);
+  try{
+   f.controller.douyinPlay({item:oldItem,playback:oldItem,playlist:[oldItem],savedPlayback:true,detailPlayback:true,hasMore:false});
+   await f.controller.douyinNavigate({name:'player',awemeId:id});
+   const entry=f.stack().at(-1)!;
+   expect(entry.playback).toMatchObject({url:oldUri,savedPlayback:true});
+   client.resolvePlayback=async(id,options)=>{
+    expect(id).toBe(oldItem.awemeId);expect(options?.allowDetail).toBe(true);
+    return {ok:true,data:fresh};
+   };
+   const recovery=f.controller.reloadVideo(entry,321,()=>current,'detail',true,false,false);
+   const result=recovery.then(()=>undefined,error=>(error as {code:string}).code);
+   if(scenario==='before commit'||scenario==='during commit'||scenario==='after commit'){
+    await hostReached;
+    expect(entry.playback?.url).toBe(oldUri);
+    if(scenario!=='after commit')current=false;
+    release();
+   }
+   if(scenario==='before commit'||scenario==='commit rejection'){
+    expect(await result).toBe(scenario==='before commit'?'CANCELLED':'permission_denied');
+    expect(entry.playback?.url).toBe(oldUri);
+    expect(entry.queue?.itemAtOffset()?.playUrl).toBe(oldItem.playUrl);
+    expect([...live]).toEqual([oldUri]);
+    expect(discarded).toBe(1);
+   }else{
+    const direct=scenario==='stage failure'||scenario==='commit failure';
+    expect(await result).toBeUndefined();
+    expect(entry.playback).toMatchObject({url:direct?fresh.playUrl:newUri,resumePositionMs:321,maxVideoShortEdge:720});
+    expect(f.source()).toBe(entry.playback);
+    expect(entry.queue?.itemAtOffset()?.playUrl).toBe(fresh.playUrl);
+    expect([...live]).toEqual(direct?[]:[newUri]);
+    if(direct)expect(discarded).toBe(scenario==='commit failure'?1:0);
+    else expect(current).toBe(false);
+   }
+   expect(commits).toBe(scenario==='before commit'||scenario==='stage failure'?0:1);
+   expect(staged).toBe(false);
+  }finally{reloadHost=undefined;host.stop();}
+ });
+}

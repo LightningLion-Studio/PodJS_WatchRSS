@@ -424,18 +424,21 @@ test('NOPLAY local cache registration failure preserves the same authorized HTTP
 test('DYFAV FIX2 an expired mirror bounds registration but leaves direct video and audio usable',async()=>{
  const playUrl='https://fixture/video?expires=4102444800';
  const audioUrl='https://fixture/audio?expires=4102444800';
- const mirror='https://fixture/mirror?expires=1000000000';
+ const realNow=Date.now,mirrorExpiry=Math.floor(realNow()/1000)+120;
+ const mirror=`https://fixture/mirror?expires=${mirrorExpiry}`;
  const item:DouyinItem={...items[0]!,playUrl,variants:[{playUrl,playUrls:[playUrl,mirror],audioUrl,format:'dash',codec:'h264',width:480,height:854,bitrate:1000}]};
  const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
  const host=createHostDouyinPreload(local as unknown as Parameters<typeof createHostDouyinPreload>[0]);
  try {
   await host.playback(item,{});
-  expect(registrations.at(-1)).toMatchObject({alternates:[mirror],audioUrl,expiresAt:1000000000*1000-30000});
+  expect(registrations.at(-1)).toMatchObject({alternates:[mirror],audioUrl,expiresAt:mirrorExpiry*1000-30000});
   await host.invalidate(item.awemeId);
-  registrationFailure={code:'unsupported_method'};
+  Date.now=()=>mirrorExpiry*1000;
+  const registered=registrations.length;
   expect(await host.playback(item,{})).toBe(playUrl);
+  expect(registrations).toHaveLength(registered);
   expect(host.sourceFor(playUrl)?.variants?.[0]?.audioUrl).toBe(audioUrl);
- }finally{registrationFailure=undefined;host.stop();}
+ }finally{Date.now=realNow;host.stop();}
 });
 test('NOPLAY cache lookup and preview failures cannot block ordinary foreground resolution',async()=>{
  const item=items[0]!,client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})};
@@ -454,12 +457,12 @@ test('NOPLAY cache fallback never replays a denied, expired or cancelled source'
 
 test('NOPLAY direct fallback retains explicit URL deadlines and audio source validation',async()=>{
  const video='https://fixture/video';
- for(const item of [{...items[0],playUrl:video+'?x-expires=1000000000'},
+ for(const [index,item] of [{...items[0],playUrl:video+'?x-expires=1000000000'},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://user:password@fixture/audio'}]},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://fixture/audio?expires=1000000000'}]},
-  {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}]){
+  {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}].entries()){
   const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})},host=createHostDouyinPreload(client as any);registrationFailure={code:'cache_error'};
-  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:'cache_error'});}finally{registrationFailure=undefined;host.stop();}
+  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:index%2===0?'source_expired':'cache_error'});}finally{registrationFailure=undefined;host.stop();}
  }
 });
 
@@ -469,12 +472,14 @@ test('DYFAV FIX4 reload binding exposes an actual direct result for the route ex
  const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
  registrationFailure={code:'unsupported_method'};
  try{
-  await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'unsupported_method'});
+  await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'source_expired'});
   const candidate=await host.playbackForReload(selected,{},()=>true);
   expect(candidate).toMatchObject({url:selected.playUrl,item:selected});
   await candidate.discard();
  }finally{registrationFailure=undefined;host.stop();}
 });
+
+const rejectUnexpectedFallback=()=>{throw new Error('unexpected fallback');};
 
 for (const decision of ['discard', 'commit', 'superseded', 'same-uri'] as const)
 test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${decision})`,async()=>{
@@ -499,14 +504,16 @@ test(`DYFAV FIX4 reload cache leaves the old binding in place until accepted (${
   expect(candidate.url).not.toBe(original);
   expect(host.sourceFor(candidate.url)).toBeUndefined();
   if(decision==='commit'){
-   await candidate.commit();
+   let published:string|undefined;
+   await candidate.commit({validateFallback:rejectUnexpectedFallback,publish:binding=>{published=binding.url;}});
+   expect(published).toBe(candidate.url);
    expect(host.sourceFor(candidate.url)).toBe(updated);
    expect(removed.slice(before)).toEqual([original]);
    expect(host.sourceFor(original)).toBeUndefined();
   }else{
    if(decision==='superseded'){
     active=false;
-    await expect(candidate.commit()).rejects.toThrow('播放来源已更换');
+    await expect(candidate.commit({validateFallback:rejectUnexpectedFallback,publish:()=>{}})).rejects.toThrow('播放来源已更换');
    }
    await candidate.discard();
    expect(removed.slice(before)).toEqual([]);
@@ -528,8 +535,10 @@ test('DYFAV FIX5 host replaces the committed binding on each of three re-entries
   for(let index=0;index<3;index++){
    const candidate=await host.playbackForReload(source(2*index+1),{},()=>true,current);
    expect(bindingUris()).toEqual([current]);
-   await candidate.commit();
-   expect(bindingUris()).toEqual([candidate.url]);
+   let published:string|undefined;
+   await candidate.commit({validateFallback:rejectUnexpectedFallback,publish:binding=>{published=binding.url;}});
+   expect(bindingUris()).toEqual([published]);
+   expect(published).toBe(candidate.url);
    host.stop();
    expect(host.sourceFor(candidate.url)).toBeUndefined();
    current=await host.playbackResolved(source(2*index+2),{},()=>true);
