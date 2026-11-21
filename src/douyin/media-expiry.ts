@@ -17,8 +17,12 @@ export function douyinMediaNetworkDeadline(urls:readonly string[]):number|undefi
  return known.length?mediaSourceExpiry(known,0,Number.MAX_SAFE_INTEGER):undefined;
 }
 
-export function douyinPlaybackAddressExpired(item:DouyinItem,now=Date.now()):boolean {
+/** Keep the playback deadline identical to the selected rendition's cache registration. */
+export function douyinPlaybackAddresses(item:DouyinItem) {
+ const mirrors=douyinPlaybackMirrors(item);
  const audioUrl=douyinPlaybackAudio(item);
- const deadline=douyinMediaNetworkDeadline([item.playUrl,...douyinPlaybackMirrors(item),...(audioUrl?[audioUrl]:[])]);
- return deadline!==undefined&&deadline<=now;
+ const directUrls=audioUrl?[item.playUrl,audioUrl]:[item.playUrl];
+ const directExpiresAtMs=douyinMediaNetworkDeadline(directUrls);
+ const expiresAtMs=mirrors.length?douyinMediaNetworkDeadline([...directUrls,...mirrors]):directExpiresAtMs;
+ return {mirrors,audioUrl,expiresAtMs,directExpiresAtMs};
 }

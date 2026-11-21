@@ -1,5 +1,6 @@
 import {useNetworkRecovery} from '../network/context.ts';
 import {douyinDetailRestricted,retryableDouyinSourceFailure,type DouyinReloadMode} from '../douyin/reload-playback.ts';
+import {douyinReloadPlan,type DouyinReloadReason} from '../douyin/reload-rules.ts';
 import {isTransportFailure} from '../network/recovery.ts';
 import {ShellCommandError} from '@podjs/framework/shell-error';
 import {measuredLines} from '../reader/measured-text.ts';
@@ -138,6 +139,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const previewPath=()=>{const path=framePreviewPath(props.source.previewFrame,props.source.awemeId);return path!==badFrame()?path:undefined;};
   const recoveryDeadline=new PlaybackPrepareDeadline();
   const reloadPolicy=new VideoReloadPolicy();
+  let reloadReason:{source:PlaybackSource;reason:DouyinReloadReason}|undefined;
+  const planDouyinReload=(source:PlaybackSource,cause:unknown,options:Omit<Parameters<typeof douyinReloadPlan>[0],'cause'|'previousReason'>={})=>{
+    const plan=douyinReloadPlan({cause,previousReason:reloadReason?.source===source?reloadReason.reason:undefined,...options});
+    reloadReason={source,reason:plan.reason};
+    return plan;
+  };
+  const sourceRequiresFreshAddress=(source:PlaybackSource)=>
+    videoSourceExpired(source)||reloadReason?.source===source&&reloadReason.reason==='source_expired';
   const bufferedStall=new VideoBufferedStallWait();
   let reloadCount=0;
   const [reconnecting,setReconnecting]=createSignal(false);
@@ -161,7 +170,11 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!props.active||resourceRetry?.source!==source)cancelResourceRetry();
   });
   onCleanup(cancelResourceRetry);
-  createEffect(()=>{if(reloadPolicy.select(props.source)){reloadCount=0;bufferedStall.cancel();reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}});
+  createEffect(()=>{
+    const source=props.source;
+    if(reloadReason?.source!==source)reloadReason=undefined;
+    if(reloadPolicy.select(source)){reloadCount=0;bufferedStall.cancel();reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}
+  });
   const cancelReload=()=>{reloadPolicy.cancel();reloadWait?.cancel();reloadWait=undefined;reloadTimeout?.cancel();reloadTimeout=undefined;setReconnecting(false);};
   onCleanup(cancelReload);
   let retiredNativeGeneration=-1;
@@ -291,12 +304,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       recoveryDeadline.cancel();const source=props.source,own=generation;setNetworkWaiting(true);
       setState(previous=>previous?{...previous,state:'error'}:previous);
       const usable=()=>state()?.state==='playing'&&state()?.isBuffering!==true&&state()?.hasRenderedFirstFrame===true;
-      void network.recover(value,()=>{setNetworkWaiting(false);if(!disposed&&props.active&&source===props.source&&own===generation)return retry(true);},usable).then(()=>setNetworkWaiting(false)).catch(error=>{
+      void network.recover(value,()=>{setNetworkWaiting(false);if(!disposed&&props.active&&source===props.source&&own===generation)return retry(true,value);},usable).then(()=>setNetworkWaiting(false)).catch(error=>{
         setNetworkWaiting(false);if(!disposed&&props.active&&source===props.source&&own===generation){failed(error,terminal,stage,true);recoverPlaybackFailure(error);}
       });return;
     }
     const detail=playerFailureFields(value,stage),fault=playerFailureCode(value);
     if(fault==='cancelled'||fault==='stale')return;
+    if(props.onReload&&douyinPlayback()&&stage!=='recovery')planDouyinReload(props.source,value);
     recoveryDeadline.cancel();
     if(resourceFailure&&resourceRetry?.source===props.source){armResourceRetry();return;}
     if(!resourceFailure)cancelResourceRetry();
@@ -490,7 +504,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       armLiveFrameDeadline(source,ownGeneration,resourceAttempt);
     if(handoff())setHandoff(false);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0&&(!resourceAttempt||prepared.positionMs!==source.resumePositionMs)){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!immersiveDouyin||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(immersiveDouyin)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);if(prepared.state==='playing'&&prepared.hasRenderedFirstFrame)networkRetriedSource=undefined;if(!resourceAttempt&&(!fromDetail||prepared.hasRenderedFirstFrame))void warmForward().catch(()=>{});captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(!resourceAttempt&&usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
   };
-  const reload=async(manual:boolean,cause:unknown={code:'source_expired'},userInitiated=manual,feedFallback=false):Promise<void>=>{
+  const reload=async(manual:boolean,cause?:unknown,userInitiated=manual,fallback?:'feed'|'detail'):Promise<void>=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
     if(props.source.previewOnly)videoSessionOwner=sessionOwner;
     if(videoSessionOwner!==sessionOwner)return;
@@ -507,22 +521,22 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const beforeLiveFrame=!recoveredSources.has(from);
     // Reserve the second automatic startup attempt for the selected item's feed refresh.
     const feedReserved=!manual&&immersive&&beforeLiveFrame&&!reloadPolicy.hasAutomaticAttempt;
-    const retryCurrent=!userInitiated&&immersive&&!from.previewOnly&&(cause as {code?:string})?.code==='timeout'&&
-      !videoSourceExpired(from)&&(!beforeLiveFrame||reloadCount===0);
-    const requestDetail=(douyinPlayback()&&userInitiated)||(immersive&&beforeLiveFrame&&retryableDouyinSourceFailure(cause));
-    const mode:DouyinReloadMode=feedFallback||feedReserved?'feed':retryCurrent?'current':requestDetail?'detail':'feed';
-    const requireFreshAddress=mode==='feed'&&(feedFallback||playerFailureCode(cause)==='source_expired'||videoSourceExpired(from));
+    const {mode,requireFreshAddress}=douyinPlayback()?planDouyinReload(from,cause,{
+      expired:videoSourceExpired(from),manual:userInitiated,firstFrame:!immersive||!beforeLiveFrame,
+      retryCurrent:immersive&&!from.previewOnly&&playerFailureCode(cause)==='timeout'&&(!beforeLiveFrame||reloadCount===0),
+      endpoint:fallback??(feedReserved?'feed':undefined),
+    }):{mode:'feed' as const,requireFreshAddress:false};
     if(mode==='detail'&&userInitiated)detailReload={source:from,manual:true};
     generation++;const own=generation;prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();autoAdvance.cancel();
     neighborRevision++;dragRevision++;forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;clearDrag();
     setReconnecting(true);setError('');setNetworkFailure(false);setReady(false);setFirstFrame(false);
-    let resolutionTimeout:HostOperation<void>|undefined,tryFeed=false;
+    let resolutionTimeout:HostOperation<void>|undefined,nextMode:'feed'|'detail'|undefined;
     const current=()=>!disposed&&props.active&&lifecycle()==='active'&&videoSessionOwner===sessionOwner&&reloadPolicy.current(ticket)&&generation===own;
     try{
       await (usingSessions()?sessionPool!.releaseAll():media.stop());
       if(!current())return;
       // A detail restriction does not cool the feed endpoint. This fallback still owns a budget slot.
-      if(ticket.waitMs&&!feedFallback){reloadWait=delay(ticket.waitMs);await reloadWait.result;reloadWait=undefined;}
+      if(ticket.waitMs&&fallback!=='feed'){reloadWait=delay(ticket.waitMs);await reloadWait.result;reloadWait=undefined;}
       if(!current())return;
       reloadPolicy.markRequest(ticket);
       reloadCount++;
@@ -540,19 +554,22 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }catch(value){
       if(current()){
         reloadPolicy.finish(ticket);
-        tryFeed=resolutionTimeout!==undefined&&immersive&&mode==='detail'&&douyinDetailRestricted(value)&&(manual||reloadPolicy.hasAutomaticAttempt);
-        if(!tryFeed){
+        const fault=playerFailureCode(value);
+        if(resolutionTimeout!==undefined&&!fallback){
+          if(immersive&&mode==='detail'&&douyinDetailRestricted(value)&&reloadPolicy.hasAutomaticAttempt)nextMode='feed';
+          if(userInitiated&&douyinPlayback()&&mode==='feed'&&fault!=='cancelled'&&fault!=='stale'&&fault!=='restricted'&&fault!=='permission_denied')nextMode='detail';
+        }
+        if(!nextMode){
           setReconnecting(false);
-          const fault=playerFailureCode(value);
           const retryTimeout=!manual&&immersive&&fault==='timeout';
           failed(fault==='cancelled'||fault==='stale'?{code:'prepare_failed'}:value,!retryTimeout,'recovery');
         }
       }
     }finally{resolutionTimeout?.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;if(reloadPolicy.current(ticket)){reloadPolicy.finish(ticket);setReconnecting(false);}}
-    if(tryFeed)await reload(manual,cause,userInitiated,true);
+    if(nextMode)await reload(manual,cause,userInitiated,nextMode);
   };
   let retrying = false, failedMove:(()=>void|Promise<void>)|undefined;
-  const retry = async (automaticNetworkRetry=false) => {
+  const retry = async (automaticNetworkRetry=false,cause?:unknown) => {
     // Native prepare settles after retry() returns. Keep its one-shot budget
     // until a frame plays, or the user explicitly retries a new operation.
     if (retrying||disposed||!props.active) return;
@@ -570,7 +587,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       catch(value){if(!disposed)failed(value);}finally{retrying=false;}
       return;
     }
-    if(props.onReload){await reload(!automaticNetworkRetry||!immersiveDouyin,undefined,!automaticNetworkRetry);return;}
+    if(props.onReload){await reload(!automaticNetworkRetry||!immersiveDouyin,cause,!automaticNetworkRetry);return;}
     // Native onRetry recreates this source; do not resolve/discard a queue item on network retry.
     const retryNetwork = !!networkPrompt();
     setNetworkFailure(false);
@@ -595,14 +612,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         const desiredResume=resumeAfterLifecycle||['playing','buffering'].includes(state()?.state??'');
         if(!ready()){
           resumeAutoplay=desiredResume;
-          if(needsFreshResolution||videoSourceExpired(props.source)){void reload(false,{code:'source_expired'});return;}
+          if(needsFreshResolution||sourceRequiresFreshAddress(props.source)){void reload(false);return;}
           if(!error()){reloadResume=checkpointPosition;freshPrepare=true;prepare(true);return;}
         }
         const own=generation;
         void media.state().then(value=>{
           if(disposed||own!==generation||!props.active||videoSessionOwner!==sessionOwner)return;
           if(['playing','paused','ready','buffering'].includes(value.state)&&Number.isFinite(value.positionMs)&&value.durationMs>0){checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;}
-          if(['error','stopped','idle'].includes(value.state)||videoSourceExpired(props.source)){resumeAutoplay=desiredResume;void reload(false,{code:value.errorCode??'source_expired'});return;}
+          if(['error','stopped','idle'].includes(value.state)||sourceRequiresFreshAddress(props.source)){resumeAutoplay=desiredResume;void reload(false,{code:value.errorCode});return;}
           reloadResume=checkpointPosition;
           if(!ready()){freshPrepare=true;prepare(true);return;}
           setState(value);
@@ -637,7 +654,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;
       if(props.onReload&&source.platform==='douyin'&&source.immersive&&source.preparationError&&retryableDouyinSourceFailure(source.preparationError)){
         if(lifecycle()==='active')untrack(()=>void reload(false,source.preparationError));
-        else needsFreshResolution=true;
+        else {planDouyinReload(source,source.preparationError);needsFreshResolution=true;}
         return;
       }
       setError(source.preparationError?formatPlayerFailure(playerFailureCode(source.preparationError)):"");
@@ -1041,7 +1058,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   let resumeAfterOverlay=false,wasRouteActive=props.active;
   createEffect(()=>{const active=props.active,resumed=active&&!wasRouteActive;wasRouteActive=active;
-    if(resumed&&props.onReload&&resourceRetry?.source!==props.source&&!isManualDetailSource()&&untrack(()=>videoSourceExpired(props.source))){videoSessionOwner=sessionOwner;void reload(false,{code:'source_expired'});return;}
+    if(resumed&&props.onReload&&resourceRetry?.source!==props.source&&untrack(()=>sourceRequiresFreshAddress(props.source))){videoSessionOwner=sessionOwner;void reload(false);return;}
     if(!active){if(props.onReload){cancelReload();reloadResume=checkpointPosition;}if(props.source.platform==='douyin'){
     if(props.source.previewOnly&&needsFreshResolution&&!untrack(error))preparedSource=undefined;
     deferredDrags.length=0;deferredPan=undefined;resumeAfterOverlay=false;autoplayAllowed=false;autoAdvance.cancel();generation++;neighborRevision++;dragRevision++;

@@ -397,7 +397,8 @@ test('NOPLAY direct fallback retains explicit URL deadlines and audio source val
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://user:password@fixture/audio'}]},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}]){
   const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})},host=createHostDouyinPreload(client as any);registrationFailure={code:'cache_error'};
-  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:'cache_error'});}finally{registrationFailure=undefined;host.stop();}
+  const code=item.playUrl===video?'cache_error':'source_expired';
+  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code});}finally{registrationFailure=undefined;host.stop();}
  }
 });
 

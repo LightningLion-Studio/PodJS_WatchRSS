@@ -2,7 +2,7 @@ import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
 import {reloadDouyinPlayback,retryableDouyinSourceFailure,type DouyinReloadMode} from '../../douyin/reload-playback.ts';
-import {douyinPlaybackAddressExpired} from '../../douyin/media-expiry.ts';
+import {douyinMediaNetworkDeadline,douyinPlaybackAddresses} from '../../douyin/media-expiry.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
@@ -368,8 +368,12 @@ export function createMediaRouteController(
     // metadata LRU has advanced, never attach a remote DASH companion to it.
     const complete=url?.startsWith('file:');
     const profile=douyinDecoderProfile(rendition,complete?url:rendition.playUrl);
+    const audioUrl=complete?undefined:profile.audioUrl;
+    const expiresAtMs=!url||complete?undefined:url.startsWith('podjs-media-cache:')
+      ?douyinPlaybackAddresses(rendition).expiresAtMs
+      :douyinMediaNetworkDeadline([url,...(audioUrl?[audioUrl]:[])]);
     return {videoMime:profile.videoMime,videoWidth:profile.videoWidth,videoHeight:profile.videoHeight,
-      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl:complete?undefined:profile.audioUrl};
+      maxVideoShortEdge:profile.maxVideoShortEdge,audioUrl,expiresAtMs};
   };
   // Only the verified local first item owns a hidden decoder on the title page.
   // Nothing plays before the user enters; navigation adopts this exact pool.
@@ -423,7 +427,7 @@ export function createMediaRouteController(
         // A restored native cache capability already owns authorized upstream headers.
         const bundle=await douyinPreload.readySource?.(request.item);
         const localUrl=bundle?.url??await douyinPreload.lookup(request.item.awemeId);
-        if(!localUrl&&request.immersive&&douyinPlaybackAddressExpired(request.playback)){
+        if(!localUrl&&request.immersive&&(douyinPlaybackAddresses(request.playback).directExpiresAtMs??Infinity)<=Date.now()){
           throw Object.assign(new Error('推荐播放地址已过期'),{code:'source_expired'});
         }
         const headers=localUrl?{}:await douyinClient.buildPlaybackHeaders();
@@ -1112,7 +1116,7 @@ export function createMediaRouteController(
       let queueGeneration=queue.playbackGeneration();
       const selected=()=>current()&&entry.playback===previous&&entry.queue===queue&&queue.itemAtOffset()?.awemeId===item.awemeId
         &&queue.playbackGeneration()===queueGeneration&&douyinClient.playbackAuthorizationVersion()===authorization;
-      const previousItem=(mode==='detail'||requireFreshAddress)&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
+      const previousItem=requireFreshAddress&&previous.url?douyinPreload.sourceFor?.(previous.url):undefined;
       const previousUrls=previousItem?[previousItem.playUrl,...douyinPlaybackMirrors(previousItem)]:[previous.url??previous.videoUrl??''];
       if(mode==='current')await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
@@ -1129,7 +1133,7 @@ export function createMediaRouteController(
         url=await douyinPreload.playbackResolved(resolved.item,resolved.headers,selected);
         if(!selected())return;
       }
-      next=freshVideoSource(previous,{url,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
+      next=freshVideoSource(previous,{url,...playbackProfile(resolved.item,url),headers:resolved.headers},positionMs);
       if(mode!=='current')next.bypassCache=false;
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       // This reload owns the metadata mutation. Continue guarding against later

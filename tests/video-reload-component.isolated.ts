@@ -563,20 +563,18 @@ test('session decoder admission recovery keeps the session backend and same sour
  }finally{sessionPort.prepare=original;}
 });
 
-for(const failure of [{code:'RATE_LIMITED'},{code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:30_000}])
-test(`manual Douyin retry refreshes feed after detail ${failure.code}`,async()=>{
+test('manual Douyin retry starts with feed and accepts the same valid address',async()=>{
  nextError={code:'restricted'};
  const source={platform:'douyin' as const,immersive:true,awemeId:'manual',url:'https://fixture.invalid/old',title:'fixture'};
  const modes:unknown[]=[];
- const player=reloadMount(source,async(position,current,mode)=>{
-  modes.push(mode);
-  if(mode==='detail')throw failure;
+ const player=reloadMount(source,async(position,current,mode,requireFreshAddress)=>{
+  modes.push([mode,requireFreshAddress]);
   expect(current()).toBe(true);
-  player.publish({...source,url:'https://fixture.invalid/fresh',resumePositionMs:position});
+  player.publish({...source,resumePositionMs:position});
  });
  await flush();player.retry();await flush();
- expect(modes).toEqual(['detail','feed']);
- expect(prepares.at(-1)?.url).toBe('https://fixture.invalid/fresh');
+ expect(modes).toEqual([['feed',false]]);
+ expect(prepares.at(-1)?.url).toBe(source.url);
  expect(current.state).toBe('playing');
 });
 test('manual local resource retry keeps the selected source and requests cache-only native preparation',async()=>{
@@ -604,17 +602,18 @@ test('resource cache miss stays on the same video without scheduling a feed or d
  expect(prepares[1]).toMatchObject({url:source.url,cacheOnlyPrepare:true,bypassCache:false});
  expect(retries).toBe(0);expect(player.text()).toContain('当前视频缓存不足');
 });
-test('a failed fresh manual detail prepare does not fall through to the recommendation feed',async()=>{
+test('manual retry can fall back to detail once when feed has no usable source',async()=>{
  nextError={code:'restricted'};
  const source={platform:'douyin',immersive:true,awemeId:'manual-failed',url:'https://fixture.invalid/old',title:'fixture'};
  const modes:unknown[]=[];
  const player=reloadMount(source,async(_position,current,mode)=>{
   modes.push(mode);
+  if(mode==='feed')throw {code:'TEMPORARILY_UNAVAILABLE'};
   nextError={code:'source_expired'};
   if(current())player.publish({...source,url:'https://fixture.invalid/fresh'});
  });
  await flush();player.retry();await flush();await tick(3000);
- expect(modes).toEqual(['detail']);
+ expect(modes).toEqual(['feed','detail']);
  expect(player.text()).toContain('重试');
 });
 
@@ -733,7 +732,7 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
   nodes(root);await flush();await tick(351);
   await until(()=>nativeFrame!==undefined);
   expect(requests).toEqual(['/aweme/v2/web/module/feed/','/aweme/v1/web/aweme/detail/','/aweme/v2/web/module/feed/']);
-  expect(reloadAddressRequirements).toEqual([false,true]);
+  expect(reloadAddressRequirements).toEqual([true,true]);
   expect(registered).toEqual([{key:id,url:freshUrl,limit:720}]);
   expect(entry.player?.reloadAttempts?.()).toBe(2);
   expect(sessionCalls.filter(call=>call.method==='prepare')).toMatchObject([{url:uri,bypassCache:false,autoplay:true,respectSilentMode:true}]);
