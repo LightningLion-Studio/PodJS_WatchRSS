@@ -1,3 +1,4 @@
+import type {IndexObjectCache} from './index-object-cache';
 import {isBodyTombstone,tombstoneBodyDescription} from './body-binding';
 /** Durable index publication journal. No body worker or account-choice apply. */
 import {sameBusinessRevision} from './business-revision';
@@ -24,7 +25,7 @@ export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 /** Authenticated segment objects retained with a decoded cloud row (25.7). */
 export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
 const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
-export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number}
+export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
 /** A failed original-result lookup preserves the immutable pending request. */
 export class PublicationLookupUnavailable extends Error {constructor(readonly cause:unknown){super((cause as Error).message);}}
 export class WatchIndexPublisher {
@@ -97,7 +98,8 @@ export class WatchIndexPublisher {
    indexRow(row);rows.set(entry.entityKey,row);changedRows.push(row);
    await stage();
   }after=page.at(-1)!.entityKey;}
-  const tree=root?await updateTree(this.http.scope,root,id=>this.http.object(id),changedRows):buildTree(this.http.scope,[...rows.values()]);for(const [id,raw]of tree.nodes)objects.set(id,raw);
+  const fetch=(id:string)=>this.http.object(id);
+  const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,[...rows.values()]);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);
   objects.set(commit.oid,jsonBytes({body:commit.body,signature:commit.signature}));
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000};

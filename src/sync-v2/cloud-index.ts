@@ -1,3 +1,4 @@
+import type {IndexObjectCache} from './index-object-cache';
 import {canonical,jsonBytes,parseCanonicalJson,digest,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
 import {sameScope,features,b64,unb64,indexRow} from './wire';
 import {authenticatePath,type ApprovedKey,type Pins} from './head-pins';
@@ -41,7 +42,7 @@ interface ObservedRow {entityKey:string;note:boolean;noteId:string;deleted:boole
  * retained and republished unchanged; the local note keeps its prior version. */
 export type UnopenableNotes=Record<string,{entityKey:string;code:string;deleted:boolean}>;
 const unopenableNotes=(seen:readonly ObservedRow[]):UnopenableNotes=>Object.fromEntries(seen.filter(r=>r.unopenable).map(r=>[r.noteId,{entityKey:r.entityKey,code:r.unopenable!,deleted:r.deleted}]));
-export interface CloudIndexOptions {noteSegments?:boolean;noteTextBudget?:number}
+export interface CloudIndexOptions {noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
 export type CloudPullResult={empty:boolean;readOnly?:boolean;rows?:number;awaitingUser?:boolean;bodyReads?:number;checkpointHit?:boolean;rebuildRequired?:boolean;rebuilt?:boolean};
 export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipeOid===null?'source-pending':'body-not-downloaded';
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
@@ -73,7 +74,16 @@ export class WatchCloudIndex {
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
-  const objects=new Map<string,Uint8Array>(),get=async(id:string)=>{const existing=objects.get(id);if(existing)return existing;const raw=await this.http.object(id,undefined,window.windowId);objects.set(id,raw);return raw;};
+  const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
+  const get=async(id:string)=>{
+   const existing=objects.get(id);if(existing)return existing;
+   const raw=await (this.options.indexObjects?.read(id,fetch)??fetch(id));objects.set(id,raw);return raw;
+  };
+  const batch=async(ids:string[])=>{
+   const values=await (this.options.indexObjects?.batch(ids,fetchBatch)??fetchBatch(ids));
+   for(const [id,raw]of values)objects.set(id,raw);
+   return values;
+  };
   const headerCache=new Map<string,any>();
   const readHeader=async(id:string)=>{
    const retained=await this.store.readHeader(id);if(retained)return retained;if(headerCache.has(id))return headerCache.get(id);if(saved.headers?.[id])return saved.headers[id];
@@ -88,7 +98,7 @@ export class WatchCloudIndex {
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
   // A closed explicit-action gate permits authentication and decoding only.
   // Keep the original persistent version, pins and choice fence untouched.
-  if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,readOnly:true,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
+  if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,batch,undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,readOnly:true,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
   // F2: rows stream into encrypted staging under the new root; only per-row OID,
   // binding and visibility metadata stay in memory. The active tree switches
   // only at the final CAS below.
@@ -97,7 +107,7 @@ export class WatchCloudIndex {
   let staged:SyncState|null=null,count=0;const pending:any[]=[],seen:ObservedRow[]=[];
   const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
   const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
-  try{await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
+  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
   if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
   const next=observeAccount(staged,{oid:a.commitOid,revision:a.revision,generation:a.rollbackGeneration});path.pins.seenOids=[];
