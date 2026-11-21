@@ -49,12 +49,12 @@ test('v2 preparation never completes the round before actual v2 work settles', a
 });
 
 test.each([
- ['object_missing','云端资料暂时缺失'],
- ['cloud_v2_repo_missing','请先在手机或小程序'],
- ['feature_disabled','云端暂未开放同步'],
- ['network_timeout','连接云端超时'],
- ['cloud_v2_start_unavailable','暂时无法启动'],
- ['unexpected_fixture_failure','暂时无法完成'],
+ ['object_missing','云端资料暂缺，\n请稍后重试'],
+ ['cloud_v2_repo_missing','请先在手机或小程序\n完成首次云同步'],
+ ['feature_disabled','云同步暂未开放，\n请稍后重试'],
+ ['network_timeout','连接云端超时，\n请重试'],
+ ['cloud_v2_start_unavailable','云同步未能启动，\n请重试'],
+ ['unexpected_fixture_failure','云同步未能完成，\n请重试'],
 ])('v2 start failure %s reaches a retryable reason and the next round can succeed', async (code, detail) => {
  let fails = true;
  const service = await setup(async () => {
@@ -67,32 +67,44 @@ test.each([
  const status = {cloud:service.status,refreshTokenStatus:'valid'} as Parameters<typeof cloudSyncView>[0];
  const view = cloudSyncView(status,true,false,10_000,'waiting');
  expect(view.title).toBe('同步失败');
- expect(view.detail).toContain(detail);
+ expect(view.detail).toBe(detail);
  expect(view.button).toMatchObject({label:'重试',enabled:true});
  fails = false;
  expect(await service.syncNow()).toBe(true);
  expect(service.status.phase).toBe('complete');
 });
 
-test('a v2 round with pending body work does not advance the last success time', async () => {
- let completionError:string|null='body_channel_write_disabled';
+test.each([
+ ['choice_pending','需要选择','查看并选择'],
+ ['cloud_v2_read_only','已暂停上传',undefined],
+ ['body_channel_write_disabled','已暂停上传',undefined],
+ ['body_channel_waiting_wifi','等待 Wi-Fi','立即同步'],
+ ['cloud_v2_pending','还有资料待同步','立即同步'],
+])('incomplete v2 round %s shows attention and does not publish success', async (code,title,button) => {
+ let completionError:string|null=code;
  const service = await setup(async () => ({completionError}));
  expect(await service.syncNow()).toBe(false);
- expect(service.status).toMatchObject({phase:'error',lastCompletedAt:0,message:'云端暂未开放正文上传，本机正文已保留。'});
+ expect(service.status).toMatchObject({phase:'idle',v2Attention:code,lastCompletedAt:0});
+ const status = {cloud:service.status,refreshTokenStatus:'valid'} as Parameters<typeof cloudSyncView>[0];
+ const view = cloudSyncView(status,true,false,10_000,'waiting');
+ expect(view).toMatchObject({title,tone:'attention'});
+ expect(view.button?.label).toBe(button);
+ if (code==='choice_pending') expect(view.button?.action).toBe('choice');
  completionError = null;
  expect(await service.syncNow()).toBe(true);
  expect(service.status.lastCompletedAt).toBe(10_000);
+ expect(service.status.v2Attention).toBeUndefined();
 });
 
 test('missing announcement ends this round with a reason and a finite retry', async () => {
  const service = await setup(async () => { throw Error('must not open v2'); },false);
  const outcome = await service.syncNowResult(true);
  expect(outcome).toMatchObject({ok:false,retryable:true,retryAtMillis:40_000});
- expect(service.status).toMatchObject({phase:'error',message:'云同步服务暂不可用，请稍后重试。'});
+ expect(service.status).toMatchObject({phase:'error',message:'云同步暂不可用，\n请稍后重试'});
 });
 
 test('known offline ends this v2 attempt without waiting on a request', async () => {
  const service = await setup(async () => { throw Error('must not open v2'); },true,false);
  expect(await service.syncNowResult(true)).toMatchObject({ok:false,networkFailure:true,retryable:true});
- expect(service.status).toMatchObject({phase:'error',message:'当前无可用网络。请连接网络后重试。'});
+ expect(service.status).toMatchObject({phase:'error',message:'未连接网络，\n请联网后重试'});
 });

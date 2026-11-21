@@ -27,7 +27,8 @@ import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type 
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface CloudSyncResult {readonly ok:boolean; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
-export interface WatchCloudStatus {v2Failure?:true;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
+export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'cloud_v2_pending';
+export interface WatchCloudStatus {v2Failure?:true;v2Attention?:WatchV2Attention;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
  changes?:CloudChangeDetection;prepareRestore?():Promise<void>;
@@ -101,38 +102,39 @@ export class WatchCloudSyncService {
   const code=failure?.code??failure?.message;
   this.networkFailure=code==='cloud_v2_offline'||code==='transport_error'||isTransportFailure(error);
   let message:string;
+  let attention:WatchV2Attention|undefined;
   switch(code){
-   case 'cloud_v2_offline': message='当前无可用网络。请连接网络后重试。'; break;
-   case 'cloud_v2_not_announced': message='云同步服务暂不可用，请稍后重试。'; break;
-   case 'cloud_v2_repo_missing': message='请先在手机或小程序完成首次云同步。'; break;
-   case 'object_missing': message='云端资料暂时缺失，请稍后重试。'; break;
-   case 'feature_disabled': message='云端暂未开放同步，请稍后重试。'; break;
-   case 'cloud_v2_start_unavailable': message='暂时无法启动云同步，请重试。'; break;
-   case 'cloud_v2_read_only': message='云端资料暂时只读，本机修改已保留。'; break;
-   case 'cloud_v2_pending': message='还有资料待同步，请稍后重试。'; break;
-   case 'choice_pending': message='请先选择要保留的资料。'; break;
-   case 'body_channel_waiting_wifi': message='正文尚未同步。请连接 Wi-Fi 后重试。'; break;
-   case 'body_channel_write_disabled': message='云端暂未开放正文上传，本机正文已保留。'; break;
+   case 'cloud_v2_offline': message='未连接网络，\n请联网后重试'; break;
+   case 'cloud_v2_not_announced': message='云同步暂不可用，\n请稍后重试'; break;
+   case 'cloud_v2_repo_missing': message='请先在手机或小程序\n完成首次云同步'; break;
+   case 'object_missing': message='云端资料暂缺，\n请稍后重试'; break;
+   case 'feature_disabled': message='云同步暂未开放，\n请稍后重试'; break;
+   case 'cloud_v2_start_unavailable': message='云同步未能启动，\n请重试'; break;
+   case 'cloud_v2_read_only': attention=code; message='云端当前只读，\n本机修改已保留'; break;
+   case 'cloud_v2_pending': attention=code; message='还有资料待同步'; break;
+   case 'choice_pending': attention=code; message='请选择要保留的资料'; break;
+   case 'body_channel_waiting_wifi': attention=code; message='正文等待 Wi-Fi，\n也可手动同步'; break;
+   case 'body_channel_write_disabled': attention=code; message='正文上传暂未开放，\n本机正文已保留'; break;
    case 'cloud_account_busy':
-   case 'library_busy': message='云同步资源暂忙，请稍后重试。'; break;
+   case 'library_busy': message='云同步暂忙，\n请稍后重试'; break;
    case 'key_unavailable':
-   case 'signing_state_unavailable': message='同步密钥暂不可用，请检查设备授权后重试。'; break;
+   case 'signing_state_unavailable': message='同步密钥暂不可用，\n请检查设备授权'; break;
    case 'upgrade_required':
-   case 'unsupported_feature': message='云端协议需要更新，请更新腕上RSS后重试。'; break;
+   case 'unsupported_feature': message='云端协议需要更新，\n请更新腕上RSS'; break;
    case 'authentication_required':
    case 'authorization_required':
-   case 'scope_mismatch': message='云同步授权未通过，请检查账号后重试。'; break;
+   case 'scope_mismatch': message='云同步授权未通过，\n请检查账号'; break;
    case 'service_key_changed':
-   case 'signature_invalid': message='无法验证云同步服务，请稍后重试。'; break;
+   case 'signature_invalid': message='无法验证云同步服务，\n请稍后重试'; break;
    case 'cloud_sync_deadline_exceeded':
    case 'network_timeout':
    case 'timeout':
-   case 'ETIMEDOUT': message='连接云端超时，请重试。'; break;
-   default: message=this.networkFailure?'无法连接云端，请检查网络后重试。':'暂时无法完成云同步，请重试。';
+   case 'ETIMEDOUT': message='连接云端超时，\n请重试'; break;
+   default: message=this.networkFailure?'无法连接云端，\n请检查网络':'云同步未能完成，\n请重试';
   }
   const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+30_000;
-  this.value={...this.value,v2Failure:true,retryable:true,retryAtMillis};
-  this.set('error',message,member);
+  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,retryable:true,retryAtMillis};
+  this.set(attention?'idle':'error',message,member);
  }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string):Promise<CloudSyncResult>{
   try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(async()=>{
@@ -185,7 +187,7 @@ export class WatchCloudSyncService {
   }finally{key.fill(0);}
  }
  private async run(manual:boolean,mode:'all'|'recent128',freshPlan=false,forceContentReset=false,expectedScope?:string){
-  this.value={...this.value,v2Failure:undefined,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined,errorCode:this.value.ownerChoiceRequired?'library_owner_mismatch':undefined,formatCompatibility:undefined};this.failureStage='network';this.guard.require();const network=await this.ports.network();
+  this.value={...this.value,v2Failure:undefined,v2Attention:undefined,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined,errorCode:this.value.ownerChoiceRequired?'library_owner_mismatch':undefined,formatCompatibility:undefined};this.failureStage='network';this.guard.require();const network=await this.ports.network();
   if(!network.active||!network.validated){
    if(this.ports.primaryV2)this.failV2(Error('cloud_v2_offline'));
    else {this.networkFailure=true;this.set('idle','等待网络连接');}
@@ -195,7 +197,7 @@ export class WatchCloudSyncService {
   const full=manual||(network.wifi&&!network.metered);
   this.failureStage='session_open';this.budget?.check();const s=await this.ports.open(()=>{this.budget?.check();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');},expectedScope);if(!s){if(this.runEpoch===this.statusEpoch)this.reset();return false;}
   const current=async()=>{this.budget?.check();this.guard.require();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');await s.assertCurrent();this.budget?.check();};await current();
-  this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();await current();this.ownerResolved();}await current();this.set('registering','正在核对云空间');
+  this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();await current();this.ownerResolved();}await current();this.set('registering',this.ports.primaryV2?'正在准备账号和密钥':'正在核对云空间');
   this.failureStage='bootstrap';let bootstrap=await s.client.bootstrap();await current();
   const continueWithAnnouncement=async(boot:typeof bootstrap)=>{
    if(boot.syncV2)return true;

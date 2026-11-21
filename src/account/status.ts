@@ -1,10 +1,11 @@
 import type {WatchAccountIdentity} from './store';
 import type {SnapshotDeferralCode} from '../cloud/snapshot-deferral';
 import type {WatchAccountState} from './types.ts';
-import type {WatchCloudPhase} from '../cloud/service.ts';
+import type {WatchCloudPhase, WatchV2Attention} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
   v2Failure?:true;
+  v2Attention?:WatchV2Attention;
   resultSequence?:number;
   accountRevision?:number;
   ownerChoiceRequired?:boolean;
@@ -31,6 +32,7 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
   return {
     ...(own.formatCompatibility?{formatCompatibility:{...own.formatCompatibility}}:{}),
     ...(own.v2Failure?{v2Failure:true}:{}),
+    ...(own.v2Attention?{v2Attention:own.v2Attention}:{}),
     ...(own.ownerChoiceRequired?{ownerChoiceRequired:true}:{}),
     ...(own.restoreProgress?{restoreProgress:own.restoreProgress}:{}),
     ...(own.errorCode?{errorCode:own.errorCode}:{}),

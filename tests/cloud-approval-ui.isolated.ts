@@ -26,12 +26,12 @@ const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))sto
 const settle=()=>new Promise<void>(resolve=>nativeSetTimeout(resolve,0));
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return [];return [value,...nodes(value.props.children)];}
 type LoadStatus=Parameters<typeof CloudSyncScreen>[0]["load"];
-function mount(withActions=false,ownerChoice=false,load?:LoadStatus){
+function mount(withActions=false,ownerChoice=false,load?:LoadStatus,v2?:Pick<Parameters<typeof CloudSyncScreen>[0],'syncV2'|'onSyncV2'|'handoff'>){
  let logoutCalls=0;const actionCalls:string[]=[];let dispose=()=>{};
  let state:WatchApprovalState={phase:'idle',message:''},creates=0;const codes:string[]=[],listeners=new Set<()=>void>();
  const [active,setActive]=createSignal(true);
  const update=(next:WatchApprovalState)=>{state=next;for(const fn of listeners)fn();};
- const root=createRoot(stop=>{stops.push(stop);dispose=stop;return CloudSyncScreen({width:233,height:233,active,clearLocal:async()=>{},actions:withActions?{busy:false,message:'',subscribe:()=>()=>{},logout:async()=>{logoutCalls++;return true;},resolveOwner:async choice=>{actionCalls.push(choice);return true;},reregister:async()=>true}:undefined,load:load??(async()=>({phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',cloud:{phase:'waiting-approval',message:ownerChoice?'本机资料属于其他账号':'waiting',usedBytes:0,quotaBytes:1e9}})),available:()=>true,sync:{pending:false,start:async()=>{}},onPhone:()=>{},onError:()=>{},ref:()=>{},approval:{get state(){return state;},subscribe:(fn:()=>void)=>{listeners.add(fn);return ()=>{listeners.delete(fn);};},request:async()=>{creates++;update({phase:'requesting',message:'正在请求旧设备批准…'});return true;},confirmMatches:async()=>true,cancel:async()=>true,setForeground:()=>{}}});});
+ const root=createRoot(stop=>{stops.push(stop);dispose=stop;return CloudSyncScreen({width:233,height:233,active,clearLocal:async()=>{},actions:withActions?{busy:false,message:'',subscribe:()=>()=>{},logout:async()=>{logoutCalls++;return true;},resolveOwner:async choice=>{actionCalls.push(choice);return true;},reregister:async()=>true}:undefined,load:load??(async()=>({phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',cloud:{phase:'waiting-approval',message:ownerChoice?'本机资料属于其他账号':'waiting',usedBytes:0,quotaBytes:1e9}})),available:()=>true,...v2,sync:{pending:false,start:async()=>{}},onPhone:()=>{},onError:()=>{},ref:()=>{},approval:{get state(){return state;},subscribe:(fn:()=>void)=>{listeners.add(fn);return ()=>{listeners.delete(fn);};},request:async()=>{creates++;update({phase:'requesting',message:'正在请求旧设备批准…'});return true;},confirmMatches:async()=>true,cancel:async()=>true,setForeground:()=>{}}});});
  return {root,update,setActive,codes,dispose,actionCalls,get logoutCalls(){return logoutCalls;},get creates(){return creates;}};
 }
 test('v2 approval tap starts only on explicit action and never opens a legacy code input',async()=>{
@@ -70,6 +70,34 @@ test('a stalled first status read times out and a late result cannot replace the
  expect(calls).toBe(2);
  expect(()=>f.dispose()).not.toThrow();
 }));
+test('v2 rollback choice keeps one action and opens the existing choice route',async()=>{
+ const targets:string[]=[];
+ const unexpected=async()=>{throw Error('unexpected v2 action in cloud page');};
+ const f=mount(false,false,async()=>({
+  phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',
+  cloud:{phase:'error',v2Failure:true,message:'云同步未能完成',usedBytes:0,quotaBytes:0},
+ }),{
+  syncV2:{
+   snapshot:async()=>({
+    enabled:true,phase:'awaiting_choice',lastSyncedAtMillis:null,errorCode:null,
+    choice:{kind:'rollback',localChanges:1,cloudChanges:0,canMerge:false,mergeUnavailableReason:null},
+    unopenableNotes:[],recoveryCopies:[],publication:null,ownDeviceId:null,keepDiscardedLocalChanges7Days:false,
+    gates:{historyRestore:false,choiceApply:true,noteSegments:false},
+   }),
+   subscribe:()=>()=>{},
+   syncNow:unexpected,openChoice:unexpected,chooseLocal:unexpected,chooseCloud:unexpected,chooseMerge:unexpected,
+   closeChoice:unexpected,history:unexpected,rollback:unexpected,restoreRecovery:unexpected,setKeepDiscarded:unexpected,
+  },
+  onSyncV2:target=>targets.push(target),
+  handoff:{state:{phase:'waiting'},subscribe:()=>()=>{}},
+ });
+ await settle();
+ expect(labels(f)).toContain('需要选择');
+ expect(labels(f)).not.toContain('同步失败');
+ expect(labels(f).filter(label=>label==='查看并选择')).toHaveLength(1);
+ press(f,'查看并选择');
+ expect(targets).toEqual(['choice']);
+});
 test('host wall-clock confirmation expires after 4000ms and requires two deliberate presses, with no browser timers',async()=>withoutBrowserTimers(async()=>{
  const f=mount(true);await settle();press(f,'退出账号');expect(f.logoutCalls).toBe(0);expect(timers[0].milliseconds).toBe(4000);expect(labels(f)).toContain('再按一次确认退出');timers[0].resolve();await settle();expect(labels(f)).toContain('退出账号');press(f,'退出账号');expect(f.logoutCalls).toBe(0);press(f,'再按一次确认退出');expect(f.logoutCalls).toBe(1);expect(timers[1].cancelled).toBe(true);f.dispose();
 }));

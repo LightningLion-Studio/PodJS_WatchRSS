@@ -117,7 +117,7 @@ export function CloudSyncScreen(props: {
   let loadRevision=0,pageGeneration=0,disposed=false;
   const usable=()=>{
     const cloud=status()?.cloud;
-    return !!(cloud?.lastCompletedAt||cloud?.quotaBytes||cloud?.ownerChoiceRequired||cloud?.v2Failure||v2());
+    return !!(cloud?.lastCompletedAt||cloud?.quotaBytes||cloud?.ownerChoiceRequired||cloud?.v2Failure||cloud?.v2Attention||v2());
   };
   useCachedNetworkContent(usable);
   let accountScope:string|undefined, accountRevision:number|undefined;
@@ -232,13 +232,15 @@ export function CloudSyncScreen(props: {
       if(current()&&!isNetworkRecoveryCancellation(error))props.onError('暂时无法请求批准，请稍后重试。');
     });
   };
+  const currentView = () => cloudSyncView(status(), available(), pending(), Date.now(), handoff(), v2());
   const press = (action: CloudSyncAction) => {
     if (!props.active()) return;
     if (action === 'reload' && loadFailed()) { setLoadFailed(false); setRevision(value=>value+1); return; }
-    const current = cloudSyncView(status(), available(), pending(), Date.now(), handoff()).button;
+    const current = currentView().button;
     if (!current?.enabled || current.action!==action) return;
     if (action === 'approval') requestApproval();
     else if (action === 'phone') props.onPhone();
+    else if (action === 'choice') { if (props.syncV2) props.onSyncV2?.('choice'); }
     else if (!pending()) join();
   };
 
@@ -283,7 +285,7 @@ export function CloudSyncScreen(props: {
   };
 
   const entries = createMemo<ScrollEntry[]>(() => {
-    const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态。',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : cloudSyncView(status(), available(), pending(), Date.now(), handoff());
+    const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : currentView();
     const rows: ScrollEntry[] = [
       // Narrow bounds let the round layout start the page higher instead of pushing a full-width row down.
       {height: 26, bounds: centredBounds(inner(), Math.min(inner(), measure('云同步', 23) + 8), 0, 26), render: () => <Text class="absolute inset-0 text-center" style={{fontSlot: 23, lineHeight: 26, textColor: PHONE_PAGE.foreground}}>云同步</Text>},
@@ -316,7 +318,7 @@ export function CloudSyncScreen(props: {
       }
     }
     const button = (grantActive&&['requested','accepting','waiting','code','delivering'].includes(grant!.phase))||['requesting','pending','code','committing'].includes(approval().phase)?undefined:view.button;
-    if (button) {
+    if (button && (button.action !== 'choice' || props.syncV2 && props.onSyncV2)) {
       const width = Math.min(ACTION_WIDTH, inner());
       rows.push(gap(14), {height: PHONE_PAGE.touchHeight, bounds: centredBounds(inner(), width, 0, PHONE_PAGE.touchHeight), render: () =>
         <View class="absolute rounded-[24] items-center justify-center active:scale-96" focusable={button.enabled}
@@ -327,6 +329,8 @@ export function CloudSyncScreen(props: {
         </View>});
     }
     for (const notice of syncV2Notices(v2())) {
+      if (notice.key === 'choice' && view.button?.action === 'choice') continue;
+      if ((notice.key === 'error' || notice.key === 'disabled') && (status()?.cloud?.v2Attention || status()?.cloud?.v2Failure)) continue;
       const headline = Math.min(inner(), 16 + measure(notice.title, 1));
       rows.push(gap(16), {height: 17, bounds: centredBounds(inner(), headline, 0, 17), render: () =>
         <View class="absolute" accessibilityLabel={notice.title} style={{insetL: (inner() - headline) / 2, insetT: 0, width: headline, height: 17}}>

@@ -1,9 +1,10 @@
 import type {AccountStatusSnapshot} from '../account/status.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
 import type {RestoreProgress} from '../cloud/restore-progress.ts';
+import type {SyncV2UiState} from '../sync-v2/ui-state.ts';
 
 export type CloudSyncTone = 'muted' | 'busy' | 'ok' | 'attention' | 'error';
-export type CloudSyncAction = 'sync' | 'phone' | 'reload' | 'approval';
+export type CloudSyncAction = 'sync' | 'phone' | 'reload' | 'approval' | 'choice';
 export interface CloudSyncView {
   title: string;
   detail: string;
@@ -21,7 +22,7 @@ const BUSY = new Set<WatchCloudPhase>(['registering', 'downloading', 'merging', 
  * `undefined` = still loading, `null` = no bound account, `cloud` absent = this build has no cloud service.
  */
 export type CloudHandoffPhase = 'idle' | 'foreground' | 'queued' | 'held' | 'waiting';
-export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, available: boolean, pending: boolean, now = Date.now(), handoff: CloudHandoffPhase = 'idle'): CloudSyncView {
+export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, available: boolean, pending: boolean, now = Date.now(), handoff: CloudHandoffPhase = 'idle', v2?: SyncV2UiState): CloudSyncView {
   const phone = {label: '连接手机', action: 'phone' as const, enabled: true};
   if (status === undefined) return {title: '正在读取', detail: '', tone: 'muted'};
   if (!available) return {title: '暂未开放', detail: '当前版本还不能使用云同步。本机内容和手机同步照常可用。', tone: 'muted'};
@@ -38,14 +39,26 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     ...(restoreProgressView(cloud.restoreProgress) ?? {}),
     ...(cloud.quotaBytes > 0 ? {space: {label: `已用 ${formatBytes(cloud.usedBytes)} / ${formatBytes(cloud.quotaBytes)}`, fraction: Math.min(1, Math.max(0, cloud.usedBytes / cloud.quotaBytes))}} : {}),
   };
-  if (phase === 'error' && cloud.v2Failure) {
-    return {...base,title:'同步失败',detail:cloud.message,tone:'error',button:{label:'重试',action:'sync',enabled:!pending}};
+  const choice = v2?.enabled && v2.phase === 'awaiting_choice' ? v2.choice : null;
+  if (cloud.v2Attention === 'choice_pending' || choice) {
+    const detail = choice?.kind === 'rollback' ? '云端已回退，\n请选择要保留的资料' : '请选择要保留的资料';
+    return {...base,title:'需要选择',detail,tone:'attention',button:{label:'查看并选择',action:'choice',enabled:true}};
+  }
+  if (cloud.v2Attention === 'cloud_v2_read_only' || cloud.v2Attention === 'body_channel_write_disabled') {
+    return {...base,title:'已暂停上传',detail:cloud.message,tone:'attention',button:undefined};
+  }
+  if (cloud.v2Attention === 'body_channel_waiting_wifi' || cloud.v2Attention === 'cloud_v2_pending') {
+    const title = cloud.v2Attention === 'body_channel_waiting_wifi' ? '等待 Wi-Fi' : '还有资料待同步';
+    return {...base,title,detail:cloud.message,tone:'attention',button:{label:'立即同步',action:'sync',enabled:!pending}};
   }
   const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&cloud.message!=='等待网络连接'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
   // A manual sync that left the foreground: queued is with the system, not finished.
   if (handoff === 'held') return {...base, title: '等待手机同步结束', detail: '蓝牙传输结束后会自动继续云同步。', tone: 'attention', button: {label: '同步中…', action: 'sync', enabled: false}};
   if ((phase==='waiting'||handoff==='waiting'&&canHandoff)&&!BUSY.has(phase)) return {...base,title:'等待继续',detail:'回到应用或系统后台接手后会自动续做。',tone:'attention',button:{label:'继续同步',action:'sync',enabled:true}};
   if (handoff === 'queued' && canHandoff && !BUSY.has(phase)) return {...base, title: '后台同步中', detail: '已移交系统后台继续，完成后这里会更新。', tone: 'busy', button: {label: '在前台同步', action: 'sync', enabled: true}};
+  if (phase === 'error' && cloud.v2Failure) {
+    return {...base,title:'同步失败',detail:cloud.message,tone:'error',button:{label:'重试',action:'sync',enabled:!pending}};
+  }
   if (pending || BUSY.has(phase)) return {...base, title: '正在同步', detail: BUSY.has(phase) ? cloud.message : '正在连接云空间', tone: 'busy', button: {label: '同步中…', action: 'sync', enabled: false}};
   if (phase === 'complete') return {...base, title: '已同步', detail: cloud.message.includes('正文') ? '阅读状态已同步，文章正文会在连上 Wi-Fi 后同步。' : cloud.message.includes('只读') ? '已恢复云端资料；云空间当前只读。' : cloud.message.includes('部分') ? '已同步，部分公共 RSS 稍后重试。' : '手表与云端已一致。'};
   if(cloud.message.includes('重新登记本机'))return{...base,title:'需要重新登记本机',detail:'本机设备公钥与云端不一致，请确认后重新登记。',tone:'attention',button:undefined};
