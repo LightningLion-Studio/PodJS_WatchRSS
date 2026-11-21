@@ -2,7 +2,7 @@ import {douyinCacheUnavailable,directDouyinMediaUrl} from './cache-availability.
 import {douyinPrestoreConfig} from './prestore-policy.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
 import {douyinMediaExpiry,douyinMediaNetworkDeadline,douyinPlaybackAddresses} from './media-expiry.ts';
-import {douyinPlaybackAudio,douyinPlaybackMirrors} from './playback-mirrors.ts';
+import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
 import {memoryPressureLevel,onMemoryTrim,processMemoryBudgetBytes} from '@podjs/framework/memory';
