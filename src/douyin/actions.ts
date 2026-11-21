@@ -15,15 +15,18 @@ export class DouyinActionsController {
   }
   private publish(patch: Partial<DouyinActionsState>) { if (!this.disposed) { this.state = { ...this.state, ...patch }; this.changed(this.state); } }
   async load() {
-    // Metadata and local state are independent: neither network failure nor delay blocks saving.
     const revision = this.revision;
-    await Promise.all([
-      this.client.getSavedState(this.id).then(saved => { if (revision === this.revision) this.publish(saved); }).catch(error => this.publish({ message: String(error) })),
-      this.client.fetchDetail(this.id).then(detail => {
-        if (detail.ok && detail.data.kind === 'video' && detail.data.item.awemeId === this.id) this.publish({ item: detail.data.item, message: '' });
-        else this.publish({ message: this.state.item ? '' : detail.ok ? '图文内容暂不支持加入本地收藏' : detail.message });
-      }).catch(error => this.publish({ message: this.state.item ? '' : String(error) })),
-    ]);
+    const saved = this.client.getSavedState(this.id).then(state => {
+      if (revision === this.revision) this.publish(this.state.item ? { ...state, message: '' } : state);
+    }).catch(error => {
+      if (revision === this.revision) this.publish({ message: String(error) });
+    });
+    if (this.state.item) return saved;
+
+    await Promise.all([saved, this.client.fetchDetail(this.id).then(detail => {
+      if (detail.ok && detail.data.kind === 'video' && detail.data.item.awemeId === this.id) this.publish({ item: detail.data.item, message: '' });
+      else this.publish({ message: detail.ok ? '图文内容暂不支持加入本地收藏' : detail.message });
+    }).catch(error => this.publish({ message: String(error) }))]);
   }
   async toggle(kind: 'favorite' | 'watchLater') {
     if (this.disposed || this.state.busy || !this.state.item) return;

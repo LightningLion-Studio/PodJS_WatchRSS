@@ -1173,7 +1173,7 @@ test(`strict reload validates the read address combination: ${outcome}`,async()=
    registrations.push(resolved.playUrl);
    return direct?resolved.playUrl:managed;
   };
-  const result=f.controller.reloadVideo(entry,321,()=>true,'detail',true,mirrorOnly);
+  const result=f.controller.reloadVideo(entry,321,()=>true,'detail',true,false,mirrorOnly);
   if(rejected){
    await expect(result).rejects.toMatchObject({code:'source_expired'});
    expect(f.source()).toBe(previous);
@@ -1262,8 +1262,187 @@ test('PERFVIDEO reverse paging uses a verified bundle while the redundant previe
  expect(f.requests()).toBe(0);
 });
 
-for(const scenario of ['before commit','during commit','after commit','stage failure','commit failure','commit rejection','authorization change'] as const){
- test(`native reload settles the route and host together after ${scenario}`,async()=>{
+test('DYFAV reopens the last exact item at the recorded position and paused state', async () => {
+  const f = fixture(), a = item('resume-favorite'), b = item('different');
+  const request = { item: a, playback: a, playlist: [a], hasMore: false };
+  f.controller.douyinPlay(request);
+  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
+  const first = f.stack().at(-1)!;
+  first.onDouyinExit?.(first.playback!, 2345, false);
+  restoredFrame = { available: true, kind: 'actual_frame', path: 'video-frames/resume.jpg' };
+  f.controller.douyinPlay(request);
+  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
+  expect(f.source()).toMatchObject({ awemeId: a.awemeId, resumePositionMs: 2345, resumePaused: true, previewFrame: { frame: restoredFrame } });
+  f.controller.douyinPlay({ ...request, item: b, playback: b, playlist: [b] });
+  await f.controller.douyinNavigate({ name: 'player', awemeId: b.awemeId });
+  expect(f.source().resumePositionMs).toBeUndefined();
+  expect(f.requests()).toBe(0);
+});
+
+
+for (const expired of ['audio', 'mirror'] as const) test(`DYFAV FIX1 automatic detail reload rejects an expired ${expired} before publication`, async () => {
+  const f = fixture(), selected = item('saved-reload');
+  const live = Math.floor(Date.now() / 1000) + 3600;
+  const stale = Math.floor(Date.now() / 1000) - 60;
+  const primary = `https://video.test/new?expires=${live}`;
+  const rendition = {
+    playUrl: primary, codec: 'h264' as const, format: 'dash' as const, width: 480, height: 854, bitrate: 300_000,
+    playUrls: [primary, `https://video.test/mirror?expires=${expired === 'mirror' ? stale : live}`],
+    audioUrl: `https://video.test/audio?expires=${expired === 'audio' ? stale : live}`,
+  };
+  f.controller.douyinPlay({ item: selected, playback: selected, detailPlayback: true, savedPlayback: true });
+  await f.controller.douyinNavigate({ name: 'player', awemeId: selected.awemeId });
+  const previous = f.source();
+  const duplicate = { ...selected, playUrl: primary, variants: [rendition] };
+  client.resolvePlayback = async (id, options) => {
+    expect(id).toBe(selected.awemeId);
+    expect(options).toMatchObject({ forceRefresh: true, allowDetail: true });
+    return { ok: true, data: duplicate };
+  };
+  let registrations = 0;
+  proxyOverride = async () => { registrations++; return 'podjs-media-cache://play/detail'; };
+  const entry = f.stack().at(-1)!;
+  await expect(f.controller.reloadVideo(entry, 321, () => true, 'detail', true)).rejects.toMatchObject({ code: 'source_expired' });
+  expect(registrations).toBe(1);
+  expect(f.source()).toBe(previous);
+  expect(invalidated).toEqual([]);
+});
+
+for (const expired of [false, true]) test(`DYFAV FIX2 saved stall ${expired ? 'refreshes a source that expired during backoff' : 'reuses the source without needing a feed match'}`, async () => {
+  const f = fixture(), original = item('saved-stall');
+  const selected: DouyinItem = {...original, variants: [{
+    playUrl: original.playUrl, audioUrl: 'https://video/audio', format: 'dash', codec: 'h264',
+    width: 480, height: 854, bitrate: 300_000,
+  }]};
+  f.controller.douyinPlay({item: selected, playback: selected, savedPlayback: true, detailPlayback: true});
+  await f.controller.douyinNavigate({name: 'player', awemeId: selected.awemeId});
+  const entry = f.stack().at(-1)!;
+  const expiry = Date.now() + (expired ? -60_000 : 60_000);
+  const previous = entry.playback = {...entry.playback!, expiresAtMs: expiry};
+  const fresh = {...original, playUrl: 'https://video/new'};
+  let detailCalls = 0;
+  client.resolvePlayback = async (id, options) => {
+    expect(id).toBe(selected.awemeId);
+    expect(options).toEqual({forceRefresh: true, allowDetail: true, freshRequest: true});
+    detailCalls++;
+    return {ok: true, data: fresh};
+  };
+  await f.controller.reloadVideo(entry, 321, () => true, 'feed', false, true);
+  expect(detailCalls).toBe(expired ? 1 : 0);
+  expect(f.source()).not.toBe(previous);
+  expect(f.source()).toMatchObject({
+    awemeId: selected.awemeId, resumePositionMs: 321,
+    url: expired ? fresh.playUrl : selected.playUrl,
+    expiresAtMs: expired ? undefined : expiry,
+    audioUrl: expired ? undefined : selected.variants[0]!.audioUrl,
+  });
+  expect(invalidated).toEqual([]);
+});
+
+for (const replacement of ['valid-audio', 'expired-audio', 'expired-mirror', 'native-and-explicit'] as const)
+test(`DYFAV FIX3 saved DASH reload checks the full replacement set (${replacement})`, async () => {
+  const f = fixture(), selected = item('saved-audio-rotation');
+  const now = Date.now, origin = 1_800_000_000_000;
+  const main = 'https://fixture.invalid/main?expires=1800003600';
+  const oldAudio = 'https://fixture.invalid/audio?expires=1800000090';
+  const freshAudio = 'https://fixture.invalid/audio?expires=1800003600';
+  const expired = 'https://fixture.invalid/expired?expires=1800000090';
+  const binding = (audioUrl: string, mirror?: string): DouyinItem => ({
+    ...selected, playUrl: main, variants: [{
+      playUrl: main, playUrls: mirror ? [main, mirror] : [main], audioUrl,
+      codec: 'h264', format: 'dash', width: 480, height: 854, bitrate: 300_000,
+    }],
+  });
+  try {
+    Date.now = () => origin;
+    const before = binding(oldAudio);
+    f.controller.douyinPlay({item: before, playback: before, savedPlayback: true, detailPlayback: true});
+    await f.controller.douyinNavigate({name: 'player', awemeId: selected.awemeId});
+    const entry = f.stack().at(-1)!, original = entry.playback;
+    expect(original).toMatchObject({url: main, audioUrl: oldAudio});
+    Date.now = () => origin + 120_000;
+    const next = binding(replacement === 'expired-audio' ? expired : freshAudio,
+      replacement === 'expired-mirror' ? expired : undefined);
+    const registrations: DouyinItem[] = [];
+    proxyOverride = async playback => {
+      registrations.push(playback);
+      return 'podjs-media-cache://play/renewed';
+    };
+    client.resolvePlayback = async (id, options) => {
+      expect(id).toBe(selected.awemeId);
+      expect(options).toMatchObject({allowDetail: true, forceRefresh: true});
+      return {ok: true, data: next};
+    };
+    const reloading = f.controller.reloadVideo(entry, 321, () => true, 'detail', true, false, replacement === 'native-and-explicit');
+    if (replacement === 'valid-audio') {
+      await reloading;
+      expect(registrations).toEqual([next]);
+      expect(entry.playback).toMatchObject({awemeId: selected.awemeId, audioUrl: freshAudio, resumePositionMs: 321});
+      expect(entry.queue?.itemAtOffset()?.variants?.[0]?.audioUrl).toBe(freshAudio);
+    } else {
+      await expect(reloading).rejects.toMatchObject({code: 'source_expired'});
+      expect(registrations).toEqual([next]);
+      expect(invalidated).toEqual([]);
+      expect(entry.playback).toBe(original);
+    }
+  } finally {
+    Date.now = now;
+  }
+});
+
+for (const scenario of ['direct-fallback', 'promote-live-mirror', 'replace-expired-mirror'] as const)
+test(`DYFAV FIX4 validates the registered playback addresses (${scenario})`, async () => {
+  const f = fixture(), selected = item('registered-address-set');
+  const now = Date.now, origin = 1_800_000_000_000;
+  const expired = 'https://fixture.invalid/expired?expires=1800000090';
+  const liveMain = 'https://fixture.invalid/main?expires=1800003600';
+  const liveMirror = 'https://fixture.invalid/old-mirror?expires=1800003600';
+  const newMirror = 'https://fixture.invalid/new-mirror?expires=1800003600';
+  const audio = 'https://fixture.invalid/audio?expires=1800003600';
+  const cacheUri = 'podjs-media-cache://play/original';
+  const replacementUri = 'podjs-media-cache://play/replacement';
+  const binding = (playUrl: string, mirrors: string[]): DouyinItem => ({
+    ...selected, playUrl, variants: [{
+      playUrl, playUrls: [playUrl, ...mirrors], audioUrl: audio,
+      codec: 'h264', format: 'dash', width: 480, height: 854, bitrate: 300_000,
+    }],
+  });
+  try {
+    Date.now = () => origin;
+    const previous = binding(scenario === 'promote-live-mirror' ? expired : liveMain,
+      [scenario === 'replace-expired-mirror' ? expired : liveMirror]);
+    proxyOverride = async () => cacheUri;
+    f.controller.douyinPlay({item: previous, playback: previous, savedPlayback: true, detailPlayback: true});
+    await f.controller.douyinNavigate({name: 'player', awemeId: selected.awemeId});
+    const entry = f.stack().at(-1)!, source = entry.playback;
+    expect(source).toMatchObject({url: cacheUri, audioUrl: audio});
+    Date.now = () => origin + 120_000;
+    const next = scenario === 'promote-live-mirror' ? binding(liveMirror, []) : binding(liveMain, [newMirror]);
+    const registrations: DouyinItem[] = [];
+    proxyOverride = async playback => {
+      registrations.push(playback);
+      return scenario === 'direct-fallback' ? playback.playUrl : replacementUri;
+    };
+    client.resolvePlayback = async () => ({ok: true, data: next});
+    const reload = f.controller.reloadVideo(entry,321,()=>true,'detail',true,false,scenario === 'direct-fallback');
+    if (scenario === 'direct-fallback') {
+      await expect(reload).rejects.toMatchObject({code:'source_expired'});
+      expect(entry.playback).toBe(source);
+      expect(entry.queue?.itemAtOffset()).toMatchObject({playUrl: liveMain, variants: previous.variants});
+    } else {
+      await reload;
+      expect(entry.playback).toMatchObject({url:replacementUri,audioUrl:audio,resumePositionMs:321});
+      expect(entry.queue?.itemAtOffset()?.playUrl).toBe(next.playUrl);
+    }
+    expect(registrations).toEqual([next]);
+    expect(invalidated).toEqual([]);
+  } finally {
+    Date.now = now;
+  }
+});
+
+for(const savedPlayback of [false,true])for(const scenario of ['before commit','during commit','after commit','stage failure','commit failure','commit rejection','authorization change'] as const){
+ test(`${savedPlayback?'saved':'native'} reload settles the route and host together after ${scenario}`,async()=>{
   const id='commit-lifecycle',oldUri='podjs-media-cache://play/old',newUri='podjs-media-cache://play/new';
   const oldItem={...item(id),playUrl:'https://fixture.invalid/old?expires=4102444800'};
   const fresh={...oldItem,playUrl:'https://fixture.invalid/new?expires=4102444800'};
@@ -1306,12 +1485,15 @@ for(const scenario of ['before commit','during commit','after commit','stage fai
   try{
    const neighbour=item('commit-neighbour');
    if(scenario==='authorization change')await client.applyCookie('sid=fixture-before');
-   f.controller.douyinPlay({item:oldItem,playback:oldItem,playlist:[oldItem,neighbour],immersive:true,hasMore:false});
+   f.controller.douyinPlay({item:oldItem,playback:oldItem,playlist:[oldItem,neighbour],savedPlayback,detailPlayback:savedPlayback,immersive:!savedPlayback,hasMore:false});
    await f.controller.douyinNavigate({name:'player',awemeId:id});
    const entry=f.stack().at(-1)!;
-   expect(entry.playback?.url).toBe(oldUri);
-   client.resolvePlayback=async()=>({ok:true,data:fresh});
-   const recovery=f.controller.reloadVideo(entry,321,()=>current,'feed',true,false);
+   expect(entry.playback).toMatchObject({url:oldUri,savedPlayback});
+   client.resolvePlayback=async(id,options)=>{
+    expect(id).toBe(oldItem.awemeId);expect(options?.allowDetail).toBe(savedPlayback);
+    return {ok:true,data:fresh};
+   };
+   const recovery=f.controller.reloadVideo(entry,321,()=>current,savedPlayback?'detail':'feed',true,false,false);
    const result=recovery.then(()=>undefined,error=>(error as {code:string}).code);
    if(scenario==='before commit'||scenario==='during commit'||scenario==='after commit'||scenario==='authorization change'){
     await hostReached;
@@ -1333,7 +1515,7 @@ for(const scenario of ['before commit','during commit','after commit','stage fai
     expect(await result).toBe('CANCELLED');
     expect(f.source()).toBe(entry.playback);
     expect(entry.playback).toMatchObject({url:undefined,videoUrl:undefined,audioUrl:undefined,
-     headers:undefined,previewOnly:true,resumePositionMs:321});
+     headers:undefined,savedPlayback,previewOnly:true,resumePositionMs:321});
     expect(entry.queue?.snapshot().playlist.map(row=>[row.awemeId,row.playUrl,row.variants])).toEqual([
      [id,'',[]],[neighbour.awemeId,'',[]],
     ]);

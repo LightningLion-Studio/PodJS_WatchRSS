@@ -1,3 +1,6 @@
+import {douyinPlaybackAddresses} from './media-expiry.ts';
+import {validatedDouyinPlaybackItem} from './playback-source.ts';
+import {formatDouyinDetailFailure} from './errors.ts';
 import type { DouyinClient } from './client.ts';
 import type { DouyinContent, DouyinItem, DouyinResult } from './types.ts';
 import type { ContentBlock } from '../reader/content.ts';
@@ -7,6 +10,25 @@ export async function loadDouyinDetail(client: DouyinClient, id: string, supplie
   if (supplied?.awemeId === id) return { ok: true, data: { kind: 'video', item: supplied } };
   const local=await client.findLocalItem(id);
   return local ? { ok: true, data: { kind: 'video', item: local } } : client.fetchDetail(id);
+}
+/** A local favorite owns metadata and an ID. Only a usable rendition can bypass detail. */
+export async function resolveSavedDouyinPlayback(client: Pick<DouyinClient, 'resolvePlayback'>, selected: DouyinItem, now = Date.now): Promise<DouyinItem> {
+  const id = selected.awemeId.trim();
+  if (!id) throw new Error('收藏缺少视频标识');
+  const usable = (item: DouyinItem) => {
+    const {expiresAtMs} = douyinPlaybackAddresses(item);
+    return item.awemeId === id && !!item.playUrl && (expiresAtMs === undefined || now() < expiresAtMs);
+  };
+  const local = validatedDouyinPlaybackItem(selected);
+  if (usable(local)) return local;
+
+  const refreshed = await client.resolvePlayback(id, { forceRefresh: true, allowDetail: true });
+  if (!refreshed.ok) throw Object.assign(new Error(formatDouyinDetailFailure(refreshed.code)), {
+    code: refreshed.code, networkFailure: refreshed.networkFailure, httpStatus: refreshed.httpStatus,
+  });
+  const playback = validatedDouyinPlaybackItem(refreshed.data);
+  if (!usable(playback)) throw new Error('详情未返回有效播放地址，请重试');
+  return playback;
 }
 export function douyinDetailBlocks(content: DouyinContent): ContentBlock[] {
   const video = content.kind === 'video' ? content.item : undefined;

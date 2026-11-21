@@ -30,7 +30,8 @@ mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{ge
 const realServices=await import('@podjs/framework/services');
 const retryTimers:Array<{ms:number;cancelled:boolean;fire:()=>void}>=[];
 mock.module('@podjs/framework/services',()=>({...realServices,delay:(ms:number)=>{
- if(ms<1000&&ms!==200)return {result:Promise.resolve(),cancel(){}};
+ // A retry can be scheduled just below 1000 ms when the clock crosses a tick.
+ if(ms<200)return {result:Promise.resolve(),cancel(){}};
  let fire!:()=>void;const result=new Promise<void>(r=>fire=r),entry={ms,cancelled:false,fire};retryTimers.push(entry);
  return {result,cancel(){entry.cancelled=true;}};
 }}));
@@ -264,7 +265,7 @@ test('DYERR accepted refresh pairs native presentation with its own sequence and
 
 test('DYERR feed transport failure automatically retries and successful retry publishes fresh content',async()=>{
  const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response([],503));await settled(f);
- const timer=retryTimers.find(t=>t.ms===1000&&!t.cancelled)!;expect(timer).toBeDefined();expect(f.text()).toContain('重试');
+ const timer=retryTimers.find(t=>t.ms>200&&t.ms<=1000&&!t.cancelled)!;expect(timer).toBeDefined();expect(f.text()).toContain('重试');
  timer.fire();await requestReady(f,2);f.requests[1]!.reply.resolve(response(['recovered']));await settled(f);f.press();
  expect(f.plays[0].item.awemeId).toBe('recovered');expect(f.data.has('douyin.cookie')).toBe(true);
 });
@@ -535,7 +536,7 @@ test('DYENTRY review: cover and prewarm emit no video endpoint and preserve cred
   expect(plays).toHaveLength(1);expect(marks.filter(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toHaveLength(1);
   expect(marks.some(m=>m.code==='first_card'||m.code==='incoming_first_frame')).toBe(false);
   plays[0].onFailure({code:'REQUEST_FAILED'});
-  retryTimers.find(timer=>timer.ms===1000&&!timer.cancelled)!.fire();await settle();
+  retryTimers.find(timer=>timer.ms>200&&timer.ms<=1000&&!timer.cancelled)!.fire();await settle();
   expect(plays).toHaveLength(2);expect(marks.filter(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toHaveLength(1);
   setActive(false);await settle();setActive(true);await cachedReady({text:()=>''});
   expect(plays).toHaveLength(2);expect(client.authState()).toBe('logged-in');expect(mutations).toEqual([]);

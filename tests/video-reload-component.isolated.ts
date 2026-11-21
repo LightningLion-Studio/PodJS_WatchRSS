@@ -70,11 +70,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeExpired?:boolean)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean)=>{retries++;if(resolver)await resolver(p,current,mode,requireFreshAddress);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeExpired?:boolean)=>{retries++;if(resolver)await resolver(p,current,mode,requireFreshAddress,reuseSavedSource,nativeExpired);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
  return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
@@ -421,6 +421,28 @@ test('RVDYA2-01 a rendered but nonloading buffered player resumes from the same 
  expect(prepares[1]).toMatchObject({url,bypassCache:true,resumePositionMs:321});
  expect(current.state).toBe('playing');
 });
+for(const expired of [false,true])test(`DYFAV FIX2 saved buffered stall after detail uses ${expired?'detail for expiry':'the same valid source'}`,async()=>{
+ const previous={platform:'douyin' as const,awemeId:'saved-buffered-stall',savedPlayback:true,detailPlayback:true,title:'fixture',url:'https://fixture/old'};
+ const active={...previous,url:'https://fixture/active',expiresAtMs:fakeNow+(expired?10_000:60_000)};
+ const refreshed={...active,url:'https://fixture/refreshed',expiresAtMs:fakeNow+60_000};
+ const modes:(string|undefined)[]=[];
+ nextError={code:'source_expired'};
+ const f=reloadMount(previous,async(position,current,mode)=>{
+  modes.push(mode);
+  if(current())f.publish({...((modes.length===1||!expired)?active:refreshed),resumePositionMs:position});
+ });
+ await flush();await tick(351);
+ expect(modes).toEqual(['detail']);
+ expect(current.state).toBe('playing');
+ expect(f.firstFrames()).toBe(1);
+ current={...state('paused'),positionMs:321,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+ stateEvents.forEach(fn=>fn(current));await flush();await tick(20_000);await tick(701);
+ expect(modes).toEqual(['detail',expired?'detail':'feed']);
+ expect(prepares.at(-1)).toMatchObject({url:expired?refreshed.url:active.url,resumePositionMs:321});
+ expect(current.state).toBe('playing');
+ expect(f.text()).not.toContain('重试');
+});
+
 test('NOPLAY a fresh native progress read cancels a stale buffered stall observation',async()=>{
  reloadMount({platform:'douyin',immersive:true,awemeId:'fresh-progress',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
  current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
@@ -438,6 +460,22 @@ test('NOPLAY buffered-stall recovery keeps the two-attempt budget and an explici
   if(i<2)expect((await f.diagnostics()).reloadCount).toBe(i+1);
  }
  expect(f.text()).toContain('播放失败');await tick(60000);expect(retries).toBe(2);
+});
+
+for(const nativeFailure of [false,true])test(`DYFAV FIX4 a rejected detail binding retries the feed with the original expiry provenance (${nativeFailure})`,async()=>{
+ const source={platform:'douyin' as const,immersive:true,awemeId:'after-registration',url:'https://fixture.invalid/old',
+  title:'fixture',expiresAtMs:nativeFailure?undefined:fakeNow-1};
+ const attempts:Array<{mode?:string;fresh?:boolean;native?:boolean}>=[];
+ nextError={code:nativeFailure?'source_expired':'prepare_failed'};
+ const f=reloadMount(source,async(position,guard,mode,fresh,_reuse,native)=>{
+  attempts.push({mode,fresh,native});
+  if(mode==='detail')throw {code:'source_expired'};
+  if(guard())f.publish({...source,url:'https://fixture.invalid/fresh',expiresAtMs:undefined,resumePositionMs:position});
+ });
+ await flush();await tick(351);await flush();
+ expect(attempts).toEqual([{mode:'detail',fresh:true,native:nativeFailure},{mode:'feed',fresh:true,native:nativeFailure}]);
+ expect(prepares.map(value=>value.url)).toEqual([source.url,'https://fixture.invalid/fresh']);
+ expect(current.state).toBe('playing');
 });
 
 test('NOPLAY an automatic Douyin resolution timeout uses the remaining bounded retry',async()=>{
@@ -743,9 +781,9 @@ test('RVDY1332-A2 production route registers feed recovery after detail 429 and 
   const root=createRoot(stop=>{
    stops.push(stop);
    return MediaRoutes({...controller,entry,playingSource,page:()=>entry.page,active:()=>true,width:233,height:233,round:true,backOffset:()=>0,setError,
-    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,nativeSourceExpired?:boolean)=>{
+    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeSourceExpired?:boolean)=>{
      reloadAddressRequirements.push(requireFreshAddress);
-     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress,nativeSourceExpired);
+     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress,reuseSavedSource,nativeSourceExpired);
     },
     services:{} as Parameters<typeof MediaRoutes>[0]['services'],
    } as unknown as Parameters<typeof MediaRoutes>[0]);
