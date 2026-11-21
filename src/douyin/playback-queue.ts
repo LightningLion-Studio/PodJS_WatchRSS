@@ -115,6 +115,12 @@ export class DouyinPlaybackQueue {
     this.cancel();this.select(index);return true;
   }
   cancel(){this.generation++;this.previewGeneration++;}
+  retirePlaybackSources(){
+    this.cancel();
+    const retire=(item:DouyinItem)=>({...item,playUrl:'',variants:[]});
+    this.items=this.items.map(retire);
+    this.ahead=this.ahead.map(retire);
+  }
   /** Playback records on foreground preparation, never speculative resolution.
    * Native list/history detail-entry writes separately update the same deduplicated store. */
   /** Save the current pager before playback succeeds, as native buildResumeIntent does. */

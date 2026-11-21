@@ -11,8 +11,8 @@ test('parser keeps the complete ordered same-track URL list, old snapshots still
 });
 test('same-track fallback precedes one refresh and keeps progress and settings',async()=>{
  let calls=0;const p=new DouyinPlaybackRecovery(item,async()=>{calls++;return {...item,playUrl:'https://fixture/fresh',variants:[]};});
- const first=await p.recover({url:item.playUrl,title:'fixture',resumePositionMs:12345,backgroundPlayback:true},()=>true);
- expect(first).toMatchObject({url:'https://fixture/b',resumePositionMs:12345,backgroundPlayback:true});expect(calls).toBe(0);
+ const first=await p.recover({url:item.playUrl,title:'fixture',resumePositionMs:12345,backgroundPlayback:true,expiresAtMs:1},()=>true);
+ expect(first).toMatchObject({url:'https://fixture/b',resumePositionMs:12345,backgroundPlayback:true,expiresAtMs:undefined});expect(calls).toBe(0);
  const second=await p.recover(first!,()=>true);expect(second?.url).toBe('https://fixture/fresh');expect(calls).toBe(1);
  await expect(p.recover(second!,()=>true)).rejects.toThrow('exhausted');expect(calls).toBe(1);
 });

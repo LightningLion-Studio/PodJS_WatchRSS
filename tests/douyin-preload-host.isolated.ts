@@ -1,10 +1,48 @@
 import {test,expect,mock} from 'bun:test';
 import {dispatchMemoryPressure} from '@podjs/framework/memory';
+import type {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],registrationFailure:any,oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 let registrationWait:((uri:string)=>Promise<void>|undefined)|undefined;
 const result=(value:any)=>({result:value?.uri&&registrationWait?Promise.resolve(registrationWait(value.uri)).then(()=>value):Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{if(registrationFailure)throw registrationFailure;registrations.push({key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge:_maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+const stages=new Map<string,{uri:string;previous?:string}>();
+const discarded:string[]=[];
+let stageCount=0;
+const captureRegistration=(operation:'register'|'stage',key:string,url:string,headers:Record<string,string>,persistent=false,
+ alternates:readonly string[]=[],expiresAt?:number,audioUrl?:string,maxVideoShortEdge?:number,replacesUri?:string)=>{
+ if(registrationFailure)throw registrationFailure;
+ registrations.push({operation,key,url,headers,persistent,alternates,expiresAt,maxVideoShortEdge,replacesUri,...(audioUrl?{audioUrl}:{})});
+ return 'podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';
+};
+mock.module('@podjs/framework/media-prefix-cache',()=>({
+ localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{
+  remove:(uri:string)=>{removed.push(uri);return result({});},
+  onResult:(fn:typeof resultListener)=>{resultListener=fn;return()=>{resultListener=undefined;};},
+  register:(...args:Parameters<typeof mediaPrefixCache.register>)=>{
+   const uri=captureRegistration('register',...args),replacesUri=args[8];
+   if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);
+   return result({uri});
+  },
+  stage:(...args:Parameters<typeof mediaPrefixCache.stage>)=>{
+   const uri=captureRegistration('stage',...args),stageId=String(++stageCount);
+   stages.set(stageId,{uri,previous:args[8]});
+   return result({uri,stageId});
+  },
+  commit:(stageId:string)=>{
+   const stage=stages.get(stageId)!;stages.delete(stageId);
+   if(stage.previous&&stage.previous!==stage.uri)removed.push(stage.previous);
+   return result({uri:stage.uri});
+  },
+  discard:(stageId:string)=>{
+   const stage=stages.get(stageId);stages.delete(stageId);
+   if(stage)discarded.push(stage.uri);
+   return result({});
+  },
+  window:(items:readonly unknown[],foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},
+  stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),
+  clear:()=>{clears++;stages.clear();return result({removedBytes:0});},
+ },
+}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -397,8 +435,85 @@ test('NOPLAY direct fallback retains explicit URL deadlines and audio source val
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'https://user:password@fixture/audio'}]},
   {...items[0],playUrl:video,variants:[{playUrl:video,format:'dash',codec:'h264',width:960,height:540,bitrate:1000,audioUrl:'file:///private'}]}]){
   const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true,data:item})},host=createHostDouyinPreload(client as any);registrationFailure={code:'cache_error'};
-  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code:'cache_error'});}finally{registrationFailure=undefined;host.stop();}
+  const code=item.playUrl===video?'cache_error':'source_expired';
+  try{await expect(host.playback(item as any,{})).rejects.toMatchObject({code});}finally{registrationFailure=undefined;host.stop();}
  }
+});
+
+test('reload binding reports the direct result for post-registration validation',async()=>{
+ const selected={...items[0]!,playUrl:'https://fixture/expired?expires=1000000000'};
+ const port={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:selected})};
+ const host=createHostDouyinPreload(port as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ registrationFailure={code:'unsupported_method'};
+ try{
+  await expect(host.playbackResolved(selected,{},()=>true)).rejects.toMatchObject({code:'source_expired'});
+  const candidate=await host.playbackForReload(selected,{},()=>true);
+  expect(candidate).toMatchObject({url:selected.playUrl,item:selected});
+  expect(host.sourceFor(candidate.url)).toBeUndefined();
+  await candidate.discard();
+ }finally{registrationFailure=undefined;host.stop();}
+});
+
+test('reload registers provisionally and releases only the rejected or superseded binding',async()=>{
+ const host=createHostDouyinPreload(client as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const old={...items[0]!,awemeId:'review',playUrl:'https://fixture/old'};
+ const fresh={...old,playUrl:'https://fixture/fresh'};
+ try{
+  const base=await host.playbackResolved(old,{},()=>true);
+  removed=[];registrations=[];discarded.length=0;
+  const rejected=await host.playbackForReload(fresh,{},()=>true,base);
+  expect(registrations[0]).toMatchObject({operation:'stage',replacesUri:base});
+  expect(host.sourceFor(base)).toEqual(old);
+  expect(host.sourceFor(rejected.url)).toBeUndefined();
+  expect(removed).toEqual([]);
+  await rejected.discard();
+  await rejected.discard();
+  expect(discarded).toEqual([rejected.url]);
+  expect(removed).toEqual([]);
+  expect(host.sourceFor(base)).toEqual(old);
+  const same=await host.playbackForReload(old,{},()=>true,base);
+  expect(same.url).toBe(base);
+  await same.discard();
+  expect(discarded).toEqual([rejected.url]);
+  expect(removed).toEqual([]);
+  const accepted=await host.playbackForReload(fresh,{},()=>true,base);
+  expect(registrations.at(-1)).toMatchObject({operation:'stage',replacesUri:base});
+  expect(host.sourceFor(base)).toEqual(old);
+  let committed:string|undefined;
+  await accepted.commit({
+   validateFallback:()=>{throw new Error('unexpected fallback');},
+   publish:binding=>{committed=binding.url;},
+   retire:()=>{throw new Error('unexpected authorization change');},
+  });
+  await accepted.discard();
+  expect(committed).toBe(accepted.url);
+  expect(host.sourceFor(base)).toBeUndefined();
+  expect(host.sourceFor(accepted.url)).toEqual(fresh);
+  expect(removed).toEqual([base]);
+  expect(discarded).toEqual([rejected.url]);
+ }finally{host.stop();}
+});
+
+test('a late reload registration is discarded when the current route changes',async()=>{
+ const host=createHostDouyinPreload(client as unknown as Parameters<typeof createHostDouyinPreload>[0]);
+ const old={...items[0]!,awemeId:'review',playUrl:'https://fixture/old'};
+ const fresh={...old,playUrl:'https://fixture/cancelled'};
+ let current=true,release!:()=>void;
+ try{
+  const base=await host.playbackResolved(old,{},()=>true);
+  removed=[];registrations=[];discarded.length=0;
+  registrationWait=()=>new Promise<void>(resolve=>release=resolve);
+  const reloading=host.playbackForReload(fresh,{},()=>current,base);
+  await flush();
+  expect(release).toBeFunction();
+  expect(removed).toEqual([]);
+  current=false;
+  release();
+  await expect(reloading).rejects.toMatchObject({code:'CANCELLED'});
+  expect(host.sourceFor(base)).toEqual(old);
+  expect(removed).toEqual([]);
+  expect(discarded).toEqual(['podjs-media-cache://play/review-cancelled.mp4']);
+ }finally{registrationWait=undefined;host.stop();}
 });
 
 test('NOPLAY a late optional cache failure cannot publish a replaced foreground source',async()=>{

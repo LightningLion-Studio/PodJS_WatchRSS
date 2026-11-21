@@ -1,7 +1,7 @@
 import {expect,test} from 'bun:test';
 import {URL as NodeURL} from 'node:url';
 import {DouyinClient} from '../../src/douyin/client.ts';
-import {reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
+import {assertDouyinAddresses,failedDouyinAddresses,reloadDouyinPlayback} from '../../src/douyin/reload-playback.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
 import {utf8Encode} from '../../src/cloud/types.ts';
@@ -35,16 +35,41 @@ test('manual retry resolves the selected aweme through detail despite fresh feed
  const retries=f.requests.slice(1).map(request=>new NodeURL(request.url));
  expect(retries.map(url=>[url.pathname,url.searchParams.get('aweme_id')])).toEqual([['/aweme/v1/web/aweme/detail/','selected']]);
 });
-test('manual detail retry refuses the previous playback URL, its mirror and a mismatched aweme',async()=>{
- const f=fixture(),original=wire('selected'),oldMirror='https://fixture.invalid/old-mirror';
- original.video.bit_rate[0]!.play_addr.url_list.push(oldMirror);
+test('detail resolution leaves the effective address decision to playback registration',async()=>{
+ const f=fixture(),original=wire('selected'),mirror='https://fixture.invalid/old-mirror';
+ original.video.bit_rate[0]!.play_addr.url_list.push(mirror);
  f.replies.push(response({aweme_list:[original]}));
  const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
  const item=page.data.items[0]!;
- const mirror=wire('selected');mirror.video.bit_rate[0]!.play_addr.url_list=[oldMirror];
- f.replies.push(response({aweme_detail:original}),response({aweme_detail:mirror}),response({aweme_detail:wire('other')}));
- for(let i=0;i<3;i++)await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
- expect(detailCount(f)).toBe(3);expect(f.requests).toHaveLength(4);
+ const promoted=wire('selected');
+ promoted.video.bit_rate[0]!.play_addr.url_list=[mirror];
+ f.replies.push(response({aweme_detail:promoted}));
+ expect((await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail'))?.item.playUrl).toBe(mirror);
+});
+test('detail fallback without a freshness requirement accepts the same valid URL for the selected aweme',async()=>{
+ const f=fixture(),original=wire('selected');
+ f.replies.push(response({aweme_list:[original]}));
+ const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;
+ f.replies.push(response({aweme_detail:original}),response({aweme_detail:wire('other')}));
+ expect(await reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).toMatchObject({item:{awemeId:item.awemeId,playUrl:item.playUrl}});
+ await expect(reloadDouyinPlayback(f.client,item.awemeId,()=>true,item,'detail')).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+});
+test('actual address validation keeps valid previous components and rejects invalid ones',()=>{
+ const now=1_800_000_120_000;
+ const main='https://fixture.invalid/main?expires=1800003600';
+ const mirror='https://fixture.invalid/mirror?expires=1800003600';
+ const audio='https://fixture.invalid/audio?expires=1800003600';
+ const expired='https://fixture.invalid/expired?expires=1800000090';
+ expect(failedDouyinAddresses([main,mirror,expired],true,now)).toEqual([main,mirror,expired]);
+ expect(failedDouyinAddresses([main,mirror,expired],false,now)).toEqual([expired]);
+ expect(()=>assertDouyinAddresses([main,audio],failedDouyinAddresses([main,mirror,expired],true,now),now))
+  .toThrow('播放地址已过期');
+ expect(failedDouyinAddresses([main,audio],false,now)).toEqual([]);
+ expect(()=>assertDouyinAddresses([main,audio],failedDouyinAddresses([main,audio],true,now),now))
+  .toThrow('播放地址已过期');
+ expect(()=>assertDouyinAddresses([mirror,audio],[expired],now)).not.toThrow();
+ expect(()=>assertDouyinAddresses([main,audio,expired],[],now)).toThrow('播放地址已过期');
 });
 test('manual detail retry uses the persisted detail 403 cooldown and never falls back to feed',async()=>{
  const f=fixture();f.replies.push(response({aweme_list:[wire('selected')]}));
