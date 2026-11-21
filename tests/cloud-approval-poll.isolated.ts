@@ -33,7 +33,7 @@ let syncResult:((manual:boolean,mode:'all'|'recent128')=>Promise<CloudSyncResult
 const cleared:string[]=[];
 const calls:{entry:string;manual:boolean;mode:string;scope?:string;grant?:string}[]=[];
 mock.module('@podjs/framework/watch',()=>({lifecycle:()=>'active',onLifecycleChange:()=>()=>{}}));
-mock.module('@podjs/framework/services',()=>({
+mock.module('@podjs/framework/services',()=>({fileChunks:{readBytes:async()=>{throw Error('Unexpected archived book read');}},
  displayPower:{state:async()=>({interactive:true,resumed:true}),onChange:()=>()=>{}},
  onSqlChanged:()=>()=>{},
  onNetworkChange(fn:()=>void){networkListeners.add(fn);return()=>{networkListeners.delete(fn);};},

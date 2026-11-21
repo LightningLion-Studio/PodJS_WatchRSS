@@ -65,10 +65,10 @@ test('with Sync v2 enabled, lost chunk ACK reconnects to durable missing ranges;
   expect(await f.db.query('SELECT body_hash FROM article_sync_content')).toEqual([{body_hash:accepted!.body_hash}]);
   const state=await guard.store.readState(),commitOid='commit:sha256:'+'a'.repeat(64);
   const before={...state,account:{oid:commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid,treeRoot:'test'}}} as typeof state;
-  let expectedRevision:string|undefined;
+  const revisionOverride:{value?:string}={};
   guard.store.cloudRow=async(_root,id)=>{
    const body=await f.repository.cloudArticlePlain(bodyObject.businessId),plain=body&&articleBodyBytes(body);
-   const bodyRevision=expectedRevision??(plain&&articleBodyRevision(id,plain));
+   const bodyRevision=revisionOverride.value??(plain&&articleBodyRevision(id,plain));
    expect(bodyRevision).toBeDefined();
    return {meta:{kind:'article',logicalId:bodyObject.businessId,payload:{contentHash:incoming.value.contentHash}},
     row:{bodyRevision,deleted:false,recipeOid:'recipe:sha256:'+'b'.repeat(64)}};
@@ -77,7 +77,7 @@ test('with Sync v2 enabled, lost chunk ACK reconnects to durable missing ranges;
   incoming.value.contentHash='d'.repeat(64);
   await f.db.transaction(await business.prepare([incoming],before));
   expect(await f.db.query('SELECT body_pending FROM article_register_state')).toEqual([{body_pending:0}]);
-  expectedRevision='e'.repeat(32);
+  revisionOverride.value='e'.repeat(32);
   const wire=toWire('article',incoming.value);
   guard.store.readCandidate=async()=>({meta:{kind:'article',logicalId:incoming.logicalId,payload:wire.meta},state:{payload:wire.state}});
   await f.db.transaction(await business.prepare([incoming],before));

@@ -22,7 +22,7 @@ const store=new WatchAccountStore({
 let faultFor:string|undefined,faults=0;
 const manualCalls:{scope?:string;account:string|undefined;token:string|undefined}[]=[];
 mock.module('@podjs/framework/watch',()=>({lifecycle:()=>life,onLifecycleChange:(fn:any)=>{lifecycleListeners.add(fn);return()=>lifecycleListeners.delete(fn);}}));
-mock.module('@podjs/framework/services',()=>({
+mock.module('@podjs/framework/services',()=>({fileChunks:{readBytes:async()=>{throw Error('Unexpected archived book read');}},
  displayPower:{state:async()=>display,onChange:(fn:any)=>{displayListeners.add(fn);return()=>displayListeners.delete(fn);}},
  onSqlChanged:()=>()=>{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}}),
  hostOperation:(method:string,args:any)=>({result:(async()=>{calls.push({method,args});if(method.startsWith('sql.'))return stateSql.host(method,args);if(method==='crypto.random')return {bytesBase64:'opaque_'+calls.length};if(method==='secure.get'){

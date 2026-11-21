@@ -11,6 +11,7 @@ import {jsonBytes,parseCanonicalJson,canonical,entityKey} from '../../src/sync-v
 import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,validateCarrier,type Carrier} from '../../src/sync-v2/body-channel-codec';
 import {BodyChannelHttp} from '../../src/sync-v2/body-channel-http';
 import {WatchBodyChannel} from '../../src/sync-v2/body-channel';
+import type {WatchProjectionStore} from '../../src/sync-v2/store';
 import {toWire} from '../../src/sync-v2/business';
 import {refreshNoteAssets,NOTE_ASSET_SCHEMA} from '../../src/sync-v2/note-assets';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
@@ -100,7 +101,7 @@ for(const kind of ['asset','book'] as const)test('matching local '+kind+' uses o
  let pendingChoice=false;
  const projection={readState:async()=>({pendingChoice,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
  let witnessReads=0,replaceOnRecheck=false;
- const channel=(http=b.http())=>new WatchBodyChannel({http,scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
+ const channel=(http=b.http())=>new WatchBodyChannel({http,scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
   ...(kind==='book'?{readBookWitness:async()=>({sha256:++witnessReads===2&&replaceOnRecheck?'f'.repeat(64):sha256Hex(p.raw),size:p.raw.length})}:{}),
   read:async()=>{if(kind==='book')throw Error('unexpected full book read');return assetFiles.contents.has(assetPath)?assetFiles.readAsset(identity):undefined;},
   validate:async()=>{},install:async()=>{throw Error('unexpected install');},
@@ -351,14 +352,14 @@ for(const expire of [false,true])test('FIX1 final D1 local proof '+(expire?'rech
  const logicalId=p.binding.logicalId;
  const wire=toWire('asset',{assetId:logicalId,mime:'image/png',originalFilename:logicalId,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0});
  const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId,payload:wire.meta},state:{payload:wire.state}};
- let local=p.raw,reads=0,validation=0,pendingChoice=false,failRead=false,installs=0;let now=1;
+ let local=p.raw,reads=0,validation=0,failRead=false,installs=0;let now=1;const pendingChoice=false;
  const changed=p.raw.slice();changed[0]^=1;
  const projection={
   readState:async()=>({pendingChoice,account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),
   cloudRows:async(_root:string,after:string)=>after?[]:[entry],
   cloudRow:async()=>{if(++validation===2&&!expire)local=changed;return entry;},
  };
- const channel=()=>new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
+ const channel=()=>new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
   read:async()=>{if(++reads===2&&expire)now=3;if(failRead)throw Error('file_replaced');return local;},
   validate:async()=>{},install:async()=>{installs++;},
  },check:async()=>{}});
@@ -418,7 +419,7 @@ test('FIX1 D1 rejects a signed carrier whose keyVersion is unavailable',async()=
   cloudRows:async(_root:string,after:string)=>after?[]:[entry],cloudRow:async()=>entry,
  };
  let keyChecks=0;
- const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async v=>{keyChecks++;if(v!==1)throw Error('key_unavailable');return key.slice();},currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
+ const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async v=>{keyChecks++;if(v!==1)throw Error('key_unavailable');return key.slice();},currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',repository:{
   read:async()=>p.raw,validate:async()=>{},install:async()=>{throw Error('unexpected install');},
  },check:async()=>{}});
  const start=b.calls.length;
@@ -473,7 +474,7 @@ for(const expire of [false,true])test('FIX2 D1 attachment publication '+(expire?
   if(method==='file.delete')return {} as T;
   throw Error(method);
  });
- const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
+ const channel=new WatchBodyChannel({http:b.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>{throw Error('unexpected upload');},approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>{throw Error('unexpected upload');},files:files(),root:'local-body',now:()=>now,repository:{
   read:async()=>published,validate:async()=>{},install:async(_kind,id,bytes,expected,deadline)=>{await write(id,bytes,expected,deadline);},
  },check:async()=>{}});
  const result=await channel.sync(2);

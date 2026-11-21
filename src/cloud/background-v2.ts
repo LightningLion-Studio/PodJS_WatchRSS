@@ -18,7 +18,8 @@ import {withAccountLease} from '../account/lease';
 import {cloudAccountIdentity} from './identity';
 import {OnboardingStore,ONBOARDING_KEY} from '../onboarding/store';
 import {startupDestination} from '../onboarding/state';
-import {createBackgroundLibrary} from './background-library';
+import {createBackgroundLibraryPorts} from './background-library-ports';
+import {SqlLibraryBodyRepository} from '../sync/library-body-repository';
 import {watchAppVersion} from '../core/app-version';
 import {openApplicationSyncV2Core} from '../sync-v2/application-core';
 import {accountIdFromUserId} from '../sync-v2/signing';
@@ -50,7 +51,8 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
   if(intent){const epoch=await cloudStatePort(host).get(manualEpochKey(account));if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch||intent.version===1&&!epoch)return 'success';}
   if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return 'busy';cloudLease=true;
-  const library=await createBackgroundLibrary(host,async key=>{const v=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return v.exists?v.value:undefined;},guard);
+  const {db,libraryPorts}=await createBackgroundLibraryPorts(host,async key=>{const v=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return v.exists?v.value:undefined;},guard);
+  const library=new SqlLibraryBodyRepository(db,libraryPorts);
   await accounts.ensureLibraryOwner(account,()=>library.hasLocalPrivateContent());
   // The worker keeps one bounded account transaction through crypto/network.
   // Logout/refresh cannot clear or replace the account between a file check and

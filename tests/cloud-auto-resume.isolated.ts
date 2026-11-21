@@ -60,7 +60,7 @@ const sync=async(manual:boolean,mode?:string)=>{
 mock.module('@podjs/framework/watch',()=>({
  lifecycle:()=>life,onLifecycleChange:(fn:(state:string)=>void)=>sub(lifecycleListeners,fn),
 }));
-mock.module('@podjs/framework/services',()=>({
+mock.module('@podjs/framework/services',()=>({fileChunks:{readBytes:async()=>{throw Error('Unexpected archived book read');}},
  displayPower:{state:async()=>display,onChange:(fn:(value:Display)=>void)=>sub(displayListeners,fn)},
  onSqlChanged:(_topic:string,fn:()=>void)=>sub(sqlListeners,fn),
  onNetworkChange:(fn:()=>void)=>sub(networkListeners,fn),

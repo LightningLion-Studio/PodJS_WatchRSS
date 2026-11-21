@@ -9,7 +9,7 @@ const {buildBackground}=await import(resolve(framework,'packages/cli/src/backgro
 test('full v2 headless bundle stays bounded and consent/account/network gates issue no business traffic',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'podnotes-v2-headless-'));try{
   const entry=join(dir,'entry.ts');writeFileSync(entry,`export {runSyncV2Background as default} from ${JSON.stringify(resolve(import.meta.dir,'../../src/cloud/background-v2.ts'))};`);
-  const artifact=(await buildBackground({v2:entry},dir)).v2!;expect(artifact.bytes).toBeLessThanOrEqual(1048576);
+  const artifact=(await buildBackground({v2:entry},dir)).v2!;expect(artifact.bytes).toBeLessThanOrEqual(1048576-32*1024);
   const source=readFileSync(join(dir,artifact.file),'utf8');
   for(const phase of ['consent','account','offline']){
    const realm:any={};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();const calls:string[]=[];

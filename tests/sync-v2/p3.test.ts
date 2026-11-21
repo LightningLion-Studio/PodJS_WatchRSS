@@ -89,8 +89,12 @@ test('P3 gzip block checkpoint resumes without repeating authentication or decom
 });
 
 test('P3 every HTTP admission preserves the 10-second shutdown reserve on a slow link',async()=>{
- const root=scratch(),b=new ContentBackend(),source=randomBytes(6*1048576),counter={reads:0,bytes:0};b.requestCost=3000;let f=engine(root,b,source,{sourceCounter:counter});
- try{await f.store.init();await f.e.enqueue(item,'upload');let completed=false;for(let i=0;i<5;i++){const start=b.clock,before=b.uploaded,result=await f.e.runWindow();expect(b.clock-start).toBeLessThanOrEqual(290000);expect(b.uploaded).toBeGreaterThan(before);expect(result.bytes).toBeLessThanOrEqual(b.uploaded-before);if(i===0)expect(result.status).toBe('paused');if(result.status==='complete'){completed=true;break;}f.db.close();f=engine(root,b,source,{sourceCounter:counter});await f.store.init();}expect(completed).toBe(true);expect(counter.bytes).toBe(source.length);
+ const root=scratch(),b=new ContentBackend(),source=randomBytes(6*1048576),counter={reads:0,bytes:0};b.requestCost=3000;
+ // The network clock is synthetic. Reopen the same files and database between
+ // windows without charging real disk flush latency against the test watchdog.
+ const options={sourceCounter:counter,syncToDisk:false};
+ let f=engine(root,b,source,options);
+ try{await f.store.init();await f.e.enqueue(item,'upload');let completed=false;for(let i=0;i<5;i++){const start=b.clock,before=b.uploaded,result=await f.e.runWindow();expect(b.clock-start).toBeLessThanOrEqual(290000);expect(b.uploaded).toBeGreaterThan(before);expect(result.bytes).toBeLessThanOrEqual(b.uploaded-before);if(i===0)expect(result.status).toBe('paused');if(result.status==='complete'){completed=true;break;}f.db.close();f=engine(root,b,source,options);await f.store.init();}expect(completed).toBe(true);expect(counter.bytes).toBe(source.length);
  }finally{f.db.close();rmSync(root,{recursive:true,force:true});}
 });
 
