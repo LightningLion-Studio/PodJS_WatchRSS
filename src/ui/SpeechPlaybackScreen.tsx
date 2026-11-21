@@ -11,6 +11,8 @@ import { createGesture } from "@pocketjs/framework/gesture";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { getOps } from "@pocketjs/framework/host";
 import { measuredLines } from "../reader/measured-text.ts";
+import type {QrRect} from '@podjs/framework/round-layout';
+import {speechControlsLayout} from './speech-controls-layout.ts';
 import { speechPlaybackStatus, type SpeechPlaybackState } from "../reader/speech-playback.ts";
 
 export function SpeechPlaybackScreen(props: {
@@ -40,31 +42,36 @@ export function SpeechPlaybackScreen(props: {
   const inner = () => props.width - 36;
   const clipped = (text: string, width: number, slot = 3) => measuredLines(text, width, s => getOps().measureText(s, slot), 1).join("");
   const errors = () => props.state.error ? measuredLines(props.state.error, inner(), s => getOps().measureText(s, 0), 2) : [];
-  const controlsTop = () => 85 + (errors().length ? 5 + errors().length * 14 : 0);
-  const gap = () => Math.max(0, (inner() - 184) / 5);
-  const button = (name: string, src: () => string, x: () => number, y: () => number, size: number, press: () => void, selected = false) =>
-    <View debugName={name} onPress={press} focusable class="absolute rounded-[9999] items-center justify-center active:scale-96" style={{ insetL: x(), insetT: y(), width: size, height: size, bgColor: selected ? "#ff6026" : "#00000000" }}><Image src={src()} style={{ width: size / 2, height: size / 2 }} /></View>;
+  const layout=createMemo(()=>speechControlsLayout(props.width,props.height,errors().length,round));
+  const headerY=(y:number)=>layout().headerTop+y*layout().headerScale;
+  const bounds=(box:QrRect)=>({insetL:box.x,insetT:box.y,width:box.width,height:box.height});
+  const button=(name:string,src:string,box:QrRect,press:()=>void,selected=false,iconSize=box.width/2)=>
+    <View debugName={name} onPress={press} focusable class="absolute rounded-[9999] items-center justify-center active:scale-96"
+      style={{...bounds(box),bgColor:selected?"#ff6026":"#00000000"}}><Image src={src} style={{width:iconSize,height:iconSize}} /></View>;
   return <View ref={value => surface = value} debugName="SpeechPlayback" class="absolute inset-0 bg-black">
-    <Text class="absolute top-[12] left-[18] right-[18] text-lg leading-[22] text-white text-center">朗读播控</Text>
-    <View class="absolute left-[18] top-[40] right-[18] h-[36]">
+    <Text class="absolute left-[18] right-[18] text-lg leading-[22] text-white text-center" style={{insetT:headerY(12)}}>朗读播控</Text>
+    <View class="absolute left-[18] right-[18] h-[36]" style={{insetT:headerY(40)}}>
       <Image src="../assets/icons/speech-volume.svg" class="absolute left-[0] top-[6] w-[24] h-[24]" />
-      <Text class="absolute left-[33] right-[0] top-[0] text-lg leading-[22] text-white">{clipped(props.state.article?.title || "尚未开始朗读", rowWidth(40, 62))}</Text>
-      <Text class="absolute left-[33] right-[0] top-[22] text-xs leading-[14] text-[#bdbdbd]">{clipped(speechPlaybackStatus(props.state), rowWidth(62, 76), 0)}</Text>
+      <Text class="absolute left-[33] right-[0] top-[0] text-lg leading-[22] text-white">{clipped(props.state.article?.title || "尚未开始朗读", rowWidth(headerY(40),headerY(62)))}</Text>
+      <Text class="absolute left-[33] right-[0] text-xs leading-[14] text-[#bdbdbd]" style={{insetT:22*layout().headerScale}}>{clipped(speechPlaybackStatus(props.state), rowWidth(headerY(62),headerY(76)), 0)}</Text>
     </View>
-    <Text class="absolute left-[18] right-[18] top-[81] text-xs leading-[14] text-[#e54d4d] text-center">{errors().join("\n")}</Text>
-    <View class="absolute left-[18] right-[18]" style={{ insetT: controlsTop(), height: 58 }}>
-      {button("SpeechPrevious", () => "../assets/icons/speech-previous.svg", gap, () => 8, 42, props.onPrevious)}
-      {button("SpeechToggle", () => props.state.playing ? "../assets/icons/speech-pause.svg" : "../assets/icons/speech-play.svg", () => 42 + gap() * 2, () => 0, 58, props.onToggle, true)}
-      {button("SpeechNext", () => "../assets/icons/speech-next.svg", () => 100 + gap() * 3, () => 8, 42, props.onNext)}
-      {button("SpeechStop", () => "../assets/icons/speech-stop.svg", () => 142 + gap() * 4, () => 8, 42, props.onStop)}
-    </View>
-    <View class="absolute left-[18] right-[18] h-[36]" style={{ insetT: controlsTop() + 67 }}>
-      <View debugName="SpeechAutoAdvance" onPress={props.onAutoAdvance} focusable class="absolute left-[0] top-[0] h-[36] items-center justify-center active:scale-96" style={{ width: Math.max(36, inner() - 116) }}><Image src={props.state.autoAdvance ? "../assets/icons/speech-auto.svg" : "../assets/icons/speech-auto-off.svg"} class="w-[24] h-[24]" /></View>
-      {button("SpeechSlower", () => "../assets/icons/speech-minus.svg", () => inner() - 106, () => 2, 32, () => props.onRate(-1))}
-      <Text class="absolute top-[7] w-[42] text-lg leading-[22] text-white text-center" style={{ insetL: inner() - 74 }}>{`${props.state.rate}x`}</Text>
-      {button("SpeechFaster", () => "../assets/icons/speech-plus.svg", () => inner() - 32, () => 2, 32, () => props.onRate(1))}
-    </View>
-    <View debugName="SpeechReturn" onPress={props.onOpenCurrentArticle} focusable class="absolute left-[18] right-[18] h-[34] items-center justify-center" style={{ insetT: controlsTop() + 111 }}><Text class="text-sm leading-[17] text-[#ff6026]" style={{translateY:-4.5}}>{props.currentArticleActionText}</Text></View>
+    <Text class="absolute left-[18] right-[18] text-xs leading-[14] text-[#e54d4d] text-center"
+      style={{insetT:headerY(81),lineHeight:14*layout().headerScale,scale:layout().headerScale}}>{errors().join("\n")}</Text>
+    <Show when={layout().buttons}>{controls=><>
+      {button("SpeechPrevious","../assets/icons/speech-previous.svg",controls().previous,props.onPrevious)}
+      {button("SpeechToggle",props.state.playing?"../assets/icons/speech-pause.svg":"../assets/icons/speech-play.svg",controls().toggle,props.onToggle,true)}
+      {button("SpeechNext","../assets/icons/speech-next.svg",controls().next,props.onNext)}
+      {button("SpeechStop","../assets/icons/speech-stop.svg",controls().stop,props.onStop)}
+      {button("SpeechAutoAdvance",props.state.autoAdvance?"../assets/icons/speech-auto.svg":"../assets/icons/speech-auto-off.svg",
+        controls().auto,props.onAutoAdvance,false,24*layout().headerScale)}
+      {button("SpeechSlower","../assets/icons/speech-minus.svg",controls().slower,()=>props.onRate(-1))}
+      <Text class="absolute text-lg leading-[22] text-white text-center"
+        style={{...bounds(controls().rate),scale:layout().headerScale,lineHeight:22*layout().headerScale}}>{`${props.state.rate}x`}</Text>
+      {button("SpeechFaster","../assets/icons/speech-plus.svg",controls().faster,()=>props.onRate(1))}
+      <View debugName="SpeechReturn" onPress={props.onOpenCurrentArticle} focusable class="absolute items-center justify-center"
+        style={bounds(controls().return)}><Text class="text-sm leading-[17] text-[#ff6026]"
+          style={{translateY:round?0:-4.5,scale:layout().headerScale}}>{props.currentArticleActionText}</Text></View>
+    </>}</Show>
     <Show when={round && volume().visible}><VolumeArcCapsule width={props.width} height={props.height} percent={volume().percent} /></Show>
     <Show when={!round && volume().visible}><View debugName="SpeechVolumeOverlay" class="absolute rounded-[9999]" style={{insetL:(props.width-volumeWidth())/2,insetT:(props.height-33)/2,width:volumeWidth(),height:33,bgColor:"#1c1f21db"}}>
       <Image src="../assets/icons/speech-volume-overlay.svg" class="absolute left-[8] w-[18] h-[18]" style={{insetT:7.5}} />

@@ -3,6 +3,8 @@ import {Text,View} from '@pocketjs/framework/components';
 import {createSignal,onCleanup,onMount,Show} from 'solid-js';
 import {LogUploadController,type LogUploadOptions,type LogUploadState} from '../logs/upload.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
+import {logReceiptTime} from './log-receipt-time.ts';
+import {logTextEntries} from './log-text-entries.tsx';
 import {DeleteConfirmDialog} from './DeleteConfirmDialog.tsx';
 
 /** Standalone: lead owns privacy-screen callback and route wiring.
@@ -16,7 +18,15 @@ export function LogUploadScreen(props:{height:number;width:number;options:LogUpl
   const controller=new LogUploadController({...props.options,backend:{...props.options.backend,upload:(...args)=>network.run(()=>props.options.backend.upload(...args)),delete:(...args)=>props.options.backend.delete(...args)}},setState);
   onMount(()=>{const consented=props.autoStart;props.consumeConsent();if(!consented)setState({phase:'empty',message:'请先阅读日志说明并再次同意，本页不会自动重新上传。'});void controller.start(consented);});
   onCleanup(()=>controller.dispose());
-  const row=(text:string,height=52,onPress?:()=>void):ScrollEntry=>({height,render:()=> <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress?'button':undefined} accessibilityLabel={onPress?text:undefined} class={onPress?'absolute inset-0 items-center justify-center rounded-[30] bg-[#2a2a2a] active:scale-96':'absolute inset-0 items-center justify-center'}><Text class="text-base leading-[22] text-[#f5f5f5]">{text}</Text></View>});
+  const padding=24;
+  const textRows=(text:string,height=52)=>logTextEntries(text,props.width-2*padding,height);
+  const button=(label:string,onPress:()=>void):ScrollEntry=>({
+    height:52,
+    render:()=> <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={label}
+      class="absolute inset-0 items-center justify-center rounded-[30] bg-[#2a2a2a] active:scale-96">
+      <Text class="text-base leading-[22] text-[#f5f5f5]">{label}</Text>
+    </View>,
+  });
   const removeCurrent=async()=>{
     const current=state();if(current.phase!=='success'||deleting())return;
     setDeleting(true);setDeleteError('');
@@ -26,7 +36,22 @@ export function LogUploadScreen(props:{height:number;width:number;options:LogUpl
   };
   const entries=():ScrollEntry[]=>{
     const s=state();
-    return [row('日志上传',40),row(s.message,84),...(s.phase==='success'?[row(`取件码：${s.receipt.code}`),row(`上传时间：${s.receipt.createdAt}`,68),row(`自动删除：${s.receipt.expiresAt}`,68),row(`密文：${s.receipt.fileSize} B · ${s.receipt.charCount} 字符`,55),...(deleteError()?[row(`删除失败：${deleteError()}`,75)]:[]),row(deleting()?'正在删除…':'立即删除这份日志',52,()=>setConfirmDelete(true)),row('管理已上传日志',52,props.onManage)]:[...(s.phase==='upload-error'||s.phase==='load-error'?[row('重试上传',52,props.onRetry)]:[]),row('管理已上传日志',52,props.onManage)])];
+    const rows=[...textRows('日志上传',40),...textRows(s.message,84)];
+    if(s.phase==='success'){
+      const receipt=s.receipt;
+      rows.push(
+        ...textRows(`取件码：${receipt.code}`),
+        ...textRows(`上传时间：${logReceiptTime(receipt.createdAt)}`,68),
+        ...textRows(`自动删除：${logReceiptTime(receipt.expiresAt)}`,68),
+        ...textRows(`密文：${receipt.fileSize} B · ${receipt.charCount} 字符`,55),
+      );
+      if(deleteError())rows.push(...textRows(`删除失败：${deleteError()}`,75));
+      rows.push(button(deleting()?'正在删除…':'立即删除这份日志',()=>setConfirmDelete(true)));
+    } else if(s.phase==='upload-error'||s.phase==='load-error'){
+      rows.push(button('重试上传',props.onRetry));
+    }
+    rows.push(button('管理已上传日志',props.onManage));
+    return rows;
   };
-  return <><ScrollEntries height={props.height} entries={entries()} padding={24} inputActive={()=>!confirmDelete()&&!deleting()&&(props.active?.()??true)} accessibilityLabel="日志上传"/><Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除已上传日志" message="确认从服务器删除这份加密日志？删除后不可恢复。" busy={deleting()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void removeCurrent()}/></Show></>;
+  return <><ScrollEntries height={props.height} entries={entries()} padding={padding} inputActive={()=>!confirmDelete()&&!deleting()&&(props.active?.()??true)} accessibilityLabel="日志上传"/><Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除已上传日志" message="确认从服务器删除这份加密日志？删除后不可恢复。" busy={deleting()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void removeCurrent()}/></Show></>;
 }

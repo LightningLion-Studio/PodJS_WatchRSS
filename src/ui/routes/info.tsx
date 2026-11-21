@@ -66,7 +66,7 @@ export function InfoRoutes(props: InfoRoutesProps) {
           onUploadLogs={() => props.setPage("log-upload", { logUploadConsent: true })}
           onManageLogs={() => props.setPage("log-upload-history")}
           onDeclineLogs={() => props.openInformation("contact-developer")}
-          onOpenUrl={(url) => void props.openUrl(url)}
+          onOpenUrl={props.openUrl}
           legalBaseUrl="https://sly-data-plane.watchrss.cn"
           restoredState={props.entry.informationSnapshot}
           onSnapshotChange={(snapshot) =>

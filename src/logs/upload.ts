@@ -51,13 +51,13 @@ export class LogUploadController {
       const receipt = await this.options.backend.upload(encrypted.bytes, encrypted.encryptedAesKey, text.length);
       try {
         await this.options.receipts.add(receipt);
-        emit({ phase: "success", message: "日志已加密上传。删除回执已安全保存在本机。", receipt, receiptSaved: true });
+        emit({ phase: "success", message: "日志已加密上传。\n回执已保存在本机。", receipt, receiptSaved: true });
       } catch {
         try {
           await this.options.backend.delete(receipt.id, receipt.deleteToken);
           emit({ phase: "upload-error", message: "日志已上传，但本机无法保存删除回执；为避免您失去删除方式，服务器已撤销这次上传。" });
         } catch {
-          emit({ phase: "success", message: "日志已上传，但本机无法保存删除回执。请留在此页立即删除；离开后无法通过本机回执管理。", receipt, receiptSaved: false });
+          emit({ phase: "success", message: "日志已上传，\n本机未能保存删除回执。\n请留在此页立即删除。\n离开后无法用本机回执管理。", receipt, receiptSaved: false });
         }
       }
     } catch (error) {

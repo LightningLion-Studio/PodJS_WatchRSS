@@ -1,6 +1,6 @@
 import { Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
-import { createEffect, createMemo, createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import { layoutText } from "../reader/index.ts";
 import { QRCode } from "./QRCode.tsx";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
@@ -12,8 +12,8 @@ export interface SafeQrScreenProps {
   title: string;
   value?: string;
   status: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
   onRefresh?: () => void;
   onError?: (message: string) => void;
   accessibilityLabel?: string;
@@ -42,7 +42,7 @@ export function SafeQrScreen(props: SafeQrScreenProps) {
       <View accessibilityHidden={!!props.qrAccessibilityLabel}>{props.value ? <QRCode value={props.value} size={Math.floor(layout().qr.width)} onError={props.onError} /> : null}</View>
     </View>
     <View accessibilityRole="text" accessibilityLabel={props.statusAccessibilityLabel} onPress={statusPages() > 1 ? () => setStatusPage((statusPage() + 1) % statusPages()) : undefined} focusable={statusPages() > 1} style={{ insetL: layout().status.x, insetT: layout().status.y, width: layout().status.width, height: layout().status.height }} class="absolute"><Text accessibilityHidden={!!props.statusAccessibilityLabel} style={{ lineHeight: statusLineHeight() }} class="absolute inset-0 text-[11px] text-[#b6b6b6] text-center">{visibleStatus().join("\n")}</Text></View>
-    <View accessibilityRole="link" accessibilityLabel={props.actionAccessibilityLabel} onPress={props.onAction} focusable style={{ insetL: layout().action.x, insetT: layout().action.y, width: layout().action.width, height: layout().action.height }} class="absolute rounded-[7] bg-[#2a2a2a] items-center justify-center"><Text accessibilityHidden={!!props.actionAccessibilityLabel} class="text-[9px] leading-[13] text-white">{props.actionLabel}</Text></View>
+    <Show when={props.actionLabel && props.onAction}><View accessibilityRole="link" accessibilityLabel={props.actionAccessibilityLabel} onPress={props.onAction} focusable style={{ insetL: layout().action.x, insetT: layout().action.y, width: layout().action.width, height: layout().action.height }} class="absolute rounded-[7] bg-[#2a2a2a] items-center justify-center"><Text accessibilityHidden={!!props.actionAccessibilityLabel} class="text-[9px] leading-[13] text-white">{props.actionLabel}</Text></View></Show>
   </View> }));
   return <ScrollEntries fixed height={props.height} entries={[entry()]} gap={0} padding={0} onRefresh={props.onRefresh} accessibilityLabel={props.accessibilityLabel} ref={props.ref} />;
 }

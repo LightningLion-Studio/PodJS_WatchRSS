@@ -10,6 +10,7 @@ import { homeEntryAtLongPress, movableHomeEntries, shouldShowHomeEmptyState, typ
 import { isDeletableLocalContentChannel } from "../core/imported-content.ts";
 import { homeChannelSummary, homeSpeechCard, homeSpeechSpectrumBars, type HomePlatformLoginState } from "./home-extras.ts";
 import type { SpeechPlaybackState } from "../reader/speech-playback.ts";
+import {layoutAtlasText} from "@podjs/framework/atlas-text";
 import { getOps } from "@pocketjs/framework/host";
 import { measuredLines } from "../reader/measured-text.ts";
 
@@ -104,13 +105,16 @@ export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
     const model=homeSpeechCard(props.speechState);
     if(!model)return undefined;
     const bars=()=>homeSpeechSpectrumBars(props.speechSpectrum, !!props.speechState?.playing);
-    return {height:84,render:()=> <View debugName="HomeSpeechCard" onPress={props.onSpeech} focusable accessibilityRole="button" accessibilityLabel={model.title} class="absolute inset-0 rounded-[16] bg-[#252a2d] border-[#ff6026] border-[1]">
-      <Text class="absolute left-[14] right-[58] top-[13] h-[21] overflow-hidden text-[17px] leading-[21] text-[#f5f5f5]">{model.title}</Text>
-      <Text class="absolute left-[14] right-[58] top-[32.5] h-[38] overflow-hidden text-sm leading-[19] text-[#b6b6b6]">{model.summary}</Text>
-      <View debugName="HomeSpeechSpectrum" class="absolute right-[12] top-[25] w-[38] h-[34]">
-        <For each={bars()}>{bar=><View class="absolute rounded-[2.2] bg-[#ff6026]" style={bar}/>}</For>
-      </View>
-    </View>};
+    return {height:84,render:()=>{
+      const summary=layoutAtlasText(model.summary,{width:cardWidth()-14-58,fontSlot:1,lineHeight:19,maxLines:2});
+      return <View debugName="HomeSpeechCard" onPress={props.onSpeech} focusable accessibilityRole="button" accessibilityLabel={`${model.title}，${model.summary}`} class="absolute inset-0 rounded-[16] bg-[#252a2d] border-[#ff6026] border-[1]">
+        <Text class="absolute left-[14] right-[58] top-[13] h-[21] overflow-hidden text-[17px] leading-[21] text-[#f5f5f5]">{model.title}</Text>
+        <Text class="absolute left-[14] top-[32.5] overflow-hidden text-sm leading-[19] text-[#b6b6b6]" style={summary.style}>{summary.lines.join("\n")}</Text>
+        <View debugName="HomeSpeechSpectrum" class="absolute right-[12] top-[25] w-[38] h-[34]">
+          <For each={bars()}>{bar=><View class="absolute rounded-[2.2] bg-[#ff6026]" style={bar}/>}</For>
+        </View>
+      </View>;
+    }};
   };
   // Narrow centred rows declare what they draw, so the round list does not treat them as full-width boxes.
   const centred=(width:number,top:number,height:number)=>centredBounds(props.width-36,width,top,height);
