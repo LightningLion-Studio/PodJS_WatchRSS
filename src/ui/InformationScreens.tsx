@@ -14,6 +14,8 @@ import {onFrame} from '@pocketjs/framework/lifecycle';
 import type {ReaderPreset} from "../reader/preset.ts";
 import type {ReaderFontResolver} from "../reader/font-assets.ts";
 import type {ReaderBackgroundSnapshot} from "../reader/background-assets.ts";
+import {logBrowserOpenFailure} from '../browser/open-failure.ts';
+import {scrollTextVisibility} from './scroll-text-visibility.ts';
 import {chunkLines} from "./round-rows.tsx";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { GROUP_NUMBER, GROUP_URL, informationText } from "./information-data.ts";
@@ -39,20 +41,30 @@ export type InformationRestorationEvent = 'document-mounted'|'document-unmounted
 export type InformationRef = (value: { scroller: Scroller;snapshot?:()=>InformationSnapshot }) => void;
 export interface InformationScreenProps { height: number; width?: number; preset:ReaderPreset; fonts:ReaderFontResolver; backgroundSnapshot:ReaderBackgroundSnapshot; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => Promise<void> | void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
 
-const button = (label: string, onPress?: () => void): ScrollEntry => ({ height: 52, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[30] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></View> });
+type LabelVisibility=(row?:()=>ScrollEntry)=>boolean;
+const button = (label: string, onPress?: () => void, labelVisible?:LabelVisibility): ScrollEntry => ({ height: 52, render: row => <View onPress={onPress} focusable={!!onPress} accessibilityLabel={label} class="absolute inset-0 rounded-[30] bg-[#2a2a2a] items-center justify-center active:scale-96"><Show when={labelVisible?.(row)??true}><Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></Show></View> });
 const aboutEntry = (label: string, summary: string, onPress: () => void): ScrollEntry => ({ height: 70, render: () => <View class="absolute inset-0"><View onPress={onPress} focusable class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[30] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text></View><Text class="absolute left-[10] top-[56] text-xs leading-[14] text-[#b6b6b6]">{summary}</Text></View> });
-const title = (label: string): ScrollEntry => ({ height: 34, render: () => <View class="absolute inset-0 items-center justify-center"><Text class="text-[21px] leading-[26] text-[#f5f5f5]">{label}</Text></View> });
+const title = (label: string,labelVisible?:LabelVisibility): ScrollEntry => ({ height: 34, render: row => <View class="absolute inset-0 items-center justify-center"><Show when={labelVisible?.(row)??true}><Text class="text-[21px] leading-[26] text-[#f5f5f5]">{label}</Text></Show></View> });
 
-function textEntries(content:string,width:number):ScrollEntry[] {
+function textEntries(content:string,rowWidth:number,height:number,round:boolean,offset:()=>number):ScrollEntry[] {
+  const width=round?Math.floor(rowWidth*.8):rowWidth;
+  const x=(rowWidth-width)/2;
   const lineHeight=18;
   return content.split(/\n\s*\n/).flatMap(paragraph=>{
     const {lines,style}=layoutAtlasText(paragraph.trim(),{width,fontSlot:21,lineHeight});
     return chunkLines(lines,lineHeight,width,8).map(chunk=>{
       const textHeight=chunk.length*lineHeight;
-      return {height:Math.max(24,textHeight+8),render:()=> <View class="absolute inset-0">
-        <Text class="absolute left-[0] top-[0] overflow-hidden text-[13px] leading-[18] text-[#e5e5e5]"
-          style={{...style,height:textHeight}}>{chunk.join("\n")}</Text>
-      </View>};
+      const lineVisibility=chunk.map((_,i)=>scrollTextVisibility({x,y:i*lineHeight,width,height:lineHeight},height,offset,18));
+      return {
+        height:Math.max(24,textHeight+8),
+        visibleBounds:{x,y:0,width,height:textHeight},
+        render:row=><View class="absolute inset-0">
+          <For each={chunk}>{(line,i)=><Show when={lineVisibility[i()]!(row)}>
+            <Text class="absolute overflow-hidden text-[13px] leading-[18] text-[#e5e5e5]"
+              style={{...style,insetL:x,insetT:i()*lineHeight,height:lineHeight}}>{line}</Text>
+          </Show>}</For>
+        </View>,
+      };
     });
   });
 }
@@ -66,7 +78,8 @@ export function InformationScreen(props: InformationScreenProps) {
     openingGroupLink=true;
     try {
       await props.onOpenUrl?.(GROUP_URL);
-    } catch {
+    } catch(error) {
+      logBrowserOpenFailure(error);
       setExternalUnavailable(true);
     } finally {
       openingGroupLink=false;
@@ -174,7 +187,24 @@ export function InformationScreen(props: InformationScreenProps) {
     case "collaborators": result = [title("协作者名单"), ...[ ["闪电狮", "前端开发", "S"], ["林海阔", "前端开发", "L"], ["Nicolas", "设计师", "N"] ].map(([name, role, initial]) => ({ height: 60, render: () => <View class="absolute inset-0 rounded-[30] bg-[#2a2a2a]"><View class="absolute left-[9] top-[9] w-[42] h-[42] rounded-full bg-[#454545] items-center justify-center"><Text class="text-xs text-white">{initial}</Text></View><Text class="absolute left-[61] top-[12] text-sm text-white">{name}</Text><Text class="absolute left-[61] top-[34] text-xs text-[#b6b6b6]">{role}</Text></View> }))]; break;
     case "contact-developer": result = [title("联系开发者"), button("加群", () => props.onNavigate("join-group")), button("上传日志", () => props.onNavigate("log-upload-privacy")), button("管理已上传日志", props.onManageLogs)]; break;
     case "join-group": result = []; break;
-    case "log-upload-privacy": result = [title("日志上传重要信息"), ...textEntries(informationText.logUploadPrivacy, (props.width ?? 233) - 36), button(props.onUploadLogs ? "同意并开始上传" : "上传日志（暂不可用）", props.onUploadLogs), button("暂不上传", props.onDeclineLogs), button("管理已上传日志", props.onManageLogs)]; break;
+    case "log-upload-privacy": {
+      const rowWidth=(props.width??metrics.logicalWidth)-36;
+      const offset=()=>legacyScroller()?.offset()??0;
+      const visible=(label:string,rowHeight:number,fontSize:number,lineHeight:number)=>{
+        const width=Math.min(rowWidth,label.length*fontSize+4);
+        return scrollTextVisibility({x:(rowWidth-width)/2,y:(rowHeight-lineHeight)/2,width,height:lineHeight},props.height,offset,18);
+      };
+      const heading="日志上传重要信息";
+      const action=(label:string,onPress?:()=>void)=>button(label,onPress,visible(label,52,17,21));
+      result=[
+        title(heading,visible(heading,34,21,26)),
+        ...textEntries(informationText.logUploadPrivacy,rowWidth,props.height,metrics.shape==='round',offset),
+        action(props.onUploadLogs?"同意并开始上传":"上传日志（暂不可用）",props.onUploadLogs),
+        action("暂不上传",props.onDeclineLogs),
+        action("管理已上传日志",props.onManageLogs),
+      ];
+      break;
+    }
     default: result = [];
   } return result; });
   return <View class="absolute inset-0" accessibilityHidden={!(props.active?.() ?? true)}><Show when={props.page === 'beian'} fallback={

@@ -1,3 +1,4 @@
+import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {preserveNetworkContent} from '../network/context.ts';
 import {isNetworkRecoveryCancellation} from '../network/recovery.ts';
 import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer} from './network-recovery.tsx';
@@ -1403,7 +1404,7 @@ export default function WatchRSS(props: {
     try {
       await openBrowserUrl(url, origin, readerPreset());
     } catch (e) {
-      setError(String(e));
+      setError(browserOpenFailureMessage(e));
     }
   };
   const updateSettings = (patch: Partial<SettingsState>) => {

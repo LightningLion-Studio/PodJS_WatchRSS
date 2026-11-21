@@ -3,6 +3,7 @@ import {Text,View} from '@pocketjs/framework/components';
 import {createSignal,onCleanup,onMount,Show} from 'solid-js';
 import {LogUploadController,type LogUploadOptions,type LogUploadState} from '../logs/upload.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
+import {logReceiptTime} from './log-receipt-time.ts';
 import {logTextEntries} from './log-text-entries.tsx';
 import {DeleteConfirmDialog} from './DeleteConfirmDialog.tsx';
 
@@ -40,8 +41,8 @@ export function LogUploadScreen(props:{height:number;width:number;options:LogUpl
       const receipt=s.receipt;
       rows.push(
         ...textRows(`取件码：${receipt.code}`),
-        ...textRows(`上传时间：${receipt.createdAt}`,68),
-        ...textRows(`自动删除：${receipt.expiresAt}`,68),
+        ...textRows(`上传时间：${logReceiptTime(receipt.createdAt)}`,68),
+        ...textRows(`自动删除：${logReceiptTime(receipt.expiresAt)}`,68),
         ...textRows(`密文：${receipt.fileSize} B · ${receipt.charCount} 字符`,55),
       );
       if(deleteError())rows.push(...textRows(`删除失败：${deleteError()}`,75));
