@@ -1,5 +1,4 @@
 import {mount} from '@pocketjs/framework/solid';
-import {Text,View} from '@pocketjs/framework/components';
 import {createSignal,Show} from 'solid-js';
 import {getDisplayMetrics,kv} from '@podjs/framework/watch';
 import {delay,fileChunks,discovery,application} from '@podjs/framework/services';
@@ -7,9 +6,6 @@ import {OnboardingScreen} from '../../../src/ui/OnboardingScreen.tsx';
 import {PrivacyPolicyConsentScreen} from '../../../src/ui/PrivacyPolicyConsentScreen.tsx';
 import {initialIntroState,transitionIntro,type IntroAction} from '../../../src/onboarding/state.ts';
 import {observeHostInternet} from '../../../src/onboarding/network-host.ts';
-import {useReaderTitleEntry} from '../../../src/ui/ReaderTitleEntry.tsx';
-import {defaultReaderPreset} from '../../../src/reader/preset.ts';
-import {readerFontResolver} from '../../../src/reader/font-assets.ts';
 
 // This fixture never loads the user's settings or onboarding store. Staged
 // rendering is driven by in-memory state, not injected physical input.
@@ -55,7 +51,7 @@ async function run(){
  // Exit through the public JS bridge; instrumentation verifies destruction.
  await application.finishTask();
 }
-function App(){const preset=defaultReaderPreset(),fonts=readerFontResolver({});const title=useReaderTitleEntry(()=>"隐私政策更新",()=>metrics.logicalWidth-28,()=>preset,()=>fonts,()=>"#ffffff");return <Show when={stage()!=='privacy'} fallback={<PrivacyPolicyConsentScreen width={metrics.logicalWidth} height={metrics.logicalHeight} background={<View class="absolute inset-0 bg-black"/>} title={title()} onOpenPrivacy={()=>{}} onAgree={()=>{}} onDisagree={()=>{}}/>}>
+function App(){return <Show when={stage()!=='privacy'} fallback={<PrivacyPolicyConsentScreen width={metrics.logicalWidth} height={metrics.logicalHeight} onOpenPrivacy={()=>{}} onAgree={()=>{}} onDisagree={()=>{}}/>}>
  <OnboardingScreen width={metrics.logicalWidth} height={metrics.logicalHeight} state={intro()} onAction={action} readerDark={dark()} onToggleReaderTheme={()=>setDark(v=>!v)} onOpenLegal={()=>{}}/>
  </Show>;}
 mount(App);void run().catch(error=>kv.set(key,{state:'failed',error:String(error)}));
