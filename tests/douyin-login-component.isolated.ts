@@ -360,12 +360,23 @@ test('manual login persists only a verified cookie and keeps validation errors v
  verdict='authenticated';manual();await settle();expect([saves,navigations]).toEqual([1,1]);
 });
 
-for (const reason of ['expired', 'oversized', 'missing-source'] as const) test(`DYFAV ${reason} saved stream resolves the same awemeId through detail`, async () => {
+for (const reason of ['expired', 'oversized', 'missing-source', 'expired-audio', 'expired-mirror'] as const) test(`DYFAV ${reason} saved stream resolves the same awemeId through detail`, async () => {
   const item = { ...sample('123'), playUrl: reason === 'missing-source' ? '' : 'https://mock.invalid/stale?x-expires=1700000000' };
   if (reason === 'oversized') Object.assign(item, {
     playUrl: 'https://mock.invalid/1080p',
     variants: [{ playUrl: 'https://mock.invalid/1080p', width: 1080, height: 1920, codec: 'h264', bitrate: 500000 }],
   });
+  if (reason === 'expired-audio' || reason === 'expired-mirror') {
+    const playUrl = 'https://mock.invalid/video';
+    const expiredUrl = 'https://mock.invalid/expired?x-expires=1700000000';
+    Object.assign(item, {
+      playUrl,
+      variants: [{
+        width: 400, height: 720, codec: 'h264', bitrate: 500000, playUrl,
+        ...(reason === 'expired-audio' ? { format: 'dash', audioUrl: expiredUrl } : { playUrls: [playUrl, expiredUrl] }),
+      }],
+    });
+  }
   const fresh = { ...sample('123'), playUrl: 'https://mock.invalid/fresh' };
   const calls: unknown[] = [], plays: DouyinPlayRequest[] = [];
   const client = {

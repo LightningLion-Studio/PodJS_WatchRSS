@@ -1,4 +1,4 @@
-import {douyinMediaNetworkDeadline} from './media-expiry.ts';
+import {douyinPlaybackAddresses} from './media-expiry.ts';
 import {validatedDouyinPlaybackItem} from './playback-source.ts';
 import {formatDouyinDetailFailure} from './errors.ts';
 import type { DouyinClient } from './client.ts';
@@ -16,8 +16,8 @@ export async function resolveSavedDouyinPlayback(client: Pick<DouyinClient, 'res
   const id = selected.awemeId.trim();
   if (!id) throw new Error('收藏缺少视频标识');
   const usable = (item: DouyinItem) => {
-    const expiry = douyinMediaNetworkDeadline([item.playUrl]);
-    return item.awemeId === id && !!item.playUrl && (expiry === undefined || now() < expiry);
+    const {expiresAtMs} = douyinPlaybackAddresses(item);
+    return item.awemeId === id && !!item.playUrl && (expiresAtMs === undefined || now() < expiresAtMs);
   };
   const local = validatedDouyinPlaybackItem(selected);
   if (usable(local)) return local;

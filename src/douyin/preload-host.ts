@@ -1,7 +1,7 @@
 import {douyinCacheUnavailable,directDouyinMediaUrl} from './cache-availability.ts';
 import {douyinPrestoreConfig} from './prestore-policy.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
-import {douyinMediaExpiry,douyinMediaNetworkDeadline} from './media-expiry.ts';
+import {douyinMediaExpiry,douyinPlaybackAddresses} from './media-expiry.ts';
 import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
@@ -74,7 +74,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(!current())return;
    const selected=preserveSelectedDouyinItem(item);
    if(!selected.playUrl)return;
-   const audioUrl=douyinPlaybackAudio(selected),mirrors=douyinPlaybackMirrors(selected);
+   const {audioUrl,mirrors,expiresAtMs}=douyinPlaybackAddresses(selected);
    const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort()),previous=registered.get(id);
    if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&Date.now()<previous.expires){
     if(previous.playUrl===selected.playUrl&&previous.audioUrl===audioUrl&&sameMirrors(previous.mirrors,mirrors))return remember(previous.uri,selected);
@@ -88,8 +88,8 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
      }
     }
    }
-   const expires=Math.min(...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
-   const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,douyinMediaNetworkDeadline([selected.playUrl,...mirrors,...(audioUrl?[audioUrl]:[])]),audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
+   const expires=Math.min(expiresAtMs??Infinity,...[selected.playUrl,...mirrors].map(url=>douyinMediaExpiry(url,Date.now())));
+   const {uri}=await mediaPrefixCache.register(id,selected.playUrl,headers,false,mirrors,expiresAtMs,audioUrl,DOUYIN_MAX_SHORT_EDGE,previous?.uri??'').result;
    if(previous&&previous.uri!==uri)forget(id,previous.uri);
    // Register is idempotent. A late reply can name the capability an active
    // player already holds. Only explicit invalidation may revoke that URI.
@@ -251,8 +251,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    return uri;
   }catch(error){
    if(!current())throw cancelled();
-   const audio=douyinPlaybackAudio(item),urls=audio?[item.playUrl,audio]:[item.playUrl],deadline=douyinMediaNetworkDeadline(urls);
-   if(douyinCacheUnavailable(error)&&urls.every(directDouyinMediaUrl)&&(deadline===undefined||Date.now()<deadline)){
+   const {audioUrl,expiresAtMs}=douyinPlaybackAddresses(item);
+   const urls=audioUrl?[item.playUrl,audioUrl]:[item.playUrl];
+   if(douyinCacheUnavailable(error)&&urls.every(directDouyinMediaUrl)&&(expiresAtMs===undefined||Date.now()<expiresAtMs)){
     appLogger.w('DouyinProxy','cache registration unavailable; using authorized media source');return remember(item.playUrl,item);
    }
    throw error;

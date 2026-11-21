@@ -509,7 +509,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     needsFreshResolution=true;
     const position=checkpointPosition,from=props.source;
     if (manual) resumeAutoplay = true;
-    else if (from.platform === 'douyin' && resumingRoute() && !autoplayAllowed) resumeAutoplay = false;
+    else if (resumeAutoplay === undefined && from.platform === 'douyin' && resumingRoute() && !autoplayAllowed) resumeAutoplay = false;
     const retryCurrent=!manual&&from.platform==='douyin'&&from.immersive===true&&(cause as {code?:string})?.code==='timeout'&&!videoSourceExpired(from);
     const mode:DouyinReloadMode=douyinPlayback()&&(userInitiated||from.savedPlayback)?'detail':retryCurrent?'current':'feed';
     if(mode==='detail')manualDetailSource=from;
@@ -1056,6 +1056,52 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
 
   let resumeAfterOverlay = false, wasRouteActive = props.active, keptForActions = false;
+  let actionsRevision = 0;
+  let interruptedDetail: PlaybackSource | undefined;
+
+  const resumeDouyinActions = async () => {
+    const source = props.source, own = generation, revision = actionsRevision;
+    const current = () => !disposed && props.active && lifecycle() === 'active'
+      && source === props.source && own === generation && revision === actionsRevision;
+    if (!current()) return;
+    const detail = interruptedDetail === source;
+    interruptedDetail = undefined;
+
+    if (ready() && videoSessionOwner === sessionOwner && preparedSource === source) {
+      const previous = state();
+      const native = await media.state().catch(() => undefined);
+      if (!current() || videoSessionOwner !== sessionOwner) return;
+      if (native?.ok && ['ready', 'playing', 'buffering', 'paused', 'ended'].includes(native.state)
+          && (previous?.sourceGeneration === undefined || native.sourceGeneration === previous.sourceGeneration)) {
+        if (resumeAfterLifecycle) {
+          resumeAfterLifecycle = false;
+          autoplayAllowed = true;
+          const resumed = await media.play().catch(error => {
+            if (current()) failed(error, false, 'play');
+            return undefined;
+          });
+          if (resumed && current() && videoSessionOwner === sessionOwner) observeState(resumed);
+        } else {
+          observeState(native);
+        }
+        if (current() && videoSessionOwner === sessionOwner) void warmForward().catch(() => {});
+        return;
+      }
+    }
+
+    const playing = resumeAutoplay ?? (resumeAfterLifecycle || autoplayAllowed);
+    suspendDouyinRoute();
+    setRouteResumeSource(source);
+    resumeAutoplay = playing;
+    if (props.onReload && (detail || videoSourceExpired(source))) {
+      videoSessionOwner = sessionOwner;
+      void reload(false, {code: 'source_expired'}, detail);
+      return;
+    }
+    needsFreshResolution = false;
+    prepare();
+  };
+
   createEffect(() => {
     const active = props.active, resumed = active && !wasRouteActive;
     wasRouteActive = active;
@@ -1063,6 +1109,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if (!active && douyin && props.coveredByActions) {
       if (!keptForActions) {
         keptForActions = true;
+        actionsRevision++;
+        if (reloadPolicy.busy) {
+          if (manualDetailSource === props.source) {
+            interruptedDetail = props.source;
+            manualDetailSource = undefined;
+          }
+          cancelReload();
+        }
         autoAdvance.cancel();
         neighborRevision++;
         forwardTarget = undefined;
@@ -1075,12 +1129,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if (resumed && keptForActions) {
       keptForActions = false;
-      if (videoSessionOwner === sessionOwner && untrack(ready) && !resumeAfterLifecycle) {
-        void poll(generation);
-        untrack(() => void warmForward().catch(() => {}));
-        return;
-      }
-      if (resumeAfterLifecycle) resumeAutoplay = true;
+      untrack(() => void resumeDouyinActions());
+      return;
     }
     if (resumed && props.onReload && resourceRetry?.source !== props.source && manualDetailSource !== props.source && untrack(() => videoSourceExpired(props.source))) {
       videoSessionOwner = sessionOwner;
@@ -1090,6 +1140,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if (!active) {
       if (douyin) {
         keptForActions = false;
+        interruptedDetail = undefined;
         untrack(suspendDouyinRoute);
         return;
       }

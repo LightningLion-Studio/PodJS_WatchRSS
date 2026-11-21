@@ -1,4 +1,4 @@
-import {douyinMediaNetworkDeadline} from '../../douyin/media-expiry.ts';
+import {douyinPlaybackAddresses} from '../../douyin/media-expiry.ts';
 import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
 import type {DouyinItem} from '../../douyin/types.ts';
 import {directNetworkWork,isNetworkRecoveryCancellation,type NetworkWork} from '../../network/recovery.ts';
@@ -15,7 +15,7 @@ import {douyinNetworkFailure} from '../douyin/player-network.ts';
 import {DOUYIN_USER_AGENT} from '../../douyin/request-config.ts';
 import {isDouyinTemporaryFailure} from '../../douyin/errors.ts';
 import {DouyinPlaybackRecovery} from '../../douyin/playback-recovery.ts';
-import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution} from '../../media/video-opt.ts';
+import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution,preserveSelectedDouyinItem} from '../../media/video-opt.ts';
 import {afterPaint} from '@podjs/framework/render';
 import {appLogger} from '../../logs/app-logger.ts';
 import {withoutDouyinSource} from '../../douyin/playback-ingress.ts';
@@ -423,6 +423,10 @@ export function createMediaRouteController(
     setVideoLoading(true);
     const request={...input,item:applyPreferredDouyinPlayback(input.item),playback:applyPreferredDouyinPlayback(input.playback)};
     pendingDouyinRequest=request;
+    const origin = dependencies.current();
+    const auth = douyinClient.playbackAuthorizationVersion?.();
+    const current = () => dependencies.current() === origin && pendingDouyinRequest === request
+      && auth === douyinClient.playbackAuthorizationVersion?.() && (request.isCurrent?.() ?? true);
     pendingDouyinQueue = new DouyinPlaybackQueue(douyinClient, {
       items: (request.playlist ?? [request.item]).map(item => item.awemeId === request.item.awemeId ? request.playback : item),
       selectedAwemeId: request.item.awemeId,
@@ -448,12 +452,16 @@ export function createMediaRouteController(
           if (frame?.available) previewFrame = { entryId: request.item.awemeId, frame };
         }
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'preview_ready'});
-        const url=localUrl??await douyinPlaybackUrl(request.playback,headers);
+        const url=localUrl??await (request.savedPlayback
+          ? douyinPreload.playbackResolved(request.playback,headers,current)
+          : douyinPlaybackUrl(request.playback,headers));
+        const expiresAtMs = request.savedPlayback && !localUrl ? douyinPlaybackAddresses(request.playback).expiresAtMs : undefined;
         return ({
         startupSeq:request.entrySeq,releaseStartupPreview:request.releaseStartupPreview,
         immersive: request.immersive,
         detailPlayback: request.detailPlayback,
         savedPlayback: request.savedPlayback,
+        expiresAtMs,
         ...resume,
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
@@ -1154,24 +1162,25 @@ export function createMediaRouteController(
         return undefined;
       });
       if(!resolved||!selected())return;
-      let url=resolved.item.playUrl;
+      const playback = mode === 'detail' && previous.savedPlayback ? preserveSelectedDouyinItem(resolved.item) : resolved.item;
+      let url=playback.playUrl;
+      const expiresAtMs = previous.savedPlayback ? douyinPlaybackAddresses(playback).expiresAtMs : undefined;
       if(mode==='detail'){
-        if (previous.savedPlayback) {
-          const expiry = douyinMediaNetworkDeadline([url]);
-          if (expiry !== undefined && expiry <= Date.now()) throw Object.assign(new Error('Expired detail playback address'), {code:'source_expired'});
+        if (expiresAtMs !== undefined && expiresAtMs <= Date.now()) {
+          throw Object.assign(new Error('Expired detail playback address'), {code:'source_expired'});
         }
         await douyinPreload.invalidate(item.awemeId);
         if(!selected())return;
-        url=await douyinPreload.playbackResolved(resolved.item,resolved.headers,selected);
+        url=await douyinPreload.playbackResolved(playback,resolved.headers,selected);
         if(!selected())return;
       }
-      next=freshVideoSource(previous,{url,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
+      next=freshVideoSource(previous,{url,...douyinDecoderProfile(playback),headers:resolved.headers,expiresAtMs},positionMs);
       if(mode==='detail')next.bypassCache=false;
-      entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
+      entry.queue.refreshPrefetchItem(item.awemeId,playback);
       // This reload owns the metadata mutation. Continue guarding against later
       // pager changes while persistence yields, using our new generation.
       queueGeneration=queue.playbackGeneration();
-      entry.queue.updateCurrentUrl(resolved.item.playUrl);
+      entry.queue.updateCurrentUrl(playback.playUrl);
       await entry.queue.persist();
       if(!selected())return;
     }else if(entry.rssDouyinRecovery){

@@ -48,14 +48,14 @@ function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateSto
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;adjacentPreview=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({historyStorage:options?.historyStorage,secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
- let goHome!:()=>void, controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
- createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;goHome=()=>setStack(rows=>rows.slice(0,1));
+ let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
+ createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;
  const [busy,setBusy]=createSignal(false),[message,setError]=createSignal(''),[playing,setPlaying]=createSignal<any>();error=message;
  controller=createMediaRouteController({initialVideoBounds:initial?()=>({x:0,y:0,width:233,height:233}):undefined,createInitialVideoPool:initial?()=>typeof initial==='function'?initial():initial:undefined,current:()=>entries().at(-1)!,motion:{phase:'idle'},busy,setBusy,setError,settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as any,
  playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;const result=setPlaying(v);options?.publish?.(source);return result;}) as any,
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
- return {controller,stack,goHome,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
+ return {controller,stack,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
  createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
  }};
 }
@@ -1213,18 +1213,30 @@ test('DYFAV reopens the last exact item at the recorded position and paused stat
 });
 
 
-test('DYFAV Home reentry offers explicit restore of the immersive queue anchor', async () => {
-  const f = fixture(), a = item('last-immersive'), b = item('not-selected');
-  f.controller.douyinPlay({ item: a, playback: a, playlist: [b, a], hasMore: false, immersive: true });
-  await f.controller.douyinNavigate({ name: 'player', awemeId: a.awemeId });
-  const first = f.stack().at(-1)!;
-  first.onDouyinExit?.(first.playback!, 2400, true);
-  f.goHome();
-  await f.controller.douyinNavigate({ name: 'entry' });
-  const cover = f.stack().at(-1)!;
-  expect(cover.page).toBe('douyin');
-  expect(cover.resumeDouyinPlayback).toBeFunction();
-  expect(await cover.resumeDouyinPlayback?.(() => true)).toBe(true);
-  expect(f.source()).toMatchObject({ awemeId: a.awemeId, resumePositionMs: 2400, resumePaused: false });
-  expect(f.requests()).toBe(0);
+for (const expired of ['audio', 'mirror'] as const) test(`DYFAV FIX1 automatic detail reload rejects an expired ${expired} before registration`, async () => {
+  const f = fixture(), selected = item('saved-reload');
+  const live = Math.floor(Date.now() / 1000) + 3600;
+  const stale = Math.floor(Date.now() / 1000) - 60;
+  const primary = `https://video.test/new?expires=${live}`;
+  const rendition = {
+    playUrl: primary, codec: 'h264' as const, format: 'dash' as const, width: 480, height: 854, bitrate: 300_000,
+    playUrls: [primary, `https://video.test/mirror?expires=${expired === 'mirror' ? stale : live}`],
+    audioUrl: `https://video.test/audio?expires=${expired === 'audio' ? stale : live}`,
+  };
+  f.controller.douyinPlay({ item: selected, playback: selected, detailPlayback: true, savedPlayback: true });
+  await f.controller.douyinNavigate({ name: 'player', awemeId: selected.awemeId });
+  const previous = f.source();
+  const duplicate = { ...selected, playUrl: primary, variants: [rendition] };
+  client.resolvePlayback = async (id, options) => {
+    expect(id).toBe(selected.awemeId);
+    expect(options).toMatchObject({ forceRefresh: true, allowDetail: true });
+    return { ok: true, data: duplicate };
+  };
+  let registrations = 0;
+  proxyOverride = async () => { registrations++; return 'podjs-media-cache://play/detail'; };
+  const entry = f.stack().at(-1)!;
+  await expect(f.controller.reloadVideo(entry, 321, () => true, 'detail')).rejects.toMatchObject({ code: 'source_expired' });
+  expect(registrations).toBe(0);
+  expect(f.source()).toBe(previous);
+  expect(invalidated).toEqual([]);
 });
