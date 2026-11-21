@@ -9,7 +9,7 @@ export function shareQrLayout(value = DEFAULT_SHARE_QR_WIDTH_RATIO, round = true
     ? Math.min(1, Math.max(0.1, value))
     : DEFAULT_SHARE_QR_WIDTH_RATIO;
   const title = round
-    ? safeTopBlock(CANVAS, CANVAS, () => 26, { minTop: 14, maxWidth: 120 })!
+    ? safeTopBlock(CANVAS, CANVAS, () => 26, { minTop: 25, maxWidth: 152 })!
     : { x: 56.5, y: 14, width: 120, height: 26 };
   const subtitleTop = title.y + title.height + 6;
   const subtitle = round
@@ -31,4 +31,23 @@ export function shareQrPixelSize(
 ): number {
   const pixels = Math.round(logicalSize * canvasScale * density);
   return Math.min(512, Math.max(1, Number.isFinite(pixels) ? pixels : 1));
+}
+
+/** Keep both ends of a long caption inside its measured single-line width. */
+export function shareMiddleEllipsis(text: string, width: number, measure: (text: string) => number): string {
+  if (measure(text) <= width) return text;
+  if (measure("…") > width) return "";
+  const chars = Array.from(text);
+  const shorten = (count: number) => {
+    const prefix = Math.ceil(count / 2);
+    const suffix = Math.floor(count / 2);
+    return chars.slice(0, prefix).join("") + "…" + chars.slice(chars.length - suffix).join("");
+  };
+  let low = 0, high = chars.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (measure(shorten(mid)) <= width) low = mid;
+    else high = mid - 1;
+  }
+  return shorten(low);
 }

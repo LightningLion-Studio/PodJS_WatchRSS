@@ -3,6 +3,7 @@ import { rectInsideCircle } from "@podjs/framework/watch-ui";
 import {
   DEFAULT_SHARE_QR_WIDTH_RATIO,
   DETAIL_SHARE_QR_WIDTH_RATIO,
+  shareMiddleEllipsis,
   shareQrLayout,
   shareQrPixelSize,
 } from "../src/ui/share-qr-layout.ts";
@@ -28,4 +29,17 @@ test("the titles and all four QR corners fit on the round canvas", () => {
   expect(shareQrLayout(0.5).qr.width).toBe(116);
   expect(shareQrPixelSize(233, 1, 3)).toBe(512);
   expect(shareQrPixelSize(23.3, 1, 2)).toBe(47);
+});
+
+test("a six-character 21px share title fits its rounded text rectangle", () => {
+  expect(shareQrLayout(DETAIL_SHARE_QR_WIDTH_RATIO).title.width).toBeGreaterThanOrEqual(6 * 21);
+});
+
+test("a long share URL retains both ends under the caption width", () => {
+  const url = "https://example.test/post/round-watch";
+  const measure = (value: string) => Array.from(value).length;
+  const short = shareMiddleEllipsis(url, 23, measure);
+  expect(short).toBe("https://exa…round-watch");
+  expect(measure(short)).toBeLessThanOrEqual(23);
+  expect(shareMiddleEllipsis(url, 50, measure)).toBe(url);
 });
