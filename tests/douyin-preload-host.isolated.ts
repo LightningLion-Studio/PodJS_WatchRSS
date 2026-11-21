@@ -537,7 +537,7 @@ test('DYFAV FIX5 host replaces the committed binding on each of three re-entries
    expect(bindingUris()).toEqual([current]);
    let published:string|undefined;
    await candidate.commit({validateFallback:rejectUnexpectedFallback,publish:binding=>{published=binding.url;}});
-   expect(bindingUris()).toEqual([published]);
+   expect(bindingUris()).toEqual([candidate.url]);
    expect(published).toBe(candidate.url);
    host.stop();
    expect(host.sourceFor(candidate.url)).toBeUndefined();
