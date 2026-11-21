@@ -312,6 +312,51 @@ for(const mode of ['cloud','local','existing different original'] as const)test(
  const path='notes/asset-conflicts/'+sha256Hex(new TextEncoder().encode('image.png'))+'-'+sha256Hex(p.raw)+'.bin';expect(f.map.get(path)).toEqual(p.raw);expect(JSON.parse(new TextDecoder().decode(f.map.get(path+'.json')))).toMatchObject({storageKey:'image.png',incomingSha256:sha256Hex(p.raw),retainedPath:path});
 });
 
+for(const kind of ['book','asset'] as const)test('BC1 repairs a damaged committed '+kind+' once through the authenticated carrier',async()=>{
+ const {bodyChannelRepository}=await import('../../src/sync-v2/body-channel-repository');
+ const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
+ const {createNoteAssetWriter}=await import('../../src/notes/cloud-assets');
+ const {bookFixture}=await import('../books/fixture');
+ const {SqlLibrarySessionRepository}=await import('../../src/sync/library-repository');
+ const {default:sample}=await import('../fixtures/cli-single-txt-book.json');
+ const original=kind==='book'?new TextEncoder().encode(sample.packageUtf8):new Uint8Array([5,10,15]);
+ const identity=kind==='book'?sample.bookId:'image.png',p=await prepared(kind,original,identity),backendFixture=backend(),f=await bookFixture();
+ try{
+  const common={updatedAt:1,sourceDeviceId:'phone',deleted:false,deletedAt:0};
+  const book={...common,bookId:identity,fingerprint:sample.fingerprint,title:sample.chapter.title,chapterCount:1,sourceUrl:sample.sourceUrl,kind:'txt' as const,deletedChapters:[],deletionClock:0};
+  const value=kind==='book'?book:{...common,assetId:identity,mime:'image/png',originalFilename:identity};
+  const assets=conditionalAssetHost(false),index=new NoteAssetFileIndex(f.db),writer=createNoteAssetWriter(assets.host,index);
+  const library=new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:f.files,
+   noteAssetReader:async id=>{const raw=assets.map.get(await index.path(id));if(!raw)throw Error('cloud_note_asset_missing');return raw;},noteAssetWriter:writer});
+  let path:string;
+  if(kind==='book'){
+   await library.mergeCloudBooks([book],[]);
+   await library.receiveCloudBook(identity,original);
+   path=(await library.books!.package(identity))!.path;
+  }else{
+   await index.commit(identity,undefined,{size:original.length,sha256:sha256Hex(original)});
+   path=await index.path(identity);
+  }
+  const damaged=original.slice();damaged[0]^=1;
+  const installed=kind==='book'?f.data:assets.map;installed.set(path,damaged);
+  const business=toWire(kind,value),entry={row:{...p.binding,deleted:false},meta:{kind,logicalId:identity,payload:business.meta},state:{payload:business.state}};
+  const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_root:string,after:string)=>after?[]:[entry]};
+  await backendFixture.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
+  const repository=bodyChannelRepository(library),install=repository.install;
+  let installs=0;
+  repository.install=async(...args)=>{installs++;return install(...args);};
+  const deadline=Date.now()+60000;
+  const channel=new WatchBodyChannel({http:backendFixture.http(),scope,projection:projection as unknown as WatchProjectionStore,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'repair-test',repository,check:async()=>{}});
+  const before=backendFixture.calls.length;
+  expect(await channel.sync(deadline)).toEqual({pending:0,errors:[]});
+  expect(backendFixture.calls.slice(before).some(call=>call.method==='GET'&&call.url.includes('/objects/'))).toBe(true);
+  expect(installed.get(path)).toEqual(original);
+  const repaired=backendFixture.calls.length;
+  expect(await channel.sync(deadline)).toEqual({pending:0,errors:[]});
+  expect(backendFixture.calls.slice(repaired).map(call=>new URL(call.url).pathname)).toEqual(['/functions/v1/cloud/bodies/v1/carriers']);
+  expect(installs).toBe(1);
+ }finally{f.sql.close();}
+});
 test('RVPODNOTES-03 backend 507/null builds persistent capped exponential backoff without a sliding deadline',async()=>{
  const p=await prepared(),cache=files();let now=1000,reserves=0;
  const http=new BodyChannelHttp({enabled:true,origin:'http://127.0.0.1:18991',policy:{accountBaseUrl:'http://127.0.0.1:18991',allowLoopback:true},scope,session:async()=>({accessToken:'synthetic',legacyDeviceId:'legacy',legacyEpoch:'epoch',legacyGeneration:'1'}),check:async()=>{},transport:{request:async r=>{

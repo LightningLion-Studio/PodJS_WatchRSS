@@ -192,8 +192,9 @@ export class LibrarySyncSession {
     if(rejection){response=accepted?{...rejection,...persistentFields}:rejection;await this.write(response);}
     else if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='manifest'){
      try{
+      const capture=await this.options.handleAction?.legacyIntake?.capture?.();this.check();
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
-      const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;ackIntake=exchange.ackIntake;legacySubset=exchange.legacySubset;
+      const exchange=await this.exchange(request,localId,accepted,capture);response=exchange.response;pending=exchange.pending;ackIntake=exchange.ackIntake;legacySubset=exchange.legacySubset;
      }catch(error){
       this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:(error as Error).message==='BUSINESS_REJECTED'?'BUSINESS_REJECTED':busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
       try{await this.write(response);}catch{this.log.event('library.errorResponse.write.failed',{},'W');}this.aborting=true;this.log.event("server.exchange.aborted",{persistentSession:persistent,completedActions:results.length,elapsedMs:this.log.elapsed()});this.status({phase:'error',message:String(response.message)});results.push({request,response,ack:null,libraryApplied:false});return results;
@@ -266,7 +267,7 @@ export class LibrarySyncSession {
    if(string(request.action)!=='previewReader')throw new Error('实时预览连接收到了其他蓝牙动作');
   }
  }
- private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess|null;ackIntake?:BoundLocalTransferIntake;legacySubset:boolean}>{
+ private async exchange(request:JsonObject,localId:string,accepted:boolean,captured?:BoundLocalTransferIntake):Promise<{response:JsonObject;pending:PendingSyncSuccess|null;ackIntake?:BoundLocalTransferIntake;legacySubset:boolean}>{
   this.capabilities(request);const peer=trim(string(request.deviceId))?string(request.deviceId):'phone',mode=string(request.libraryMode)||'merge';
   if(!['merge','phoneToWatchReplace','watchToPhoneReplace'].includes(mode))throw new Error('Invalid library mode');
   const target=mode==='phoneToWatchReplace',source=mode==='watchToPhoneReplace';this.checkpointed=this.checkpointRequested&&mode==='merge'&&request[LIBRARY_CHECKPOINT_FEATURE]===true;
@@ -277,7 +278,7 @@ export class LibrarySyncSession {
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
   const intake=this.options.handleAction?.legacyIntake;
   const check:SqlCancellationCheck=Object.assign(()=>this.check(),{onCancel:this.actionContext.onCancel});
-  const captured=await intake?.capture?.(),write=captured??intake;
+  const write=captured??intake;
   const ackIntake=legacySubset?undefined:captured;check();
   const sourceRecords=sources.map(value=>{const url=normalizeSourceUrl(value.url);return {kind:'source' as const,logicalId:url,value:{...value,url}};});
   let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>applyLegacyTransfer(write,peer,'mergeSources',sourceRecords,()=>this.repository.mergeSources(sources,peer,false,check),check)):0;this.check();

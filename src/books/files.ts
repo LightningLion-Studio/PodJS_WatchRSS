@@ -5,7 +5,7 @@ export interface BookFileInfo {path:string;size:number;sha256:string}
 export interface BookFiles {
  write(parts:AsyncIterable<string>,maxBytes:number):Promise<BookFileInfo>;
  writeBytes(bytes:Uint8Array,checkpoint?:FileCheckpoint,bookId?:string):Promise<BookFileInfo>;
- publish(info:BookFileInfo,bookId:string,deadline?:PublicationDeadline):Promise<BookFileInfo>;
+ publish(info:BookFileInfo,bookId:string,deadline?:PublicationDeadline,repairTargetSha256?:string):Promise<BookFileInfo>;
  /** Adopt a verified, owned native restore output on the same filesystem. */
  adopt?(info:BookFileInfo,bookId:string):Promise<BookFileInfo>;
  stat(path:string):Promise<{exists:boolean;size:number;changeToken?:string}>;

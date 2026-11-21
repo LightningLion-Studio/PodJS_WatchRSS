@@ -73,6 +73,7 @@ export function watchBookSyncAction(
  accountStore:LibraryAccountStore,
  intake:LocalTransferIntake,
 ){
+ const sessions=new WeakMap<object,{account:string;projection:string|null}>();
  return async(request:JsonObject,session?:object,afterAck?:AfterReadingAck,cancel?:SqlCancellationCheck)=>{
   const repository=await getRepository();cancel?.();
   if(!SYNC_V2_PRODUCT.syncV2||request.phase==='pull')return repository.syncBooks(request,session,afterAck,undefined,cancel);
@@ -84,6 +85,19 @@ export function watchBookSyncAction(
   const fence=async(protect:LocalTransferWrite)=>canonical([accountFence(account),epoch??null,await protect.transferFence?.(true)??null]);
   return run(async protect=>{
    cancel?.();
+   let write=protect;
+   if(session){
+    const current={account:canonical([accountFence(account),epoch??null]),projection:await protect.transferFence?.()??null};
+    const previous=sessions.get(session);
+    if(previous&&previous.account!==current.account)throw Error('AUTH_REVOKED');
+    if(previous&&previous.projection!==current.projection){
+     if(request.phase!=='body')throw Error('BUSINESS_REJECTED');
+     // Let the same authenticated account retain a complete old package.
+     // The old window may finish staging, never publish a business version.
+     write=async input=>{await protect(input);throw Error('BUSINESS_REJECTED');};
+    }
+    if(!previous)sessions.set(session,current);
+   }
    const reading=request.phase==='readingSummary'||request.phase==='readingCommit';
    const stamp=reading?await fence(protect):undefined;
    const defer:AfterReadingAck|undefined=afterAck&&request.phase==='readingCommit'?commit=>afterAck(async()=>{
@@ -93,7 +107,7 @@ export function watchBookSyncAction(
      cancel?.();await commit();
     });
    }):afterAck;
-   return repository.syncBooks(request,session,defer,protect,cancel,stamp);
+   return repository.syncBooks(request,session,defer,write,cancel,stamp);
   });
  };
 }

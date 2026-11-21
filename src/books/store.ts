@@ -285,7 +285,17 @@ export class SqlBookStore {
    const installed=await this.ports.files.stat(str(existing.package_path));
    const directory=(await this.db.query('SELECT count(*) AS n FROM sync_book_chapters WHERE book_id=?',[id]))[0];
    const missing=(await this.db.query('SELECT 1 FROM sync_book_chapters m LEFT JOIN articles a ON a.id=m.item_id WHERE m.book_id=? AND a.id IS NULL AND NOT EXISTS(SELECT 1 FROM sync_book_delete_members d WHERE d.book_id=m.book_id AND d.chapter_index=m.chapter_index) LIMIT 1',[id])).length;
-   if(installed.exists&&installed.size===info.size&&num(directory?.n)===expected!.chapterCount&&(!missing||expected!.deleted)){await this.captureReading(check);await checkpoint?.check();return 0;}
+   if(num(directory?.n)===expected!.chapterCount&&(!missing||expected!.deleted)){
+    const path=str(existing.package_path);
+    const proof=cloud&&installed.exists?await this.ports.files.hash(path):undefined;
+    if(installed.exists&&installed.size===info.size&&(!cloud||proof?.sha256===info.sha256&&proof.size===info.size)){
+     await this.captureReading(check);await checkpoint?.check();return 0;
+    }
+    if(cloud&&deadline&&!expected!.deleted&&path==='books/'+id+'-'+info.sha256+'.jsonl'){
+     await checkpoint?.check();deadline.check();
+     await this.ports.files.publish(info,id,deadline,proof?.sha256);return 1;
+    }
+   }
   }
   // Cloud can verify each decoded chapter as it creates the private shadow.
   // Its receipt namespace is separate from older and Bluetooth installs.

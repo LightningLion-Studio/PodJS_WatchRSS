@@ -46,12 +46,15 @@ export function createNoteAssetWriter(host:NoteAssetHost,index?:NoteAssetFileInd
  try{for(let at=0;at<bytes.length;at+=65535){const part=bytes.subarray(at,at+65535),r=await host<{size:number}>('file.write',{path,dataBase64:encodeBase64(part),append:true,expectedOffset:at});if(r.size!==at+part.length)throw Error('cloud_note_asset_write_incomplete');}
   deadline?.check();
   try{
+   let targetSha=expectedTargetSha256??null;
    if(previous){
     const actual=stat.file?(await host<{sha256:string}>('file.hash',{path:currentPath})).sha256:null;
     deadline?.check();
-    if(actual!==(expectedTargetSha256??null)&&actual!==digest)throw Error('file_target_changed');
+    if(deadline&&target===currentPath&&expectedTargetSha256===null)targetSha=actual;
+    if(actual!==targetSha&&actual!==digest)throw Error('file_target_changed');
    }
-   await host('file.commit',{path,target,expectedSize:bytes.length,expectedSha256:digest,expectedTargetSha256:previous&&target!==currentPath?null:expectedTargetSha256??null});
+   deadline?.check();
+   await host('file.commit',{path,target,expectedSize:bytes.length,expectedSha256:digest,expectedTargetSha256:previous&&target!==currentPath?null:targetSha});
    if(previous){deadline?.check();await index!.commit(key,previous,{sha256:digest,size:bytes.length});}
   }
   catch(error){if(!String(error).includes('file_target_changed'))throw error;

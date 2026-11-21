@@ -197,14 +197,23 @@ export class WatchBodyChannel {
   await checkTransfer();
   const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:await this.carrierPublicKey(descriptor),key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();checkWindow();},read:async(hash,size)=>{await checkTransfer();return this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash);}});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;
-  await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
+  const value=fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload);
+  await this.o.repository.validate(binding.kind,binding.logicalId,value,raw);
   const incomingHash=sha256Hex(raw);
-  // If Bluetooth finished while the carrier was in flight, retain its bytes.
+  // Recheck the installed original after the download, before publication.
   await this.current(entry,anchor);
-  const old=await this.o.repository.read(binding.kind,binding.logicalId);
+  let installedHash:string|undefined;
+  try{
+   if(binding.kind==='book'&&this.o.repository.readBookWitness){
+    installedHash=(await this.o.repository.readBookWitness(binding.logicalId,value as BookState))?.sha256;
+   }else{
+    const old=await this.o.repository.read(binding.kind,binding.logicalId);
+    if(old)installedHash=sha256Hex(old);
+   }
+  }catch(error){if(binding.kind!=='book'||(error as Error).message!=='cloud_book_package_changed')throw error;}
   checkWindow();
-  if(old&&sha256Hex(old)===incomingHash)return;
-  if(binding.kind==='book'&&old)throw Error('body_revision_changed');
+  if(installedHash===incomingHash)return;
+  if(binding.kind==='book'&&installedHash)throw Error('body_revision_changed');
   await this.current(entry,anchor);await checkTransfer();
   await this.o.repository.install(binding.kind,binding.logicalId,raw,null,deadline);await this.current(entry,anchor);checkWindow();
  }
