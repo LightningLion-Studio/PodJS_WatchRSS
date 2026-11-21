@@ -28,6 +28,7 @@ export interface DouyinPrefetchHooks {
  quarantine(id:string,failure:PrefetchFailure):boolean|Promise<boolean>;
 }
 type PlaybackBinding={url:string;item:DouyinItem};
+type UnstagedBinding=PlaybackBinding&{commit?:never};
 type ReloadBinding=PlaybackBinding&{commit:()=>Promise<void>;discard:()=>Promise<void>;settled:Promise<void>};
 type RegisteredBinding={uri:string;playUrl:string;mirrors:string[];audioUrl?:string;authorization:number;headersKey:string;expires:number;staged?:boolean};
 
@@ -118,7 +119,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const sameMirrors=(a:readonly string[],b:readonly string[])=>a.length===b.length&&a.every((url,i)=>url===b[i]);
  const register=(item:DouyinItem,headers:Record<string,string>,current:()=>boolean=()=>true,speculative=false,reload?:{previousUri?:string})=>{
   const id=item.awemeId,prior=pending.get(id);
-  const work=(async():Promise<PlaybackBinding|ReloadBinding|undefined>=>{
+  const work=(async():Promise<UnstagedBinding|ReloadBinding|undefined>=>{
    if(prior)await prior.catch(()=>{});
    if(!current())return;
    const selected=preserveSelectedDouyinItem(item);
@@ -173,7 +174,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    publishBinding(binding,record);
    return binding;
   })();
-  const completion=work.then(binding=>binding&&'settled' in binding?binding.settled:undefined);
+  const completion=work.then(binding=>binding?.commit?binding.settled:undefined);
   pending.set(id,completion);
   void completion.finally(()=>{if(pending.get(id)===completion)pending.delete(id);}).catch(()=>{});
   return work;
@@ -320,11 +321,11 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  managedCache.registerProducer('douyin-preload',{pins:()=>new Set<string>(),async clear(){if(migrating)return;trafficStoppedUntil=0;stop();await mediaPrefixCache.clear().result;await video.clearFrames?.();kv.delete?.('watchrss.douyin.prefetch-failures');stock?.clear();}});
  client.subscribeAuth?.(state=>{if(state!=='logged-in'){trafficStoppedUntil=0;stop();}});
  const cancelled=()=>Object.assign(new Error('播放来源已更换'),{code:'CANCELLED'});
- const playbackBinding=async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,speculative=false,reload?:{previousUri?:string}):Promise<PlaybackBinding|ReloadBinding>=>{
+ const playbackBinding=async(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,speculative=false,reload?:{previousUri?:string}):Promise<UnstagedBinding|ReloadBinding>=>{
   try{
    const binding=await register(item,headers,current,speculative,reload);
    if(!current()){
-    if(binding&&'discard' in binding)await binding.discard();
+    if(binding?.commit)await binding.discard();
     throw cancelled();
    }
    if(!binding)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
@@ -354,7 +355,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   playbackResolved,
   async playbackForReload(item:DouyinItem,headers:Record<string,string>,current:()=>boolean,previousUri?:string):Promise<ReloadBinding>{
    const binding=await playbackBinding(item,headers,current,false,{previousUri});
-   if(!('commit' in binding))throw cancelled();
+   if(!binding.commit)throw cancelled();
    return binding;
   },
   async playback(item:DouyinItem,headers:Record<string,string>,intent:'playback'|'prewarm'='playback'){
