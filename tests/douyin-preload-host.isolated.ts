@@ -383,7 +383,7 @@ test('DYFAV FIX2 an expired mirror bounds registration but leaves direct video a
  const mirror='https://fixture/mirror?expires=1000000000';
  const item:DouyinItem={...items[0]!,playUrl,variants:[{playUrl,playUrls:[playUrl,mirror],audioUrl,format:'dash',codec:'h264',width:480,height:854,bitrate:1000}]};
  const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>({ok:true as const,data:item})};
- const host=createHostDouyinPreload(local as Parameters<typeof createHostDouyinPreload>[0]);
+ const host=createHostDouyinPreload(local as unknown as Parameters<typeof createHostDouyinPreload>[0]);
  try {
   await host.playback(item,{});
   expect(registrations.at(-1)).toMatchObject({alternates:[mirror],audioUrl,expiresAt:1000000000*1000-30000});
