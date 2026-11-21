@@ -26,7 +26,8 @@ export class BinaryBooks {
  constructor(private readonly store:BinaryStore,private readonly books:()=>Promise<SqlBookStore|undefined>,
   private readonly files:BinaryBookFiles,private readonly chunks:VerifiedChunkStore,private readonly work:()=>void,
   private readonly excluded:(kind:'bookState'|'bookReading',limit:BookMetadataRejected['limit'])=>void=()=>{},
-  private readonly intake?:BoundLocalTransferIntake){}
+  private readonly intake?:BoundLocalTransferIntake,
+  private readonly witness?:(state:BookState)=>Promise<{size:number;sha256:string}|undefined>){}
 
  validate(d:ObjectDescriptor,limits:Limits=HARD_LIMITS){return bookDescription(d,limits);}
 
@@ -204,6 +205,29 @@ export class BinaryBooks {
   return total+maxSegment*3;
  }
 
+ async verifyReceipt(job:Job,d:ObjectDescriptor,outcome:string,objects:readonly {descriptor:ObjectDescriptor;receipt:unknown}[]){
+  if(d.kind==='bookPackageCommit'&&outcome!=='retainedLocal'){
+   const book=bookDescription(d,job.description.selection.limits);
+   if(book.kind!=='bookPackageCommit')fail('JOURNAL_CORRUPT');
+   const repo=await this.repo(),state=await repo.transferState(book.metadata.bookId);
+   const installed=state&&await repo.package(state.bookId);
+   if(!state||state.deleted||state.fingerprint!==book.metadata.fingerprint||!installed||
+    installed.sha256!==book.metadata.packageSha256||installed.size!==book.metadata.packageBytes)fail('RECEIPT_CONFLICT');
+   const proof=await (this.witness?this.witness(state):this.files.hash(installed.path)).catch(()=>undefined);
+   if(!proof||proof.size!==installed.size||proof.sha256!==installed.sha256)fail('RECEIPT_CONFLICT');
+  }
+  if(d.kind==='bookPackageSegment'){
+   const assembly=objects.find(o=>o.descriptor.kind==='bookPackageCommit'&&o.descriptor.dependsOn.includes(d.objectId));
+   if(assembly?.receipt)return;
+   const rows=await this.store.db.query('SELECT path,size,ready FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id IN (?,?)',
+    [...jobKey(job),d.objectId,assembly?.descriptor.objectId??d.objectId]);
+   for(const row of rows)if(Number(row.ready)===1){
+    const actual=await this.files.stat(String(row.path));
+    if(actual.file&&actual.size===Number(row.size))return;
+   }
+   fail('RECEIPT_CONFLICT');
+  }
+ }
  async publish(job:Job,lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor){
   const path='library-binary/spool/'+stagingKey(job,d.objectId)+'.bin';
   await this.store.db.execute('INSERT OR IGNORE INTO library_binary_book_files VALUES(?,?,?,?,?,?,0)',[...jobKey(job),d.objectId,path,d.size,d.sha256]);

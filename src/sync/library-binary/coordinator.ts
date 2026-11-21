@@ -32,6 +32,7 @@ export interface BinaryPorts {
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job:Job):Promise<VerifiedPublication>;
  protectNoteAsset?(job:Job,object:ObjectDescriptor,stage:()=>Promise<VerifiedPublication>,apply:()=>Promise<void>):Promise<void>;
  cleanupCompleted?(job:Job):Promise<void>;
+ verifyReceipt?(job:Job,object:ObjectDescriptor,outcome:string,objects:readonly {descriptor:ObjectDescriptor;receipt:unknown}[]):Promise<void>;
  stopLocalWork?():void;
  guardedTransaction?(channel:string,epoch:number,statements:import('./store').Statement[]):Promise<number[]>;
  durableTransaction?(statements:import('./store').Statement[]):Promise<void>;
@@ -255,7 +256,7 @@ export class LibraryBinaryConnection {
    const j=this.receive?.job;
    if(!j||j.jobId!==r.jobId||!this.begun.has(j.jobId)||j.connectionId!==this.ports.connectionId||j.epoch!==r.epoch||j.planDigest!==r.planDigest)fail('AUTH_REVOKED');
    this.checkReceiveBinding(r);
-   if(this.ports.guarded&&j.completion)await this.ports.authorize(()=>this.guardedStamp(j));
+   if(this.ports.guarded&&j.completion)await this.ports.authorize(async()=>{await this.verifyApplied(j);await this.guardedStamp(j);});
    await this.write(this.reply(r,{state:j.state,nextManifestPage:j.nextPage,expiresAtMillis:j.expiresAt,completion:j.completion,items:[],next:null,done:true},j.epoch));
    if(j.lease&&!this.regrant&&!this.nativeHeartbeat&&!this.stopped){
     this.nativeHeartbeat=this.ports.chunks.check(j.lease as unknown as ObjectLease).catch(e=>{
@@ -485,6 +486,7 @@ export class LibraryBinaryConnection {
     break;
    }
    case 'complete':{
+    await this.verifyApplied(j);
     const released=await this.cleanupApplied(j);
     result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.guardedCommit(stamp,j)) as unknown as Row;if(released){
     let clean=true;
@@ -551,7 +553,7 @@ export class LibraryBinaryConnection {
   requests.remember(r);
   const job=await this.ports.store.begin(this.scope,r,p,this.ports.connectionId,lease.epoch,lease as unknown as Row,'receiver',stamp,this.guardedCommit(stamp));this.begun.add(b.jobId);
   await this.ports.store.db.transaction(this.ports.store.bind(job,this.ports.phoneDeviceId,r));
-  const rows=await this.verifyRestored(job);await this.cleanupApplied(job);
+  const rows=await this.verifyRestored(job);await this.verifyApplied(job,rows);await this.cleanupApplied(job);
   const objects=rows.map(o=>o.descriptor);
   if(!terminal(job)&&job.state!=='PLANNING')await this.ports.reserve(job,objects);
   const binding=this.binding(job);
@@ -616,6 +618,13 @@ export class LibraryBinaryConnection {
   if(j.state==='COMPLETE'){if(all.some(o=>!o.receipt)||!j.completion)fail('RECEIPT_CONFLICT');const root=receiptsRoot(all.map(o=>o.receipt!)),expected=completion(j.jobId,j.planDigest,p.objectCount,root,p.phoneSnapshot.toInclusive);if(Object.keys(expected).some(k=>j.completion![k as keyof Completion]!==expected[k as keyof Completion]))fail('RECEIPT_CONFLICT');}
   return all;
  }
+ private async verifyApplied(j:Job,rows?:Awaited<ReturnType<BinaryStore['objects']>>,only?:string){
+  const verify=this.ports.verifyReceipt;if(!verify||!this.ports.guarded)return;
+  const objects=rows??await this.ports.store.objects(j);
+  for(const row of objects)if(row.receipt&&(!only||row.descriptor.objectId===only)){
+   await verify(j,row.descriptor,row.receipt.outcome,objects);this.check();
+  }
+ }
  private async cleanupApplied(j:Job,d?:ObjectDescriptor):Promise<boolean>{
   if(!j.lease)return true;let released=true;
   for(const o of d?[await this.ports.store.object(j,d.objectId)]:await this.ports.store.objects(j)){
@@ -640,6 +649,7 @@ export class LibraryBinaryConnection {
   let rangesLeft=j.description.selection.limits.maxRangesPerPage,next:Row|null=null;
   for(let i=start;i<all.length&&items.length<limit;i++){
    const o=all[i]!,d=o.descriptor;let state='APPLIED',ranges:number[][]=[];
+   if(o.receipt&&this.ports.guarded)await this.ports.verifyReceipt?.(j,d,o.receipt.outcome,all);
    if(!o.receipt){const status=await this.ports.chunks.status(j.lease as unknown as ObjectLease,nativeObject(d));state=status.state;for(const n of status.missing.filter(n=>n>=chunk)){const tail=ranges[ranges.length-1];if(tail&&tail[1]===n)tail[1]=n+1;else ranges.push([n,n+1]);}}
    const take=ranges.slice(0,rangesLeft);rangesLeft-=take.length;items.push({objectId:d.objectId,state,missingRanges:take,receipt:o.receipt});chunk=0;
    if(take.length<ranges.length){if(!take.length){items.pop();next={afterObjectId:d.objectId,afterChunkIndex:ranges[0]![0]};}else next={afterObjectId:d.objectId,afterChunkIndex:take[take.length-1]![1]};break;}
@@ -660,7 +670,7 @@ export class LibraryBinaryConnection {
   if(this.nativeReceive&&channel&&guard)return statements=>guard(channel.id,job.epoch,statements);
  }
  private async apply(j:Job,r:Envelope,stamp?:GuardedLibraryStamp):Promise<Row>{
-  if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await (this.guardedCommit(stamp,j)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
+  if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await this.verifyApplied(j,undefined,o.descriptor.objectId);await (this.guardedCommit(stamp,j)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
   const boundary=this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,this.commitCheck);
   if(stamp&&(o.descriptor.kind==='noteAsset'||o.descriptor.kind==='bookPackageCommit')){
@@ -895,5 +905,5 @@ export class LibraryBinaryConnection {
   }
  }
  private validateReceipt(r:AppliedReceipt,job:string,plan:string,id:string){exact(r,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);if(r.jobId!==job||r.planDigest!==plan||r.objectId!==id||r.receiverDeviceId!==this.ports.phoneDeviceId||!['merged','retainedLocal','alreadyPresent'].includes(r.outcome)||r.resultDigest!==D('wrss.library-binary.v2/applied',[r.jobId,r.planDigest,r.objectId,hex(r.applyRequestId,32),hex(r.applyRequestDigest),r.receiverDeviceId,r.outcome]))fail('RECEIPT_CONFLICT');}
- private async acceptCompletion(j:Job,c:Completion){this.settled.add(j.jobId);this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const stamp=await this.guardedStamp(latest);await (this.guardedCommit(stamp)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));}
+ private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const stamp=await this.guardedStamp(latest);await (this.guardedCommit(stamp)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));this.settled.add(j.jobId);this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);}
 }

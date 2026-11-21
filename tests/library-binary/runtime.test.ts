@@ -10,7 +10,7 @@ import {localTransferIntakeFixture} from '../helpers/local-transfer-intake';
 async function ready(f:Awaited<ReturnType<typeof binaryRuntime>>){const s=f.session(),legacy=async(r:Row)=>{await s.connection.writeFrame(r);const reply=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return reply;};const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true,...(f.ports.guardedRuntime?{supportedGuardedLibraryVersions:[1]}:{})});await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});return {s,probe,legacy};}
 function request(phase:Envelope['phase'],payload:Row,job:string|null=null,plan:string|null=null,epoch:number|null=null):Envelope{return {action:'syncLibraryBinary',version:2,type:'request',phase,jobId:job,planDigest:plan,epoch,requestId:nonce(),requestDigest:requestDigest(job,plan,phase,payload),payload};}
 export {ready,request};
-for(const mode of ['ordinary','rollback','guarded','guarded-stale'] as const)test('B2 '+mode+' asset, durable receipt and protected terminal resume',async()=>{
+for(const mode of ['ordinary','rollback','guarded','guarded-stale','guarded-corrupt'] as const)test('B2 '+mode+' asset, durable receipt and protected terminal resume',async()=>{
  const rollback=mode==='rollback',guarded=mode.startsWith('guarded');
  const watchDeviceId='22000000-0000-0000-0000-000000000000';
  let busy=true;const f=await binaryRuntime({userId:'11000000-0000-0000-0000-000000000000',watchId:watchDeviceId,fault:m=>{if(busy&&m.endsWith('.stage')){busy=false;throw Error('BUSY');}}});try{
@@ -56,11 +56,15 @@ for(const mode of ['ordinary','rollback','guarded','guarded-stale'] as const)tes
    const before=await guard.store.readState();
    await guard.store.controlUpdate(before,{...before,account:{...before.account!,revision:'9'}});
   }
+  if(mode==='guarded-corrupt'){
+   const changed=bytes.slice();changed[0]=255;
+   await f.files.writeBytes(await f.ports.assetIndex!.path('picture.png'),changed);
+  }
   // Both peers now advertise S3. The completed S2 job retains its original selection.
-  const resumed=await ready(f);await resumed.s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});await resumed.s.connection.readFrame(3000);const resumedIo=new BinaryByteTransport(resumed.s.connection.detachStream());const resumedCall=async(r:Envelope,success=true)=>{await resumedIo.writeFrame(encodeFrame({kind:'control',envelope:r}));const answer=decodeFrame(await resumedIo.readFrame());if(answer.kind!=='control')throw Error('control expected');expect(answer.envelope.success).toBe(success);return answer.envelope;};const resumedOffer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneCapabilities:cap,phoneSnapshot,watchSnapshot});const resumedOffered=await resumedCall(resumedOffer);const resumedBindings=[{jobId:job,direction:'phoneToWatch',intent:'resume',selection}];await resumedCall(request('prepare',{step:'confirm',offerRequestId:resumedOffer.requestId,bindings:resumedBindings,preparationDigest:preparationDigest(String(resumedOffered.result!.offerDigest),resumedBindings as any)}));const terminal=await resumedCall(request('begin',{...p,intent:'resume'} as unknown as Row,job,plan),mode!=='guarded-stale');
-  if(mode==='guarded-stale'){
-   expect(terminal.error?.code).toBe('BUSINESS_REJECTED');
-   await expect(resumed.s.running).rejects.toThrow('BUSINESS_REJECTED');
+  const resumed=await ready(f);await resumed.s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});await resumed.s.connection.readFrame(3000);const resumedIo=new BinaryByteTransport(resumed.s.connection.detachStream());const resumedCall=async(r:Envelope,success=true)=>{await resumedIo.writeFrame(encodeFrame({kind:'control',envelope:r}));const answer=decodeFrame(await resumedIo.readFrame());if(answer.kind!=='control')throw Error('control expected');expect(answer.envelope.success).toBe(success);return answer.envelope;};const resumedOffer=request('prepare',{step:'offer',accountScope:f.accountScope,phoneDeviceId:'phone',watchDeviceId,phoneCapabilities:cap,phoneSnapshot,watchSnapshot});const resumedOffered=await resumedCall(resumedOffer);const resumedBindings=[{jobId:job,direction:'phoneToWatch',intent:'resume',selection}];await resumedCall(request('prepare',{step:'confirm',offerRequestId:resumedOffer.requestId,bindings:resumedBindings,preparationDigest:preparationDigest(String(resumedOffered.result!.offerDigest),resumedBindings as any)}));const replayError=mode==='guarded-stale'?'BUSINESS_REJECTED':mode==='guarded-corrupt'?'RECEIPT_CONFLICT':null;const terminal=await resumedCall(request('begin',{...p,intent:'resume'} as unknown as Row,job,plan),!replayError);
+  if(replayError){
+   expect(terminal.error?.code).toBe(replayError);
+   await expect(resumed.s.running).rejects.toThrow(replayError);
   }else{
    expect(terminal.result!.state).toBe('COMPLETE');
    expect(terminal.result!.completion).toEqual(done.result);

@@ -124,6 +124,17 @@ export class BinaryAssets {
   const rows=await this.store.db.query("SELECT path FROM library_binary_source_files f WHERE expires_at<? AND NOT EXISTS(SELECT 1 FROM library_binary_snapshot_files sf JOIN library_binary_snapshots s ON s.scope=sf.scope AND s.snapshot_id=sf.snapshot_id WHERE sf.path=f.path) LIMIT 64",[this.store.now()]);
   for(const row of rows){this.check();const path=String(row.path);if(!/^library-binary\/spool\/[A-Za-z0-9._-]{1,160}$/.test(path))fail('JOURNAL_CORRUPT');await this.files.remove(path);await this.store.db.execute('DELETE FROM library_binary_source_files WHERE path=?',[path]);this.unit();}
  }
+ async verifyReceipt(job:Job,d:ObjectDescriptor,outcome:string,objects:readonly {descriptor:ObjectDescriptor;receipt:unknown}[]){
+  if(d.kind.startsWith('book')){
+   await this.books?.verifyReceipt(job,d,outcome,objects);
+  }else if(d.kind==='noteAsset'){
+   const [row]=await this.store.db.query('SELECT path,outcome FROM library_binary_assets WHERE storage_key=? AND sha256=?',[d.businessId,d.sha256]);
+   if(!row||row.outcome!==outcome&&!(row.outcome==='alreadyPresent'&&outcome==='merged'))fail('RECEIPT_CONFLICT');
+   const path=outcome==='retainedLocal'?noteAssetVersionPath(d.businessId,d.sha256):await this.assetIndex!.path(d.businessId);
+   if(path!==row.path&&outcome==='retainedLocal')fail('RECEIPT_CONFLICT');
+   await this.verified(path,d,'RECEIPT_CONFLICT');
+  }
+ }
  async publish(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job?:Job){
   if(d.kind==='bookPackageSegment'){
    if(!this.books||!job)fail('UNSUPPORTED_KIND');
