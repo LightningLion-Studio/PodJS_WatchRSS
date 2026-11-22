@@ -49,6 +49,8 @@ export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AU
  ...sqlProgramRelationGuards('syncv2_apply_keys','scope','plan_id','wrss_apply_keys_ready'),
  `CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
+ // The legacy read fallback and cleanup also run on zero-row snapshots.
+ `CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`,
  `CREATE TABLE IF NOT EXISTS syncv2_business_basis(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,epoch TEXT NOT NULL,revision TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_state(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,local_revision TEXT NOT NULL,body TEXT NOT NULL,account_generation TEXT NOT NULL,edit_generation TEXT NOT NULL,awaiting_user INTEGER NOT NULL CHECK(awaiting_user IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_identity_map(local_library TEXT NOT NULL,repo TEXT NOT NULL,kind TEXT NOT NULL,logical_id TEXT NOT NULL,entity_key TEXT NOT NULL,mapping_version INTEGER NOT NULL CHECK(mapping_version=2),PRIMARY KEY(local_library,repo,kind,logical_id))`,
@@ -391,7 +393,7 @@ export class WatchProjectionStore {
  }
  /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
  async stageCloudRows(root:string,rows:any[],baseline:SyncState,observation=false){
-  this.gate.require();const db=observation?this.observationSql(baseline):this.db;await db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))'}]);
+  this.gate.require();const db=observation?this.observationSql(baseline):this.db;
   let state=await this.readState();if(observation&&queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
   const cache=observation?new SqlAuthenticatedCache<any>(db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:chunkedValues(db,this.cipher,this.scopeKey+'#cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined):this.cloudCache;
   for(let at=0;at<rows.length;at+=32){const statements=await cache.prepare(root,rows.slice(at,at+32).map(value=>({key:value.row.entityKey,value})));if(!statements.length)continue;const next={...state};await (observation?this.observationUpdate(state,next,statements):this.controlUpdate(state,next,statements));state=next;}
