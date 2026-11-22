@@ -40,6 +40,7 @@ export interface SourceReader {
  /** Reserved keyed lookup for future incremental work; never read body recipes. */
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
+const CLOUD_ROWS_SCHEMA=`CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`;
 export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_apply_tree_v2(scope TEXT NOT NULL,plan_id TEXT NOT NULL,step INTEGER NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,plan_id,prefix,step))`,
  ...sqlProgramRelationGuards('syncv2_apply_tree_v2','scope','plan_id','wrss_apply_tree_ready'),
@@ -50,7 +51,7 @@ export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AU
  `CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
  // The legacy read fallback and cleanup also run on zero-row snapshots.
- `CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`,
+ CLOUD_ROWS_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_business_basis(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,epoch TEXT NOT NULL,revision TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_state(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,local_revision TEXT NOT NULL,body TEXT NOT NULL,account_generation TEXT NOT NULL,edit_generation TEXT NOT NULL,awaiting_user INTEGER NOT NULL CHECK(awaiting_user IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_identity_map(local_library TEXT NOT NULL,repo TEXT NOT NULL,kind TEXT NOT NULL,logical_id TEXT NOT NULL,entity_key TEXT NOT NULL,mapping_version INTEGER NOT NULL CHECK(mapping_version=2),PRIMARY KEY(local_library,repo,kind,logical_id))`,
@@ -552,6 +553,8 @@ export class WatchProjectionStore {
  private async sameCurrentTransfer(state:SyncState,input:LocalTransferInput){
   const current=state.cloud?.current;
   if(!state.account||!state.activeGeneration||state.activeGeneration!==state.account.oid||current?.commitOid!==state.account.oid||state.hasUnsentEdits||!sameBusinessRevision(state.businessRevision,await businessRevision(this.db)))return false;
+  // Offline intake opens an existing projection without running initialize().
+  if(this.options.localIntake&&input.records.length)await this.db.transaction([{sql:CLOUD_ROWS_SCHEMA}]);
   for(const {kind,logicalId,value} of input.records){
    const id=this.entityKeyFor(kind,logicalId),cloud=await this.cloudRow(current.treeRoot,id);
    if(!cloud||cloud.unopenable||cloud.meta.kind!==kind||cloud.meta.logicalId!==logicalId)return false;

@@ -6,9 +6,10 @@ import {SyncV2Http} from '../../src/sync-v2/http';
 import {buildTree} from '../../src/sync-v2/merkle';
 import {canonical,jsonBytes} from '../../src/sync-v2/protocol';
 import {signCommit} from '../../src/sync-v2/signing';
-import type {WatchProjectionStore} from '../../src/sync-v2/store';
+import {ProjectionGate} from '../../src/sync-v2/gate';
+import {WatchProjectionStore} from '../../src/sync-v2/store';
 import {b64} from '../../src/sync-v2/wire';
-import {cipher,idKey,libraryId,productCipherHost,scope,SqlFixture} from './fixture';
+import {cipher,idKey,libraryId,noteValue,productCipherHost,scope,SqlFixture} from './fixture';
 import {crypto,publicBytes,serverPin,SyntheticIndexBackend} from './p2-fixture';
 
 const tableInfo='PRAGMA table_info(syncv2_cloud_rows)';
@@ -101,5 +102,23 @@ test('cloud rows schema preserves readable legacy ciphertext on each reopen',asy
    expect(await reopened.cloudRowCount(root)).toBe(1);
    expect(await db.query('SELECT body FROM syncv2_cloud_rows')).toEqual([{body:sealed}]);
   }
+ }finally{db.close();}
+});
+
+test('cloud rows schema repairs the first offline transfer lookup after a rollback',async()=>{
+ const db=new SqlFixture();
+ try{
+  const previous=db.store();
+  await previous.initialize();
+  await emptyIndex(previous);
+  const saved=await previous.readState(),account={...saved.account!,generation:'1'};
+  await previous.controlUpdate(saved,{...saved,account,rollbackGeneration:'1',activeGeneration:account.oid,
+   editBase:{accountOid:account.oid,generation:'1'}});
+  db.raw.exec('DROP TABLE syncv2_cloud_rows');
+  const offline=new WatchProjectionStore(db,cipher,new ProjectionGate(true),scope,libraryId,idKey,undefined,{localIntake:true});
+  const input={peer:'offline-peer',version:14 as const,cursor:'1',records:[{kind:'note' as const,logicalId:'n',value:noteValue()}]};
+  expect(await offline.protectLocalInput(input)).toBe(true);
+  expect((await offline.readState()).pendingChoice?.inboxKeys).toEqual([canonical([input.peer,input.version,input.cursor])]);
+  expect(await db.query(tableInfo)).toHaveLength(4);
  }finally{db.close();}
 });
