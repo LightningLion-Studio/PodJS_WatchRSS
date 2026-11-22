@@ -116,20 +116,22 @@ function* parseBlockSteps(markup:string,max:number,emit:(block:NotePreviewBlock)
 }
 function chunkMarkdown(markup:string,max:number):string[]{
  const out:string[]=[];
- let buffer='',length=0;
- const flush=()=>{
-  if(buffer)out.push(buffer.replace(/\n+$/,''));
-  buffer='';length=0;
- };
+ let lines:string[]=[],length=0,breakAfterBlank=false;
  for(const row of noteCodeLines(markup)){
-  const line=row.line,inside=row.fenced&&row.kind!=='open';
+  const line=row.line,blank=!trim(line);
+  const insideFence=row.fenced&&row.kind!=='open';
   const visible=row.kind==='text'&&line.includes('<')?notePreviewPlainText(line).length:line.length;
-  if(!inside&&buffer&&length+visible+1>max)flush();
-  if(buffer){buffer+='\n';length++;}
-  buffer+=line;length+=visible;
-  if((!row.fenced||row.kind==='close')&&!trim(line)&&length>=Math.trunc(max/2))flush();
+  // Keep blank rows with the preceding chunk. A new chunk resets the code parser.
+  if(lines.length&&!blank&&!insideFence&&!row.inheritsContainer&&(breakAfterBlank||length+visible+1>max)){
+   out.push(lines.join('\n'));
+   lines=[];length=0;breakAfterBlank=false;
+  }
+  length+=visible+(lines.length?1:0);
+  lines.push(line);
+  if(blank&&!row.fenced&&length>=Math.trunc(max/2))breakAfterBlank=true;
  }
- flush();return out.length?out:[markup];
+ if(lines.length)out.push(lines.join('\n'));
+ return out;
 }
 export function* prepareNotePreviewSteps(markup:string,max=1200,onPrefix?:(blocks:NotePreviewBlock[])=>void):Generator<void,NotePreviewBlock[]>{
  if(max<=0)throw new Error('Invalid note chunk size');

@@ -20,10 +20,19 @@ export function notePreviewPlainText(value:string):string {
  return projectNoteText(value.includes('<')&&/<ol\b/i.test(value)?numberHtmlListItems(value):value,true);
 }
 
-function integerAttribute(tag:string,name:string):number|undefined {
- const match=new RegExp(`\\s${name}\\s*=\\s*(?:"([+-]?\\d+)"|'([+-]?\\d+)'|([+-]?\\d+)(?=[\\s>]))`,'i').exec(tag);
- const value=Number(match?.[1]??match?.[2]??match?.[3]);
- return Number.isSafeInteger(value)?value:undefined;
+function listAttributes(tag:string):Map<string,string> {
+ const attributes=new Map<string,string>();
+ for(const [,name,doubleQuoted,singleQuoted,unquoted] of tag.slice(3,-1).matchAll(/[ \t\n\f\r]+([^ \t\n\f\r"'<>/=]+)(?:[ \t\n\f\r]*=[ \t\n\f\r]*(?:"([^"]*)"|'([^']*)'|([^ \t\n\f\r>]+)))?/g)){
+  const key=name.toLowerCase();
+  if(!attributes.has(key))attributes.set(key,doubleQuoted??singleQuoted??unquoted??'');
+ }
+ return attributes;
+}
+
+function listInteger(value:string|undefined):number|undefined {
+ if(value===undefined||!/^[-+]?\d+$/.test(value))return undefined;
+ const number=Number(value);
+ return Number.isSafeInteger(number)?number:undefined;
 }
 
 function numberHtmlListItems(value:string):string {
@@ -39,18 +48,21 @@ function numberHtmlListItems(value:string):string {
   }
  };
  let cursor=0;
- for(const match of value.matchAll(/<(\/?)(ol|ul|li)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)){
+ for(const match of value.matchAll(/<(\/?)(ol|ul|li)(?=[ \t\n\f\r/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)){
   parts.push(value.slice(cursor,match.index));
   cursor=match.index+match[0].length;
   const [,closing,name]=match,tag=name.toLowerCase();
   if(tag==='li'&&!closing&&lists.at(-1)?.ordered){
-   lists.at(-1)!.items.push({index:parts.length,value:integerAttribute(match[0],'value')});
+   lists.at(-1)!.items.push({index:parts.length,value:listInteger(listAttributes(match[0]).get('value'))});
    parts.push('');
   }else{
    parts.push(match[0]);
    if(tag!=='li'){
     if(closing)finish(lists.pop());
-    else lists.push({ordered:tag==='ol',start:integerAttribute(match[0],'start'),step:/\sreversed(?=[\s=>])/i.test(match[0])?-1:1,items:[]});
+    else {
+     const attributes=tag==='ol'?listAttributes(match[0]):undefined;
+     lists.push({ordered:tag==='ol',start:listInteger(attributes?.get('start')),step:attributes?.has('reversed')?-1:1,items:[]});
+    }
    }
   }
  }

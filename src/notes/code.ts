@@ -3,7 +3,7 @@
  * retained for storage/chunking and source anchors. This is not a full MD parser. */
 type Container=number|'>';
 interface Fence {marker:string;length:number;containers:Container[];indent:number}
-export interface NoteCodeLine {line:string;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean}
+export interface NoteCodeLine {line:string;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean;inheritsContainer:boolean}
 export const noteCodeIndent=(line:string)=>/^ {4}/.test(line)?4:(/^ {0,3}\t/.exec(line)?.[0].length??0);
 function strip(line:string,path:Container[]):number|null{
  let offset=0;
@@ -13,13 +13,15 @@ function strip(line:string,path:Container[]):number|null{
  }
  return offset;
 }
-function context(line:string,path:Container[]=[]):{offset:number;path:Container[]}{
- let offset=strip(line,path);if(offset===null){path=[];offset=0;}else path=path.slice();
+function context(line:string,path:Container[]=[]):{offset:number;path:Container[];inheritsContainer:boolean}{
+ let offset=strip(line,path);
+ const inheritsContainer=offset!==null&&path.length>0;
+ if(offset===null){path=[];offset=0;}else path=path.slice();
  for(;;){
   const m=/^ {0,3}(?:>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]+)/.exec(line.slice(offset));if(!m)break;
   path.push(m[0].trimStart()[0]==='>'?'>':m[0].length);offset+=m[0].length;
  }
- return{offset,path};
+ return{offset,path,inheritsContainer};
 }
 function opener(line:string,ctx:ReturnType<typeof context>):Fence|null{
  const m=/^( {0,3})(`{3,}|~{3,})([^]*)$/.exec(line.slice(ctx.offset));
@@ -39,15 +41,15 @@ export function* noteCodeLines(markup:string):Generator<NoteCodeLine>{
    if(from!==null){
     const close=noteFenceCloses(line,fence);let offset=from;
     for(let n=0;n<fence.indent&&line[offset]===' ';n++)offset++;
-    yield{line,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true};
+    yield{line,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true,inheritsContainer:false};
     if(close)fence=null;continue;
    }
    fence=null;
   }
   const ctx=context(line,path);path=ctx.path;
   fence=opener(line,ctx);
-  if(fence){yield{line,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true};continue;}
+  if(fence){yield{line,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true,inheritsContainer:ctx.inheritsContainer};continue;}
   const indent=noteCodeIndent(line.slice(ctx.offset)),offset=ctx.offset+indent;
-  yield{line,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false};
+  yield{line,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false,inheritsContainer:ctx.inheritsContainer};
  }
 }
