@@ -27,7 +27,7 @@ export function bytePair(){const a=new Bytes(),b=new Bytes();const close=async()
 /** Host runtime for product TS, with real fsync files and the same SQLite DB for
  * receipts/business rows. This replaces Android service ports, never B2 logic. */
 export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fileRefs?:boolean;usableBytes?:number;userId?:string;watchId?:string;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
- const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
+ const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL');
  const nativeSql=new Database(join(root,'native.sqlite'));
  nativeSql.exec('PRAGMA synchronous=FULL; CREATE TABLE requests(scope TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(scope,id))');
  const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as Row[],execute:async(q,p=[])=>{sql.query(q).run(...p as any[]);},transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]) as any[]);})();}};
@@ -89,7 +89,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   if(method.endsWith('.finalize')){if((await missing()).length)throw Error('CHUNKS_MISSING');const temp=dir+'/compose';await files.writeBytes(temp,new Uint8Array());for(let i=0;i<d.chunkHashes.length;i++){const b=await readFile(path(dir+'/'+i));await files.appendBytes(temp,b,i*65536);}const target=String(a.path??('resumable-published/'+scope+'/'+d.id+'.bin'));try{await files.commit(temp,target,d.size,d.sha256,null);}catch(e){if(String(e).includes('file_target_changed'))throw Error('PUBLICATION_CONFLICT');throw e;}return {path:target,size:d.size,sha256:d.sha256} as T;}
   throw Error('bad native method '+method);
  };
- const chunks=new VerifiedChunkStore((m,a)=>native(m,a),(m,a,b)=>native(m,a,b));const store=new BinaryStore(db);
+ const chunks=new VerifiedChunkStore((m,a)=>native(m,a),(m,a,b)=>native(m,a,b));const store=new BinaryStore(db,db.transaction);
  const kv=new Map<string,string>();const account=new WatchAccountStore({get:k=>kv.get(k)??null,set:(k,v)=>{kv.set(k,v);},remove:k=>{kv.delete(k);}});
  // Synthetic account only. No production tokens or keys.
  const userId=options.userId??'b2-host',watchId=options.watchId??'watch';

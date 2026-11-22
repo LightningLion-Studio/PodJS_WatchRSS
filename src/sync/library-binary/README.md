@@ -34,8 +34,9 @@ path. IP remains on its existing implementation.
 ## Persistence and fencing
 
 `BinaryStore` uses private `library_binary_*` tables in the existing business
-SQLite database. It never changes the v1 or C-v1 journal schema. Every write
-restores FULL and checks `pragma_synchronous` inside the actual transaction.
+SQLite database. It never changes the v1 or C-v1 journal schema. Android opens
+the database with FULL durability and checks the setting inside each B2 write
+transaction.
 The connection/epoch guard and request bindings share the business transaction.
 `BinaryAssets` publishes immutable native files before writing the business
 reference and APPLIED receipt in that transaction. A conflicting local image

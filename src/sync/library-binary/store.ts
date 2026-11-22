@@ -28,11 +28,12 @@ export class BinaryStore {
  private logical=Date.now();private injectedClock:boolean;private clockLane:Promise<void>=Promise.resolve();private lastElapsed?:number;
  readonly now:()=>number;
  readonly db:SqlDatabase;
- constructor(database:SqlDatabase,now?:()=>number){
-  this.db={query:database.query.bind(database),execute:async(sql,params)=>{await this.db.transaction([{sql,params}]);},transaction:async statements=>{
-   await database.execute('PRAGMA synchronous=FULL');
-   await database.transaction([...statements,{sql:"UPDATE library_binary_guard SET ok=CASE WHEN (SELECT synchronous FROM pragma_synchronous)=2 THEN 1 ELSE 0 END WHERE id=1"}]);
-  }};this.injectedClock=!!now;this.now=now??(()=>this.logical);}
+ constructor(database:SqlDatabase,transactionFull:(statements:Statement[])=>Promise<unknown>,now?:()=>number){
+  this.db={
+   query:database.query.bind(database),
+   execute:async(sql,params)=>{await this.db.transaction([{sql,params}]);},
+   transaction:async statements=>{await transactionFull(statements);},
+  };this.injectedClock=!!now;this.now=now??(()=>this.logical);}
  exclusive<T>(run:()=>Promise<T>):Promise<T>{const p=(lanes.get(this.db)??Promise.resolve()).then(run);lanes.set(this.db,p.catch(()=>{}));return p;}
  initialize(){return this.ready??=(async()=>{
   await this.db.transaction([
