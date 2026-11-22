@@ -3,7 +3,7 @@ export type NotePreviewBlock={kind:'rich';markup:string;html:boolean}|{kind:'ima
 const trim=(s:string)=>s.replace(/^[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g,'');
 const rich=(markup:string,html=false):NotePreviewBlock=>({kind:'rich',markup,html});
 const pad=(row:string[],n:number)=>row.slice(0,n).concat(Array(Math.max(0,n-row.length)).fill(''));
-import {noteCodeIndent,noteCodeLines} from './code';
+import {noteCodeIndent,noteCodeLines,type NoteCodeLine} from './code';
 import {notePreviewPlainText} from './text';
 export {noteFence,noteFenceCloses,noteCodeIndent} from './code';
 export function isNoteRichHtml(markup:string){
@@ -31,8 +31,21 @@ function parseTable(lines:string[],start:number,code:readonly {kind:string}[]):T
  for(;index<lines.length;index++){const next=read(index,alignedRow);const row=next?.length===aligned.length?next:read(index,line=>degradedRow(line,aligned))??next;if(!row)break;rows.push(row);}
  return rows.length>=2&&(aligned.length!==2||rows.length>=3)?table(rows,index):null;
 }
-function* tableBlockSteps(markup:string):Generator<void,NotePreviewBlock[]>{const code:Array<{kind:string;line:string}>=[];for(const row of noteCodeLines(markup)){yield;code.push(row);}const lines=code.map(r=>r.line),out:NotePreviewBlock[]=[];let buffer='';const append=(line:string)=>{if(buffer)buffer+='\n';buffer+=line;};const flush=()=>{if(buffer){out.push(rich(buffer));buffer='';}};
- for(let i=0;i<lines.length;){yield;const line=lines[i];if(code[i].kind!=='text'){append(line);i++;continue;}const found=parseTable(lines,i,code);if(found){flush();out.push(found.block);i=found.next;}else{append(line);i++;}}flush();return out;}
+function* tableBlockSteps(markup:string):Generator<void,NotePreviewBlock[]>{
+ const code:NoteCodeLine[]=[];
+ for(const row of noteCodeLines(markup)){yield;code.push(row);}
+ const lines=code.map(row=>row.line),out:NotePreviewBlock[]=[];
+ let start:number|undefined,end=0;
+ const flush=()=>{if(start!==undefined){out.push(rich(markup.slice(start,end)));start=undefined;}};
+ for(let i=0;i<lines.length;){
+  yield;
+  const row=code[i],found=row.kind==='text'?parseTable(lines,i,code):null;
+  if(found){flush();out.push(found.block);i=found.next;continue;}
+  if(start!==undefined||row.line){start??=row.sourceStart;end=row.sourceStart+row.line.length;}
+  i++;
+ }
+ flush();return out;
+}
 // Keep HTML containers intact and bound the work in the first layout slice.
 function* htmlPreviewChunks(markup:string,max:number):Generator<string|undefined> {
  const paragraphTags=/^(?:p|div|h[1-6]|blockquote|ol|ul|table|pre|section|article)$/i;
@@ -85,52 +98,67 @@ function* parseHtmlSteps(markup:string,max:number,append:(block:NotePreviewBlock
 }
 
 function* parseMarkdownSteps(markup:string,append:(block:NotePreviewBlock)=>void):Generator<void>{
- // Without a table or image marker, this source needs only line normalization.
+ // Without a table or image marker, keep the source slice for editor anchors.
  if(!markup.includes('![')&&!/[|\t]| {2,}/.test(markup)){
-  const source=markup.replace(/\r\n?/g,'\n').replace(/^\n+/,'');
+  const source=markup.replace(/^(?:\r\n?|\n)+/,'');
   if(source)append(rich(source));
   return;
  }
- let buffer='';const flush=function*():Generator<void,void>{if(buffer){for(const block of yield* tableBlockSteps(buffer))append(block);buffer='';}};
- for(const row of noteCodeLines(markup)){yield;const line=row.line;if(row.kind!=='text'){if(buffer)buffer+='\n';buffer+=line;continue;}const images=[...line.matchAll(/!\[([^\]]*)\]\(([^) \t\n\v\f\r]+)(?:[ \t\n\v\f\r]+["'][^"']*["'])?\)/g)];if(!images.length){if(buffer)buffer+='\n';buffer+=line;continue;}let cursor=0;for(const image of images){buffer+=line.slice(cursor,image.index);yield* flush();append({kind:'image',path:image[2].replace(/%20/g,' '),description:image[1]});cursor=image.index!+image[0].length;}buffer+=line.slice(cursor);}yield* flush();
+ let buffer='',previousEnd=0;
+ const flush=function*():Generator<void,void>{if(buffer){for(const block of yield* tableBlockSteps(buffer))append(block);buffer='';}};
+ for(const row of noteCodeLines(markup)){
+  yield;
+  const line=row.line,lineBreak=markup.slice(previousEnd,row.sourceStart);
+  previousEnd=row.sourceStart+line.length;
+  const images=row.kind==='text'?[...line.matchAll(/!\[([^\]]*)\]\(([^) \t\n\v\f\r]+)(?:[ \t\n\v\f\r]+["'][^"']*["'])?\)/g)]:[];
+  if(!images.length){if(buffer)buffer+=lineBreak;buffer+=line;continue;}
+  let cursor=0;
+  for(const image of images){
+   buffer+=line.slice(cursor,image.index);yield* flush();
+   append({kind:'image',path:image[2].replace(/%20/g,' '),description:image[1]});
+   cursor=image.index!+image[0].length;
+  }
+  buffer+=line.slice(cursor);
+ }
+ yield* flush();
 }
 // Split fenced source before the rich-HTML detector can interpret its tags.
 function* parseBlockSteps(markup:string,max:number,emit:(block:NotePreviewBlock)=>void):Generator<void>{
  if(!isNoteRichHtml(markup))return yield* parseMarkdownSteps(markup,emit);
  const flush=function*(start:number,end:number,literal:boolean):Generator<void,void>{
   const source=markup.slice(start,end);
-  if(literal){emit(rich(source.replace(/\r\n?/g,'\n')));return;}
+  if(literal){emit(rich(source));return;}
   if(isNoteRichHtml(source))yield* parseHtmlSteps(source,max,emit);
   else yield* parseMarkdownSteps(source,emit);
  };
- let cursor=0,start=0,end=0,literal=false;
+ let start=0,end=0,literal=false;
  for(const row of noteCodeLines(markup)){
   yield;
   const code=row.kind!=='text';
-  if(code!==literal){if(start<end)yield* flush(start,end,literal);start=cursor;literal=code;}
-  end=cursor+row.line.length;
-  cursor=end+(markup.startsWith('\r\n',end)?2:1);
+  if(code!==literal){if(start<end)yield* flush(start,end,literal);start=row.sourceStart;literal=code;}
+  end=row.sourceStart+row.line.length;
+  const cursor=end+(markup.startsWith('\r\n',end)?2:1);
   if(row.kind==='close'||code&&!row.fenced){yield* flush(start,end,true);start=cursor;literal=false;}
  }
  if(start<=end)yield* flush(start,end,literal);
 }
 function chunkMarkdown(markup:string,max:number):string[]{
  const out:string[]=[];
- let lines:string[]=[],length=0,breakAfterBlank=false;
+ let start=0,end=0,length=0,breakAfterBlank=false;
  for(const row of noteCodeLines(markup)){
   const line=row.line,blank=!trim(line);
   const insideFence=row.fenced&&row.kind!=='open';
   const visible=row.kind==='text'&&line.includes('<')?notePreviewPlainText(line).length:line.length;
   // Keep blank rows with the preceding chunk. A new chunk resets the code parser.
-  if(lines.length&&!blank&&!insideFence&&!row.inheritsContainer&&(breakAfterBlank||length+visible+1>max)){
-   out.push(lines.join('\n'));
-   lines=[];length=0;breakAfterBlank=false;
+  if(row.sourceStart>start&&!blank&&!insideFence&&!row.inheritsContainer&&(breakAfterBlank||length+visible+1>max)){
+   out.push(markup.slice(start,end));
+   start=row.sourceStart;length=0;breakAfterBlank=false;
   }
-  length+=visible+(lines.length?1:0);
-  lines.push(line);
+  length+=visible+(row.sourceStart>start?1:0);
+  end=row.sourceStart+line.length;
   if(blank&&!row.fenced&&length>=Math.trunc(max/2))breakAfterBlank=true;
  }
- if(lines.length)out.push(lines.join('\n'));
+ out.push(markup.slice(start,end));
  return out;
 }
 export function* prepareNotePreviewSteps(markup:string,max=1200,onPrefix?:(blocks:NotePreviewBlock[])=>void):Generator<void,NotePreviewBlock[]>{

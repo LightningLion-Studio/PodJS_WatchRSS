@@ -40,9 +40,9 @@ export function noteTableCodeFragments(lines:readonly string[],codes:readonly {s
 /** Readable block typography; full native inline span styling is a separate layer. */
 export function noteTextRows(markup:string,html:boolean):NoteTextRow[]{
  if(html){const plain=notePreviewPlainText(markup);let start=0;return plain.split('\n').map(text=>{const row={text,role:'body' as const,size:14,lineHeight:20,sourceMarkup:markup,sourceStart:0,mappingText:plain,mappingStart:start};start+=text.length+1;return row;});}
- const result:NoteTextRow[]=[];let sourceStart=0;
+ const result:NoteTextRow[]=[];
  for(const row of noteCodeLines(markup)){
-  const line=row.line,start=sourceStart;sourceStart+=line.length+1;
+  const line=row.line,start=row.sourceStart;
   if(row.kind==='open'||row.kind==='close')continue;
   if(row.kind==='code'){const text=row.text;result.push({text,role:'code',size:13,lineHeight:19,sourceMarkup:text,sourceStart:start+row.offset,mappingText:text,mappingStart:0});continue;}
   const heading=/^(#{1,6})[ \t]+(.*)$/.exec(line),quote=/^>[ \t]?(.*)$/.exec(line),bullet=/^\s*[-*+] (.*)$/.exec(line),ordered=/^ {0,3}(\d{1,9}[.)])[ \t]+(.*)$/.exec(line);

@@ -30,15 +30,28 @@ for(const newline of ['\n','\r\n','\r'])test('Markdown chunks preserve paragraph
  expect(whole).toHaveLength(1);
  expect(markdownRows(whole).map(row=>row.text)).toEqual(lines);
  expect(markdownRows(split)).toEqual(markdownRows(whole));
+ const offsets=noteBlockSourceOffsets(source,split);
+ expect(offsets).toEqual([0,lines[0].length+2*newline.length,1400+5*newline.length]);
+ for(const [index,block] of split.entries()){
+  if(block.kind!=='rich')throw new Error('Expected a Markdown block');
+  const start=offsets[index]!;
+  expect(source.slice(start,start+block.markup.length)).toBe(block.markup);
+  for(const row of noteTextRows(block.markup,false)){
+   const from=start+row.sourceStart;
+   const end=source.indexOf(newline,from);
+   expect(source.slice(from,end<0?source.length:end)).toBe(row.sourceMarkup);
+  }
+ }
 });
 
 test('Markdown chunks preserve indentation and fenced code in list continuations',()=>{
  const item='123. '+'A'.repeat(1190);
- const source=[item,'     ```text','     literal','','     ```','after'].join('\n');
+ const source=[item,'     ```text','     literal','','     ```','after'].join('\r\n');
  const split=prepareNotePreview(source),whole=prepareNotePreview(source,source.length);
  expect(split.length).toBeGreaterThan(1);
  expect(markdownRows(whole).map(row=>row.text)).toEqual([item,'literal','','after']);
  expect(markdownRows(split)).toEqual(markdownRows(whole));
+ expect(noteBlockSourceOffsets(source,split)).toEqual([0,source.lastIndexOf('after')]);
 });
 
 test('HTML list numbering uses actual attributes outside quoted values',()=>{

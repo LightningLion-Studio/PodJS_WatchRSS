@@ -3,7 +3,7 @@
  * retained for storage/chunking and source anchors. This is not a full MD parser. */
 type Container=number|'>';
 interface Fence {marker:string;length:number;containers:Container[];indent:number}
-export interface NoteCodeLine {line:string;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean;inheritsContainer:boolean}
+export interface NoteCodeLine {line:string;sourceStart:number;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean;inheritsContainer:boolean}
 export const noteCodeIndent=(line:string)=>/^ {4}/.test(line)?4:(/^ {0,3}\t/.exec(line)?.[0].length??0);
 function strip(line:string,path:Container[]):number|null{
  let offset=0;
@@ -35,21 +35,24 @@ export function noteFenceCloses(line:string,fence:Fence):boolean{
 }
 export function* noteCodeLines(markup:string):Generator<NoteCodeLine>{
  let fence:Fence|null=null,path:Container[]=[];
- for(const line of markup.replace(/\r\n?/g,'\n').split('\n')){
+ let nextStart=0;
+ for(const line of markup.split(/\r\n?|\n/)){
+  const sourceStart=nextStart,end=sourceStart+line.length;
+  nextStart=end+(markup.startsWith('\r\n',end)?2:1);
   if(fence){
    const from=strip(line,fence.containers);
    if(from!==null){
     const close=noteFenceCloses(line,fence);let offset=from;
     for(let n=0;n<fence.indent&&line[offset]===' ';n++)offset++;
-    yield{line,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true,inheritsContainer:false};
+    yield{line,sourceStart,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true,inheritsContainer:false};
     if(close)fence=null;continue;
    }
    fence=null;
   }
   const ctx=context(line,path);path=ctx.path;
   fence=opener(line,ctx);
-  if(fence){yield{line,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true,inheritsContainer:ctx.inheritsContainer};continue;}
+  if(fence){yield{line,sourceStart,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true,inheritsContainer:ctx.inheritsContainer};continue;}
   const indent=noteCodeIndent(line.slice(ctx.offset)),offset=ctx.offset+indent;
-  yield{line,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false,inheritsContainer:ctx.inheritsContainer};
+  yield{line,sourceStart,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false,inheritsContainer:ctx.inheritsContainer};
  }
 }
