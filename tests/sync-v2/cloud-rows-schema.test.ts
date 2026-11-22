@@ -70,11 +70,11 @@ test('cloud rows schema supports the first foreground projection without a worke
  const db=new SqlFixture(),secure=productCipherHost();
  try{
   const factory=watchLocalProjection({enabled:true,scope,libraryId,accountScope:'cloud-rows',descriptor:{},
-   identity:{installed:async()=>({idKeyHex:hex(idKey)})} as Parameters<typeof watchLocalProjection>[0]['identity'],
-   metadata:{cloudRestoreMetadata:async()=>[]},
-   host:async(method,args)=>{
-    if(method==='sql.query')return await db.query(String(args.sql),args.params as unknown[]) as any;
-    if(method==='sql.transaction')return await db.transaction(args.statements as Parameters<SqlFixture['transaction']>[0]) as any;
+   identity:{installed:async()=>({idKeyHex:hex(idKey)})},
+   metadata:{cloudRestoreMetadata:async()=>({articles:[],next:undefined})},
+   host:async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{
+    if(method==='sql.query')return await db.query(String(args.sql),args.params as unknown[]) as T;
+    if(method==='sql.transaction')return await db.transaction(args.statements as Parameters<SqlFixture['transaction']>[0]) as T;
     return secure.host(method,args);
    },
   });
