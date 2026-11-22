@@ -37,6 +37,7 @@ interface MediaRoutesProps {
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
+  coveredByActions?: () => boolean;
   width: number;
   height: number;
   round: boolean;
@@ -70,7 +71,7 @@ interface MediaRoutesProps {
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
-  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean,mode?:DouyinReloadMode)=>Promise<void>;
+  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean,mode?:DouyinReloadMode,requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeSourceExpired?:boolean)=>Promise<void>;
   rejectDouyinAdjacent:(entry:RouteEntry,id:string,uri?:string,remote?:string,mirrorIndex?:number)=>boolean;
   recoverDouyinVideo: (entry: RouteEntry, manual?: boolean, positionMs?:number, error?:unknown) => Promise<void>;
   recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean,positionMs?:number,error?:unknown) => Promise<void>;
@@ -164,6 +165,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
           restoreStock={()=>douyinStock.restore()}
+          resumePlayback={props.entry.resumeDouyinPlayback}
           onPreloadWindow={(owner,items,anchor,seq)=>{douyinPreload.start(owner,items,anchor??undefined,'entry');void props.primeDouyinEntry?.(props.entry,owner,items,anchor,seq);}}
           onPreloadStop={owner=>{douyinPreload.stop(owner);props.stopDouyinEntry?.(owner);}}
           settings={{
@@ -202,6 +204,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               : props.entry.playback!
           }
           active={props.active()}
+          coveredByActions={props.coveredByActions?.()}
+          onDouyinExit={props.entry.onDouyinExit}
           offset={props.active() ? props.backOffset() : 0}
           offsetVector={props.active() ? props.backTranslation?.() : undefined}
           round={props.round}
@@ -229,7 +233,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
                   ? (position,error) => void props.entry.retryPlayback!(position,{error}).catch(error => props.setError(String(error)))
                   : undefined
           }
-          onReload={(position,current,mode)=>props.reloadVideo(props.entry,position,current,mode)}
+          onReload={(position,current,mode,requireFreshAddress,reuseSavedSource,nativeSourceExpired)=>props.reloadVideo(props.entry,position,current,mode,requireFreshAddress,reuseSavedSource,nativeSourceExpired)}
           onRetry={
             props.entry.retryPlayback
               ? position => props.entry.retryPlayback!(position, {manual:true})

@@ -51,7 +51,7 @@ export class VideoReloadPolicy {
   begin(manual:boolean):ReloadTicket|undefined {
     if(this.running)return;
     if(manual)this.attempts=0;
-    if(!manual&&this.attempts>=2)return;
+    if(!manual&&!this.hasAutomaticAttempt)return;
     this.running=true;this.automatic=!manual;this.requestStarted=false;this.progress=undefined;
     return {revision:++this.revision,waitMs:manual?0:350*Math.pow(2,this.attempts++)};
   }
@@ -60,6 +60,7 @@ export class VideoReloadPolicy {
   finish(ticket:ReloadTicket){if(this.current(ticket))this.running=false;}
   cancel(){if(this.running&&this.automatic&&!this.requestStarted)this.attempts=Math.max(0,this.attempts-1);this.revision++;this.running=false;}
   get busy(){return this.running;}
+  get hasAutomaticAttempt(){return this.attempts<2;}
   observe(generation:number,positionMs:number,playing:boolean){
     if(!playing){this.progress=undefined;return;}
     if(!this.progress||this.progress.generation!==generation||positionMs<this.progress.positionMs)this.progress={generation,positionMs};

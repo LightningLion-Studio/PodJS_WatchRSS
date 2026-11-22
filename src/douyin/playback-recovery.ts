@@ -42,7 +42,7 @@ export class DouyinPlaybackRecovery {
       this.budget.check();
       if(!current())return;
       if(!next)throw new Error('playback_recovery_exhausted');
-      return {...source,url:next,audioUrl:douyinPlaybackAudio(this.item,next),previewOnly:false,recoveryDeadlineMs:this.now()+this.budget.remaining()};
+      return {...source,url:next,expiresAtMs:undefined,douyinReadUrls:undefined,audioUrl:douyinPlaybackAudio(this.item,next),previewOnly:false,recoveryDeadlineMs:this.now()+this.budget.remaining()};
     } finally {this.running=false;}
   }
 }

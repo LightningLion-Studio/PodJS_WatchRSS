@@ -164,6 +164,23 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     });
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
+  const enterFromCover = async () => {
+    const resume = props.resumePlayback;
+    if (!resume || !logged()) return enter();
+    if (!active() || opening()) return;
+    const authorization = props.client.playbackAuthorizationVersion(), revision = generation;
+    const current = () => active() && revision === generation && authorization === props.client.playbackAuthorizationVersion();
+    setOpening(true);
+    let restored = false;
+    try {
+      restored = await resume(current);
+    } catch {
+      if (current()) setError('无法恢复上次播放');
+    } finally {
+      if (current()) setOpening(false);
+    }
+    if (!restored && current()) await enter();
+  };
   benchmark.mark('startup_stage',entrySeq,{startup_stage:'entry_mounted'});
   const preloadOwner={};
   createEffect(()=>{const list=items(),enabled=active();if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
@@ -171,7 +188,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // Local inventory and external intents only select an anchor. A tap/swipe
   // enters the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
   createEffect(()=>{const enabled=props.active??true;if(auth()==='logged-out')setStockPending(false);if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':auth()==='logged-in'&&busy()&&!items().length?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
-  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy< -30||c.dy< -12&&(c.vy??0)< -400)void enter();else if(c.dy>50)void load(true,true);}});
+  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy< -30||c.dy< -12&&(c.vy??0)< -400)void enterFromCover();else if(c.dy>50)void load(true,true);}});
   // Back on the cover after the stream: a stale opening flag must never swallow the next enter.
   createEffect(()=>{if(props.route.name==='entry'&&(props.active??true))untrack(()=>setOpening(false));});
   createEffect(()=>{
@@ -188,8 +205,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   onCleanup(()=>{disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);generation++;loadTimer?.cancel();cancelRetry();gesture.dispose();});
   // Submit no guest scene while restoring: frame zero is the first page content.
   return <Show when={(props.active??true)&&!stockPending()}><ImmersiveEntryContent width={props.width} height={props.height}
-   auth={auth()} hasItems={items().length>0} busy={busy()} slow={slow()} error={error()}
-   onInfo={()=>props.onNavigate({name:"channel-info"})} onRetry={()=>void (retryPlayback?enter():load(true,true))} onEnter={()=>void enter()}/></Show>;
+   auth={auth()} hasItems={items().length>0 || logged() && !!props.resumePlayback} busy={busy()} slow={slow()} error={error()}
+   onInfo={()=>props.onNavigate({name:"channel-info"})} onRetry={()=>void (retryPlayback?enter():load(true,true))} onEnter={()=>void enterFromCover()}/></Show>;
 }
 
 /** Presentation shared by the real entry and the offline screenshot fixture. */

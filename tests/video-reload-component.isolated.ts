@@ -6,9 +6,14 @@ import {registerAnimationTheme,bakedTimelines} from '../node_modules/@pocketjs/f
 import {ENUMS,f32Bits,PROP} from '../node_modules/@pocketjs/framework/contracts/spec/spec.ts';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps, onCleanup } from 'solid-js';
+import type {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
+import type {HttpResponse} from '../src/cloud/types.ts';
+import type {PlaybackSource} from '../src/ui/VideoPlayerScreen.tsx';
+import type {Channel} from '../src/ui/service.ts';
+import type {RouteEntry} from '../src/ui/routes/types.ts';
 import type { InternetStatus } from '../src/onboarding/state.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/(?:VideoPlayerScreen|PlayerLoadingIndicator)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/(?:VideoPlayerScreen|PlayerLoadingIndicator|routes\/media)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>{const child=createMemo(()=>props.children);return {kind,props:mergeProps(props,{get children(){return child();}})};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
@@ -50,10 +55,10 @@ let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any
 const originalNow=Date.now;let fakeNow=originalNow();Date.now=()=>fakeNow;afterAll(()=>{Date.now=originalNow;});
 const due=new Map<()=>void,number>();let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,sourceGeneration:nativeSequence,state:name,positionMs:321,durationMs:['idle','stopped'].includes(name)?0:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
-const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);nativeSequence++;prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
+const video={captureBackdrop:async()=>{},retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);nativeSequence++;prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current={...state('playing'),positionMs:current?.positionMs??0};},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async(positionMs:number)=>current={...current,positionMs},stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoStateChanged:(fn:any)=>{stateEvents.add(fn);return()=>stateEvents.delete(fn);},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:(ms:number)=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);due.set(release,fakeNow+ms);return{result,cancel(){ticks=ticks.filter(t=>t!==release);due.delete(release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,discovery:{networkSnapshot:async()=>({active:false})},onNetworkChange:()=>()=>{},onVideoStateChanged:(fn:any)=>{stateEvents.add(fn);return()=>stateEvents.delete(fn);},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:(ms:number)=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);due.set(release,fakeNow+ms);return{result,cancel(){ticks=ticks.filter(t=>t!==release);due.delete(release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());nativeSequence=0;ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';setHostLifecycle('active');due.clear();});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
@@ -65,16 +70,68 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:string)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeExpired?:boolean)=>Promise<void>,prepareAdjacent?:()=>Promise<undefined>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:string)=>{retries++;if(resolver)await resolver(p,current,mode);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onPrepareAdjacent:prepareAdjacent,onReload:async(p:number,current:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeExpired?:boolean)=>{retries++;if(resolver)await resolver(p,current,mode,requireFreshAddress,reuseSavedSource,nativeExpired);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
  return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();stateEvents.forEach(fn=>fn(current));await flush();};
+const {DouyinClient}=await import('../src/douyin/client.ts');
+const {reloadDouyinPlayback}=await import('../src/douyin/reload-playback.ts');
+const {freshVideoSource}=await import('../src/media/reload-source.ts');
+
+for(const failure of ['none','source_expired','source_resolution'] as const)test(`DYFIRST mock feed first selection: ${failure}`,async()=>{
+ const id='first-video',oldUrl='https://fixture.invalid/old',freshUrl='https://fixture.invalid/fresh';
+ const requests:Array<{path:string;id:string|null}>=[];
+ const row=(url:string)=>({aweme_id:id,video:{play_addr:{url_list:[url]}}});
+ const client=new DouyinClient({
+  secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=synthetic':null,set:async()=>{},remove:async()=>{}},
+  signer:{sign:()=> 'synthetic'},
+  transport:{request:async request=>{
+   const url=new URL(request.url),path=url.pathname,detail=path.endsWith('/detail/');
+   requests.push({path,id:url.searchParams.get('aweme_id')});
+   const data=detail?{aweme_detail:row(freshUrl)}:{aweme_list:requests.length===1?[row(oldUrl)]:[]};
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify(data))};
+  }},
+ });
+ const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
+ if(!feed.ok)throw Error(feed.code);
+ const item=feed.data.items[0]!;
+ expect(item).toMatchObject({awemeId:id,playUrl:oldUrl});
+ const source={platform:'douyin' as const,immersive:true,awemeId:id,title:'fixture',
+  ...(failure==='source_resolution'?{previewOnly:true,preparationError:{code:'source_expired'}}:{url:item.playUrl}),
+ };
+ if(failure==='source_expired')nextError={code:'source_expired'};
+ const player=reloadMount(source,async(position,current,mode)=>{
+  const resolved=await reloadDouyinPlayback(client,id,current,item,mode as Parameters<typeof reloadDouyinPlayback>[4]);
+  if(resolved)player.publish(freshVideoSource(source,{url:resolved.item.playUrl,headers:resolved.headers},position));
+ });
+ await flush();await tick(351);
+ for(let n=0;n<5;n++){await Bun.sleep(1);await flush();}
+ const automatic=current.state==='playing';
+ const retryVisible=player.text().includes('重试');
+ const automaticRequests=requests.slice();
+ if(!automatic&&retryVisible){
+  player.retry();await flush();
+  for(let n=0;n<5;n++){await Bun.sleep(1);await flush();}
+ }
+ const preparedUrls=prepares.map(value=>value.url);
+ console.info('DYFIRST',JSON.stringify({failure,automatic,retryVisible,automaticRequests,requests,preparedUrls,state:current.state}));
+ expect(current.state).toBe('playing');
+ expect(automatic).toBe(true);
+ expect(retryVisible).toBe(false);
+ expect(automaticRequests).toEqual([
+  {path:'/aweme/v2/web/module/feed/',id:null},
+  ...(failure==='none'?[]:[{path:'/aweme/v1/web/aweme/detail/',id}]),
+ ]);
+ expect(preparedUrls).toEqual(failure==='none'?[oldUrl]:failure==='source_expired'?[oldUrl,freshUrl]:[freshUrl]);
+ expect(player.firstFrames()).toBe(1);
+});
+
 test('RELOAD manual failure forces new resolution, releases native state and restores position',async()=>{
  nextError={code:'restricted'};const f=reloadMount();await flush();f.retry();await flush();
  expect(retries).toBe(1);expect(legacyStops).toBeGreaterThan(0);expect(prepares.at(-1)).toMatchObject({url:'https://fixture/new',resumePositionMs:0,bypassCache:true});
@@ -335,12 +392,57 @@ test('NETOVERLAY direct Bluetooth media loading shows an advisory without blocki
  createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return createComponent(VideoPlayerScreen,{source:{platform:'douyin',immersive:true,url:'podjs-media-cache://fixture',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
  await flush();expect(plays).toBe(1);expect(prepares).toHaveLength(1);expect(scope.blocking).toBe(false);expect(scope.bluetooth).toBe(true);
 });
-test('NOPLAY a rendered but nonloading buffered player gets a bounded normal reload',async()=>{
- const f=reloadMount({platform:'douyin',immersive:true,awemeId:'buffered-stall',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
- current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+test('RVDYA2-01 a rendered but nonloading buffered player resumes from the same valid feed address',async()=>{
+ const id='buffered-stall',url='https://fixture.invalid/stall.mp4?expires=4102444800';
+ const paths:string[]=[];
+ const client=new DouyinClient({
+  secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=synthetic':null,set:async()=>{},remove:async()=>{}},
+  signer:{sign:()=> 'synthetic'},
+  transport:{request:async request=>{
+   paths.push(new URL(request.url).pathname);
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({aweme_list:[{aweme_id:id,video:{play_addr:{url_list:[url]}}}]}))};
+  }},
+ });
+ const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
+ if(!feed.ok)throw Error(feed.code);
+ const source={platform:'douyin' as const,immersive:true,awemeId:id,url,title:'fixture'};
+ const f=reloadMount(source,async(position,guard,mode)=>{
+  const resolved=await reloadDouyinPlayback(client,id,guard,feed.data.items[0]!,mode);
+  if(resolved)f.publish(freshVideoSource(source,{url:resolved.item.playUrl,headers:resolved.headers},position));
+ });
+ await flush();expect(f.firstFrames()).toBe(1);
+ current={...state('paused'),positionMs:321,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
  stateEvents.forEach(fn=>fn(current));await flush();await tick(19999);expect(retries).toBe(0);
- await tick(1);await tick(351);expect(retries).toBe(1);expect(prepares.at(-1)).toMatchObject({bypassCache:true,resumePositionMs:1});
+ await tick(1);await tick(351);
+ for(let n=0;n<10&&current.state!=='playing';n++){await Bun.sleep(1);await flush();}
+ expect(retries).toBe(1);
+ expect(paths).toEqual(['/aweme/v2/web/module/feed/','/aweme/v2/web/module/feed/']);
+ expect(prepares).toHaveLength(2);
+ expect(prepares[1]).toMatchObject({url,bypassCache:true,resumePositionMs:321});
+ expect(current.state).toBe('playing');
 });
+for(const expired of [false,true])test(`DYFAV FIX2 saved buffered stall after detail uses ${expired?'detail for expiry':'the same valid source'}`,async()=>{
+ const previous={platform:'douyin' as const,awemeId:'saved-buffered-stall',savedPlayback:true,detailPlayback:true,title:'fixture',url:'https://fixture/old'};
+ const active={...previous,url:'https://fixture/active',expiresAtMs:fakeNow+(expired?10_000:60_000)};
+ const refreshed={...active,url:'https://fixture/refreshed',expiresAtMs:fakeNow+60_000};
+ const modes:(string|undefined)[]=[];
+ nextError={code:'source_expired'};
+ const f=reloadMount(previous,async(position,current,mode)=>{
+  modes.push(mode);
+  if(current())f.publish({...((modes.length===1||!expired)?active:refreshed),resumePositionMs:position});
+ });
+ await flush();await tick(351);
+ expect(modes).toEqual(['detail']);
+ expect(current.state).toBe('playing');
+ expect(f.firstFrames()).toBe(1);
+ current={...state('paused'),positionMs:321,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
+ stateEvents.forEach(fn=>fn(current));await flush();await tick(20_000);await tick(701);
+ expect(modes).toEqual(['detail',expired?'detail':'feed']);
+ expect(prepares.at(-1)).toMatchObject({url:expired?refreshed.url:active.url,resumePositionMs:321});
+ expect(current.state).toBe('playing');
+ expect(f.text()).not.toContain('重试');
+});
+
 test('NOPLAY a fresh native progress read cancels a stale buffered stall observation',async()=>{
  reloadMount({platform:'douyin',immersive:true,awemeId:'fresh-progress',url:'file:///fixture/stall.mp4',title:'fixture'});await flush();
  current={...state('paused'),positionMs:1,durationMs:571745,hasRenderedFirstFrame:true,playWhenReady:true,nativePlaybackState:2,isBuffering:true,loading:false,bufferedMs:4156};
@@ -358,6 +460,22 @@ test('NOPLAY buffered-stall recovery keeps the two-attempt budget and an explici
   if(i<2)expect((await f.diagnostics()).reloadCount).toBe(i+1);
  }
  expect(f.text()).toContain('播放失败');await tick(60000);expect(retries).toBe(2);
+});
+
+for(const nativeFailure of [false,true])test(`DYFAV FIX4 a rejected detail binding retries the feed with the original expiry provenance (${nativeFailure})`,async()=>{
+ const source={platform:'douyin' as const,immersive:true,awemeId:'after-registration',url:'https://fixture.invalid/old',
+  title:'fixture',expiresAtMs:nativeFailure?undefined:fakeNow-1};
+ const attempts:Array<{mode?:string;fresh?:boolean;native?:boolean}>=[];
+ nextError={code:nativeFailure?'source_expired':'prepare_failed'};
+ const f=reloadMount(source,async(position,guard,mode,fresh,_reuse,native)=>{
+  attempts.push({mode,fresh,native});
+  if(mode==='detail')throw {code:'source_expired'};
+  if(guard())f.publish({...source,url:'https://fixture.invalid/fresh',expiresAtMs:undefined,resumePositionMs:position});
+ });
+ await flush();await tick(351);await flush();
+ expect(attempts).toEqual([{mode:'detail',fresh:true,native:nativeFailure},{mode:'feed',fresh:true,native:nativeFailure}]);
+ expect(prepares.map(value=>value.url)).toEqual([source.url,'https://fixture.invalid/fresh']);
+ expect(current.state).toBe('playing');
 });
 
 test('NOPLAY an automatic Douyin resolution timeout uses the remaining bounded retry',async()=>{
@@ -382,11 +500,11 @@ test('NOPLAY reload attempts remain readable while the resolver has no native st
  await flush();await tick(351);expect(f.reloadAttempts()).toBe(1);await tick(20001);await tick(701);expect(f.reloadAttempts()).toBe(2);
 });
 
-test('NOPLAY only an automatic unexpired Douyin timeout may retry the current source',async()=>{
+test('NOPLAY a first timeout can reuse an unexpired source; an expired source requests detail',async()=>{
  for(const [expiry,reuse]of [[4102444800,true],[1000000000,false]]as const){
   nextError={code:'timeout'};let f:ReturnType<typeof reloadMount>;const flags:unknown[]=[];
   f=reloadMount({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/current?x-expires='+expiry,title:'fixture'},async(position,current,retryCurrent)=>{flags.push(retryCurrent);if(current())f.publish({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/valid',title:'fixture',resumePositionMs:position});});
-  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'feed']);
+  await flush();await tick(351);expect(flags).toEqual([reuse?'current':'detail']);
  }
 });
 
@@ -483,13 +601,19 @@ test('session decoder admission recovery keeps the session backend and same sour
  }finally{sessionPort.prepare=original;}
 });
 
-test('manual Douyin retry selects detail resolution',async()=>{
+test('manual Douyin retry starts with feed and accepts the same valid address',async()=>{
  nextError={code:'restricted'};
- const source={platform:'douyin',immersive:true,awemeId:'manual',url:'https://fixture.invalid/old',title:'fixture'};
+ const source={platform:'douyin' as const,immersive:true,awemeId:'manual',url:'https://fixture.invalid/old',title:'fixture'};
  const modes:unknown[]=[];
- const player=reloadMount(source,async(_position,_current,mode)=>{modes.push(mode);throw {code:'RATE_LIMITED'};});
+ const player=reloadMount(source,async(position,current,mode,requireFreshAddress)=>{
+  modes.push([mode,requireFreshAddress]);
+  expect(current()).toBe(true);
+  player.publish({...source,resumePositionMs:position});
+ });
  await flush();player.retry();await flush();
- expect(modes).toEqual(['detail']);
+ expect(modes).toEqual([['feed',false]]);
+ expect(prepares.at(-1)?.url).toBe(source.url);
+ expect(current.state).toBe('playing');
 });
 test('manual local resource retry keeps the selected source and requests cache-only native preparation',async()=>{
  for(const cause of [{code:'video_decoder_limit'},{name:'ByteAdmissionDenied'},{code:'resource_exhausted'}]){
@@ -516,18 +640,35 @@ test('resource cache miss stays on the same video without scheduling a feed or d
  expect(prepares[1]).toMatchObject({url:source.url,cacheOnlyPrepare:true,bypassCache:false});
  expect(retries).toBe(0);expect(player.text()).toContain('当前视频缓存不足');
 });
-test('a failed fresh manual detail prepare does not fall through to the recommendation feed',async()=>{
+test('manual retry can fall back to detail once when feed has no usable source',async()=>{
  nextError={code:'restricted'};
  const source={platform:'douyin',immersive:true,awemeId:'manual-failed',url:'https://fixture.invalid/old',title:'fixture'};
  const modes:unknown[]=[];
  const player=reloadMount(source,async(_position,current,mode)=>{
   modes.push(mode);
+  if(mode==='feed')throw {code:'TEMPORARILY_UNAVAILABLE'};
   nextError={code:'source_expired'};
   if(current())player.publish({...source,url:'https://fixture.invalid/fresh'});
  });
  await flush();player.retry();await flush();await tick(3000);
- expect(modes).toEqual(['detail']);
+ expect(modes).toEqual(['feed','detail']);
  expect(player.text()).toContain('重试');
+});
+
+test('rejecting a detail address combination leaves the original expiry and one feed attempt',async()=>{
+ nextError={code:'source_expired'};
+ const source={platform:'douyin' as const,immersive:true,awemeId:'expired-candidate',url:'podjs-media-cache://play/old',title:'fixture'};
+ const calls:unknown[]=[];
+ const player=reloadMount(source,async(position,guard,mode,requireFreshAddress)=>{
+  calls.push([mode,requireFreshAddress]);
+  if(mode==='detail')throw {code:'source_expired'};
+  if(guard())player.publish({...source,url:'podjs-media-cache://play/renewed',resumePositionMs:position});
+ });
+ await flush();await tick(351);
+ expect(calls).toEqual([['detail',true],['feed',true]]);
+ expect(player.reloadAttempts()).toBe(2);
+ expect(prepares.at(-1)?.url).toBe('podjs-media-cache://play/renewed');
+ expect(current.state).toBe('playing');
 });
 
 test('PERFVIDEO repeated resource denial exhausts the finite cache-only retry budget',async()=>{
@@ -545,4 +686,127 @@ test('PERFVIDEO repeated resource denial exhausts the finite cache-only retry bu
  expect(player.text()).toContain('重试');
  expect(retries).toBe(0);
  nextError=undefined;
+});
+
+
+test('RVDY1332-A2 production route registers feed recovery after detail 429 and delivers the native first frame',async()=>{
+ const id='selected',oldUrl='https://fixture.invalid/old?x-expires=1000000000',freshUrl='https://fixture.invalid/fresh';
+ const uri='podjs-media-cache://play/recovered';
+ const requests:string[]=[],registered:Array<{key:string;url:string;limit?:number}>=[],firstFrames:string[]=[];
+ const reloadAddressRequirements:Array<boolean|undefined>=[];
+ const values=new Map([['douyin.cookie','sessionid=synthetic']]);
+ const row=(awemeId:string,url:string)=>({aweme_id:awemeId,video:{play_addr:{url_list:[url]}}});
+ const client=new DouyinClient({
+  secureStorage:{get:async key=>values.get(key)??null,set:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}},
+  signer:{sign:()=> 'synthetic'},
+  transport:{request:async (request):Promise<HttpResponse>=>{
+   const url=new URL(request.url);
+   requests.push(url.pathname);
+   if(url.pathname.endsWith('/detail/')){
+    expect(url.searchParams.get('aweme_id')).toBe(id);
+    return {status:429,headers:{'retry-after':'60'},body:new Uint8Array()};
+   }
+   const aweme_list=requests.length===1?[row(id,oldUrl)]:[row('unrelated','https://fixture.invalid/other'),row(id,freshUrl)];
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({aweme_list}))};
+  }},
+ });
+ const hostOperation=<T>(value:T)=>({result:Promise.resolve(value),cancel(){}});
+ mock.module('@podjs/framework/media-prefix-cache',()=>({
+  localMediaStore:{},mediaPrefixCache:{
+   register:(...args:Parameters<typeof mediaPrefixCache.register>)=>{
+    const [key,url,,,,,,limit]=args;
+    registered.push({key,url,limit});return hostOperation({uri});
+   },
+   stage:(...args:Parameters<typeof mediaPrefixCache.stage>)=>{
+    const [key,url,,,,,,limit]=args;
+    registered.push({key,url,limit});return hostOperation({uri,stageId:'fixture'});
+   },
+   commit:()=>hostOperation({uri}),discard:()=>hostOperation(undefined),
+   window:()=>hostOperation(undefined),remove:()=>hostOperation(undefined),
+  },
+ }));
+ mock.module('../src/cache/host.ts',()=>({managedCache:{registerProducer(){},stats:async()=>({bucketBytes:{}})}}));
+ mock.module('../src/ui/bili/index.tsx',()=>({BiliScreen:()=>null}));
+ mock.module('../src/ui/douyin/index.tsx',()=>({DouyinScreen:()=>null}));
+ mock.module('../src/ui/PlatformNotice.tsx',()=>({PendingDisclosure:()=>null}));
+ mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
+ const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
+ const preload=createHostDouyinPreload(client);
+ mock.module('../src/media-services.ts',()=>({
+  douyinClient:client,douyinPreload:preload,douyinStock:{consume:(key:string)=>firstFrames.push(key)},
+  biliClient:{},biliPreviewCache:{},loadLocalBiliDetail:async()=>undefined,
+ }));
+ const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
+ const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
+ type ControllerDependencies=Parameters<typeof createMediaRouteController>[0];
+ const feed=await client.fetchFeedPage({count:1,publishBeforeSave:true});
+ if(!feed.ok)throw Error(feed.code);
+ const selected=feed.data.items[0]!;
+ const [stack,setStack]=createSignal<RouteEntry[]>([{page:'douyin',douyinRoute:{name:'entry'}}]);
+ const [playingSource,setPlayingSource]=createSignal<PlaybackSource>();
+ const [busy,setBusy]=createSignal(false),[error,setError]=createSignal('');
+ const [channels,setChannels]=createSignal<Channel[]>([]);
+ const [,setOriginalModes]=createSignal<Record<string,boolean>>({});
+ const controller=createRoot(stop=>{
+  stops.push(stop);
+  return createMediaRouteController({current:()=>stack().at(-1)!,busy,setBusy,setError,playingSource,setPlayingSource,
+   motion:{phase:'idle'},channels,setChannels,setOriginalModes,setStack,setPage:(page,data)=>{setStack(entries=>[...entries,{page,...data}]);},popPage:()=>false,
+   settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as ReturnType<ControllerDependencies['settings']>,
+   services:{} as ControllerDependencies['services'],
+  });
+ });
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();current=state('idle');
+ const prepare=sessionPort.prepare;
+ let nativeFrame:Awaited<ReturnType<typeof prepare>['result']>|undefined;
+ sessionPort.prepare=options=>{
+  const operation=prepare(options);
+  return {...operation,result:operation.result.then(value=>{
+   nativeFrame={...value,sourceGeneration:1,hasRenderedFirstFrame:true,presented:true};
+   const pending={...nativeFrame,hasRenderedFirstFrame:false};
+   sessionStates.set(options.sessionId,pending);
+   return pending;
+  })};
+ };
+ const until=async(predicate:()=>boolean)=>{
+  const deadline=performance.now()+1500;
+  while(!predicate()&&performance.now()<deadline){await Bun.sleep(1);await flush();}
+  expect(predicate()).toBe(true);
+ };
+ try{
+  controller.douyinPlay({item:selected,playback:selected,playlist:[selected],hasMore:false,immersive:true,entrySeq:101});
+  await controller.douyinNavigate({name:'player',awemeId:id});
+  const entry=stack().at(-1)!;
+  expect(entry).toMatchObject({page:'video',playback:{awemeId:id,previewOnly:true}});
+  expect(registered).toEqual([]);
+  const root=createRoot(stop=>{
+   stops.push(stop);
+   return MediaRoutes({...controller,entry,playingSource,page:()=>entry.page,active:()=>true,width:233,height:233,round:true,backOffset:()=>0,setError,
+    reloadVideo:(target:RouteEntry,position:number,guard:()=>boolean,mode?:Parameters<typeof reloadDouyinPlayback>[4],requireFreshAddress?:boolean,reuseSavedSource?:boolean,nativeSourceExpired?:boolean)=>{
+     reloadAddressRequirements.push(requireFreshAddress);
+     return controller.reloadVideo(target,position,guard,mode,requireFreshAddress,reuseSavedSource,nativeSourceExpired);
+    },
+    services:{} as Parameters<typeof MediaRoutes>[0]['services'],
+   } as unknown as Parameters<typeof MediaRoutes>[0]);
+  });
+  nodes(root);await flush();await tick(351);
+  await until(()=>nativeFrame!==undefined);
+  expect(requests).toEqual(['/aweme/v2/web/module/feed/','/aweme/v1/web/aweme/detail/','/aweme/v2/web/module/feed/']);
+  expect(reloadAddressRequirements).toEqual([true,true]);
+  expect(registered).toEqual([{key:id,url:freshUrl,limit:720}]);
+  expect(entry.player?.reloadAttempts?.()).toBe(2);
+  expect(sessionCalls.filter(call=>call.method==='prepare')).toMatchObject([{url:uri,bypassCache:false,autoplay:true,respectSilentMode:true}]);
+  expect(entry.queue?.itemAtOffset()).toMatchObject({awemeId:id,playUrl:freshUrl});
+  expect(firstFrames).toEqual([]);
+  expect(entry.douyinEntrySeq).toBe(101);
+  const frame=nativeFrame!;
+  sessionStates.set(frame.sessionId,frame);
+  frameEvents.forEach(callback=>callback(frame));
+  await flush();
+  expect(firstFrames).toEqual([id]);
+  expect(entry.douyinEntrySeq).toBeUndefined();
+  expect(error()).toBe('');
+  expect(nodes(root).some(node=>node.props.children==='重试')).toBe(false);
+  expect(await client.fetchDetail(id,{forceRefresh:true,freshRequest:true})).toMatchObject({ok:false,retryAfterMs:60_000});
+  expect(requests).toHaveLength(3);
+ }finally{sessionPort.prepare=prepare;}
 });

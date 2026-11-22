@@ -83,6 +83,7 @@ function sanitizedDouyinRoute(value: unknown): Record<string, unknown> | null {
     if (item && JSON.stringify(item).length <= 4096 && ["detail", "actions", "share"].includes(name)) route.item = { ...item, playUrl: "" };
   }
   if (["detail", "actions", "share"].includes(name) && !awemeId) return null;
+  if (name === "detail" && raw.savedPlayback === true) route.savedPlayback = true;
   return route;
 }
 

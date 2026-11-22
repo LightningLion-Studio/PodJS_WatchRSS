@@ -3,11 +3,17 @@ let jankStateChanged:(v:any)=>void=()=>{};
 import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
-import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
+import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps, batch, For, type JSX } from 'solid-js';
 import { dispatchMemoryPressure } from '@podjs/framework/memory';
 import type { InternetStatus } from '../src/onboarding/state.ts';
+import type { DouyinItem } from '../src/douyin/types.ts';
+import { DouyinClient } from '../src/douyin/client.ts';
+import type { DouyinScreenProps } from '../src/ui/douyin/index.tsx';
+import type { Channel } from '../src/ui/service.ts';
+import type { RouteEntry } from '../src/ui/routes/types.ts';
+import type { PlaybackSource, VideoPlayerHandle } from '../src/ui/VideoPlayerScreen.tsx';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/VideoPlayerScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'d2-player-solid',setup(builder){builder.onLoad({filter:/\/ui\/(?:VideoPlayerScreen|HomeScreen|douyin\/ImmersiveEntry|routes\/(?:home|media))\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
@@ -50,7 +56,7 @@ const sessionPort={
 let sessionsCapable=false,decoderLimit=1,independentKeyframes=false,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
-mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},playbackUrl:(_id:string,url:string)=>url,bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
 let network:(s:InternetStatus)=>void=()=>{},initial:InternetStatus='available';
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(fn:typeof network)=>{network=fn;fn(initial);return()=>{};}}));
 let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
@@ -59,10 +65,10 @@ let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any
 let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 let captured=0,sampled=0;mock.module('@podjs/framework/render-checkpoint',()=>({renderCheckpoint:()=>++sampled}));
-const video={captureFrame:async()=>{captured++;return {available:true};},retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
+const video={captureBackdrop:async()=>{},captureFrame:async()=>{captured++;return {available:true};},retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoProgress:(fn:any)=>{compactTick=fn;return ()=>{if(compactTick===fn)compactTick=()=>{};};},onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onNetworkChange:()=>()=>{},onVideoProgress:(fn:any)=>{compactTick=fn;return ()=>{if(compactTick===fn)compactTick=()=>{};};},onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:independentKeyframes?3:decoderLimit,independentKeyframes,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;independentKeyframes=false;lifecycleState='active';});
 let deliveredNativeState:any;
@@ -1297,4 +1303,382 @@ test('PERFVIDEO reports the real frame for its native generation after cached pi
   expect(live()[0]).toMatchObject({seq:17,source_generation:71});
   expect(presented).toBe(1);
  }finally{globals.pod=saved;}
+});
+
+for (const playing of [true, false]) test(`DYFAV local actions retain the selected decoder and ${playing ? 'playing' : 'paused'} state`, async () => {
+  const { DouyinActionsController } = await import('../src/douyin/actions.ts');
+  initial = 'available'; prepares = []; plays = 0; legacyStops = 0; gestures.length = 0; boundsCalls.length = 0;
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'favorite', url: 'https://mock.invalid/favorite', title: 'favorite' };
+  const [covered, setCovered] = createSignal(false);
+  let saved = false, detailRequests = 0;
+  const item: DouyinItem = {
+    awemeId: source.awemeId, playUrl: source.url, description: 'fixture', authorName: 'fixture',
+    authorId: '', createdAtSeconds: 0, durationMs: 1000, variants: [],
+    likeCount: 0, commentCount: 0, shareCount: 0, collectCount: 0,
+  };
+  const actions = new DouyinActionsController({
+    fetchDetail: async () => { detailRequests++; return { ok: false, code: 'REQUEST_FAILED', message: 'offline' }; },
+    getSavedState: async () => ({ favorite: saved, watchLater: false }),
+    toggleSaved: async () => (saved = !saved),
+  }, source.awemeId, item, () => {}, () => setCovered(false));
+  let handle!: VideoPlayerHandle;
+  createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      source, width: 233, height: 233, round: true, offset: 0,
+      get active() { return !covered(); },
+      get coveredByActions() { return covered(); },
+      onActions: () => setCovered(true),
+      ref: value => { handle = value; },
+    });
+  });
+  await flush();
+  if (!playing) await handle.shellPlaying(false);
+  current = { ...current, positionMs: 4567 };
+  jankStateChanged(current);
+  gestures[0].onLongPress();
+  await flush();
+  expect(boundsCalls.at(-1)?.visible).toBe(false);
+  await actions.load();
+  await actions.toggle('favorite');
+  await flush();
+  expect(saved).toBe(true);
+  expect(prepares).toHaveLength(1);
+  expect(legacyStops).toBe(0);
+  expect(detailRequests).toBe(0);
+  expect(boundsCalls.at(-1)?.visible).toBe(true);
+  expect(await handle.shellState()).toMatchObject({ state: playing ? 'playing' : 'paused', positionMs: 4567 });
+});
+
+test('DYFAV decoder release restores a paused position with a cover until a frame arrives', async () => {
+  initial = 'available'; prepares = []; plays = 0;
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'resume', url: 'https://mock.invalid/resume', posterUrl: 'https://mock.invalid/cover', title: 'resume', resumePositionMs: 4321, resumePaused: true };
+  let finish!: (value: ReturnType<typeof state>) => void;
+  heldPrepare = new Promise(resolve => { finish = resolve; });
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({ source, width: 233, height: 233, round: true, offset: 0, active: true });
+  });
+  await flush();
+  expect(nodes(root).find(n => n.kind === 'Poster')?.props.url).toBe(source.posterUrl);
+  current = { ...state('paused'), positionMs: 4321, hasRenderedFirstFrame: true };
+  finish(current);
+  await flush();
+  expect(prepares[0].resumePositionMs).toBe(4321);
+  expect(plays).toBe(0);
+  expect(nodes(root).filter(n => n.kind === 'Poster')).toHaveLength(0);
+});
+
+test('DYFAV rejects a stale saved stream with a single detail reload', async () => {
+  initial = 'available'; prepares = [];
+  const a = { platform: 'douyin' as const, awemeId: 'saved', url: 'https://mock.invalid/stale', title: 'saved', detailPlayback: true, savedPlayback: true };
+  const [source, setSource] = createSignal(a);
+  const modes: unknown[] = [];
+  nextError = { code: 'source_expired' };
+  createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      get source() { return source(); }, width: 233, height: 233, round: true, offset: 0, active: true,
+      onReload: (_position, _current, mode) => {
+        modes.push(mode);
+        setSource({ ...a, url: 'https://mock.invalid/fresh' });
+      },
+    });
+  });
+  await flush();
+  for (let i = 0; i < 3; i++) { ticks.splice(0).forEach(tick => tick()); await flush(); }
+  expect(modes).toEqual(['detail']);
+  expect(prepares.map(value => value.url)).toEqual([a.url, 'https://mock.invalid/fresh']);
+});
+
+
+test('DYFAV session player keeps the active decoder under actions and evicts its neighbour', async () => {
+  sessionsCapable = true;
+  decoderLimit = 3;
+  initial = 'available';
+  sessionCalls.length = 0;
+  const [covered, setCovered] = createSignal(false);
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'session', url: 'https://mock.invalid/session', title: 'session' };
+  const next = { ...source, awemeId: 'next', url: 'https://mock.invalid/next' };
+  const released: string[] = [], placements: { id: string; visible: boolean }[] = [];
+  const release = sessionPort.release, bounds = sessionPort.setBounds;
+  Object.assign(sessionPort, {
+    release: async (id: string) => { released.push(id); return release(); },
+    setBounds: async (id: string, value: { visible: boolean }) => { placements.push({ id, visible: value.visible }); return bounds(id); },
+  });
+  try {
+    let handle!: VideoPlayerHandle;
+    createRoot(stop => {
+      stops.push(stop);
+      return VideoPlayerScreen({
+        source, width: 233, height: 233, round: true, offset: 0,
+        get active() { return !covered(); },
+        get coveredByActions() { return covered(); },
+        onAdjacentKey: direction => direction === 'next' ? next.awemeId : undefined,
+        onPrepareAdjacent: async () => ({ key: next.awemeId, source: next }),
+        ref: value => { handle = value; },
+      });
+    });
+    await flush();
+    const prepares = () => sessionCalls.filter(value => value.method === 'prepare');
+    const activeId = prepares().find(value => !value.prewarm).sessionId;
+    const neighbourId = prepares().find(value => value.prewarm).sessionId;
+    setCovered(true);
+    await flush();
+    expect(placements.at(-1)).toEqual({ id: activeId, visible: false });
+    expect(released).toContain(neighbourId);
+    expect(released).not.toContain(activeId);
+    setCovered(false);
+    await flush();
+    expect(placements.at(-1)).toEqual({ id: activeId, visible: true });
+    expect(prepares().filter(value => !value.prewarm)).toHaveLength(1);
+    expect(await handle.shellState()).toMatchObject({ state: 'playing' });
+  } finally {
+    Object.assign(sessionPort, { release, setBounds: bounds });
+  }
+});
+
+test('DYFAV pressure under actions can release and seek without starting a paused video', async () => {
+  initial = 'available'; prepares = []; plays = 0; legacyStops = 0;
+  const globals = globalThis as typeof globalThis & { pod?: { memoryBudgetBytes?: () => number } };
+  const originalPod = globals.pod;
+  globals.pod = { ...originalPod, memoryBudgetBytes: () => 256_000_000 };
+  const source = { platform: 'douyin' as const, immersive: true, awemeId: 'trim', url: 'https://mock.invalid/trim', posterUrl: 'https://mock.invalid/cover', title: 'trim' };
+  const [covered, setCovered] = createSignal(false);
+  let handle!: VideoPlayerHandle;
+  const root = createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      source, width: 233, height: 233, round: true, offset: 0,
+      get active() { return !covered(); },
+      get coveredByActions() { return covered(); },
+      ref: value => { handle = value; },
+    });
+  });
+  await flush();
+  await handle.shellPlaying(false);
+  current = { ...current, positionMs: 654 };
+  jankStateChanged(current);
+  setCovered(true);
+  try {
+    dispatchMemoryPressure({ t: 'memory.pressure', level: 2 });
+    await flush();
+    expect(legacyStops).toBe(1);
+    let finish!: (value: ReturnType<typeof state>) => void;
+    heldPrepare = new Promise(resolve => { finish = resolve; });
+    setCovered(false);
+    await flush();
+    expect(nodes(root).find(n => n.kind === 'Poster')?.props.url).toBe(source.posterUrl);
+    expect(prepares.at(-1).resumePositionMs).toBe(654);
+    current = { ...state('paused'), positionMs: 654, hasRenderedFirstFrame: true };
+    finish(current);
+    await flush();
+    expect(plays).toBe(1);
+    expect(await handle.shellState()).toMatchObject({ state: 'paused', positionMs: 654 });
+  } finally {
+    dispatchMemoryPressure({ t: 'memory.pressure', level: 0 });
+    globals.pod = originalPod;
+  }
+});
+
+const routeItem = (awemeId: string): DouyinItem => ({
+  awemeId, description: awemeId, authorName: 'fixture', authorId: '', createdAtSeconds: 0,
+  likeCount: 0, commentCount: 0, shareCount: 0, collectCount: 0, durationMs: 1000, variants: [],
+  playUrl: `https://mock.invalid/${awemeId}`, coverUrl: 'https://mock.invalid/cover',
+});
+
+async function productionRoutes() {
+  const a = routeItem('route-a'), b = routeItem('route-b');
+  const values = new Map<string, string>();
+  const requests: string[] = [];
+  let auth = 1;
+  const client = new DouyinClient({
+    secureStorage: { get: async key => values.get(key) ?? null, set: async (key, value) => { values.set(key, value); }, remove: async key => { values.delete(key); } },
+    transport: { request: async () => { throw new Error('unexpected real transport'); } },
+  });
+  client.authState = () => 'logged-in';
+  client.isLoggedIn = async () => true;
+  client.playbackAuthorizationVersion = () => auth;
+  let headers: () => Promise<Record<string, string>> = async () => ({});
+  client.buildPlaybackHeaders = () => headers();
+  client.fetchFeedPage = async () => ({ ok: true, data: { items: [a, b], nextCursor: null, hasMore: false } });
+
+  mock.module('../src/media-services.ts', () => ({
+    douyinClient: client, douyinStock: { restore: async () => [a,b], consume() {}, resume: async () => {}, suspend() {} },
+    douyinPreload: {
+      readySource: async () => undefined, lookup: async () => undefined, restoreFrame: async () => ({ available: false }),
+      playback: async (item: DouyinItem) => item.playUrl, playbackResolved: async (item: DouyinItem) => item.playUrl,
+      invalidate: async () => {}, start() {}, stop() {}, allowBluetooth() {},
+    },
+    biliClient: {}, biliPreviewCache: {}, loadLocalBiliDetail: async () => undefined,
+  }));
+  mock.module('../src/cache/host.ts', () => ({ managedCache: {} }));
+  mock.module('../src/services.ts', () => ({ clearLocalPrivateLibrary: async () => {} }));
+  mock.module('../src/cloud/application.ts', () => ({
+    applicationCloudActions: {}, manualCloudSync: async () => {},
+    applicationCloudApproval: {}, applicationCloudApprover: {}, applicationCloudHandoff: {},
+    applicationSyncV2Ui: {}, applicationSyncV2OwnDeviceId: () => undefined,
+  }));
+  mock.module('../src/cloud/status.ts', () => ({ readCloudAccountStatus: () => undefined, subscribeCloudAccountStatus: () => () => {} }));
+  mock.module('../src/ui/PlatformNotice.tsx', () => ({ PendingDisclosure: () => null, platformNoticeEntry: () => ({ height: 45, render: () => null }) }));
+  mock.module('../src/ui/entry-disclosure.ts', () => ({ entryDisclosure: () => ({ pending: () => undefined }) }));
+  mock.module('../src/ui/ScrollEntries.tsx', () => ({
+    ScrollEntries: (p: { entries: { render(): unknown }[] }) => element('List', { children: createMemo(() => p.entries.map(entry => entry.render())) }),
+  }));
+  for (const [path, name] of [
+    ['../src/ui/AccountStatusScreen.tsx', 'AccountStatusScreen'],
+    ['../src/ui/CloudSyncScreen.tsx', 'CloudSyncScreen'],
+    ['../src/ui/SyncV2Screen.tsx', 'SyncV2Screen'],
+    ['../src/ui/PhoneConnectionScreen.tsx', 'PhoneConnectionScreen'],
+    ['../src/ui/ProfileScreen.tsx', 'ProfileScreen'],
+    ['../src/ui/DeleteConfirmDialog.tsx', 'DeleteConfirmDialog'],
+    ['../src/ui/WatchProgressIndicator.tsx', 'WatchProgressIndicator'],
+    ['../src/ui/bili/index.tsx', 'BiliScreen'],
+  ]) mock.module(path!, () => ({ [name!]: () => null }));
+
+  const { ImmersiveEntry } = await import('../src/ui/douyin/ImmersiveEntry.tsx');
+  mock.module('../src/ui/douyin/index.tsx', () => ({
+    DouyinScreen: (props: DouyinScreenProps) => props.route.name === 'entry' ? createComponent(ImmersiveEntry, props)
+      : element('View', { accessibilityLabel: '取消', onPress: props.onBack }),
+  }));
+  const { HomeRoutes } = await import('../src/ui/routes/home.tsx');
+  const { MediaRoutes } = await import('../src/ui/routes/media.tsx');
+  const { createMediaRouteController } = await import('../src/ui/routes/media-controller.ts');
+  const { backStackSize } = await import('../src/navigation/back-target.ts');
+  const channel: Channel = { id: 'douyin', title: '抖音', url: 'builtin:douyin' };
+
+  initial = 'available'; prepares = []; plays = 0; legacyStops = 0; ticks = []; gestures.length = 0; current = state('idle');
+  const [stack, setStack] = createSignal<RouteEntry[]>([{ page: 'home' }]);
+  const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
+  const activeRoute = () => stack().at(-1)!;
+  const back = () => {
+    const size = backStackSize(stack());
+    for (const entry of stack().slice(size)) entry.queue?.cancel();
+    batch(() => {
+      setStack(before => before.slice(0, size));
+      setPlayingSource(activeRoute().playback);
+    });
+    return true;
+  };
+
+  const root = createRoot(stop => {
+    stops.push(stop);
+    const [busy, setBusy] = createSignal(false), [, setError] = createSignal('');
+    const [channels, setChannels] = createSignal([channel]), [, setOriginalModes] = createSignal<Record<string, boolean>>({});
+    const controller = createMediaRouteController({
+      services: {} as never, current: activeRoute, motion: { phase: 'idle' } as never,
+      busy, setBusy, setError,
+      settings: () => ({ mediaVolumeControl: true, mediaVolumeGuard: false, playbackStartVolumeLimit: null }) as never,
+      playingSource, setPlayingSource, channels, setChannels, setOriginalModes, setStack, popPage: back,
+      setPage: (page, data) => { setStack(previous => [...previous, { page, ...data }]); },
+    });
+    return createComponent(For<RouteEntry[], JSX.Element>, {
+      get each() { return stack(); },
+      children: entry => entry.page === 'home'
+        ? createComponent(HomeRoutes, {
+          entry, page: () => entry.page, active: () => activeRoute() === entry, width: 233, height: 233,
+          channels: () => [channel], notesPlacement: { sortOrder: 0, isPinned: false },
+          refreshing: () => false, busy: () => false, speechState: () => undefined,
+          platformLoginState: () => ({ douyin: true, bili: false }), openDouyin: controller.douyinNavigate,
+        } as Parameters<typeof HomeRoutes>[0])
+        : createComponent(MediaRoutes, {
+          ...controller, entry, page: () => entry.page, active: () => activeRoute() === entry, width: 233, height: 233,
+          round: true, backOffset: () => 0, services: {}, channels: () => [channel],
+          coveredByActions: () => activeRoute().douyinActionsOwner === entry,
+          playingSource, openDouyin: controller.douyinNavigate, playDouyin: controller.douyinPlay,
+          douyinOriginal: () => true, popPage: back,
+        } as unknown as Parameters<typeof MediaRoutes>[0]),
+    });
+  });
+  const press = (label: string) => {
+    const element = nodes(root).find(node => node.props.accessibilityLabel?.startsWith(label));
+    expect(element?.props.onPress).toBeFunction();
+    element!.props.onPress();
+  };
+  const settle = async (until: () => boolean = () => true) => {
+    await flush();
+    for (let turn = 0; turn < 100 && !until(); turn++) {
+      await Bun.sleep(1);
+      await flush();
+    }
+  };
+  const enter = async () => {
+    press('抖音，');
+    await settle();
+    expect(activeRoute().douyinRoute?.name).toBe('entry');
+    press('向上进入视频流');
+    await settle(() => activeRoute().page === 'video');
+    expect(activeRoute().page).toBe('video');
+  };
+  return { a, b, client, requests, activeRoute, enter, press, settle, back, setHeaders: (handler: typeof headers) => { headers = handler; }, changeAuth: () => { auth++; } };
+}
+
+test('DYFAV FIX1 Home click enters through the real cover and restores playback after route disposal', async () => {
+  const f = await productionRoutes();
+  await f.enter();
+  const first = f.activeRoute(), handle = first.player!;
+  current = { ...current, positionMs: 654 };
+  const pause = video.pause;
+  video.pause = async () => (current = { ...current, state: 'paused' });
+  try {
+    await handle.shellPlaying!(false);
+  } finally {
+    video.pause = pause;
+  }
+  f.back();
+  await f.settle();
+  expect(f.activeRoute().page).toBe('home');
+  expect(legacyStops).toBe(1);
+  await f.enter();
+  expect(f.activeRoute()).not.toBe(first);
+  expect(f.activeRoute().playback).toMatchObject({ awemeId: f.a.awemeId, resumePositionMs: 654, resumePaused: true });
+  expect(prepares.at(-1)?.resumePositionMs).toBe(654);
+  expect(plays).toBe(1);
+
+  f.back();
+  f.press('抖音，');
+  await f.settle();
+  const cover = f.activeRoute();
+  let allowHeaders!: () => void;
+  f.setHeaders(() => new Promise(resolve => { allowHeaders = () => resolve({}); }));
+  f.press('向上进入视频流');
+  await f.settle(() => !!allowHeaders);
+  expect(allowHeaders).toBeFunction();
+  f.changeAuth();
+  allowHeaders();
+  await f.settle();
+  expect(f.activeRoute()).toBe(cover);
+  expect(prepares).toHaveLength(2);
+});
+
+test('DYFAV FIX1 actions resume the same item without preparing its rejected source', async () => {
+  const f = await productionRoutes();
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  f.client.resolvePlayback = async (id) => {
+    if (id === f.b.awemeId) return { ok: true, data: f.b };
+    f.requests.push(id);
+    if (f.requests.length === 1) {
+      await pending;
+      return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/late' } };
+    }
+    return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/recovered' } };
+  };
+  nextError = { code: 'source_expired' };
+  await f.enter();
+  ticks.splice(0).forEach(tick => tick());
+  await f.settle();
+  expect(f.requests).toEqual([f.a.awemeId]);
+  expect(current.state).toBe('stopped');
+  gestures.find(gesture => gesture.onLongPress)?.onLongPress();
+  await f.settle();
+  expect(f.activeRoute().douyinRoute?.name).toBe('actions');
+  f.press('取消');
+  await f.settle(() => current.state === 'playing');
+  expect(current.state).toBe('playing');
+  release();
+  await f.settle();
+  expect((await f.activeRoute().player!.shellState!()).state).toBe('playing');
+  expect(f.requests).toEqual([f.a.awemeId, f.a.awemeId]);
+  expect(prepares.map(value => value.url)).toEqual([f.a.playUrl, 'https://mock.invalid/recovered']);
 });

@@ -16,7 +16,7 @@ import {appLogger} from '../../logs/app-logger.ts';
 import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
 import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
-import { loadDouyinDetail, douyinDetailBlocks } from "../../douyin/detail.ts";
+import { loadDouyinDetail, douyinDetailBlocks, resolveSavedDouyinPlayback } from "../../douyin/detail.ts";
 import { browser, DOUYIN_AUTH_STATUS_SCRIPT, hostOperation } from "@podjs/framework/services";
 import { DOUYIN_USER_AGENT } from "../../douyin/request-config.ts";
 import { douyinBrowserAvailable } from "../../douyin/browser.ts";
@@ -52,7 +52,7 @@ export type DouyinRoute =
   | { name: "channel-info" }
   | { name: "login" }
   | { name: "feed" }
-  | { name: "detail"; awemeId: string; item?: DouyinItem; playlist?: DouyinItem[] }
+  | { name: "detail"; awemeId: string; savedPlayback?: boolean; item?: DouyinItem; playlist?: DouyinItem[] }
   | { name: "history" }
   | { name: "actions"; awemeId: string; item?: DouyinItem }
   | { name: "share"; awemeId: string; item?: DouyinItem }
@@ -68,7 +68,7 @@ export interface DouyinPlayRequest {
   /** Failure after preview navigation belongs to the selected player, not the cover. */
   onSourceFailure?:(failure:import('../../douyin/errors.ts').DouyinPlaybackFailure)=>void;
   onFailure?:(failure:import('../../douyin/errors.ts').DouyinPlaybackFailure)=>void;
-  detailPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
+  detailPlayback?:boolean; savedPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
 export type DouyinPlaybackCommand = "toggle" | "previous" | "next" | "replay";
 export interface DouyinSettingsBindings {
   originalContentEnabled: boolean;
@@ -91,6 +91,7 @@ export interface DouyinScreenProps {
   onBack: () => void;
   onPlay: (request: DouyinPlayRequest) => void;
   restoreStock?:()=>Promise<DouyinItem[]>;
+  resumePlayback?:(current:()=>boolean)=>Promise<boolean>;
   onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null,entrySeq?:number)=>void;
   onPreloadStop?:(owner:unknown)=>void;
   onPlaybackCommand?: (command: DouyinPlaybackCommand) => void;
@@ -269,9 +270,9 @@ function routeAction(props:DouyinScreenProps) {
 }
 function playNavigation(props:DouyinScreenProps,report:(message:string)=>void) {
   const run=routeAction(props);
-  return (resolve:()=>Promise<DouyinPlayRequest|undefined>)=>run(async current=>{
+  return (resolve:(current:()=>boolean)=>Promise<DouyinPlayRequest|undefined>)=>run(async current=>{
     try {
-      const request=await resolve();
+      const request=await resolve(current);
       if(!current()||!request)return;
       props.onPlay({...request,isCurrent:current});
       await props.onNavigate({name:'player',awemeId:request.item.awemeId});
@@ -371,10 +372,19 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       .catch(error => { if (current) setError(String(error)); });
   });
   const item = () => content()?.kind === "video" ? (content() as Extract<DouyinContent, { kind: "video" }>).item : null;
+  const savedPlayback = () => props.route.name === 'detail' && props.route.savedPlayback === true;
   const navigateToPlayer=playNavigation(props,setError);
-  const play=()=>navigateToPlayer(async()=>{
+  const play=()=>navigateToPlayer(async current=>{
     const selected=item();
     if(!selected)return;
+    if (savedPlayback()) {
+      setError('');
+      const playback = await network.run(() => resolveSavedDouyinPlayback(props.client, selected));
+      if (current() && item() === selected && playback.playUrl !== selected.playUrl) {
+        setContent({ kind: 'video', item: { ...selected, playUrl: playback.playUrl, variants: playback.variants } });
+      }
+      return {item:selected,playback,playlist:[playback],hasMore:false,detailPlayback:true,savedPlayback:true};
+    }
     const fallback=validatedDouyinPlaybackItem(selected),url=fallback.playUrl;
     const expiry=douyinMediaNetworkDeadline([url]);
     const usable=()=>!!url&&!isDouyinPageUrl(url)&&(expiry===undefined||Date.now()<expiry);
@@ -412,7 +422,7 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
       const title = () => { const first = blocks()[0]; return first?.type === "text" ? first.text : "抖音视频"; };
       return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false} keepAwake={props.readerKeepAwake}
         articleId={`douyin:${props.awemeId}`} title={title()} blocks={body()} message={error() || notice()}
-        favorite={favorite} onPlay={() => void play()} onImage={props.onOpenImage} onFavorite={()=>{if(item())void toggleFavorite();else setError('图文内容暂不支持加入本地收藏');}} onShare={share}
+        favorite={favorite} onPlay={() => void play()} onRetry={savedPlayback() && error() ? () => void play() : undefined} onImage={props.onOpenImage} onFavorite={()=>{if(item())void toggleFavorite();else setError('图文内容暂不支持加入本地收藏');}} onShare={share}
         onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })} />;
     }}
   </Show>;

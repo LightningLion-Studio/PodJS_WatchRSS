@@ -78,6 +78,9 @@ export type RouteEntry = {
   channelId?: string;
   biliRoute?: BiliRoute;
   douyinRoute?: DouyinRoute;
+  douyinActionsOwner?: RouteEntry;
+  resumeDouyinPlayback?: (current: () => boolean) => Promise<boolean>;
+  onDouyinExit?: (source: PlaybackSource, positionMs: number, playing: boolean) => void;
   /** Ephemeral decoder ownership; excluded from navigation snapshots. */
   initialVideoPool?:import("../douyin/video-sessions.ts").DouyinVideoSessionPool;
   playback?: PlaybackSource;

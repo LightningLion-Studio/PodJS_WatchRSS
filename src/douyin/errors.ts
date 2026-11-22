@@ -45,3 +45,17 @@ export function mediaRequestFailure(error: unknown): { category: 'http' | 'timeo
 }
 
 export const isDouyinTemporaryFailure=(code:DouyinErrorCode)=>code==='RATE_LIMITED'||code==='TEMPORARILY_UNAVAILABLE';
+
+/** Explain the outcome of refreshing the selected saved video's playback address. */
+export function formatDouyinDetailFailure(code: string): string {
+  switch (code) {
+    case 'NOT_LOGGED_IN': return '需要登录后刷新播放地址';
+    case 'RATE_LIMITED': return '详情请求过于频繁，请稍后重试';
+    case 'REQUEST_FAILED': return '详情请求失败，请检查网络后重试';
+    case 'PARSE_FAILED': return '视频详情解析失败，请重试';
+    case 'UNSUPPORTED': return '详情没有可用的视频播放地址';
+    case 'source_expired': return '详情返回的播放地址已过期，请重试';
+    case 'resolution_limit': return '视频清晰度超过 720P';
+    default: return '暂时无法刷新播放地址，请稍后重试';
+  }
+}
