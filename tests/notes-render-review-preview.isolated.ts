@@ -17,7 +17,9 @@ mock.module('@podjs/framework/text',()=>({SystemTextLine:()=>null}));
 mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:233,logicalWidth:233}),hasCapability:()=>false}));
 mock.module(root+'/src/ui/RemoteImage.tsx',()=>({RemoteImage:()=>null}));
 const {notePreviewEntries,notePreviewEntrySteps}=await import(root+'/src/ui/NotePreview.tsx') as typeof import('../src/ui/NotePreview.tsx');
-const {prepareNotePreview,noteBlockSourceOffsets}=await import(root+'/src/notes/preview.ts') as typeof import('../src/notes/preview.ts');
+const {prepareNotePreview,prepareNotePreviewSteps,noteBlockSourceOffsets}=await import(root+'/src/notes/preview.ts') as typeof import('../src/notes/preview.ts');
+const {noteBodyLayoutBlocks}=await import(root+'/src/notes/native-layout-input.ts') as typeof import('../src/notes/native-layout-input.ts');
+const {mapNoteTextAnchorOffset}=await import(root+'/src/notes/editor-anchor.ts') as typeof import('../src/notes/editor-anchor.ts');
 test('RNR-01 real reading entries retain a fence-like line with trailing code',()=>{
  const text='```html\n```still-code\n<img src="assets/x.png">\n```';
  const entries=notePreviewEntries(text,200);
@@ -42,11 +44,14 @@ test('RNR4-02 reader retains literal image in a list fence',()=>{
  expect(entries.some((e:any)=>e.anchor?.renderedText.includes('<img src="assets/x.png">'))).toBe(true);
 });
 
-function layout(source:string,blocks=prepareNotePreview(source)){
+function entriesFor(source:string,blocks=prepareNotePreview(source)){
  const offsets=noteBlockSourceOffsets(source,blocks);
- const rows=notePreviewEntries(source,2000,undefined,undefined,undefined,undefined,undefined,undefined,undefined,{blocks,offsets});
+ return notePreviewEntries(source,2000,undefined,undefined,undefined,undefined,undefined,undefined,undefined,{blocks,offsets});
+}
+
+function layout(source:string,blocks=prepareNotePreview(source)){
  let top=0;
- return rows.flatMap(entry=>{
+ return entriesFor(source,blocks).flatMap(entry=>{
   const position=top;
   top+=entry.height;
   return entry.anchor?[{text:entry.anchor.renderedText,top:position}]:[];
@@ -63,6 +68,11 @@ test('FIX2 P2: consecutive Markdown quotes bound the first layout step',()=>{
  expect({firstBlock:blocks[0]?.kind==='rich'?blocks[0].markup.length:0,measurements}).toEqual({
   firstBlock:1091,measurements:1071
  });
+ let prefix:typeof blocks|undefined;
+ const steps=prepareNotePreviewSteps(source,1200,value=>{prefix=value;});
+ for(let index=0;index<32&&!prefix;index++)expect(steps.next().done).toBe(false);
+ expect(prefix).toEqual(blocks.slice(0,2));
+ steps.return([]);
  expect(layout(source,blocks)).toEqual(layout(source,[{kind:'rich',markup:source,html:false}]));
 });
 
@@ -73,6 +83,10 @@ test('FIX2 P3: the first row of an HTML chunk retains nonbreaking spaces',()=>{
  const whole=layout(source,[{kind:'rich',markup:source,html:true}]);
  expect(whole[4]?.text).toBe('\u00a0\u00a0Indented');
  expect(layout(source,blocks)).toEqual(whole);
+ expect(noteBodyLayoutBlocks(source).map(row=>row.text)).toEqual(whole.map(row=>row.text));
+ const anchor=entriesFor(source).find(entry=>entry.anchor?.renderedText===whole[4]!.text)?.anchor;
+ expect(anchor?.sourceStart).toBe(source.indexOf('<p>&nbsp;'));
+ expect(anchor!.sourceStart!+mapNoteTextAnchorOffset(anchor!.mappingText,anchor!.sourceMarkup,5,anchor!.projectSource)).toBe(source.indexOf('Indented')+3);
 });
 
 test('FIX2 P3: an image inside an ordered list keeps the following ordinal',()=>{
@@ -80,4 +94,20 @@ test('FIX2 P3: an image inside an ordered list keeps the following ordinal',()=>
  const source=`<ol start="3"><li>Third</li><li><img src="${path}" alt="Inside">Fourth</li><li>Fifth</li></ol>`;
  expect(prepareNotePreview(source).map(block=>block.kind)).toEqual(['rich','image','rich']);
  expect(layout(source).map(row=>row.text)).toEqual(['3. Third','4.','Fourth','5. Fifth']);
+ const anchor=entriesFor(source).find(entry=>entry.anchor?.renderedText==='5. Fifth')!.anchor!;
+ expect(anchor.sourceStart!+mapNoteTextAnchorOffset(anchor.mappingText,anchor.sourceMarkup,anchor.renderedStart+6,anchor.projectSource)).toBe(source.indexOf('Fifth')+3);
+});
+
+test('FIX2: reversed and nested ordered lists keep their counters across multiple images',()=>{
+ const image='<img src="assets/fixture.png">';
+ const source=`<ol reversed><li>Outer first</li><li value="7">${image}Override<ol start="3"><li>Nested first</li><li>${image}Nested second</li></ol></li><li>Outer last</li></ol>`;
+ expect(prepareNotePreview(source).map(block=>block.kind)).toEqual(['rich','image','rich','image','rich']);
+ expect(layout(source).map(row=>row.text)).toEqual(['3. Outer first','7.','Override','3. Nested first','4.','Nested second','6. Outer last']);
+});
+
+test('FIX2: a complete list in a subsequent HTML chunk keeps its local numbering',()=>{
+ const source='<p>A</p><p>B</p><p>C</p><p>D</p><ol start="8"><li>Eighth</li><li>Ninth</li></ol>';
+ const blocks=prepareNotePreview(source);
+ expect(blocks).toHaveLength(2);
+ expect(layout(source,blocks).map(row=>row.text)).toEqual(['A','B','C','D','8. Eighth','9. Ninth']);
 });

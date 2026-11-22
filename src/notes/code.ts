@@ -3,7 +3,7 @@
  * retained for storage/chunking and source anchors. This is not a full MD parser. */
 type Container=number|'>';
 interface Fence {marker:string;length:number;containers:Container[];indent:number}
-export interface NoteCodeLine {line:string;sourceStart:number;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean;inheritsContainer:boolean}
+export interface NoteCodeLine {line:string;sourceStart:number;text:string;offset:number;kind:'text'|'open'|'close'|'code';fenced:boolean;needsListContext:boolean}
 export const noteCodeIndent=(line:string)=>/^ {4}/.test(line)?4:(/^ {0,3}\t/.exec(line)?.[0].length??0);
 function strip(line:string,path:Container[]):number|null{
  let offset=0;
@@ -13,15 +13,17 @@ function strip(line:string,path:Container[]):number|null{
  }
  return offset;
 }
-function context(line:string,path:Container[]=[]):{offset:number;path:Container[];inheritsContainer:boolean}{
+function context(line:string,path:Container[]=[]):{offset:number;path:Container[];needsListContext:boolean}{
  let offset=strip(line,path);
- const inheritsContainer=offset!==null&&path.length>0;
+ // A quote repeats its markers on the source line. List continuations can
+ // rely on indentation inferred from a marker on a previous line.
+ const needsListContext=offset!==null&&path.some(item=>item!=='>');
  if(offset===null){path=[];offset=0;}else path=path.slice();
  for(;;){
   const m=/^ {0,3}(?:>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]+)/.exec(line.slice(offset));if(!m)break;
   path.push(m[0].trimStart()[0]==='>'?'>':m[0].length);offset+=m[0].length;
  }
- return{offset,path,inheritsContainer};
+ return{offset,path,needsListContext};
 }
 function opener(line:string,ctx:ReturnType<typeof context>):Fence|null{
  const m=/^( {0,3})(`{3,}|~{3,})([^]*)$/.exec(line.slice(ctx.offset));
@@ -44,15 +46,15 @@ export function* noteCodeLines(markup:string):Generator<NoteCodeLine>{
    if(from!==null){
     const close=noteFenceCloses(line,fence);let offset=from;
     for(let n=0;n<fence.indent&&line[offset]===' ';n++)offset++;
-    yield{line,sourceStart,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true,inheritsContainer:false};
+    yield{line,sourceStart,text:line.slice(offset),offset,kind:close?'close':'code',fenced:true,needsListContext:false};
     if(close)fence=null;continue;
    }
    fence=null;
   }
   const ctx=context(line,path);path=ctx.path;
   fence=opener(line,ctx);
-  if(fence){yield{line,sourceStart,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true,inheritsContainer:ctx.inheritsContainer};continue;}
+  if(fence){yield{line,sourceStart,text:line.slice(ctx.offset),offset:ctx.offset,kind:'open',fenced:true,needsListContext:ctx.needsListContext};continue;}
   const indent=noteCodeIndent(line.slice(ctx.offset)),offset=ctx.offset+indent;
-  yield{line,sourceStart,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false,inheritsContainer:ctx.inheritsContainer};
+  yield{line,sourceStart,text:indent?line.slice(offset):line,offset:indent?offset:0,kind:indent?'code':'text',fenced:false,needsListContext:ctx.needsListContext};
  }
 }

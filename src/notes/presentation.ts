@@ -1,6 +1,6 @@
-import {notePreviewPlainText} from './text.ts';
+import {notePreviewPlainText,type NoteHtmlPreviewContext} from './text.ts';
 import {noteCodeLines} from './code.ts';
-export interface NoteTextRow {text:string;role:'body'|'heading'|'quote'|'code';size:number;lineHeight:number;sourceMarkup:string;sourceStart:number;mappingText:string;mappingStart:number}
+export interface NoteTextRow {text:string;role:'body'|'heading'|'quote'|'code';size:number;lineHeight:number;sourceMarkup:string;sourceStart:number;mappingText:string;mappingStart:number;projectSource?:(markup:string)=>string}
 export function noteImageSource(path:string):{url:string;filePath?:string}{return path.startsWith('assets/')?{url:path,filePath:'notes/'+path}:{url:path};}
 let assetPath:((key:string)=>Promise<string>)|undefined;
 export function registerNoteAssetPath(resolve:(key:string)=>Promise<string>){assetPath=resolve;}
@@ -38,8 +38,17 @@ export function noteTableCodeFragments(lines:readonly string[],codes:readonly {s
  return fragments;
 }
 /** Readable block typography; full native inline span styling is a separate layer. */
-export function noteTextRows(markup:string,html:boolean):NoteTextRow[]{
- if(html){const plain=notePreviewPlainText(markup);let start=0;return plain.split('\n').map(text=>{const row={text,role:'body' as const,size:14,lineHeight:20,sourceMarkup:markup,sourceStart:0,mappingText:plain,mappingStart:start};start+=text.length+1;return row;});}
+export function noteTextRows(markup:string,html:boolean,htmlContext?:NoteHtmlPreviewContext):NoteTextRow[]{
+ if(html){
+  const projectSource=htmlContext?(source:string)=>notePreviewPlainText(source,htmlContext):undefined;
+  const plain=notePreviewPlainText(markup,htmlContext);
+  let start=0;
+  return plain.split('\n').map(text=>{
+   const row={text,role:'body' as const,size:14,lineHeight:20,sourceMarkup:markup,sourceStart:0,mappingText:plain,mappingStart:start,projectSource};
+   start+=text.length+1;
+   return row;
+  });
+ }
  const result:NoteTextRow[]=[];
  for(const row of noteCodeLines(markup)){
   const line=row.line,start=row.sourceStart;

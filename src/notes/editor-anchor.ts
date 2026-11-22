@@ -6,6 +6,7 @@ export interface NoteLineAnchor {
   renderedStart:number;
   sourceMarkup:string;
   sourceStart:number|null;
+  projectSource?:(markup:string)=>string;
   fontSlot:number;
   scale?:number;
   tracking?:number;
@@ -14,7 +15,7 @@ export interface NoteLineAnchor {
 export interface NotePositionedAnchor {anchor:NoteLineAnchor;x:number;y:number;width:number;height:number}
 export interface NoteAnchorEntry {height:number;anchor?:NoteLineAnchor;positionedAnchors?:()=>readonly NotePositionedAnchor[]}
 
-function htmlSourceCaret(markup:string,visibleOffset:number):number {
+function htmlSourceCaret(markup:string,visibleOffset:number,projectSource:(markup:string)=>string):number {
   // A cut through a tag or entity changes its projection. Only search complete
   // tokens or literal character boundaries when mapping back into the editor.
   const candidates:{start:number;end:number}[]=[];
@@ -33,27 +34,27 @@ function htmlSourceCaret(markup:string,visibleOffset:number):number {
   const wanted=Math.max(1,visibleOffset);
   while(low<high){
     const middle=(low+high)>>>1;
-    const length=notePreviewPlainText(markup.slice(0,candidates[middle]!.end)).length;
+    const length=projectSource(markup.slice(0,candidates[middle]!.end)).length;
     if(length<wanted)low=middle+1;
     else high=middle;
   }
   const caret=candidates[low];
   if(!caret)return markup.length;
-  const length=notePreviewPlainText(markup.slice(0,caret.end)).length;
+  const length=projectSource(markup.slice(0,caret.end)).length;
   return visibleOffset===0||length>wanted?caret.start:caret.end;
 }
 
 /** Port of NotesActivity.mapNoteTextAnchorOffset for a displayed text block. */
-export function mapNoteTextAnchorOffset(sourceText:string,targetText:string,sourceOffset:number):number {
+export function mapNoteTextAnchorOffset(sourceText:string,targetText:string,sourceOffset:number,projectSource:(markup:string)=>string=notePreviewPlainText):number {
   if(!targetText)return 0;
   if(!sourceText)return Math.max(0,Math.min(targetText.length,sourceOffset));
   const safe=Math.max(0,Math.min(sourceText.length,sourceOffset));
   if(sourceText===targetText)return safe;
   if(notePreviewPlainText(sourceText)===targetText)return Math.min(targetText.length,notePreviewPlainText(sourceText.slice(0,safe)).length);
-  if(notePreviewPlainText(targetText)===sourceText){
-    if(/<[a-z][\w-]*(?=[\s>])/i.test(targetText))return htmlSourceCaret(targetText,safe);
+  if(projectSource(targetText)===sourceText){
+    if(/<[a-z][\w-]*(?=[\s>])/i.test(targetText))return htmlSourceCaret(targetText,safe,projectSource);
     let low=0,high=targetText.length;
-    while(low<high){const middle=(low+high)>>>1;if(notePreviewPlainText(targetText.slice(0,middle)).length<safe)low=middle+1;else high=middle;}
+    while(low<high){const middle=(low+high)>>>1;if(projectSource(targetText.slice(0,middle)).length<safe)low=middle+1;else high=middle;}
     return low;
   }
   for(const radius of [32,24,16,12,8]){
@@ -99,5 +100,5 @@ export function noteEditorAnchor(entries:readonly NoteAnchorEntry[],markdown:str
   const displayOffset=best.renderedStart+caret;
   return Math.max(0,Math.min(markdown.length,best.sourceStart===null
     ?mapNoteTextAnchorOffset(best.mappingText,markdown,displayOffset)
-    :best.sourceStart+mapNoteTextAnchorOffset(best.mappingText,best.sourceMarkup,displayOffset)));
+    :best.sourceStart+mapNoteTextAnchorOffset(best.mappingText,best.sourceMarkup,displayOffset,best.projectSource)));
 }

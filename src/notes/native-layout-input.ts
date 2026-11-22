@@ -3,7 +3,7 @@ import {noteTextRows} from './presentation.ts';
 import type {ContentBlock} from '../reader/content.ts';
 
 /** Body/quote input for native layout; code uses its own font in NotePreview. */
-export function* noteBodyLayoutSteps(markup:string,blocks:readonly NotePreviewBlock[],rows:(block:Extract<NotePreviewBlock,{kind:'rich'}>,index:number)=>ReturnType<typeof noteTextRows>=(block)=>noteTextRows(block.markup,block.html)):Generator<Extract<ContentBlock,{type:'text'}>,void> {
+export function* noteBodyLayoutSteps(markup:string,blocks:readonly NotePreviewBlock[],rows:(block:Extract<NotePreviewBlock,{kind:'rich'}>,index:number)=>ReturnType<typeof noteTextRows>=(block)=>noteTextRows(block.markup,block.html,block.htmlContext)):Generator<Extract<ContentBlock,{type:'text'}>,void> {
  const seen=new Set<string>();
  for(let index=0;index<blocks.length;index++){
   const block=blocks[index]!;
