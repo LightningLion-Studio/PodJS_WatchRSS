@@ -103,11 +103,15 @@ export class LibrarySyncSession {
   const roots=checkedStateRoots(request.roots,SYNC_DOMAINS),projectionVersions=checkedProjectionVersions(request.projectionVersions,SYNC_DOMAINS,roots),base={success:true,action:'syncDomains',version:2,phase:request.phase,deviceId:localId};
   if(request.phase==='summary'){
    if(request.profile!==DOMAIN_FAST_PATH_PROFILE||request.forceFull===true||request.libraryMode!==undefined&&request.libraryMode!=='merge')throw Error('invalid_domain_profile');
+   const known=checkedStateReceipts(request.known??{},SYNC_DOMAINS);
+   // The phone reads the watch's account root before granting credentials on the B2 connection.
+   if(Object.keys(roots).length||Object.keys(known).length)this.options.binary?.business?.(this.actionContext);
    this.domainVector?.abort();this.domainVector=await this.options.handleAction.domainVectors.open(this.domainPeer,DOMAIN_FAST_PATH_PROFILE);
-   const result=await this.timed('domains.summary.prepared',()=>this.domainVector!.summary(roots,checkedStateReceipts(request.known??{},SYNC_DOMAINS),projectionVersions));
+   const result=await this.timed('domains.summary.prepared',()=>this.domainVector!.summary(roots,known,projectionVersions));
    this.log.event('domains.summary.complete',{rootCount:Object.keys(result.roots).length,skipCount:result.skipDomains.length});return {...base,...result};
   }
   if(request.phase!=='commit'||!this.domainVector||typeof request.windowId!=='string'||!Array.isArray(request.completedDomains)||request.completedDomains.some(d=>typeof d!=='string'))throw Error('invalid_domain_window');
+  this.options.binary?.business?.(this.actionContext);
   const result=await this.timed('domains.commit.prepared',()=>this.domainVector!.stage(request.windowId as string,roots,request.completedDomains as string[],projectionVersions));
   this.log.event('domains.commit.complete',{committedCount:result.committedDomains.length,retryCount:result.retryDomains.length});return {...base,...result};
  }
@@ -160,7 +164,7 @@ export class LibrarySyncSession {
      if(!this.options.binary||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
      await this.options.binary.run(request,this.connection,this.actionContext);return results;
     }
-    if(!['syncLibrary','syncAccount','ack','syncSession'].includes(String(request.action))||request.action==='syncLibrary'&&request.phase!=='probe')this.options.binary?.business?.(this.actionContext);
+    if(!['syncLibrary','syncAccount','syncDomains','ack','syncSession'].includes(String(request.action))||request.action==='syncLibrary'&&request.phase!=='probe')this.options.binary?.business?.(this.actionContext);
     if(request.action==='syncLibraryResume'){
      if(!this.options.resume||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
      await this.options.resume.run(request,{readFrame:timeout=>this.read(timeout),writeFrame:frame=>this.write(frame),close:()=>this.close()},this.actionContext);return results;

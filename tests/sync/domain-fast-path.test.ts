@@ -66,6 +66,31 @@ function fastSession(negotiated=true,failAck=false){
 test('R47 production session factory completes all-equal seven domains without invoking legacy exports',async()=>{const f=fastSession();await f.session.run();expect(f.outbound.map(r=>r.action)).toEqual(['syncLibrary','syncDomains','syncDomains','syncSession']);expect(f.outbound[1]!.skipDomains).toHaveLength(7);expect(f.published()).toBe(1);expect(f.outbound.reduce((n,f)=>n+encodeFrame(f).length,0)).toBeLessThan(10000);});
 test('R47 requires explicit physical-connection negotiation and final applied ACK',async()=>{const missing=fastSession(false);await expect(missing.session.run()).rejects.toThrow('domain_fast_path_not_negotiated');expect(missing.published()).toBe(0);const lost=fastSession(true,true);const result=await lost.session.run();expect(result.at(-1)!.ack).toBeNull();expect(lost.published()).toBe(0);});
 
+for(const exchange of ['account grant','domain comparison','domain commit'] as const)test(`B2 switch after ${exchange}`,async()=>{
+ const provider={open:async()=>new AckedStateVector(SYNC_DOMAINS,async()=>remote,async()=>({}),async()=>{},()=> 'window-one',{versions:()=>descriptors})};
+ const handleAction=createApplicationActionHandler({domainVectors:provider,books:{apply:async()=>({})},notes:{initialize:async()=>{},merge:async()=>0,allIncludingDeleted:async()=>[]},deviceId:async()=>'watch',notesChanged:()=>{}});
+ const ack={action:'ack',success:true,applied:true};
+ const requests:JsonObject[]=[
+  {action:'syncLibrary',version:14,phase:'probe',deviceId:'phone',requestPersistentSession:true,supportsPersistentSession:true,
+   supportsDomainFastPathV2:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true,supportsRssCanonicalIds:true},ack,
+  {action:'syncDomains',version:2,phase:'summary',deviceId:'phone',profile:DOMAIN_FAST_PATH_PROFILE,
+   projectionVersions:descriptors,roots:exchange==='domain comparison'?remote:{},known:{}},ack,
+ ];
+ if(exchange==='domain commit')requests.push({action:'syncDomains',version:2,phase:'commit',deviceId:'phone',
+  windowId:'window-one',roots:{},projectionVersions:descriptors,completedDomains:[]},ack);
+ requests.push({action:'syncLibraryBinary',version:2,phase:'switch'});
+ let legacyBusiness=false;
+ const binary={
+  probe:async()=>({}),accountConfirmed:async()=>{},
+  business:()=>{legacyBusiness=true;},
+  run:async()=>{if(legacyBusiness)throw Error('AUTH_REVOKED');},
+ };
+ const session=new LibrarySyncSession({readFrame:async()=>requests.shift()!,writeFrame:async()=>{},close:async()=>{}},
+  {deviceId:async()=>'watch'} as LibrarySessionRepository,{handleAction,binary});
+ if(exchange==='account grant')await expect(session.run()).resolves.toHaveLength(2);
+ else await expect(session.run()).rejects.toThrow('AUTH_REVOKED');
+});
+
 test('R47 ignores unsaved public RSS refresh clocks but witnesses unknown source revision writers',async()=>{const f=await setup();try{
  await f.db.execute("INSERT INTO channels(id,url,title,created_at,last_fetched_at) VALUES(1,'https://public.example/rss','public',1,1)");await f.db.execute("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'not retained','ordinary RSS','https://public.example/a','guid:a',1)");const known=await prime(f),v=await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE);
  await f.db.execute("UPDATE articles SET title='new RSS title',fetched_at=99,is_read=1 WHERE id=1");await f.db.execute('UPDATE channels SET last_fetched_at=99 WHERE id=1');await f.db.execute("INSERT INTO cloud_rss_article_ids(item_id,article_id) VALUES(1,'pool-id')");expect((await v.summary(remote,known,descriptors)).skipDomains).toContain('library');
