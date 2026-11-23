@@ -54,9 +54,9 @@ for(const mode of ['ordinary','rollback','guarded','guarded-stale','guarded-corr
   let terminalWriteStarted=false;
   if(mode==='ordinary'){
    const write=s.pair.watch.write.bind(s.pair.watch),readJob=f.store.job.bind(f.store);
-   s.pair.watch.write=(data,timeout)=>{
+   s.pair.watch.write=data=>{
     if(Buffer.from(data).includes('"phase":"complete"'))terminalWriteStarted=true;
-    return write(data,timeout);
+    return write(data);
    };
    f.store.job=async(...args)=>{
     if(terminalWriteStarted)await Bun.sleep(20);
