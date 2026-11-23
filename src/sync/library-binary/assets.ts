@@ -43,7 +43,15 @@ export class BinaryAssets {
     await this.verified(e.path,before);await this.verified(temp,before);
     const metadataUtf8=JSON.stringify({storageKey:key,sha256:before.sha256,size:before.size});const d:ObjectDescriptor={objectId:'',kind:'noteAsset',schemaVersion:1,businessId:key,contentVersion:before.sha256,encoding:'raw',size:before.size,sha256:before.sha256,chunkBytes:65536,chunkHashes:hashes,metadataUtf8,metadataSha256:hash(utf8(metadataUtf8)),dependsOn:[]};d.objectId=objectId(d);descriptor(d,limits);
     manifestBytes+=utf8(JSON.stringify(d)).length+1;if(manifestBytes>limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
-    const target='library-binary/spool/'+D('wrss.library-binary.v2/spool',[scope,d.objectId])+'.bin';await this.store.db.execute('INSERT OR REPLACE INTO library_binary_source_files VALUES(?,?,?)',[target,d.size+4096,this.store.now()+86400000]);await this.files.commit(temp,target,d.size,d.sha256,null);this.check();objects.push(d);paths[d.objectId]=target;
+    const target='library-binary/spool/'+D('wrss.library-binary.v2/spool',[scope,d.objectId])+'.bin';await this.store.db.execute('INSERT OR REPLACE INTO library_binary_source_files VALUES(?,?,?)',[target,d.size+4096,this.store.now()+86400000]);try{
+     if((await this.files.stat(target)).file)await this.verified(target,d);
+     else await this.files.commit(temp,target,d.size,d.sha256,null);
+    }catch(error){
+     if(!(error instanceof Error)||error.message!=='file_target_changed')throw error;
+     // Concurrent snapshots may publish the same immutable spool.
+     await this.verified(target,d);
+    }
+    this.check();objects.push(d);paths[d.objectId]=target;
    }finally{try{await this.files.remove(temp);await this.store.db.execute('DELETE FROM library_binary_source_files WHERE path=?',[temp]);}catch{/* The owned ledger retains interrupted copies for delayed collection. */}}
   }
   if(send?.has('rssSource')&&this.kinds)for(const d of await this.kinds.freezeSources()){

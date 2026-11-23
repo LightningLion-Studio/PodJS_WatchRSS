@@ -29,7 +29,11 @@ test('asset conflict preserves canonical bytes and shares the APPLIED business t
 });
 
 test('frozen content is reused across snapshots and collected only after the 24h references expire',async()=>{
- const f=await binaryRuntime();try{let now=0;const {BinaryStore}=await import('../../src/sync/library-binary/store');const store=new BinaryStore(f.db, f.db.transaction, ()=>now);await store.initialize();await f.files.writeBytes('notes/assets/icon.png',new Uint8Array([1,2,3]));const assets=new BinaryAssets(f.files,store,f.chunks),selection=negotiate(s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],limits),s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],limits))!;
+ const f=await binaryRuntime();try{let now=0;const {BinaryStore}=await import('../../src/sync/library-binary/store');const store=new BinaryStore(f.db, f.db.transaction, ()=>now);await store.initialize();await f.files.writeBytes('notes/assets/icon.png',new Uint8Array([1,2,3]));const files={...f.files,commit:async(...args:Parameters<typeof f.files.commit>)=>{
+   const [,target,,,expected]=args;
+   if(expected===null&&(await f.files.stat(target)).file)throw Error('file_target_changed');
+   return f.files.commit(...args);
+  }};const assets=new BinaryAssets(files,store,f.chunks),selection=negotiate(s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],limits),s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],limits))!;
   const first=await assets.freeze('scope',nonce(),selection.limits);await store.saveSnapshot('scope',first.witness,first.inventory);const second=await assets.freeze('scope',nonce(),selection.limits);await store.saveSnapshot('scope',second.witness,second.inventory);expect((await f.db.query('SELECT * FROM library_binary_source_files')).length).toBe(1);const path=Object.values((first.inventory as {paths:Record<string,string>}).paths)[0]!;expect(Object.values((second.inventory as {paths:Record<string,string>}).paths)).toEqual([path]);
   now=86400000-1;await store.collect('scope',async()=>{});await assets.collect();expect((await f.files.stat(path)).file).toBe(true);now=86400001;await store.collect('scope',async()=>{});await assets.collect();expect((await f.files.stat(path)).file).toBe(false);expect((await f.files.stat('notes/assets/icon.png')).file).toBe(true);expect((await f.db.query('SELECT * FROM library_binary_source_files')).length).toBe(0);
  }finally{await f.dispose();}
