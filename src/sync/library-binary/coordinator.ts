@@ -252,7 +252,11 @@ export class LibraryBinaryConnection {
   if(this.stopped||this.normalClose)return;
   if(!this.clockSync)this.clockSync=this.ports.store.observeClock(Math.floor(at)).catch(e=>this.close(e)).finally(()=>{this.clockSync=undefined;});
   const remoteWork=!!this.send?.window.credit.chunks||[...this.pending.values()].some(p=>['manifestPage','apply','complete','missing'].includes(p.request.phase));const localWork=this.localWorkAt!==null||this.receive?.pipeline?.working||this.sourceReading;if(!remoteWork&&!localWork&&at-this.networkAt>=30000){await this.close(Error('SocketTimeout'));return;}if(localWork&&at-this.lastLocalUnit>=30000){await this.close(new ResumeError('LOCAL_IO'));return;}
-  const source=this.sourceEpoch;if(source&&at-source.last>=8000&&!this.sourceHeartbeat){source.last=at;this.sourceHeartbeat=this.request('missing',source.job,source.plan,source.epoch,{afterObjectId:null,afterChunkIndex:null,limit:0},false);void this.sourceHeartbeat.catch(e=>{if(e instanceof ResumeError&&e.code==='LEASE_EXPIRED'){this.failData(e);for(const [id,p] of this.pending){this.retiredControls.set(id,p.request);if(this.retiredControls.size>2)this.retiredControls.delete(this.retiredControls.keys().next().value!);p.reject(e);}this.pending.clear();this.slots?.clear();}else return this.close(e);}).finally(()=>{this.sourceHeartbeat=undefined;});}this.tick();},e=>{if(!this.stopped)void this.close(e);}).catch(e=>this.close(e));}
+  const source=this.sourceEpoch;if(source&&at-source.last>=8000&&!this.sourceHeartbeat){source.last=at;this.sourceHeartbeat=this.request('missing',source.job,source.plan,source.epoch,{afterObjectId:null,afterChunkIndex:null,limit:0},false);void this.sourceHeartbeat.catch(e=>{if(e instanceof ResumeError&&e.code==='LEASE_EXPIRED'){this.failData(e);for(const [id,p] of this.pending){this.retiredControls.set(id,p.request);if(this.retiredControls.size>2)this.retiredControls.delete(this.retiredControls.keys().next().value!);p.reject(e);}this.pending.clear();this.slots?.clear();}else return this.close(e);}).finally(()=>{this.sourceHeartbeat=undefined;});}this.tick();
+ }).catch(error=>{
+  // The Android host rejects a cancelled delay when the round enters its terminal drain.
+  if(!this.stopped&&!this.normalClose)return this.close(error);
+ });}
  private async answerHeartbeat(r:Envelope){
   try{
    this.check();

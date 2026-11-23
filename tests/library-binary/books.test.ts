@@ -198,6 +198,17 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
 test('guarded BT-R receives an 8 MiB book by missing ranges without replaying 27 durable frames',async()=>{
  const f=await binaryRuntime({fileRefs:true,...v2Identity});
  try{
+  const sleep=f.ports.sleep;
+  f.ports.sleep=milliseconds=>{
+   const timer=sleep(milliseconds);
+   if(milliseconds!==1000)return timer;
+   let rejectCancelled:(error:Error)=>void;
+   const cancelled=new Promise<never>((_,reject)=>{rejectCancelled=reject;});
+   return {result:Promise.race([timer.result,cancelled]),cancel:()=>{
+    timer.cancel();
+    rejectCancelled(new Error('Operation cancelled'));
+   }};
+  };
   const {repository,files}=await attachBinaryBooks(f);
   const {NoteAssetFileIndex}=await import('../../src/notes/asset-files');
   const {LocalBodyClaims}=await import('../../src/sync-v2/local-body-claims');
