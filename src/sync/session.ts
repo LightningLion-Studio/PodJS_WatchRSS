@@ -1,3 +1,4 @@
+import {BOOK_STATE_ACTION} from './library-binary/book-state';
 import type {SqlCancellationCheck} from '../core/types';
 import {knownRecordValue} from '../cloud/compatibility';
 import {normalizeSourceUrl} from './source-store';
@@ -164,7 +165,7 @@ export class LibrarySyncSession {
      if(!this.options.binary||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
      await this.options.binary.run(request,this.connection,this.actionContext);return results;
     }
-    if(!['syncLibrary','syncAccount','syncDomains','ack','syncSession'].includes(String(request.action))||request.action==='syncLibrary'&&request.phase!=='probe')this.options.binary?.business?.(this.actionContext);
+    if(!['syncLibrary','syncAccount','syncDomains','ack','syncSession',BOOK_STATE_ACTION].includes(String(request.action))||request.action==='syncLibrary'&&request.phase!=='probe')this.options.binary?.business?.(this.actionContext);
     if(request.action==='syncLibraryResume'){
      if(!this.options.resume||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
      await this.options.resume.run(request,{readFrame:timeout=>this.read(timeout),writeFrame:frame=>this.write(frame),close:()=>this.close()},this.actionContext);return results;
@@ -213,6 +214,7 @@ export class LibrarySyncSession {
       const account=await this.options.handleAction?.accountBinding?.();this.check();
       response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...await this.options.localObjects?.probe(request),...await this.options.resume?.probe(request,this.actionContext),...await this.options.binary?.probe(request,this.actionContext),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
      }
+     else if(request.action===BOOK_STATE_ACTION&&persistent&&this.options.binary?.bookState)response=await this.options.binary.bookState(request,this.actionContext);
      else if(request.action==='syncDomains')response=await this.domainAction(request,persistent,localId);
      else if(this.options.handleAction){
       try{response=await this.options.handleAction(request,this.log,this.actionContext);}catch(error){this.log.event("request.handle.failed",{message:"<redacted>"},"E");throw error;}
@@ -247,6 +249,7 @@ export class LibrarySyncSession {
      libraryApplied=!stagedBook&&!!(response.success&&ack?.success&&ack.applied);
     }
     else if(pending)this.log.event("library.peerState.mark.skipped",{ackSuccess:ack?.success??null,ackApplied:ack?.applied??null,localSeqMax:pending.localSeqToInclusive,remoteSeqPendingAck:pending.remoteSeqToInclusive},"W");
+    if(request.action===BOOK_STATE_ACTION&&(!ack?.success||!ack.applied))throw Error('AUTH_REVOKED');
     if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount'){await this.options.resume?.accountConfirmed(request,this.actionContext);await this.options.binary?.accountConfirmed(request,this.actionContext);}if(!legacySubset)this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
     this.log.event("server.exchange.complete",{persistentSession:persistent,completedActions:results.length+1,elapsedMs:this.log.elapsed()});

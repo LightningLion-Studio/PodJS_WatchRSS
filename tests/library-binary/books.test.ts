@@ -1,3 +1,4 @@
+import {BOOK_STATE_ACTION,BOOK_STATE_VERSION,bookPackageProof,readBookPackageProofs} from '../../src/sync/library-binary/book-state';
 import {test,expect} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
@@ -24,7 +25,7 @@ const v2Identity={userId:'11000000-0000-0000-0000-000000000000',watchId:'2200000
 const request=(phase:Envelope['phase'],payload:Row,jobId:string|null=null,planDigest:string|null=null,epoch:number|null=null):Envelope=>({
  action:'syncLibraryBinary',version:2,type:'request',phase,jobId,planDigest,epoch,requestId:nonce(),requestDigest:requestDigest(jobId,planDigest,phase,payload),payload,
 });
-async function connect(f:Fixture){
+async function connect(f:Fixture,bookState=false){
  const session=f.session();
  const legacy=async(value:Row)=>{
   await session.connection.writeFrame(value);
@@ -32,10 +33,10 @@ async function connect(f:Fixture){
   await session.connection.writeFrame({action:'ack',success:true,applied:true});
   return reply;
  };
- const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],...(f.ports.guardedRuntime?{supportedGuardedLibraryVersions:[1]}:{}),supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
+ const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],...(bookState?{[BOOK_STATE_VERSION]:1}:{}),...(f.ports.guardedRuntime?{supportedGuardedLibraryVersions:[1]}:{}),supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
  await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:(await f.ports.account.read())!.userId}});
  const cap=probe.libraryBinary as unknown as Capability;
- return {session,cap,switch:async()=>{
+ return {session,cap,probe,legacy,switch:async()=>{
   await session.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap)}});
   expect((await session.connection.readFrame(3000)).success).toBe(true);
   return new BinaryByteTransport(session.connection.detachStream());
@@ -255,6 +256,31 @@ test('guarded BT-R receives an 8 MiB book by missing ranges without replaying 27
   expect(await watchEof).toBeNull();
   expect(f.stats().stageCalls-chunksBefore).toBe(128);
   expect(await f.db.query('SELECT count(*) AS count FROM sync_book_chapters')).toEqual([{count:32}]);
+  const next=await connect(f,true);
+  expect(next.probe[BOOK_STATE_VERSION]).toBe(1);
+  const packageProof=bookPackageProof(book.state,book.info);
+  const reply=await next.legacy({action:BOOK_STATE_ACTION,version:14,deviceId:'phone',packages:[packageProof]});
+  expect(reply.packages).toEqual([packageProof]);
+  const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{});
+  const plan=async(id:string,proof:unknown)=>{
+   const kinds:string[]=[];
+   await books.freeze('proof',id,HARD_LIMITS,new Set(BOOK_KINDS),d=>kinds.push(d.kind),async()=>{},readBookPackageProofs(proof));
+   return kinds;
+  };
+  expect(await plan('complete',[packageProof])).toEqual(['bookState','bookReading']);
+  expect(await plan('incomplete',[{...packageProof,d1Complete:false}])).toContain('bookPackageSegment');
+  expect(await plan('wrong-size',[{...packageProof,packageBytes:book.info.size-1}])).toContain('bookPackageCommit');
+  expect(await plan('wrong-sha',[{...packageProof,packageSha256:'f'.repeat(64)}])).toContain('bookPackageSegment');
+  expect(await plan('wrong-life',[{...packageProof,lifecycle:{generation:1,operationId:'a'.repeat(32),startedAt:0}}])).toContain('bookPackageSegment');
+  await next.session.pair.close();await next.session.running.catch(()=>{});
+  const installed=(await repository.books!.package(book.state.bookId))!;
+  const corrupt=new Uint8Array(readFileSync(f.root+'/'+installed.path));
+  corrupt[corrupt.length-2]=corrupt[corrupt.length-2]!^1;
+  await f.files.writeBytes(installed.path,corrupt);
+  const damaged=await connect(f,true);
+  expect((await damaged.legacy({action:BOOK_STATE_ACTION,version:14,deviceId:'phone',packages:[]})).packages).toEqual([]);
+  await damaged.session.pair.close();await damaged.session.running.catch(()=>{});
+
  }finally{await f.dispose();}
 },60000);
 

@@ -7,6 +7,7 @@ import {BOOK_MAX_CHAPTERS,validateBook,validateBookReading,validateBookShape,typ
 import {libraryRevision} from '../revision';
 import {D} from './digests';
 import {bookDescription,bookObject,BOOK_SEGMENT_BYTES,validateBookPlan} from './book-plan';
+import {bookPackageProof,sameBookPackage,type BookPackageProof} from './book-state';
 import {BodyJsonReader} from './article-file';
 import {BOOK_METADATA_BODY_BYTES,BOOK_METADATA_STRING_BYTES,BookMetadataRejected,bookSqlText,pagedBookBoundary} from './book-metadata';
 import {importBookPackage,type BinaryBookFiles} from './book-import';
@@ -48,7 +49,7 @@ export class BinaryBooks {
  }
 
  async freeze(scope:string,id:string,limits:Limits,send:ReadonlySet<Kind>,add:(d:ObjectDescriptor,file?:FrozenBookFile)=>void,
-  reserve:(bytes:number)=>Promise<void>){
+  reserve:(bytes:number)=>Promise<void>,peerPackages?:ReadonlyMap<string,BookPackageProof>){
   if(!send.has('bookState'))return;
   const books=await this.repo();
   if(!await books.binaryReady())fail('SOURCE_CHANGED');
@@ -108,7 +109,7 @@ export class BinaryBooks {
   try{
    let after='';
    for(;;){
-    const [state]=await this.store.db.query(`SELECT book_id,chapter_count,fingerprint,json_extract(state_json,'$.deleted') AS deleted,
+    const [state]=await this.store.db.query(`SELECT book_id,chapter_count,fingerprint,json_extract(state_json,'$.lifecycle') AS lifecycle,json_extract(state_json,'$.deleted') AS deleted,
      length(state_json) AS chars,length(CAST(state_json AS BLOB)) AS bytes FROM sync_books WHERE book_id>? ORDER BY book_id LIMIT 1`,[after]);
     if(!state)break;
     const bookId=after=String(state.book_id),path=target(bookId,'state'),meta={bookId};
@@ -118,7 +119,9 @@ export class BinaryBooks {
     add(stateObject,{path,offset:0});
     if(!state.deleted&&send.has('bookPackageSegment')&&send.has('bookPackageCommit')){
      const pkg=await books.package(bookId);
-     if(pkg){
+     const local=pkg&&bookPackageProof({bookId,fingerprint:String(state.fingerprint),chapterCount:Number(state.chapter_count),
+      lifecycle:state.lifecycle==null?undefined:JSON.parse(String(state.lifecycle))},pkg);
+     if(pkg&&local&&!sameBookPackage(local,peerPackages?.get(bookId))){
       if(pkg.size<1||pkg.size>limits.maxPackageBytes||limits.maxObjectBytes<Math.min(BOOK_SEGMENT_BYTES,pkg.size))fail('LIMIT_EXCEEDED');
       const output=target(bookId,'package');
       await reserve(pkg.size+4096);await remember(output,pkg.size);

@@ -1,3 +1,4 @@
+import {BOOK_STATE_VERSION,MAX_BOOK_PROOFS,bookPackageProof,readBookPackageProofs,type BookPackageProof} from './book-state';
 import type {SqlCancellationCheck} from '../../core/types';
 import type {LocalBodyClaim} from '../../sync-v2/local-body-claims';
 import {bookDescription} from './book-plan';
@@ -24,13 +25,14 @@ import type {SqlLibrarySessionRepository} from '../library-repository';
 import {BOOK_KINDS,HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
 export interface BinarySessionPort {
  probe(request:Row,context:SyncActionContext):Promise<Row>;
+ bookState?(request:Row,context:SyncActionContext):Promise<Row>;
  accountConfirmed(request:Row,context:SyncActionContext):Promise<void>;
  run(request:Row,connection:SyncFrameConnection,context:SyncActionContext):Promise<void>;
  failed?(error:unknown,context?:SyncActionContext):unknown;
  business?(context:SyncActionContext):void;
  acceptsLegacySubset?(peer:string,context:SyncActionContext):boolean;
 }
-interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean;books:boolean;guarded:boolean;accountEpoch?:number}
+interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean;books:boolean;guarded:boolean;accountEpoch?:number;bookState:boolean;peerPackages?:ReadonlyMap<string,BookPackageProof>;packageProofAnchor?:string}
 export interface BinaryApplicationPorts {
  /** Presence requires a guarded proposal for every B2 connection. */
  guardedRuntime?:()=>Promise<boolean>;
@@ -95,8 +97,9 @@ export class BinaryApplicationService implements BinarySessionPort {
   context.checkCancelled?.();
   if(!this.enabled())return {};
   if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();
-  this.sessions.set(context.session,{peer,capability:cap,connectionId,running:false,books,guarded});
-  return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap,...(guarded?{guardedLibraryVersion:1}:{})};
+  const bookState=guarded&&books&&r[BOOK_STATE_VERSION]===1;
+  this.sessions.set(context.session,{peer,capability:cap,connectionId,running:false,books,guarded,bookState});
+  return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap,...(bookState?{[BOOK_STATE_VERSION]:1}:{}),...(guarded?{guardedLibraryVersion:1}:{})};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
  acceptsLegacySubset(peer:string,context:SyncActionContext){
@@ -112,6 +115,42 @@ export class BinaryApplicationService implements BinarySessionPort {
   if(!account||!r.account||(r.account as Row).userId!==account.userId||r.deviceId!==undefined&&r.deviceId!==n.peer)fail('ACCOUNT_MISMATCH');
   if(n.guarded&&(this.sessions.get(context.session)!==n||epoch!==this.ports.account.librarySessionGeneration()))fail('AUTH_REVOKED');
   n.account=account;n.accountEpoch=epoch;this.recovery.accountReady(n.connectionId,this.reconnected);
+ }
+ async bookState(r:Row,context:SyncActionContext):Promise<Row>{
+  const n=this.sessions.get(context.session);
+  if(!this.enabled()||!n?.account||!n.bookState||n.running||n.peerPackages||this.v1Sessions.has(context)||
+   r.version!==14||r.deviceId!==n.peer||!this.ports.intake||!this.ports.library)fail('AUTH_REVOKED');
+  const check=()=>{
+   context.checkCancelled?.();
+   if(!this.enabled()||this.sessions.get(context.session)!==n||n.accountEpoch!==this.ports.account.librarySessionGeneration())fail('AUTH_REVOKED');
+  };
+  const watch=await this.ports.deviceId(),account=n.account,intake=this.ports.intake;
+  return this.ports.account.withLibraryAccount(account,async()=>{
+   check();
+   const stamp=()=>intake(account,watch,async protect=>{
+    if(!protect.guardedStamp)fail('BUSINESS_REJECTED');
+    return protect.guardedStamp();
+   }).catch(error=>{
+    if(error instanceof Error&&error.message==='BUSINESS_REJECTED')return undefined;
+    throw error;
+   });
+   const initial=await stamp(),repository=await this.ports.library!.repository();
+   const packages:BookPackageProof[]=[];
+   const rows=initial?await this.ports.store.db.query('SELECT book_id FROM sync_books WHERE registration_complete=1 ORDER BY book_id LIMIT ?',[MAX_BOOK_PROOFS]):[];
+   for(const {book_id} of rows){
+    check();
+    const state=await repository.books?.transferState(String(book_id));
+    if(!state||state.deleted)continue;
+    const file=await repository.cloudBookWitness(state.bookId,state).catch(()=>undefined);
+    if(file)packages.push(bookPackageProof(state,file));
+   }
+   const current=await stamp();check();
+   const stable=current&&initial&&JSON.stringify(current)===JSON.stringify(initial);
+   if(!stable)packages.length=0;
+   n.peerPackages=readBookPackageProofs(stable?r.packages:[]);
+   if(stable)n.packageProofAnchor=initial.anchor;
+   return {success:true,action:r.action,version:14,deviceId:watch,packages};
+  });
  }
  failed(error:unknown,context?:SyncActionContext):unknown {
   const e=error as Error&{code?:string;b2Handled?:boolean;stopAutomaticRecovery?:boolean};if(e?.b2Handled)return e;
@@ -179,7 +218,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    ...(initial?{guarded:{accountAnchor:initial.anchor,stamp,transaction:statements=>sessionTransaction!({...context,checkCancelled:owner.commitCheck,onCancel:owner.commitCheck.onCancel},statements)}}:{}),
    ...(initial?{verifyReceipt:(job,d,outcome,objects)=>assets.verifyReceipt(job,d,outcome,objects)}:{}),
    stopLocalWork:fileWork?.stop,guardedTransaction:this.ports.guardedTransaction,durableTransaction:this.ports.durableTransaction,
-   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);
+   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)),initial?.anchor===n.packageProofAnchor?n.peerPackages:undefined);},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);
     if(initial&&this.ports.receiveClaims&&!releaseClaims){
      const claims:LocalBodyClaim[]=[];
      for(const object of objects){

@@ -1,3 +1,4 @@
+import type {BookPackageProof} from './book-state';
 import type {VerifiedChunkStore,ObjectLease,VerifiedObject} from '@podjs/framework/verified-chunk-store';
 import {noteAssetVersionPath, type NoteAssetFileIndex} from '../../notes/asset-files';
 import type {SourceFileRange} from './codec';
@@ -29,7 +30,7 @@ export class BinaryAssets {
  private metadata(d:ObjectDescriptor){const m=exact(strictJson(d.metadataUtf8,false),['storageKey','sha256','size']);if(d.kind!=='noteAsset'||d.encoding!=='raw'||!/^([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/.test(String(m.storageKey))||m.storageKey!==d.businessId||m.sha256!==d.sha256||m.size!==d.size||d.size>5*1024*1024||d.dependsOn.length)fail('BUSINESS_REJECTED');return m;}
  private conflict(d:ObjectDescriptor){return 'notes/asset-conflicts/'+hash(utf8(d.businessId))+'-'+d.sha256+'.bin';}
  private async verified(path:string,d:Pick<ObjectDescriptor,'size'|'sha256'>,code='SOURCE_CHANGED'){const h=await this.files.hash(path);this.check();if(h.size!==d.size||h.sha256!==d.sha256)fail(code);this.unit();}
- async freeze(scope:string,id:string,limits:Limits,send?:ReadonlySet<Kind>):Promise<{witness:Snapshot;inventory:Row}>{
+ async freeze(scope:string,id:string,limits:Limits,send?:ReadonlySet<Kind>,peerPackages?:ReadonlyMap<string,BookPackageProof>):Promise<{witness:Snapshot;inventory:Row}>{
   const objects:ObjectDescriptor[]=[],paths:Record<string,string>={};let manifestBytes=2;
   const entries=send&&!send.has('noteAsset')?[]:await this.noteEntries();
   for(const e of entries){this.check();const key=e.key;if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(key)||/\.(?:part|pending|async-\d+|kv-migration)$/.test(key))continue;
@@ -54,7 +55,7 @@ export class BinaryAssets {
    manifestBytes+=utf8(JSON.stringify(d)).length+1;
    if(objects.length>=limits.maxPlanObjects||manifestBytes>limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
    objects.push(d);if(file)paths[d.objectId]=file.path;
-  },bytes=>this.peak(limits,bytes));
+  },bytes=>this.peak(limits,bytes),peerPackages);
   objects.sort((a,b)=>a.objectId<b.objectId?-1:1);return {witness:{snapshotId:id,manifestDigest:hash(utf8(JSON.stringify(objects))),fromExclusive:0,toInclusive:0},inventory:{objects,paths}};
  }
  private async noteEntries(){

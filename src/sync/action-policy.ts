@@ -1,3 +1,4 @@
+import {BOOK_STATE_ACTION} from './library-binary/book-state';
 import {createRequestAllowlist} from '@podjs/framework/request-policy';
 import {ACTION_OPEN_PAIRING,type JsonObject} from './protocol.ts';
 /** Native automatic Bluetooth and IP listeners share this list. Active connection
@@ -15,7 +16,8 @@ export class BluetoothActionPolicy {
  constructor(private readonly allowBinarySwitch:()=>boolean=()=>false){}
  readonly filterRequest=(request:JsonObject)=>{
   if(this.connectionPages>0)return;
-  if(request.action==='syncLibraryBinary'&&request.version===2&&request.type==='request'&&request.phase==='switch'&&this.allowBinarySwitch())return;
+  if(this.allowBinarySwitch()&&(request.action===BOOK_STATE_ACTION&&request.version===14||
+   request.action==='syncLibraryBinary'&&request.version===2&&request.type==='request'&&request.phase==='switch'))return;
   return foregroundRequestFilter(request);
  };
  acquireConnectionPage():()=>void {
