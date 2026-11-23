@@ -51,7 +51,23 @@ for(const mode of ['ordinary','rollback','guarded','guarded-stale','guarded-corr
    return;
   }
   expect(applied.result!.state).toBe('APPLIED');const rows=await f.db.query('SELECT * FROM library_binary_assets');expect(rows.length).toBe(1);expect((await f.files.hash(await f.ports.assetIndex?.path('picture.png')??'notes/assets/picture.png')).sha256).toBe(d.sha256);
-  const done=await call(request('complete',{objectCount:1,receiptsRoot:receiptsRoot([applied.result!.receipt as any]),ackToInclusive:0},job,plan,epoch));expect(done.result!.state).toBe('COMPLETE');await s.pair.close();await s.running;expect(f.stats().peak).toBe(65536);
+  let terminalWriteStarted=false;
+  if(mode==='ordinary'){
+   const write=s.pair.watch.write.bind(s.pair.watch),readJob=f.store.job.bind(f.store);
+   s.pair.watch.write=(data,timeout)=>{
+    if(Buffer.from(data).includes('"phase":"complete"'))terminalWriteStarted=true;
+    return write(data,timeout);
+   };
+   f.store.job=async(...args)=>{
+    if(terminalWriteStarted)await Bun.sleep(20);
+    return readJob(...args);
+   };
+  }
+  const done=await call(request('complete',{objectCount:1,receiptsRoot:receiptsRoot([applied.result!.receipt as any]),ackToInclusive:0},job,plan,epoch));
+  expect(done.result!.state).toBe('COMPLETE');
+  if(mode==='ordinary')expect(terminalWriteStarted).toBe(true);
+  await s.pair.close();await s.running;expect(f.stats().peak).toBe(65536);
+  if(mode==='ordinary')expect(await f.db.query('SELECT revoked FROM library_binary_connections')).toEqual([{revoked:1}]);
   if(mode==='guarded-stale'){
    const before=await guard.store.readState();
    await guard.store.controlUpdate(before,{...before,account:{...before.account!,revision:'9'}});

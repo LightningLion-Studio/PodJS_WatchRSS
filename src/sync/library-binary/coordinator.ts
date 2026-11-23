@@ -95,7 +95,8 @@ export class LibraryBinaryConnection {
  private localWorkAt:number|null=null;
  private lastLocalUnit=0;
  private networkAt:number;
- private normalClose=false;private settled=new Set<string>();
+ private normalClose=false;
+ private readonly settled=new Map<string,'COMPLETE'|'CANCELLED'>();
  private sourceWork?:Promise<void>;
  private preparedSource?:BinarySourcePlan;
  private readonly sourcePlans=new Map<string,BeginPayload>();
@@ -297,7 +298,7 @@ export class LibraryBinaryConnection {
   const commit=stamp?this.guardedChanges(stamp,job):job?this.nativeChanges(job):undefined;
   if(commit)return async statements=>{await commit(statements);};
  }
- private async answer(r:Envelope){let after:(()=>void)|undefined,charged=false;const charge=()=>{if(!charged){this.stateBucket.take(this.ports.now());charged=true;}};
+ private async answer(r:Envelope){let after:(()=>void)|undefined,charged=false,finalState:'COMPLETE'|'CANCELLED'|undefined;const charge=()=>{if(!charged){this.stateBucket.take(this.ports.now());charged=true;}};
   try{this.localWorkAt=this.ports.now();this.workUnit();
    if(r.phase==='begin'||r.phase==='cancel')await this.regrant?.work;
    const result=await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{
@@ -307,7 +308,15 @@ export class LibraryBinaryConnection {
      await this.guardedStamp(job);
     }
     return result;
-   }));this.check();await this.write(this.reply(r,result.result,result.epoch),()=>{
+   }));this.check();
+   const state=result.result.state;
+   if((r.phase==='complete'||r.phase==='begin'||r.phase==='cancel')&&(state==='COMPLETE'||state==='CANCELLED'))finalState=state;
+   await this.write(this.reply(r,result.result,result.epoch),()=>{
+    if(finalState==='COMPLETE'){
+     // The job is durable. Mark success before the phone can read the terminal reply and close.
+     this.settled.set(r.jobId!,'COMPLETE');
+     void this.finishIfTerminal();
+    }
     if(r.phase==='begin'){this.regrant=undefined;this.dataReady=!!this.receive?.pipeline;}
     if(r.phase==='manifestPage'&&result.result.manifestVerified)this.dataReady=true;
     if(this.nativeReceive&&(r.phase==='begin'||r.phase==='manifestPage'&&result.result.manifestVerified))this.io.activateReceive?.();
@@ -315,19 +324,17 @@ export class LibraryBinaryConnection {
    if(r.phase==='prepare'&&r.payload!.step==='confirm')this.preparation.confirmResponseFullyWritten();
   }catch(e){let error=resumeError(e);if(error.wire().class==='STATE')try{charge();}catch(limit){error=resumeError(limit);}if(!this.stopped)await this.write(this.reply(r,null,r.epoch,error));if(error.wire().recovery==='STOP')throw error;}
   finally{this.localWorkAt=null;}
-  after?.();if(['complete','cancel'].includes(r.phase)||r.phase==='begin'&&terminal((await this.ports.store.job(this.scope,r.jobId!))!)){this.settled.add(r.jobId!);await this.finishIfTerminal();}
+  after?.();
+  if(finalState==='CANCELLED')this.settled.set(r.jobId!,'CANCELLED');
+  if(finalState)await this.finishIfTerminal(true);
  }
- private async finishIfTerminal(){
+ private finishIfTerminal(allowCancelled=false){
   if(!this.bindings.length||!this.bindings.every(b=>this.settled.has(b.jobId)))return;
-  let cancelled=false;
-  for(const binding of this.bindings){
-   const job=await this.ports.store.job(this.scope,binding.jobId);
-   if(!job||!terminal(job))return;
-   cancelled ||= job.state==='CANCELLED';
-  }
   if(this.stopped||this.cancelling||this.normalClose)return;
+  const cancelled=this.bindings.some(b=>this.settled.get(b.jobId)==='CANCELLED');
+  if(cancelled&&!allowCancelled)return;
   this.normalClose=true;
-  if(cancelled){await this.close();return;}
+  if(cancelled)return this.close();
   // Let the phone persist its completion and drain its writer before it closes RFCOMM.
   this.heartbeatTimer?.cancel();
   const timer=this.ports.sleep(30000);
@@ -850,7 +857,7 @@ export class LibraryBinaryConnection {
  }
  private async sendSource(b:Binding):Promise<void>{
 
-  for(;;){try{await this.transferSource(b);await this.finishIfTerminal();return;}catch(e){if(!(e instanceof ResumeError))throw e;const recovery=String(e.wire().recovery);if(recovery==='WAIT'){await this.ports.sleep(100).result;this.check();continue;}if(!['BEGIN','QUERY'].includes(recovery))throw e;this.check();b={...b,intent:'resume'};}}
+  for(;;){try{await this.transferSource(b);await this.finishIfTerminal(true);return;}catch(e){if(!(e instanceof ResumeError))throw e;const recovery=String(e.wire().recovery);if(recovery==='WAIT'){await this.ports.sleep(100).result;this.check();continue;}if(!['BEGIN','QUERY'].includes(recovery))throw e;this.check();b={...b,intent:'resume'};}}
  }
  private async transferSource(b:Binding):Promise<void>{
   const o=this.selectedOffer!,old=await this.ports.store.job(this.scope,b.jobId);let source:BinarySourcePlan|undefined,p:BeginPayload;
@@ -927,5 +934,5 @@ export class LibraryBinaryConnection {
   }
  }
  private validateReceipt(r:AppliedReceipt,job:string,plan:string,id:string){exact(r,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);if(r.jobId!==job||r.planDigest!==plan||r.objectId!==id||r.receiverDeviceId!==this.ports.phoneDeviceId||!['merged','retainedLocal','alreadyPresent'].includes(r.outcome)||r.resultDigest!==D('wrss.library-binary.v2/applied',[r.jobId,r.planDigest,r.objectId,hex(r.applyRequestId,32),hex(r.applyRequestDigest),r.receiverDeviceId,r.outcome]))fail('RECEIPT_CONFLICT');}
- private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const stamp=await this.guardedStamp(latest);await (this.guardedCommit(stamp)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));this.settled.add(j.jobId);this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);}
+ private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const stamp=await this.guardedStamp(latest);await (this.guardedCommit(stamp)??(statements=>this.ports.store.db.transaction(statements)))([this.ports.store.guard(j),{sql:"UPDATE library_binary_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_binary_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));this.settled.set(j.jobId,'COMPLETE');this.ports.recovery?.confirm('COMPLETE','watchToPhone:'+j.description.objectsRoot);}
 }
