@@ -51,7 +51,7 @@ for(const mode of ['ordinary','rollback','guarded','guarded-stale','guarded-corr
    return;
   }
   expect(applied.result!.state).toBe('APPLIED');const rows=await f.db.query('SELECT * FROM library_binary_assets');expect(rows.length).toBe(1);expect((await f.files.hash(await f.ports.assetIndex?.path('picture.png')??'notes/assets/picture.png')).sha256).toBe(d.sha256);
-  const done=await call(request('complete',{objectCount:1,receiptsRoot:receiptsRoot([applied.result!.receipt as any]),ackToInclusive:0},job,plan,epoch));expect(done.result!.state).toBe('COMPLETE');await s.running;expect(f.stats().peak).toBe(65536);
+  const done=await call(request('complete',{objectCount:1,receiptsRoot:receiptsRoot([applied.result!.receipt as any]),ackToInclusive:0},job,plan,epoch));expect(done.result!.state).toBe('COMPLETE');await s.pair.close();await s.running;expect(f.stats().peak).toBe(65536);
   if(mode==='guarded-stale'){
    const before=await guard.store.readState();
    await guard.store.controlUpdate(before,{...before,account:{...before.account!,revision:'9'}});
@@ -68,6 +68,7 @@ for(const mode of ['ordinary','rollback','guarded','guarded-stale','guarded-corr
   }else{
    expect(terminal.result!.state).toBe('COMPLETE');
    expect(terminal.result!.completion).toEqual(done.result);
+   await resumed.s.pair.close();
    await resumed.s.running;
   }expect((await f.db.query('SELECT * FROM library_binary_assets')).length).toBe(1);
 

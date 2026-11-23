@@ -179,6 +179,7 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
   expect(await f.db.query('SELECT chapter_index FROM sync_book_chapters')).toEqual([{chapter_index:1}]);
   expect((await repository.books!.readingStates(false))[0]).toMatchObject({readingPositionChangedAt:21,favoriteSaved:true});
   await peer.operation('complete',{objectCount:book.objects.length,receiptsRoot:receiptsRoot(book.objects.map(d=>receipts.get(d.objectId)!)),ackToInclusive:0});
+  await peer.session.pair.close();
   await peer.session.running;
   expect((await files.stat(published!.path)).file).toBe(true);
   expect(f.refStats().readRefs).toBe(book.objects.reduce((n,d)=>n+d.chunkHashes.length,0));
@@ -233,7 +234,14 @@ test('guarded BT-R receives an 8 MiB book by missing ranges without replaying 27
   const claims=new LocalBodyClaims(f.db);
   expect(await claims.received(canonical(scope),{kind:'book',logicalId:book.state.bookId,entityKey:'',bodyRevision:''},book.info.sha256)).toBe(true);
   const complete=await peer.operation('complete',{objectCount:book.objects.length,receiptsRoot:receiptsRoot(book.objects.map(d=>receipts.get(d.objectId)!)),ackToInclusive:0});
-  expect(complete.result?.state).toBe('COMPLETE');await peer.session.running;
+  expect(complete.result?.state).toBe('COMPLETE');
+  // Android 121 persists its side of COMPLETE and flushes its writer before closing.
+  const watchEof=peer.session.pair.phone.read(1,3000);
+  const waitForPhone=await Promise.race([watchEof.then(()=>false),Bun.sleep(40).then(()=>true)]);
+  await peer.session.pair.close();
+  await peer.session.running;
+  expect(waitForPhone).toBe(true);
+  expect(await watchEof).toBeNull();
   expect(f.stats().stageCalls-chunksBefore).toBe(128);
   expect(await f.db.query('SELECT count(*) AS count FROM sync_book_chapters')).toEqual([{count:32}]);
  }finally{await f.dispose();}
@@ -322,6 +330,7 @@ test('guarded BT-R watch source queries durable chunks after a disconnect and co
     }else if(r.phase==='complete'){
      const root=receiptsRoot(objects.map(d=>receipts.get(d.objectId)!));expect(params.receiptsRoot).toBe(root);
      await reply(completion(job,plan!,objects.length,root,0) as unknown as Row);
+     await peer.session.pair.close();
      await peer.session.running;return true;
     }else throw Error('unexpected '+r.phase);
    }

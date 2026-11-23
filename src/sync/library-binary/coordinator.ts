@@ -89,6 +89,7 @@ export class LibraryBinaryConnection {
  private dataReady=false;
  private sourceReading=false;
  private heartbeatTimer?:{cancel():void};
+ private terminalDrainTimer?:{cancel():void};
  private sourceHeartbeat?:Promise<Envelope>;
  private sourceEpoch?:{job:string;plan:string;epoch:number;last:number};
  private localWorkAt:number|null=null;
@@ -120,7 +121,7 @@ export class LibraryBinaryConnection {
  workUnit(){this.lastLocalUnit=this.ports.now();}
  private write(value:Envelope,started?:()=>void):Promise<void>{this.check();return this.binary.write({kind:'control',envelope:value},value.phase==='missing'&&value.payload?.limit===0?'urgent':'ordinary',started);}
  private reply(r:Envelope,result:Row|null,epoch:number|null,error?:ResumeError):Envelope{const {payload,...base}=r;return {...base,type:'response',success:!error,result,...(error?{error:error.wire()}:{}),epoch};}
- async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.revokeCommits();this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.io.waitRevoked?.();await this.ports.store.revokeConnection(this.ports.connectionId);}
+ async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.revokeCommits();this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.terminalDrainTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.io.waitRevoked?.();await this.ports.store.revokeConnection(this.ports.connectionId);}
  cancel():Promise<void>{
   if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;this.revokeCommits();this.ports.stopLocalWork?.();
   this.receive?.window.grant.fence();const draining=this.receive?.pipeline?.fence();this.send?.window.close();
@@ -227,10 +228,11 @@ export class LibraryBinaryConnection {
    if(!this.normalClose)throw this.closeReason;
   }catch(e){if(!this.normalClose)throw this.closeReason??e;}finally{await this.close();await this.incoming?.catch(()=>{});await this.sourceWork?.catch(()=>{});}
  }
- private tick(){const timer=this.ports.sleep(1000);this.heartbeatTimer=timer;void timer.result.then(async()=>{if(this.stopped)return;await this.ports.sampleClock?.();if(this.stopped)return;const at=this.ports.now();
+ private tick(){if(this.stopped||this.normalClose)return;const timer=this.ports.sleep(1000);this.heartbeatTimer=timer;void timer.result.then(async()=>{if(this.stopped||this.normalClose)return;await this.ports.sampleClock?.();if(this.stopped||this.normalClose)return;const at=this.ports.now();
   if(this.io.native&&(this.nativeReceive||this.nativeSending)){
    const receive=this.receive,epoch=receive?.job.epoch;
    const {progress,durable,overflow}=await this.io.native.state();
+   if(this.stopped||this.normalClose)return;
    if(progress!==this.nativeProgress){this.nativeProgress=progress;this.networkAt=at;this.workUnit();}
    if(this.nativeReceive&&receive&&receive.job.epoch===epoch){
     const affected=new Set<ObjectDescriptor>();
@@ -247,6 +249,7 @@ export class LibraryBinaryConnection {
     }
    }
   }
+  if(this.stopped||this.normalClose)return;
   if(!this.clockSync)this.clockSync=this.ports.store.observeClock(Math.floor(at)).catch(e=>this.close(e)).finally(()=>{this.clockSync=undefined;});
   const remoteWork=!!this.send?.window.credit.chunks||[...this.pending.values()].some(p=>['manifestPage','apply','complete','missing'].includes(p.request.phase));const localWork=this.localWorkAt!==null||this.receive?.pipeline?.working||this.sourceReading;if(!remoteWork&&!localWork&&at-this.networkAt>=30000){await this.close(Error('SocketTimeout'));return;}if(localWork&&at-this.lastLocalUnit>=30000){await this.close(new ResumeError('LOCAL_IO'));return;}
   const source=this.sourceEpoch;if(source&&at-source.last>=8000&&!this.sourceHeartbeat){source.last=at;this.sourceHeartbeat=this.request('missing',source.job,source.plan,source.epoch,{afterObjectId:null,afterChunkIndex:null,limit:0},false);void this.sourceHeartbeat.catch(e=>{if(e instanceof ResumeError&&e.code==='LEASE_EXPIRED'){this.failData(e);for(const [id,p] of this.pending){this.retiredControls.set(id,p.request);if(this.retiredControls.size>2)this.retiredControls.delete(this.retiredControls.keys().next().value!);p.reject(e);}this.pending.clear();this.slots?.clear();}else return this.close(e);}).finally(()=>{this.sourceHeartbeat=undefined;});}this.tick();},e=>{if(!this.stopped)void this.close(e);}).catch(e=>this.close(e));}
@@ -310,7 +313,23 @@ export class LibraryBinaryConnection {
   finally{this.localWorkAt=null;}
   after?.();if(['complete','cancel'].includes(r.phase)||r.phase==='begin'&&terminal((await this.ports.store.job(this.scope,r.jobId!))!)){this.settled.add(r.jobId!);await this.finishIfTerminal();}
  }
- private async finishIfTerminal(){if(this.bindings.length&&this.bindings.every(b=>this.settled.has(b.jobId))&&await this.allTerminal()){this.normalClose=true;await this.close();}}
+ private async finishIfTerminal(){
+  if(!this.bindings.length||!this.bindings.every(b=>this.settled.has(b.jobId)))return;
+  let cancelled=false;
+  for(const binding of this.bindings){
+   const job=await this.ports.store.job(this.scope,binding.jobId);
+   if(!job||!terminal(job))return;
+   cancelled ||= job.state==='CANCELLED';
+  }
+  if(this.stopped||this.cancelling||this.normalClose)return;
+  this.normalClose=true;
+  if(cancelled){await this.close();return;}
+  // Let the phone persist its completion and drain its writer before it closes RFCOMM.
+  this.heartbeatTimer?.cancel();
+  const timer=this.ports.sleep(30000);
+  this.terminalDrainTimer=timer;
+  void timer.result.then(()=>this.close(),error=>this.close(error)).catch(()=>{});
+ }
  private binding(j:Job):JobBinding{return {streamId:j.description.direction==='phoneToWatch'?1:2,jobId:j.jobId,planDigest:j.planDigest,selectionDigest:j.description.selectionDigest};}
  private fenceReceiver(){
   const receive=this.receive;
@@ -434,7 +453,6 @@ export class LibraryBinaryConnection {
   });
   receive.pipeline.sequenced=this.nativeReceive;
  }
- private async allTerminal(){for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(!j||!terminal(j))return false;}return true;}
  private checkReceiveBinding(r:Envelope){
   if(this.stagingRequest?.requestId===r.requestId&&this.stagingRequest.requestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');
   this.receive?.requests.hasBinding(r);
