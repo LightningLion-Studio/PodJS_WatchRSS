@@ -6,6 +6,7 @@ import {createComponent, createEffect, createMemo, createRenderEffect, createRoo
 import * as solidRuntime from "solid-js";
 import type {TextLayoutOptions} from "@podjs/framework/services";
 import type {SystemTextLineOptions} from "@podjs/framework/text";
+import type {ScrollEntry} from "../src/ui/ScrollEntries.tsx";
 import type {InformationListAnchor} from "../src/ui/information-anchor.ts";
 import type {InformationDocumentHandle, InformationDocumentProps} from "../src/ui/InformationDocument.tsx";
 import type {InformationRef, InformationScreenProps, InformationSnapshot} from "../src/ui/InformationScreens.tsx";
@@ -41,10 +42,13 @@ mock.module("@pocketjs/framework/renderer", () => ({createComponent, mergeProps,
 mock.module("@pocketjs/framework/components", () => ({View: element("View"), Text: element("Text")}));
 mock.module("@podjs/framework/text", () => ({SystemTextLine: element("SystemTextLine")}));
 let externalBrowser=false;
+const aboutCache = new Map<string, unknown>();
 mock.module("@podjs/framework/watch", () => ({
+  kv: {get: (key: string) => aboutCache.get(key), set: (key: string, value: unknown) => aboutCache.set(key, value)},
   getDisplayMetrics: () => ({logicalWidth: 233, logicalHeight: 233, physicalWidth: 466, physicalHeight: 466, density: 1.75}),
   hasCapability: (name: string) => name==="system.browser" ? externalBrowser : ["text.environment", "text.layout", "text.raster"].includes(name),
 }));
+mock.module("@podjs/framework/atlas-text", () => ({layoutAtlasText: (text: string) => ({lines: text.split("\n"), style: {}})}));
 mock.module("../src/ui/ScrollEntries.tsx", () => ({ScrollEntries: element("ScrollEntries")}));
 mock.module("../src/ui/SafeQrScreen.tsx", () => ({SafeQrScreen: element("SafeQrScreen")}));
 mock.module("../src/ui/BeianScreen.tsx", () => ({BeianScreen: element("BeianScreen")}));
@@ -120,6 +124,7 @@ const {InformationScreen} = await import("../src/ui/InformationScreens.tsx");
 const disposers: Array<() => void> = [];
 afterEach(() => {
   externalBrowser=false;
+  aboutCache.clear();
   while (disposers.length) disposers.pop()!();
   documents.length = 0; requests.length = 0; nativeRequests.length = 0; nativeMeasurements.length = 0; settingsCalls=0;settingsPending=undefined;settingsFailure=undefined;hostRequests.length=0;
 });
@@ -425,6 +430,26 @@ for (const page of ["info", "licenses"] as const) test(`static ${page} uses the 
   expect(document.props.active).toBe(mounted.input.active);
   expect(document.props.accessibilityLabel).toBe("协议正文");
   expect(nodes.some(node => node.kind === "ScrollEntries" || typeof node.props.onPress === "function")).toBe(false);
+});
+
+test("about section occupies rows only when the watch endpoint returns content", async () => {
+  const about = mount({page:"about"});
+  const rows = () => about.nodes().find(node => node.kind === "ScrollEntries")?.props.entries as ScrollEntry[];
+  expect(rows()).toHaveLength(7);
+  expect(requests[0]!.url).toBe("https://legal.example.test/functions/v1/about-section?platform=watch");
+  requests[0]!.resolve(JSON.stringify({revision:1,items:[{title:"产品详情",body:"第一行\n第二行"}]}));
+  await settle();
+  expect(rows()).toHaveLength(8);
+  expect(aboutCache.get("watchrss.about-section.watch")).toMatchObject({revision:1});
+  expect(runWithOwner(about.owner, () => textIn(rows()[6]!.render()))).toBe("产品详情\n第一行\n第二行");
+  expect(rows()[7]!.height).toBe(52);
+  about.dispose();
+
+  const reopened = mount({page:"about"});
+  requests[1]!.resolve(JSON.stringify({revision:2,items:[]}));
+  await settle();
+  expect(reopened.nodes().find(node => node.kind === "ScrollEntries")?.props.entries as ScrollEntry[]).toHaveLength(7);
+  expect(aboutCache.get("watchrss.about-section.watch")).toEqual({revision:2,items:[]});
 });
 
 test("a successful empty response remains a document instead of returning to loading", async () => {

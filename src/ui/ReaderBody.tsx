@@ -1,5 +1,6 @@
 import {onMemoryTrim,memoryPressureLevel} from '@podjs/framework/memory';
 import {WindowedReaderDocument,needsReaderWindows} from '../reader/windowed-document';
+import {rectInsideCircle} from "./safe-qr-layout.ts";
 import {readerMediaRatio} from '../reader/media-geometry.ts';
 import {AutoPageClock} from "../reader/auto-page.ts";
 import {ReaderBookPage} from "./ReaderBookPage.tsx";
@@ -66,6 +67,7 @@ export interface ReaderBodyHandle {
 }
 function ReaderBodyImpl(props:{
   pageMode?:boolean;
+  fitRoundText?:boolean;
   touchOrigin?:{left:number;top:number};
   onMoving?:(moving:boolean)=>void;
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
@@ -580,7 +582,27 @@ function ReaderBodyImpl(props:{
     if(!foreground)void save();
   });
   onCleanup(()=>{cancelProgressTimer?.();textCache.close();void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();windowed()?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
-  function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",onPress:initial.kind==="text"?tap:undefined,render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createMemo(raw);const textRow=()=>row() as Extract<ReaderRow,{kind:"text"}>;return initial.kind==="text"?<>{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<ReaderTextRow cache={textCache} top={textRow().gap} environment={textEnvironment()} row={textRow()} style={styleForText(textRow())} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={(positions,owner)=>setSystemCarets(previous=>updateSystemCarets(previous,owner,positions))}/></>:(()=>{const row=createWindowValue(()=>raw() as Exclude<ReaderRow,{kind:"text"}>);return <View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
+  function makeEntry(initial:ReaderRow):PositionedScrollEntry {
+    return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",onPress:initial.kind==="text"?tap:undefined,
+      render:(current?:()=>ScrollEntry)=>{
+        const raw=()=>current?.().data as ReaderRow??initial;
+        if(initial.kind==="text"){
+          const row=createMemo(()=>raw() as Extract<ReaderRow,{kind:"text"}>);
+          const visible=createMemo(()=>{
+            if(!props.fitRoundText)return true;
+            const line=row();
+            const top=(current?.() as PositionedScrollEntry|undefined)?.top??headerHeight()+line.top;
+            // Use the full column so a short continuation cannot appear below a hidden line.
+            return rectInsideCircle({x:14,y:(props.top??40)+top+line.gap-scroller.offset(),
+              width:props.width-28,height:line.lineHeight},
+              {cx:props.width/2,cy:props.height/2,radius:Math.min(props.width,props.height)/2},3);
+          });
+          const highlight=()=>{const rect=highlightRects().get(row());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;};
+          const text=<ReaderTextRow cache={textCache} top={row().gap} environment={textEnvironment()} row={row()} style={styleForText(row())} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={(positions,owner)=>setSystemCarets(previous=>updateSystemCarets(previous,owner,positions))}/>;
+          return <View class="absolute inset-0" accessibilityHidden={!visible()}
+            style={{opacity:visible()?1:0}}>{highlight()}{text}</View>;
+        }
+        return (()=>{const row=createWindowValue(()=>raw() as Exclude<ReaderRow,{kind:"text"}>);return <View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;})();}};}
   const indexedEntries=createMemo(()=>{

@@ -1,3 +1,5 @@
+import {loadHostWatchAboutSection} from '../about/section-host.ts';
+import type {AboutSectionItem} from '../about/section.ts';
 import {isTransportFailure} from '../network/recovery.ts';
 import {useNetworkRecovery} from '../network/context.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
@@ -67,6 +69,27 @@ function textEntries(content:string,rowWidth:number,height:number,round:boolean,
   });
 }
 
+function aboutSectionRows(items: readonly AboutSectionItem[], rowWidth: number, viewportHeight: number, offset: () => number): ScrollEntry[] {
+  const width = Math.floor(rowWidth * .8);
+  const x = (rowWidth - width) / 2;
+  const lineHeight = 14;
+  return items.flatMap(item => {
+    const text = [item.title, item.body].filter(value => value?.trim()).join("\n");
+    if (!text) return [];
+    const {lines} = layoutAtlasText(text, {width, fontSlot: 0, lineHeight});
+    // Leave room for fixed bottom padding so the last chunk fits at the end of the list.
+    return chunkLines(lines, lineHeight, width, 76).map(chunk => {
+      const height = chunk.length * lineHeight;
+      const bounds = {x, y: 0, width, height};
+      const visible = scrollTextVisibility(bounds, viewportHeight, offset, 18);
+      return {height, visibleBounds: bounds, render: row => <Show when={visible(row)}>
+        <Text class="absolute text-center text-xs leading-[14] text-[#b6b6b6]"
+          style={{insetL:x,insetT:0,width,height}}>{chunk.join("\n")}</Text>
+      </Show>};
+    });
+  });
+}
+
 export function InformationScreen(props: InformationScreenProps) {
   const network=useNetworkRecovery();
   const [externalUnavailable,setExternalUnavailable]=createSignal(false);
@@ -95,6 +118,14 @@ export function InformationScreen(props: InformationScreenProps) {
   const [restoreOffset, setRestoreOffset] = createSignal(restored?.listAnchor ? undefined : restored?.scrollOffset);
   const [document, setDocument] = createSignal<InformationDocumentHandle>();
   const [legacyScroller, setLegacyScroller] = createSignal<Scroller>();
+  const [aboutItems, setAboutItems] = createSignal<AboutSectionItem[]>([]);
+  createEffect(() => {
+    const baseUrl = props.legalBaseUrl;
+    if (props.page !== 'about' || !baseUrl || props.active?.() === false) return;
+    let current = true;
+    void loadHostWatchAboutSection(baseUrl).then(items => { if (current) setAboutItems(items); });
+    onCleanup(() => { current = false; });
+  });
   const statusScroller = createScroller({max: () => 0, extent: () => props.height});
   const remote = () => props.page === 'privacy' || props.page === 'useragreement';
   const documentTitle = () => ({privacy:'隐私政策', useragreement:'用户协议', info:'项目自介', licenses:'开源许可与清单'}[props.page as 'privacy'|'useragreement'|'info'|'licenses']);
@@ -181,7 +212,7 @@ export function InformationScreen(props: InformationScreenProps) {
   });
   const result = createMemo<ScrollEntry[]>(() => { let result: ScrollEntry[];
   switch (props.page) {
-    case "about": result = [{height:25.5,render:()=> <View class="absolute inset-0 items-center justify-center"><Text style={{translateY:-1.25}} class="text-[21px] leading-[26] text-[#f5f5f5]">关于</Text></View>}, aboutEntry("项目自介", "腕上RSS 聚合阅读", () => props.onNavigate("info")), aboutEntry("隐私政策", "个人信息与日志说明", () => props.onNavigate("privacy")), aboutEntry("用户协议", "使用条款", () => props.onNavigate("useragreement")), aboutEntry("开源许可与清单", "第三方库信息", () => props.onNavigate("licenses")), aboutEntry("贡献者", "协作者名单", () => props.onNavigate("collaborators")), { height: 52, render: () => <View /> }]; break;
+    case "about": result = [{height:25.5,render:()=> <View class="absolute inset-0 items-center justify-center"><Text style={{translateY:-1.25}} class="text-[21px] leading-[26] text-[#f5f5f5]">关于</Text></View>}, aboutEntry("项目自介", "腕上RSS 聚合阅读", () => props.onNavigate("info")), aboutEntry("隐私政策", "个人信息与日志说明", () => props.onNavigate("privacy")), aboutEntry("用户协议", "使用条款", () => props.onNavigate("useragreement")), aboutEntry("开源许可与清单", "第三方库信息", () => props.onNavigate("licenses")), aboutEntry("贡献者", "协作者名单", () => props.onNavigate("collaborators")), ...aboutSectionRows(aboutItems(), (props.width ?? metrics.logicalWidth) - 36, props.height, () => legacyScroller()?.offset() ?? 0), { height: 52, render: () => <View /> }]; break;
     case "collaborators": result = [title("协作者名单"), ...[ ["闪电狮", "前端开发", "S"], ["林海阔", "前端开发", "L"], ["Nicolas", "设计师", "N"] ].map(([name, role, initial]) => ({ height: 60, render: () => <View class="absolute inset-0 rounded-[30] bg-[#2a2a2a]"><View class="absolute left-[9] top-[9] w-[42] h-[42] rounded-full bg-[#454545] items-center justify-center"><Text class="text-xs text-white">{initial}</Text></View><Text class="absolute left-[61] top-[12] text-sm text-white">{name}</Text><Text class="absolute left-[61] top-[34] text-xs text-[#b6b6b6]">{role}</Text></View> }))]; break;
     case "contact-developer": result = [title("联系开发者"), button("加群", () => props.onNavigate("join-group")), button("上传日志", () => props.onNavigate("log-upload-privacy")), button("管理已上传日志", props.onManageLogs)]; break;
     case "join-group": result = []; break;

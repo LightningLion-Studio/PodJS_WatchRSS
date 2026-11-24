@@ -44,6 +44,17 @@ test('full 512 KiB response exceeds the Pocket fetch limit and decodes Unicode a
  }
 });
 
+test('disclosure download bounds individual host reads and preserves split UTF-8',async()=>{
+ const body='x'.repeat(8191)+'中'+'y'.repeat(8192),f=fixture(body);
+ const options={maxBytes:256*1024,chunkBytes:8*1024,revalidate:false};
+ const url='https://legal.example/functions/v1/ai-disclosure?platform=watch';
+ expect(await fetchLegalDocument(url,f.ports,options).result).toBe(body);
+ expect(f.calls.args[0]).toMatchObject({url,maxBytes:256*1024,headers:{'X-WatchRSS-App-Version':`watch-${config.versionName.trim()}+${config.versionCode}`}});
+ expect(f.calls.args[0].headers).not.toHaveProperty('Cache-Control');
+ expect(f.calls.reads.map(row=>row.offset)).toEqual([0,8192,16384]);
+ expect(f.calls.reads.every(row=>row.maxBytes<=8192)).toBe(true);
+});
+
 test('concurrent requests own distinct paths and only clean their own files',async()=>{
  const f=fixture('协议');const requests=Array.from({length:10},()=>fetchLegalDocument('https://legal.example/terms',f.ports));
  expect(await Promise.all(requests.map(row=>row.result))).toEqual(Array(10).fill('协议'));

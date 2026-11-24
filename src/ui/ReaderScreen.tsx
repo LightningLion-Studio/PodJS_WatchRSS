@@ -25,14 +25,19 @@ import type {NativeBlockLayouts,ReaderRow} from "../reader/content-layout.ts";
 import { createContentLayouter, presetContentFont, readerColor } from "../reader/content-layout.ts";
 import {onFrame} from "@pocketjs/framework/lifecycle";
 import {hostOperation,textLayout} from "@podjs/framework/services";
+import {roundTextShift} from "../reader/round-text.ts";
+import {wrapFieldText} from "../reader/field-wrap.ts";
 import {measuredLines} from "../reader/measured-text.ts";
+import {AI_DISCLOSURE_UNAVAILABLE} from "../llm/ai-disclosure.ts";
+import {roundRowMaxHeight} from "./round-rows.tsx";
+import {rectInsideCircle} from "./safe-qr-layout.ts";
 import {summaryDisplayText,summaryTokenUsageText,type SummaryState} from "../llm/summary.ts";
-import {createMemo,createSignal,createEffect,onCleanup,Show} from "solid-js";
+import {createMemo,createSignal,createEffect,onCleanup,For,Show} from "solid-js";
 import {Image,Text,View,type NodeMirror} from "@pocketjs/framework/components";
 import {getOps} from "@pocketjs/framework/host";
 import {ReaderBody,type ReaderBodyHandle} from "./ReaderBody.tsx";
 import {ArticleSource} from "./ArticleSource.tsx";
-import type {ScrollEntry} from "./ScrollEntries.tsx";
+import type {PositionedScrollEntry,ScrollEntry} from "./ScrollEntries.tsx";
 import type {Article,AppServices} from "./service.ts";
 import type {ContentBlock} from "../reader/content.ts";
 import {contentFont} from "../reader/content-layout.ts";
@@ -94,8 +99,59 @@ function ReaderScreenImpl(props:{
  const animatingSummary = () => props.active && loading();
  onFrame(() => { if (animatingSummary()) setRotation((Date.now() % 1200) / 1200 * 360); }, animatingSummary);
  const toggleSummary=()=>{setExpanded(value=>!value);if(expanded()&&(summary().status==="idle"||summary().status==="error"))void session.start();};
+ const [disclosure,setDisclosure]=createSignal(AI_DISCLOSURE_UNAVAILABLE);
+ createEffect(()=>{
+  if(novel()||!props.llmEnabled||!expanded())return;
+  let current=true;
+  void props.services.loadAiDisclosure?.().then(text=>{if(current)setDisclosure(text);}).catch(()=>{});
+  onCleanup(()=>{current=false;});
+ });
+ const disclosureLineHeight=14;
+ const disclosureEntries=createMemo<ScrollEntry[]>(()=>{
+  const round=getDisplayMetrics().shape==='round';
+  const diameter=Math.min(props.width,props.height);
+  const safeSide=Math.floor((diameter-16)/Math.SQRT2);
+  const contentWidth=chromeWidth()-28;
+  const safeWidth=pageMode()?safeSide:Math.floor(diameter*.75);
+  const width=Math.max(1,Math.min(contentWidth-8,round?safeWidth:contentWidth));
+  const lines=wrapFieldText(disclosure(),width,text=>getOps().measureText(text,0));
+  const maxHeight=round?Math.min(safeSide,roundRowMaxHeight(width)):props.height-28;
+  const maxLines=Math.max(1,Math.floor(maxHeight/disclosureLineHeight));
+  const entries:ScrollEntry[]=[];
+  for(let start=0;start<lines.length;start+=maxLines){
+   const chunk=lines.slice(start,start+maxLines);
+   const height=chunk.length*disclosureLineHeight;
+   const left=(contentWidth-width)/2;
+   const visible=(row?:()=>ScrollEntry)=>{
+    if(!round||!row)return true; // Paged headers are centered inside the safe square.
+    const top=(row() as PositionedScrollEntry).top-(handle()?.scroller.offset()??0);
+    return rectInsideCircle({x:(props.width-width)/2,y:top,width,height},
+     {cx:props.width/2,cy:props.height/2,radius:diameter/2});
+   };
+   entries.push({height,render:row=><Show when={visible(row)}>
+    <Text class="absolute text-center text-xs leading-[14]" style={{insetL:left,insetT:0,width,height,textColor:`${chrome().content.slice(0,7)}b8`}}>{chunk.join("\n")}</Text>
+   </Show>});
+  }
+  return entries;
+ });
  const summaryText=()=>summaryDisplayText(summary());
  const summaryLines=createMemo(()=>measuredLines(summaryText(),chromeWidth()-36,text=>getOps().measureText(text,1)));
+ const fitRoundText=()=>expanded()&&props.llmEnabled&&!novel()&&!pageMode()&&getDisplayMetrics().shape==="round";
+ const summaryBody:ScrollEntry={
+  get height(){return summaryLines().length*17;},
+  render:row=><View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0">
+   <For each={summaryLines()}>{(line,index)=>{
+    const width=createMemo(()=>getOps().measureText(line,1));
+    const shift=createMemo(()=>{
+     if(!fitRoundText()||!row)return 0;
+     const top=(row() as PositionedScrollEntry).top+index()*17-(handle()?.scroller.offset()??0);
+     return roundTextShift(props.width,props.height,top,17,18,width());
+    });
+    return <Text class="absolute left-[4] right-[4] text-sm leading-[17]" accessibilityHidden={shift()===undefined}
+     style={{insetT:index()*17,height:17,translateX:shift()??0,opacity:shift()===undefined?0:1,textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{line}</Text>;
+   }}</For>
+  </View>,
+ };
  const tokenUsageLines=createMemo(()=>{const text=summaryTokenUsageText(summary(),props.llmShowTokenUsage??false);return text?measuredLines(text,chromeWidth()-60,value=>getOps().measureText(value,0)):[];});
  const summaryIcon=(size:number)=>loading()?<Image src={chrome().dark?"../assets/icons/ai-loading.svg":"../assets/icons/ai-loading-light.svg"} style={{width:size,height:size,rotate:rotation()}}/>:<Image src={chrome().dark?"../assets/icons/ai-summary.svg":"../assets/icons/ai-summary-light.svg"} style={{width:size,height:size}}/>;
  const spacer=(height:number):ScrollEntry=>({height,render:()=>null});
@@ -207,7 +263,13 @@ function ReaderScreenImpl(props:{
    spacer(22),
    ...titleHeader(),
    ...(!novel()&&(!imported()||props.llmEnabled)?[spacer(6),actionRow]:[]),
-   ...(!novel()&&props.llmEnabled&&expanded()?[spacer(6),{height:20+summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text><Text class="absolute left-[4] right-[4] top-[20] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>},...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
+   ...(!novel()&&props.llmEnabled&&expanded()?[
+    spacer(6),
+    {height:20,render:()=> <View class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text></View>},
+    ...disclosureEntries(),
+    spacer(4),
+    {...summaryBody},
+    ...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
    ...(source.notice()?[{height:40,render:()=> <Text class="absolute inset-0 text-xs leading-[16] text-[#aaa]">{source.notice()}</Text>}]:[]),
    ...(offlineFailures()||retryingOffline()?[{height:34,render:()=> <View onPress={()=>void retryOffline()} focusable={!retryingOffline()} class="absolute inset-0 items-center justify-center"><Text class="text-xs text-[#ffb88c]">{retryingOffline()?"重试中...":"离线媒体下载失败，点此重试"}</Text></View>}]:[]),spacer(6)
   ]);
@@ -221,7 +283,7 @@ function ReaderScreenImpl(props:{
   ]);
   const bodyState=()=>bodyRetryFailed()?'failed':readerBodyState(article());
   const bodyNotice=()=>retryingBody()?'正在加载…':bodyState()==='restoring'?'正在从云端恢复':'加载失败可重试';
-  return <><Show when={!bodyState()} fallback={<View debugName="ReaderBodyUnavailable" class="absolute inset-0 items-center justify-center" style={{bgColor:readerColor(props.preset.background.colorArgb)}}><Text class="absolute left-[28] right-[28] top-[42] text-center text-sm" style={{textColor:chrome().content}}>{props.article.title}</Text><View onPress={()=>void retryBody()} focusable={!retryingBody()} accessibilityRole="button" accessibilityLabel="重试加载正文" class="absolute left-[24] right-[24] top-[98] h-[64] items-center justify-center active:scale-96"><Text class="text-sm" style={{textColor:chrome().content}}>{bodyNotice()}</Text><Text class="text-xs" style={{textColor:chrome().content}}>点此重试</Text></View></View>}><ReaderBody pageMode={pageMode()} touchOrigin={props.touchOrigin} onMoving={setMoving} progressStore={props.services.readingProgress} imported={article().importedText&&props.services.loadImportedTextChunk?{handle:article().importedText!,read:index=>props.services.loadImportedTextChunk!(article().importedText!,index)}:undefined} highlight={activeHighlight()} speechPlaying={props.speaking} speechTitleCenter={titleRects().length?22+highlightCenter(titleRects())!:undefined} highlightColor={highlightColor()} onSpeechControls={anchor=>props.onSpeechControls(speechArticle(),anchor)} preset={props.preset} articleId={props.article.id} text={article().content} blocks={article().contentBlocks??[{type:"text",text:article().content,style:"body"}]} offlineMedia={offlineMedia()} baseUrl={article().link} width={props.width} height={props.height} top={0} fontSize={props.fontSize} lineHeight={props.lineHeight} active={props.active&&!webWarning()&&!novelMenu()} autoStart={props.autoStart} keepAwake={props.keepAwake} speed={props.speed} pageSeconds={props.pageSeconds} header={header()} footer={footer()} onMedia={block=>props.onMedia({...article(),offlineMedia:offlineMedia()},block)} onControls={props.onControls} onImportedError={()=>{setHandle(undefined);setBodyRetryFailed(true);}} onError={props.onError} ref={value=>{setHandle(value);props.ref(value);}}/></Show><Show when={novel()}><NovelReadingMenu width={props.width} height={props.height} active={props.active} expanded={novelMenu()} moving={moving()} pageMode={pageMode()} preset={props.preset} onExpanded={value=>{handle()?.pause();setNovelMenu(value);}} onMode={value=>{setPageMode(value);if(value)void hostOperation("ui.toast",{message:"轻点左侧上一页，轻点右侧下一页"}).result.catch(()=>{});}} onSpeak={()=>props.onSpeechControls(speechArticle())}/></Show><Show when={webWarning()}><OriginalWebConfirm width={props.width} height={props.height} onCancel={()=>setWebWarning(false)} onConfirm={()=>{setWebWarning(false);void openBrowserUrl(props.article.link??"","article",props.preset).catch(error=>props.onError(browserOpenFailureMessage(error)));}}/></Show></>;
+  return <><Show when={!bodyState()} fallback={<View debugName="ReaderBodyUnavailable" class="absolute inset-0 items-center justify-center" style={{bgColor:readerColor(props.preset.background.colorArgb)}}><Text class="absolute left-[28] right-[28] top-[42] text-center text-sm" style={{textColor:chrome().content}}>{props.article.title}</Text><View onPress={()=>void retryBody()} focusable={!retryingBody()} accessibilityRole="button" accessibilityLabel="重试加载正文" class="absolute left-[24] right-[24] top-[98] h-[64] items-center justify-center active:scale-96"><Text class="text-sm" style={{textColor:chrome().content}}>{bodyNotice()}</Text><Text class="text-xs" style={{textColor:chrome().content}}>点此重试</Text></View></View>}><ReaderBody pageMode={pageMode()} fitRoundText={fitRoundText()} touchOrigin={props.touchOrigin} onMoving={setMoving} progressStore={props.services.readingProgress} imported={article().importedText&&props.services.loadImportedTextChunk?{handle:article().importedText!,read:index=>props.services.loadImportedTextChunk!(article().importedText!,index)}:undefined} highlight={activeHighlight()} speechPlaying={props.speaking} speechTitleCenter={titleRects().length?22+highlightCenter(titleRects())!:undefined} highlightColor={highlightColor()} onSpeechControls={anchor=>props.onSpeechControls(speechArticle(),anchor)} preset={props.preset} articleId={props.article.id} text={article().content} blocks={article().contentBlocks??[{type:"text",text:article().content,style:"body"}]} offlineMedia={offlineMedia()} baseUrl={article().link} width={props.width} height={props.height} top={0} fontSize={props.fontSize} lineHeight={props.lineHeight} active={props.active&&!webWarning()&&!novelMenu()} autoStart={props.autoStart} keepAwake={props.keepAwake} speed={props.speed} pageSeconds={props.pageSeconds} header={header()} footer={footer()} onMedia={block=>props.onMedia({...article(),offlineMedia:offlineMedia()},block)} onControls={props.onControls} onImportedError={()=>{setHandle(undefined);setBodyRetryFailed(true);}} onError={props.onError} ref={value=>{setHandle(value);props.ref(value);}}/></Show><Show when={novel()}><NovelReadingMenu width={props.width} height={props.height} active={props.active} expanded={novelMenu()} moving={moving()} pageMode={pageMode()} preset={props.preset} onExpanded={value=>{handle()?.pause();setNovelMenu(value);}} onMode={value=>{setPageMode(value);if(value)void hostOperation("ui.toast",{message:"轻点左侧上一页，轻点右侧下一页"}).result.catch(()=>{});}} onSpeak={()=>props.onSpeechControls(speechArticle())}/></Show><Show when={webWarning()}><OriginalWebConfirm width={props.width} height={props.height} onCancel={()=>setWebWarning(false)} onConfirm={()=>{setWebWarning(false);void openBrowserUrl(props.article.link??"","article",props.preset).catch(error=>props.onError(browserOpenFailureMessage(error)));}}/></Show></>;
  }}</ArticleSource>;
 }
 
