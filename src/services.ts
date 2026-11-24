@@ -49,6 +49,7 @@ import {kv} from "@podjs/framework/watch";
 import {readUsage,clearUsage,subscribeUsageChanges} from "./llm/usage.ts";
 import { ImportedTextStore, importedTextFileName } from "./reader/imported-text.ts";
 import { importedSpeechSource } from "./reader/imported-speech.ts";
+import {createHostWatchDisclosureLoader} from "./llm/ai-disclosure-host.ts";
 import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from './cloud/status';
 import {accountStatusSnapshot} from "./account/status.ts";
@@ -242,6 +243,7 @@ export const services: AppServices = {
   async clearSummaryUsage(){await init();await clearUsage(db);},
   subscribeSummaryUsage(listener){return subscribeUsageChanges(listener);},
   async hasSummaryAccount(){return !!(await summaryAccountStore.read())?.watchDeviceToken;},
+  loadAiDisclosure:createHostWatchDisclosureLoader(),
   createSummary(id,preset,changed,network){return createSummarySession({query:async(sql,params)=>{await init();return db.query(sql,params);},execute:async(sql,params)=>{await init();return db.execute(sql,params);},transaction:db.transaction},id,preset,()=>originalArticle(id),changed,network);},
   async getChannelPlaybackSettings(id) {await init();const row=(await db.query("SELECT EXISTS(SELECT 1 FROM articles WHERE channel_id=? AND (COALESCE(audio_url,'')<>'' OR COALESCE(video_url,'')<>'')) has_media,COALESCE((SELECT continue_in_background FROM source_media_preferences WHERE channel_id=?),0) enabled",[Number(id),Number(id)]))[0];return {hasPlayableMedia:!!Number(row.has_media),continuePlaybackInBackground:!!Number(row.enabled)};},
   async setChannelBackgroundPlayback(id,enabled) {await init();await db.execute("INSERT INTO source_media_preferences(channel_id,continue_in_background) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET continue_in_background=excluded.continue_in_background",[Number(id),enabled?1:0]);},

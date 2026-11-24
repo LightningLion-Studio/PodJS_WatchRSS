@@ -26,13 +26,15 @@ import { createContentLayouter, presetContentFont, readerColor } from "../reader
 import {onFrame} from "@pocketjs/framework/lifecycle";
 import {hostOperation,textLayout} from "@podjs/framework/services";
 import {measuredLines} from "../reader/measured-text.ts";
+import {AI_DISCLOSURE_UNAVAILABLE} from "../llm/ai-disclosure.ts";
+import {rectInsideCircle} from "./safe-qr-layout.ts";
 import {summaryDisplayText,summaryTokenUsageText,type SummaryState} from "../llm/summary.ts";
 import {createMemo,createSignal,createEffect,onCleanup,Show} from "solid-js";
 import {Image,Text,View,type NodeMirror} from "@pocketjs/framework/components";
 import {getOps} from "@pocketjs/framework/host";
 import {ReaderBody,type ReaderBodyHandle} from "./ReaderBody.tsx";
 import {ArticleSource} from "./ArticleSource.tsx";
-import type {ScrollEntry} from "./ScrollEntries.tsx";
+import type {PositionedScrollEntry,ScrollEntry} from "./ScrollEntries.tsx";
 import type {Article,AppServices} from "./service.ts";
 import type {ContentBlock} from "../reader/content.ts";
 import {contentFont} from "../reader/content-layout.ts";
@@ -94,6 +96,39 @@ function ReaderScreenImpl(props:{
  const animatingSummary = () => props.active && loading();
  onFrame(() => { if (animatingSummary()) setRotation((Date.now() % 1200) / 1200 * 360); }, animatingSummary);
  const toggleSummary=()=>{setExpanded(value=>!value);if(expanded()&&(summary().status==="idle"||summary().status==="error"))void session.start();};
+ const [disclosure,setDisclosure]=createSignal(AI_DISCLOSURE_UNAVAILABLE);
+ createEffect(()=>{
+  if(novel()||!props.llmEnabled||!expanded())return;
+  let current=true;
+  void props.services.loadAiDisclosure?.().then(text=>{if(current)setDisclosure(text);}).catch(()=>{});
+  onCleanup(()=>{current=false;});
+ });
+ const disclosureLineHeight=14;
+ const disclosureEntries=createMemo<ScrollEntry[]>(()=>{
+  const round=getDisplayMetrics().shape==='round';
+  const diameter=Math.min(props.width,props.height);
+  const safeSide=Math.floor((diameter-16)/Math.SQRT2);
+  const contentWidth=chromeWidth()-28;
+  const width=Math.max(1,Math.min(contentWidth-8,round?safeSide:contentWidth));
+  const lines=disclosure().split(/\r?\n/).flatMap(line=>measuredLines(line,width,text=>getOps().measureText(text,0)));
+  const maxLines=Math.max(1,Math.floor((round?safeSide:props.height-28)/disclosureLineHeight));
+  const entries:ScrollEntry[]=[];
+  for(let start=0;start<lines.length;start+=maxLines){
+   const chunk=lines.slice(start,start+maxLines);
+   const height=chunk.length*disclosureLineHeight;
+   const left=(contentWidth-width)/2;
+   const visible=(row?:()=>ScrollEntry)=>{
+    if(!round||!row)return true; // Paged headers are centered inside the safe square.
+    const top=(row() as PositionedScrollEntry).top-(handle()?.scroller.offset()??0);
+    return rectInsideCircle({x:(props.width-width)/2,y:top,width,height},
+     {cx:props.width/2,cy:props.height/2,radius:diameter/2});
+   };
+   entries.push({height,render:row=><Show when={visible(row)}>
+    <Text class="absolute text-center text-xs leading-[14]" style={{insetL:left,insetT:0,width,height,textColor:`${chrome().content.slice(0,7)}b8`}}>{chunk.join("\n")}</Text>
+   </Show>});
+  }
+  return entries;
+ });
  const summaryText=()=>summaryDisplayText(summary());
  const summaryLines=createMemo(()=>measuredLines(summaryText(),chromeWidth()-36,text=>getOps().measureText(text,1)));
  const tokenUsageLines=createMemo(()=>{const text=summaryTokenUsageText(summary(),props.llmShowTokenUsage??false);return text?measuredLines(text,chromeWidth()-60,value=>getOps().measureText(value,0)):[];});
@@ -207,7 +242,13 @@ function ReaderScreenImpl(props:{
    spacer(22),
    ...titleHeader(),
    ...(!novel()&&(!imported()||props.llmEnabled)?[spacer(6),actionRow]:[]),
-   ...(!novel()&&props.llmEnabled&&expanded()?[spacer(6),{height:20+summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text><Text class="absolute left-[4] right-[4] top-[20] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>},...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
+   ...(!novel()&&props.llmEnabled&&expanded()?[
+    spacer(6),
+    {height:20,render:()=> <View class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text></View>},
+    ...disclosureEntries(),
+    spacer(4),
+    {height:summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0"><Text class="absolute left-[4] right-[4] top-[0] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>},
+    ...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
    ...(source.notice()?[{height:40,render:()=> <Text class="absolute inset-0 text-xs leading-[16] text-[#aaa]">{source.notice()}</Text>}]:[]),
    ...(offlineFailures()||retryingOffline()?[{height:34,render:()=> <View onPress={()=>void retryOffline()} focusable={!retryingOffline()} class="absolute inset-0 items-center justify-center"><Text class="text-xs text-[#ffb88c]">{retryingOffline()?"重试中...":"离线媒体下载失败，点此重试"}</Text></View>}]:[]),spacer(6)
   ]);
