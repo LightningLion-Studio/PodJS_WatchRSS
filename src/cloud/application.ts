@@ -30,6 +30,9 @@ import {connectCloudAccountStatus,notifyCloudAccountStatus} from './status';
 import {SYNC_V2_PRODUCT} from '../sync-v2/gate';
 import {watchSyncV2Product,leasedSyncV2Session} from '../sync-v2/product-start';
 import {createCloudTransport} from './transport';
+import {requestAccountHead,requestHeadPollConfig,WatchHeadPoll} from './head-poll';
+import {syncV2Origin} from '../sync-v2/http';
+import config from '../../pod.config.json';
 import type {CloudSyncResult} from './service';
 import type {WatchAccountIdentity} from '../account/store';
 let owner:ReturnType<typeof start>|undefined;let approvalPageActive=false;
@@ -49,6 +52,8 @@ function start(){
  };
  observeProgress();
  let v2Progress:SyncProgress|undefined;
+ let headPoll:WatchHeadPoll|undefined;
+ let v2Writers=0;
  let prepareAccount=():boolean|Promise<boolean>=>false;
  const visibility=new CloudVisibility(lifecycle());
  const execution=new CloudForegroundExecution(lifecycle()==='active'&&!localTransferActivity.active&&!playbackWork.active);
@@ -71,7 +76,11 @@ function start(){
   let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined;
   const v2Guard={require(){guard.require();if(!v2Current)throw Error('feature_disabled');v2Current();}};
   const v2Exclusive=<T>(work:()=>Promise<T>)=>{
+   v2Writers++;
+   headPoll?.update();
    const next=v2Tail.then(async()=>{
+    const reading=headPoll?.drainRead();
+    if(reading)await reading;
     guard.require();
     const current=execution.begin(),budget=new CloudSyncBudget();
     if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)throw Error('cloud_account_busy');
@@ -85,7 +94,7 @@ function start(){
      v2Current=undefined;
      await host('cloud.release',{});
     }
-   });
+   }).finally(()=>{v2Writers--;headPoll?.update();});
    v2Tail=next.catch(()=>{});
    return next;
   };
@@ -134,8 +143,48 @@ function start(){
   };
   runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{progress,onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady,syncV2:syncV2Round});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   let accountId='',accountScope='',accountRead=0;
+  const pollEligible=()=>{
+   if(!initialized||!cloudGate.allowed||!accountReady||!accountId||v2Writers||!scheduler?.headPollIdle||
+     !syncV2Ready?.syncV2||!heldKeys.size)return false;
+   const status=runtime!.service.status;
+   return status.member?.readable===true&&status.phase!=='waiting-approval'&&!status.ownerChoiceRequired&&status.retryable!==false;
+  };
+  headPoll=new WatchHeadPoll({
+   eligible:pollEligible,
+   now:Date.now,
+   delay:schedule,
+   sync:()=>scheduler!.syncFromHead(),
+   async read(kind,lifetime){
+    const ready=syncV2Ready,scope=identity;
+    const check=()=>{
+     guard.require();
+     lifetime.require();
+     if(!pollEligible()||syncV2Ready!==ready||identity!==scope)throw Error('head_poll_suspended');
+    };
+    check();
+    const account=await summaryAccountStore.read();
+    check();
+    if(!account||cloudAccountIdentity(account)!==scope)return;
+    if(kind==='head'&&account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())return;
+    const base=account.backendBaseUrl.replace(/\/+$/,'');
+    const origin=syncV2Origin(base,{accountBaseUrl:base,allowLoopback:false});
+    const transport=createCloudTransport(async<T>(method:string,args:Record<string,unknown>)=>{
+     if(method!=='file.delete')check();
+     const task=hostOperation<T>(method,args);
+     const off=method==='http.download'?lifetime.onCancel(()=>task.cancel()):undefined;
+     try{return await task.result;}finally{off?.();}
+    },{require:check},{callTimeoutMs:10_000,maxResponseBytes:kind==='head'?16_384:262_144});
+    if(kind==='config')return requestHeadPollConfig(transport,origin,config.versionCode,account.installId);
+    // The writer lease keeps the head GET out of a WorkManager writer's round.
+    // A foreground writer cancels this request and drains its cleanup first.
+    if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return;
+    try{return await requestAccountHead(transport,origin,account.watchDeviceToken,ready!.deviceId);}
+    finally{await host('cloud.release',{});}
+   },
+  });
   scheduler=new WatchCloudScheduler({
-   prepare:()=>prepareAccount(),
+   headPoll,
+   prepare:()=>headPoll?.drainRead()?.then(()=>prepareAccount())??prepareAccount(),
    mayHavePendingIntent:()=>!accountReady||!!handoff?.state.mode,
    async sync(requestedManual,requestedMode,run){
     const scope=identity;
@@ -185,6 +234,7 @@ function start(){
    const current=()=>!disposed&&generation===accountGeneration;
    const task=(async()=>{
     await syncV2?.stop();
+    await headPoll?.drainRead();
     if(!current())return;
     await runtime!.inspectOwner();
     if(!current())return;
@@ -239,18 +289,30 @@ function start(){
   await ready;
   if(disposed||!runtime)throw Error('client_upgrade_required');
   const scope=identity,generation=accountGeneration;
-  const result=await runtime.reregister(confirmed);
-  if(!disposed&&generation===accountGeneration){
-   runtime.service.reset();
-   void handoff?.manual('recent128',{scope}).catch(()=>{});
-  }
-  return result;
+  v2Writers++;
+  headPoll?.update();
+  try{
+   await headPoll?.drainRead();
+   const result=await runtime.reregister(confirmed);
+   if(!disposed&&generation===accountGeneration){
+    runtime.service.reset();
+    void handoff?.manual('recent128',{scope}).catch(()=>{});
+   }
+   return result;
+  }finally{v2Writers--;headPoll?.update();}
  },async ownerResolved(scope:string){
   await ready;
   if(disposed||!runtime||identity!==scope)return;
   const generation=accountGeneration;
-  await runtime.inspectOwner();
-  if(!disposed&&generation===accountGeneration)await scheduler?.setUpgradeRequired(false);
+  v2Writers++;
+  headPoll?.update();
+  try{
+   await headPoll?.drainRead();
+   if(!disposed&&generation===accountGeneration){
+    await runtime.inspectOwner();
+    if(!disposed&&generation===accountGeneration)await scheduler?.setUpgradeRequired(false);
+   }
+  }finally{v2Writers--;headPoll?.update();}
  },get handoffState(){return handoff?.state??{phase:'idle' as const};},manual:async(mode:'all'|'recent128'='recent128',scope?:string,retry=false,generation?:number)=>{
   await ready;
   const expected=generation??(accountGeneration||undefined);

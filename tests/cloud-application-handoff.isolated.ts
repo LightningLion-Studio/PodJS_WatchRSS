@@ -35,7 +35,7 @@ mock.module('@podjs/framework/services',()=>({fileChunks:{readBytes:async()=>{th
 mock.module('../src/cloud/host.ts',()=>({initializeCloudHost:async()=>true}));
 mock.module('../src/cloud/gate.ts',()=>({cloudGate:{allowed:true,require(){}}}));
 mock.module('../src/llm/runtime.ts',()=>({summaryAccountStore:store}));
-mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:()=>()=>{}}));
+mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:()=>()=>{},subscribeLocalMemoSaves:()=>()=>{}}));
 mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyNotesChanged(){},notifyLibraryChanged(){},services:{subscribeChannel:()=>()=>{}}}));
 let cloudStatus:()=>AccountCloudStatus|undefined=()=>undefined;
 mock.module('../src/cloud/status.ts',()=>({connectCloudAccountStatus:(read:typeof cloudStatus)=>{cloudStatus=read;return()=>{cloudStatus=()=>undefined;};},notifyCloudAccountStatus(){}}));

@@ -2,6 +2,7 @@ import {sameManualIntent,type ManualIntent} from './manual-handoff';
 import type {NoteSyncTimes} from './sync-progress';
 import type {CloudSyncResult} from './service';
 import {idleHit} from '../diagnostics/idle-counters';
+import type {WatchHeadPoll} from './head-poll';
 import {cloudDisabled,type CloudGuard} from './guard';
 export const CLOUD_INTERVAL=5*60*1000;
 const NOTE_INTERVAL=3000;
@@ -14,7 +15,7 @@ export interface CloudScheduledRun {
  bindIntent(intent:ManualIntent|undefined):void;
  publish(result:CloudSyncResult):void;
 }
-export interface CloudSchedulerPorts {prepare?():boolean|Promise<boolean>;mayHavePendingIntent?():boolean;sync(manual:boolean,mode:'all'|'recent128',run:CloudScheduledRun):Promise<boolean>;now():number;delay(ms:number,callback:()=>void):()=>void;scheduleWorker():Promise<void>;cancelWorker():Promise<void>}
+export interface CloudSchedulerPorts {headPoll?:WatchHeadPoll;prepare?():boolean|Promise<boolean>;mayHavePendingIntent?():boolean;sync(manual:boolean,mode:'all'|'recent128',run:CloudScheduledRun):Promise<boolean>;now():number;delay(ms:number,callback:()=>void):()=>void;scheduleWorker():Promise<void>;cancelWorker():Promise<void>}
 /** One coalesced trailing request; account/network/library bursts cannot make a
  * hot sync loop. Foreground ownership is independent of the 6-hour OS worker. */
 export class WatchCloudScheduler {
@@ -26,10 +27,10 @@ export class WatchCloudScheduler {
  private wakeRequested=false;private retryOnWake?:{mode?:'all'|'recent128'};
  private retryAt?:number;private last=-Infinity;private active=false;private disposed=false;private dirty=false;private running:Promise<boolean>|undefined;private cancelTimer?:()=>void;
  constructor(private ports:CloudSchedulerPorts,private guard:CloudGuard=cloudDisabled){}
- async setUpgradeRequired(required:boolean){this.guard.require();if(this.upgradeRequired===required)return;this.upgradeRequired=required;if(required){this.cancelTimer?.();this.cancelTimer=undefined;this.dirty=false;await this.ports.cancelWorker();}else await this.ports.scheduleWorker();}
+ async setUpgradeRequired(required:boolean){this.guard.require();if(this.upgradeRequired===required)return;this.upgradeRequired=required;this.ports.headPoll?.update();if(required){this.cancelTimer?.();this.cancelTimer=undefined;this.dirty=false;await this.ports.cancelWorker();}else await this.ports.scheduleWorker();}
  async start(enabled:boolean){if(!enabled){await this.ports.cancelWorker();return;}this.guard.require();await this.ports.scheduleWorker();}
- foreground(active:boolean){this.guard.require();if(this.active===active)return;this.active=active;if(active)this.trigger("foreground");else{this.cancelTimer?.();this.cancelTimer=undefined;}}
- hold(held:boolean){this.guard.require();if(this.held===held)return;this.held=held;if(held){this.cancelTimer?.();this.cancelTimer=undefined;if(this.runState)this.runState.held=true;}else this.wakePending();}
+ foreground(active:boolean){this.guard.require();if(this.active===active)return;this.active=active;if(active)this.trigger("foreground");else{this.cancelTimer?.();this.cancelTimer=undefined;}this.ports.headPoll?.update();}
+ hold(held:boolean){this.guard.require();if(this.held===held)return;this.held=held;if(held){this.cancelTimer?.();this.cancelTimer=undefined;if(this.runState)this.runState.held=true;}else this.wakePending();this.ports.headPoll?.update();}
  trigger(reason:"foreground"|"account"|"library"|"channel"|"network"="library"){idleHit({foreground:65,account:66,library:67,channel:68,network:69}[reason]);this.guard.require();if(this.disposed||this.upgradeRequired)return;this.dirty=true;this.wakePending();}
  noteSaved(){
   this.guard.require();
@@ -79,12 +80,23 @@ export class WatchCloudScheduler {
   }
   void this.run(!!(manual||checkIntent),manual);
  }
+ get headPollIdle(){return this.active&&!this.disposed&&!this.held&&!this.runState&&!this.upgradeRequired;}
+ /** A cloud change bypasses the ordinary interval, while pending memo saves
+  * and service retries keep their original deadlines. */
+ async syncFromHead(){
+  if(!this.headPollIdle||this.approvalPending||this.pendingManual||this.noteDue!==undefined||
+   this.retryAt!==undefined&&this.ports.now()<this.retryAt)return false;
+  this.cancelTimer?.();
+  this.cancelTimer=undefined;
+  return this.run(false).task;
+ }
  private run(manual:boolean,mode:'all'|'recent128'='recent128',intent?:ManualIntent,afterApproval=false){
   idleHit(42);this.guard.require();this.dirty=false;this.retryOnWake=undefined;this.retryAt=undefined;
   let attemptedAt=this.last=this.ports.now();
   const scheduleRevision=this.scheduleRevision;
   const state:NonNullable<typeof this.runState>={held:false,accountRevision:this.accountRevision,intent};
   this.runState=state;
+  this.ports.headPoll?.update();
   const current=()=>!this.disposed&&state.accountRevision===this.accountRevision;
   let approvalAtStart:typeof this.approvalPending,started=false;
   let note:NoteSyncTimes|undefined;
@@ -145,7 +157,7 @@ export class WatchCloudScheduler {
    return success;
   },error=>{idleHit(87);failed(true);throw error;}).finally(()=>{
    this.running=undefined;this.runState=undefined;
-   void Promise.resolve().then(()=>this.pump()).catch(()=>{});
+   void Promise.resolve().then(()=>{this.pump();this.ports.headPoll?.update();}).catch(()=>{});
   });
   this.running=task;
   void task.catch(()=>{});
@@ -184,8 +196,8 @@ export class WatchCloudScheduler {
   return deliver(task,state);
  }
  /** Fence old results immediately, while keeping wakeups from the existing schedule. */
- fenceAccount(){this.guard.require();this.accountRevision++;this.approvalPending=undefined;this.pendingNote=undefined;this.noteDue=undefined;this.lastNoteStart=-Infinity;this.retryOnWake=undefined;}
+ fenceAccount(){this.guard.require();this.accountRevision++;this.ports.headPoll?.resetAccount();this.approvalPending=undefined;this.pendingNote=undefined;this.noteDue=undefined;this.lastNoteStart=-Infinity;this.retryOnWake=undefined;}
  accountChanged(){this.fenceAccount();this.scheduleAccount();}
  scheduleAccount(){this.guard.require();this.scheduleRevision++;this.pendingManual=undefined;void this.setUpgradeRequired(false).catch(()=>{});this.cancelTimer?.();this.cancelTimer=undefined;this.last=-Infinity;this.retryAt=undefined;this.trigger("account");}
- dispose(){this.disposed=true;this.cancelTimer?.();this.cancelTimer=undefined;}
+ dispose(){this.disposed=true;this.ports.headPoll?.update();this.cancelTimer?.();this.cancelTimer=undefined;}
 }
