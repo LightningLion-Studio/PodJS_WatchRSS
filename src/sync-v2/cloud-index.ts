@@ -42,7 +42,7 @@ interface ObservedRow {entityKey:string;note:boolean;noteId:string;deleted:boole
  * retained and republished unchanged; the local note keeps its prior version. */
 export type UnopenableNotes=Record<string,{entityKey:string;code:string;deleted:boolean}>;
 const unopenableNotes=(seen:readonly ObservedRow[]):UnopenableNotes=>Object.fromEntries(seen.filter(r=>r.unopenable).map(r=>[r.noteId,{entityKey:r.entityKey,code:r.unopenable!,deleted:r.deleted}]));
-export interface CloudIndexOptions {noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
+export interface CloudIndexOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
 export type CloudPullResult={empty:boolean;readOnly?:boolean;rows?:number;awaitingUser?:boolean;bodyReads?:number;checkpointHit?:boolean;rebuildRequired?:boolean;rebuilt?:boolean};
 export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipeOid===null?'source-pending':'body-not-downloaded';
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
@@ -74,6 +74,7 @@ export class WatchCloudIndex {
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
+  this.options.progress?.()?.stage('download');
   // Observe queued explicit actions through the current network window.
   const cache=readOnly||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
   const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
@@ -110,6 +111,7 @@ export class WatchCloudIndex {
   const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
   const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
   try{await this.snapshot(head.treeRoot,window.windowId,get,batch,saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
+  this.options.progress?.()?.stage('write');
   const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
   if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
   const next=observeAccount(staged,{oid:a.commitOid,revision:a.revision,generation:a.rollbackGeneration});path.pins.seenOids=[];
@@ -118,7 +120,7 @@ export class WatchCloudIndex {
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision&&saved.lastPublication.heldEdits!==true){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
   next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,staged,saved);next.cloud.unopenableBaselines=kept.baselines;
-  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
   * An unsent edit when the note enters quarantine, or any later local change of
@@ -188,7 +190,8 @@ export class WatchCloudIndex {
  /** Authenticated decoded rows. With `sink`, each row is handed over as soon as
   * it is decoded and nothing is accumulated (F2); otherwise rows are returned. */
  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>){
-  const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);};
+  const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
+  progress?.plan('items',rows.length);
   for(const row of rows){
    const pair=batch?await batch([row.metaOid,row.stateOid]):!get?await this.http.objects(windowId,[row.metaOid,row.stateOid]):new Map([[row.metaOid,await read(row.metaOid)],[row.stateOid,await read(row.stateOid)]]);
    const meta=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);

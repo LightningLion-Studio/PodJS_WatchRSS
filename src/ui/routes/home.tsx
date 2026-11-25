@@ -1,13 +1,15 @@
 import {NetworkRecoveryContext} from '../../network/context';
 import type {NetworkRecovery} from '../../network/recovery';
 import {idleHit} from '../../diagnostics/idle-counters';
+import {displayPower} from '@podjs/framework/services';
+import {hasCapability} from '@podjs/framework/watch';
 import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {douyinClient} from '../../media-services.ts';
 import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
-import { manualCloudSync, applicationCloudApproval, applicationCloudApprover, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
+import { manualCloudSync, applicationCloudApproval, applicationCloudApprover, applicationCloudActions, applicationCloudHandoff, applicationCloudProgress } from "../../cloud/application.ts";
 import { cloudRemediationActions } from "../cloud-sync-view.ts";
 import { clearLocalPrivateLibrary } from "../../services.ts";
 import { readCloudAccountStatus, subscribeCloudAccountStatus } from "../../cloud/status.ts";
@@ -27,6 +29,7 @@ import type { AppServices, Channel } from "../service.ts";
 import { profileDestination } from "./meta.ts";
 import type { Page, RouteEntry } from "./types.ts";
 
+const keepCloudAwake=(owner:string,active:boolean)=>hasCapability('display.power')?displayPower.keepAwake(owner,active):Promise.resolve();
 const cloudActions = cloudRemediationActions(applicationCloudActions);
 const [syncV2Target, setSyncV2Target] = createSignal<SyncV2Target>("choice");
 
@@ -164,7 +167,9 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
         <CloudSyncScreen
           width={props.width}
           height={props.height}
-          active={cloudActive}
+          active={()=>cloudActive()&&!cloudOwnerChoice()}
+          progress={applicationCloudProgress}
+          keepAwake={keepCloudAwake}
           load={props.services.readAccountStatus}
           subscribe={props.services.subscribeAccountStatus}
           readCloud={readCloudAccountStatus}

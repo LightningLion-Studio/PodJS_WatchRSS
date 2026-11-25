@@ -15,7 +15,8 @@ import {prepareArchivedNoteAsset} from '../notes/archive-restore';
 import {prepareArchivedBook} from '../books/archive-restore';
 import {hostOperation,delay,onNetworkChange,displayPower,onSqlChanged,fileChunks} from '@podjs/framework/services';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
-import {subscribeLibraryMutations} from '../core/library-mutations';
+import {SyncProgress} from './sync-progress';
+import {subscribeLibraryMutations,subscribeLocalMemoSaves} from '../core/library-mutations';
 import {initializeCloudHost} from './host';
 import {cloudGate} from './gate';
 import {summaryAccountStore} from '../llm/runtime';
@@ -33,11 +34,21 @@ import type {CloudSyncResult} from './service';
 import type {WatchAccountIdentity} from '../account/store';
 let owner:ReturnType<typeof start>|undefined;let approvalPageActive=false;
 let nextAccountGeneration=0;
+const progressListeners=new Set<(snapshot:import('./sync-progress').SyncProgressSnapshot|undefined)=>void>();
 const approvalListeners=new Set<()=>void>(),approverListeners=new Set<()=>void>(),handoffListeners=new Set<()=>void>();
 const notifyApproval=()=>{for(const fn of approvalListeners)try{fn();}catch{}};
 function start(){
  let handoff:CloudManualHandoff|undefined;
  let identity='',accountGeneration=0;
+ const schedule=(ms:number,fn:()=>void)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();};
+ const progress=new SyncProgress(Date.now,schedule,value=>appLogger.i('CloudSyncRound',value));
+ let stopProgress:(()=>void)|undefined;
+ const observeProgress=()=>{
+  if(progressListeners.size)stopProgress??=progress.subscribe(snapshot=>{for(const fn of progressListeners)try{fn(snapshot);}catch{}});
+  else {stopProgress?.();stopProgress=undefined;}
+ };
+ observeProgress();
+ let v2Progress:SyncProgress|undefined;
  let prepareAccount=():boolean|Promise<boolean>=>false;
  const visibility=new CloudVisibility(lifecycle());
  const execution=new CloudForegroundExecution(lifecycle()==='active'&&!localTransferActivity.active&&!playbackWork.active);
@@ -91,15 +102,20 @@ function start(){
    const ready=syncV2Ready,account=await summaryAccountStore.read();
    if(!ready||!account||account.userId!==ready.userId)throw Error('cloud_v2_start_unavailable');
    const {accountBoundCasHost}=await import('../sync-v2/product'),accountHost=accountBoundCasHost(v2Host,account,()=>summaryAccountStore.read());
-   const transport=createCloudTransport(accountHost,v2Guard),tokens=new (await import('../account/token')).WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
+   const transport=createCloudTransport(accountHost,v2Guard,{progress:()=>v2Progress}),tokens=new (await import('../account/token')).WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
    const session=async()=>{const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);return current;};
    const {openApplicationSyncV2}=await import('../sync-v2/application-open');
-   const opened=await v2Exclusive(async()=>openApplicationSyncV2({lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedAsset:(key,archive)=>prepareArchivedNoteAsset(new NoteAssetFileIndex(projectionSql(accountHost)),fileChunks,key,archive,()=>v2Guard.require()),prepareArchivedBook:async(book,archive)=>{
+   const trackV2=async<T>(work:()=>Promise<T>)=>{
+    v2Progress=progress;
+    try{return await work();}finally{v2Progress=undefined;}
+   };
+   const opened=await v2Exclusive(()=>trackV2(async()=>openApplicationSyncV2({progress:()=>v2Progress,lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedAsset:(key,archive)=>prepareArchivedNoteAsset(new NoteAssetFileIndex(projectionSql(accountHost)),fileChunks,key,archive,()=>v2Guard.require()),prepareArchivedBook:async(book,archive)=>{
     const books=(await getLibrarySyncRepository()).books;
     if(!books)throw Error('book_storage_unavailable');
     const check=()=>v2Guard.require(),work=bookFileWork(fileChunks,hostOperation,check);
     try{return await prepareArchivedBook(books,work.files,book,archive,check);}finally{work.stop();}
-   },bodyInstall:work=>withAccountLease(host,async()=>{const current=await summaryAccountStore.read();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current!);return work();}),allowBodies:async()=>{if(await handoff?.authorized(cloudAccountIdentity(account)))return true;const n=await accountHost<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});return n.active&&n.validated&&n.wifi&&n.metered===false;},bootstrap:async()=>{await session();const latest=syncV2Ready;if(!latest||latest.userId!==account.userId||!latest.syncV2)throw Error('feature_disabled');return {accountId:(await import('../sync-v2/signing')).accountIdFromUserId(account.userId),syncV2:latest.syncV2,devices:latest.bootstrap.devices,libraryEpoch:latest.bootstrap.libraryEpoch,contentGeneration:latest.bootstrap.contentGeneration};}}));return opened?leasedSyncV2Session(opened,v2Exclusive):null;
+   },bodyInstall:work=>withAccountLease(host,async()=>{const current=await summaryAccountStore.read();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current!);return work();}),allowBodies:async()=>{if(await handoff?.authorized(cloudAccountIdentity(account)))return true;const n=await accountHost<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});return n.active&&n.validated&&n.wifi&&n.metered===false;},bootstrap:async()=>{await session();const latest=syncV2Ready;if(!latest||latest.userId!==account.userId||!latest.syncV2)throw Error('feature_disabled');return {accountId:(await import('../sync-v2/signing')).accountIdFromUserId(account.userId),syncV2:latest.syncV2,devices:latest.bootstrap.devices,libraryEpoch:latest.bootstrap.libraryEpoch,contentGeneration:latest.bootstrap.contentGeneration};}})));
+   return opened?leasedSyncV2Session({...opened,sync:opened.sync?()=>trackV2(()=>opened.sync!()):undefined},v2Exclusive):null;
   }});
   const keysReady=SYNC_V2_PRODUCT.syncV2?async(event:NonNullable<typeof syncV2Ready>)=>{
    const expected=await summaryAccountStore.read();if(!expected||expected.userId!==event.userId)throw Error('cloud_operation_superseded');
@@ -116,7 +132,7 @@ function start(){
    if(!result)throw Error('cloud_v2_repo_missing');
    return result;
   };
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady,syncV2:syncV2Round});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{progress,onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady,syncV2:syncV2Round});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   let accountId='',accountScope='',accountRead=0;
   scheduler=new WatchCloudScheduler({
    prepare:()=>prepareAccount(),
@@ -130,7 +146,7 @@ function start(){
     run.bindIntent(grant);
     // Approval retains the initial recent sync when no durable grant exists.
     const manual=!!grant||run.afterApproval,mode=grant?.mode??requestedMode;
-    const outcome=await runtime!.service.syncNowResult(manual,mode,scope);
+    const outcome=await runtime!.service.syncNowResult(manual,mode,scope,run.note);
     // Report whether the writer finished for scheduling purposes. Only a
     // current writer may deliver its result or touch a grant.
     if(!run.current||identity!==scope)return false;
@@ -150,7 +166,7 @@ function start(){
     return success;
    },
    now:Date.now,
-   delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();},
+   delay:schedule,
    scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{}),
   },guard);
   const epochStore=cloudStatePort(host);
@@ -214,12 +230,12 @@ function start(){
    if(accountReady)return true;
    return (accountGeneration?initializeAccount():account()).then(()=>accountReady);
   };
-  cleanups.push(summaryAccountStore.subscribe(state=>{void account(state).catch(()=>{});}),subscribeLibraryMutations(()=>scheduler?.trigger("library")),services.subscribeChannel(e=>{if(e.kind!=='notes'&&e.origin!=='remote')scheduler?.trigger('channel');}),onNetworkChange(()=>scheduler?.trigger("network")),onLifecycleChange(state=>{foreground();if(state==='active')notifyLibraryChanged('remote');}));
+  cleanups.push(summaryAccountStore.subscribe(state=>{void account(state).catch(()=>{});}),subscribeLibraryMutations(()=>scheduler?.trigger("library")),subscribeLocalMemoSaves(()=>{if(accountId)scheduler?.noteSaved();}),services.subscribeChannel(e=>{if(e.kind!=='notes'&&e.origin!=='remote')scheduler?.trigger('channel');}),onNetworkChange(()=>scheduler?.trigger("network")),onLifecycleChange(state=>{foreground();if(state==='active')notifyLibraryChanged('remote');}));
   let displayRevision=0;cleanups.push(displayPower.onChange(state=>{displayRevision++;visibility.display(state);updateVisibility();}));
   const revision=displayRevision,display=await displayPower.state();if(disposed)return;if(revision===displayRevision){visibility.display(display);updateVisibility();}
   await account().catch(()=>{});if(disposed)return;initialized=true;scheduler.foreground(visibility.active);if(pageActive&&approver?.active)void approver.poll();await scheduler.start(true);
  })();void ready.catch(()=>{});
- return {ready,get approvalState(){return approvals?.state??idleApproval();},get approverState(){return approver?.state??idleApprover();},async pollApprover(){await ready;return !disposed&&!!approver&&approver.poll();},async acceptApprover(id:string){await ready;return !disposed&&!!approver&&approver.accept(id);},async confirmApprover(match:boolean){return !disposed&&!!approver&&approver.confirm(match);},async cancelApprover(){return !disposed&&!!approver&&approver.cancel();},setApprovalForeground(active:boolean){const opened=active&&!pageActive;pageActive=active;foreground();if(opened&&approver?.active)void approver.poll();},async requestApproval(){await ready;return !disposed&&!!approvals&&approvals.request();},async confirmApproval(matches:boolean){return !disposed&&!!approvals&&approvals.confirmMatches(matches);},async cancelApproval(){return !disposed&&!!approvals&&approvals.cancel();},resetApproval(){approvals?.reset();approver?.reset();},async reregister(confirmed:boolean){
+ return {ready,progress,observeProgress,get approvalState(){return approvals?.state??idleApproval();},get approverState(){return approver?.state??idleApprover();},async pollApprover(){await ready;return !disposed&&!!approver&&approver.poll();},async acceptApprover(id:string){await ready;return !disposed&&!!approver&&approver.accept(id);},async confirmApprover(match:boolean){return !disposed&&!!approver&&approver.confirm(match);},async cancelApprover(){return !disposed&&!!approver&&approver.cancel();},setApprovalForeground(active:boolean){const opened=active&&!pageActive;pageActive=active;foreground();if(opened&&approver?.active)void approver.poll();},async requestApproval(){await ready;return !disposed&&!!approvals&&approvals.request();},async confirmApproval(matches:boolean){return !disposed&&!!approvals&&approvals.confirmMatches(matches);},async cancelApproval(){return !disposed&&!!approvals&&approvals.cancel();},resetApproval(){approvals?.reset();approver?.reset();},async reregister(confirmed:boolean){
   await ready;
   if(disposed||!runtime)throw Error('client_upgrade_required');
   const scope=identity,generation=accountGeneration;
@@ -247,11 +263,18 @@ function start(){
   if(retry)await handoff?.restore(true,options);
   else await handoff?.manual(mode,options);
   return result;
- },dispose(){handoff?.localTransferChanged(false);disposed=true;syncV2Ready=undefined;void syncV2?.stop().catch(()=>{});handoff?.dispose();cancelPoll();cancelApproverPoll();approvals?.reset();approver?.reset();scheduler?.dispose();for(const off of cleanups)off();}};
+ },dispose(){handoff?.localTransferChanged(false);disposed=true;progress.reset();stopProgress?.();syncV2Ready=undefined;void syncV2?.stop().catch(()=>{});handoff?.dispose();cancelPoll();cancelApproverPoll();approvals?.reset();approver?.reset();scheduler?.dispose();for(const off of cleanups)off();}};
 }
 export function startApplicationCloudSync(){return owner??=start();}
 export function stopApplicationCloudSync(){owner?.dispose();owner=undefined;}
 export function manualCloudSync(mode:'all'|'recent128'='recent128',scope?:string,retry=false,generation?:number){cloudGate.require();return owner?.manual(mode,scope,retry,generation)??Promise.resolve(undefined);}
+export const applicationCloudProgress:import('./sync-progress').SyncProgressPort={
+ get snapshot(){return owner?.progress.snapshot;},
+ subscribe(fn){
+  progressListeners.add(fn);owner?.observeProgress();
+  return ()=>{progressListeners.delete(fn);owner?.observeProgress();};
+ },
+};
 export const applicationCloudApproval={get state(){return owner?.approvalState??idleApproval();},subscribe(fn:()=>void){approvalListeners.add(fn);return()=>{approvalListeners.delete(fn);};},request(){return startApplicationCloudSync().requestApproval();},confirmMatches(matches:boolean){return owner?.confirmApproval(matches)??Promise.resolve(false);},cancel(){return owner?.cancelApproval()??Promise.resolve(false);},setForeground(active:boolean){approvalPageActive=active;owner?.setApprovalForeground(active);}};
 export const applicationCloudApprover={get state(){return owner?.approverState??idleApprover();},subscribe(fn:()=>void){approverListeners.add(fn);return()=>{approverListeners.delete(fn);};},poll(){return startApplicationCloudSync().pollApprover();},accept(requestId:string){return startApplicationCloudSync().acceptApprover(requestId);},confirm(match:boolean){return owner?.confirmApprover(match)??Promise.resolve(false);},cancel(){return owner?.cancelApprover()??Promise.resolve(false);},setForeground(active:boolean){applicationCloudApproval.setForeground(active);}};
 /** Local confirmation is mandatory; a clear action must supply the complete local-library cleanup. */

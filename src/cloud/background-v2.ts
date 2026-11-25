@@ -24,6 +24,7 @@ import {watchAppVersion} from '../core/app-version';
 import {openApplicationSyncV2Core} from '../sync-v2/application-core';
 import {accountIdFromUserId} from '../sync-v2/signing';
 import {MANUAL_INTENT_KEY,readManualIntent,completeManualIntent,manualEpochKey} from './manual-handoff';
+import {SyncProgress} from './sync-progress';
 import {cloudStatePort} from './state-sql';
 
 export async function runSyncV2Background(context:BackgroundContext):Promise<BackgroundOutcome>{
@@ -35,15 +36,18 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   if(['cloud.release','secure.release','file.delete','file.closeText','crypto.closeSealedGzip'].includes(method))return window.cleanup(()=>raw<T>(method,args));
   guard.require();return bounded<T>(method,args);
  };
- const diagnostic=backgroundDiagnostics(raw);let cloudLease=false;
+ const diagnostic=backgroundDiagnostics(raw);let cloudLease=false,summary:string|undefined;
+ const progress=new SyncProgress(Date.now,()=>()=>{},line=>{summary=line;},'background');
  try{
   if(!await gate.initialize(()=>raw('app.buildInfo',{})))return 'failure';
   const consent=await context.request('kv.get',{key:ONBOARDING_KEY}) as {exists:boolean;value?:unknown};
   if(startupDestination(new OnboardingStore({get:()=>consent.exists?consent.value:undefined,set:()=>{throw Error('consent_required');}}).load())!=='content')return 'success';
   const accounts=new WatchAccountStore({get:async key=>(await readCloudSecure(host,key))??null,set:(key,value)=>host('secure.set',{key,value}),remove:key=>host('secure.delete',{key}),exclusive:work=>withAccountLease(host,work)});
   const stored=await accounts.read();if(!stored)return 'success';
+  progress.start();
   const network=await host<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});if(!network.active||!network.validated)return 'retry';
-  const transport=createCloudTransport(host,guard),account=stored.watchRefreshToken?await new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion}).freshAccount():stored;
+  const transport=createCloudTransport(host,guard,{progress:()=>progress}),account=stored.watchRefreshToken?await new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion}).freshAccount():stored;
+  progress.stage('keys');
   const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion},{sha256:async()=>{throw Error('unused');}},guard),bootstrap=await client.bootstrap();
   if(!bootstrap.syncV2)return 'success'; // No announcement never licenses v1.
   const payload=context.payload as {manual?:boolean;token?:string}|null;
@@ -64,9 +68,14 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
    const ready=await foundation.keys.acceptBootstrap(account.userId,deviceId,bootstrap.keyEnvelopes,bootstrap,device.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);
    if(ready!=='ready')return 'retry';
    const cleanup:CloudHostRequest=(method,args)=>window.cleanup(()=>raw(method,args));
-   const opened=await openApplicationSyncV2Core({host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
-   try{if(!opened||opened.bodyError())return 'retry';if(intent)await completeManualIntent(host,intent);return 'success';}finally{await opened?.close();}
+   progress.stage('compare');
+   const opened=await openApplicationSyncV2Core({progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
+   try{if(!opened||opened.bodyError())return 'retry';if(intent)await completeManualIntent(host,intent);}finally{await opened?.close();}
+   progress.finish('complete');
+   return 'success';
   });
  }catch(error){if(error instanceof CloudSyncDeadlineError)return 'retry';diagnostic.report(recordFailureDiagnostic(error));return 'retry';}
- finally{if(cloudLease)await window.cleanup(()=>raw('cloud.release',{}));await diagnostic.flush();}
+ finally{if(cloudLease)await window.cleanup(()=>raw('cloud.release',{}));await diagnostic.flush();progress.finish('incomplete');
+  if(summary)await window.cleanup(()=>raw('log.append',{path:'app_log.txt',text:new Date().toISOString()+' [I] CloudSyncRound '+summary+'\n',maxBytes:5*1024*1024})).catch(()=>{});
+ }
 }

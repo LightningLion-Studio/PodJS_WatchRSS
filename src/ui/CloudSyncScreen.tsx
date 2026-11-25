@@ -4,9 +4,12 @@ import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {delay,type HostOperation} from '@podjs/framework/services';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {batch,createEffect, createMemo, createSignal, onCleanup, useContext} from 'solid-js';
+import {Show,batch,createEffect, createMemo, createSignal, onCleanup, useContext} from 'solid-js';
 import {accountStatusIdentity,refreshAccountCloudStatus,type AccountStatusChange,type AccountStatusSnapshot,type AccountCloudStatus} from '../account/status.ts';
 import {cloudAccountIdentity} from '../cloud/identity';
+import {DisplayAwakeLease} from '../reader/keep-awake';
+import {appLogger} from '../logs/app-logger';
+import {SYNC_STAGE_LABEL,type SyncProgressPort,type SyncProgressSnapshot} from '../cloud/sync-progress';
 import type {CloudSyncResult} from '../cloud/service';
 import {NetworkRecoveryContext,useCachedNetworkContent} from '../network/context';
 import {directNetworkWork,isNetworkRecoveryCancellation} from '../network/recovery';
@@ -22,13 +25,25 @@ const TONE: Record<CloudSyncTone, string> = {
   ok: PHONE_PAGE.primary, busy: PHONE_PAGE.primary, attention: '#ffc266', error: '#ff7777', muted: PHONE_PAGE.secondary,
 };
 /** Narrower than the row so the pill's ends stay inside the circle wherever it lands on first show. */
-const ACTION_WIDTH = 168, FACTS_WIDTH = 150, DETAIL_WIDTH = 176;
+const ACTION_WIDTH = 168, FACTS_WIDTH = 150, DETAIL_WIDTH = 176, PROGRESS_BAR_WIDTH = 96;
+function progressBytes(bytes:number){
+  const [scale,unit]=bytes>=1024*1024?[1024*1024,'MB'] as const:bytes>=1024?[1024,'KB'] as const:[1,'B'] as const;
+  return (bytes/scale).toFixed(1)+' '+unit;
+}
+function countLabel(count:NonNullable<SyncProgressSnapshot['count']>){
+  const {done,total,unit}=count;
+  if(total===undefined)return unit==='received'?'已接收 '+progressBytes(done):'已处理 '+done+' 项';
+  if(unit==='items')return '已下载 '+done+' / '+total+' 项';
+  return (unit==='sent'?'已上传 ':'已下载 ')+progressBytes(done)+' / '+progressBytes(total);
+}
 
 /** 我的 → 云同步 (native CloudSyncActivity). Opening only reads status; a sync starts on tap alone. */
 export function CloudSyncScreen(props: {
   width: number;
   height: number;
   active: () => boolean;
+  progress?: SyncProgressPort;
+  keepAwake?: (owner:string, active:boolean) => Promise<unknown>;
   load: () => Promise<AccountStatusSnapshot | null>;
   subscribe?: (listener: (change?:AccountStatusChange) => void) => () => void;
   readCloud?: () => AccountCloudStatus | undefined;
@@ -53,6 +68,19 @@ export function CloudSyncScreen(props: {
   onError: (message: string) => void;
   ref: (value: {scroller: Scroller}) => void;
 }) {
+  if(props.keepAwake){
+    const awake=new DisplayAwakeLease('watchrss.cloud-sync',props.keepAwake,()=>appLogger.w('CloudSync','Display lease update failed'));
+    createEffect(()=>void awake.setActive(props.active()));
+    onCleanup(()=>void awake.close());
+  }
+  const [syncProgress,setSyncProgress]=createSignal<SyncProgressSnapshot>();
+  createEffect(()=>{
+    const source=props.progress;
+    if(!props.active()||!source){setSyncProgress(undefined);return;}
+    setSyncProgress(source.snapshot);
+    onCleanup(source.subscribe(setSyncProgress));
+  });
+  const progressVisible=createMemo(()=>!!syncProgress());
   const routeNetwork=useContext(NetworkRecoveryContext);
   const network=routeNetwork??directNetworkWork;
   const [v2, setV2] = createSignal<SyncV2UiState>();
@@ -284,6 +312,25 @@ export function CloudSyncScreen(props: {
       </View>};
   };
 
+  // Fixed geometry keeps count changes local and preserves scroll position.
+  const progressRow=():ScrollEntry=>({
+    height:36,
+    bounds:centredBounds(inner(),FACTS_WIDTH,0,36),
+    render:()=> {
+      const count=createMemo(()=>syncProgress()?.count);
+      const fraction=()=>Math.min(1,(count()?.done??0)/(count()?.total??1));
+      return <View class="absolute" style={{insetL:(inner()-FACTS_WIDTH)/2,insetT:0,height:36,width:FACTS_WIDTH}}>
+        <Text class="absolute text-center" style={{insetT:0,width:FACTS_WIDTH,fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.foreground}}>{SYNC_STAGE_LABEL[syncProgress()?.stage??'connecting']}</Text>
+        <Text class="absolute text-center" style={{insetT:17,width:FACTS_WIDTH,fontSlot:0,lineHeight:14,textColor:PHONE_PAGE.secondary}}>{count()?countLabel(count()!):''}</Text>
+        <Show when={count()?.total!==undefined}>
+          <View class="absolute rounded-[2]" accessibilityLabel="同步进度条" style={{insetL:(FACTS_WIDTH-PROGRESS_BAR_WIDTH)/2,insetT:32,width:PROGRESS_BAR_WIDTH,height:4,bgColor:'#2a2a2a'}}>
+            <View class="absolute rounded-[2]" style={{width:Math.round(PROGRESS_BAR_WIDTH*fraction()),height:4,bgColor:PHONE_PAGE.primary}}/>
+          </View>
+        </Show>
+      </View>;
+    },
+  });
+
   const entries = createMemo<ScrollEntry[]>(() => {
     const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : currentView();
     const rows: ScrollEntry[] = [
@@ -360,7 +407,8 @@ export function CloudSyncScreen(props: {
     }
     if(actions&&fix.needsReregistration)rows.push(gap(12),pill(armed()==='reregister'?'再按一次确认':'重新登记本机',armed()!=='reregister',()=>arm('reregister',()=>act(actions.reregister(true))),!busy,armed()==='reregister'));
     if(actions?.message)rows.push(gap(8),centred(actions.message,1,17,'#ff7777'));
-    if (!fix.needsOwnerChoice && view.progress) rows.push(gap(14), bar(view.progress.fraction), gap(6), centred(view.progress.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
+    if (!fix.needsOwnerChoice && bound() && progressVisible()) rows.push(gap(14),progressRow());
+    else if (!fix.needsOwnerChoice && view.progress) rows.push(gap(14), bar(view.progress.fraction), gap(6), centred(view.progress.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     if (!fix.needsOwnerChoice && (view.space || view.lastSynced)) rows.push(gap(14));
     if (!fix.needsOwnerChoice && view.space) {
       rows.push(bar(view.space.fraction), gap(6), centred(view.space.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));

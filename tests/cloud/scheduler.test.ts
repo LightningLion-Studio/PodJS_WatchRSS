@@ -327,3 +327,52 @@ for(const wake of retryBoundaryWakes)for(const offset of [-1,0,1]){
   }
  });
 }
+
+test('memo commits coalesce within three seconds and bypass the five-minute automatic interval',async()=>{
+ const clock=new Clock(),calls:{at:number;savedAt?:number;manual:boolean}[]=[];
+ const scheduler=new WatchCloudScheduler({
+  now:()=>clock.now,delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(manual,_mode,run){run.bindIntent(undefined);calls.push({at:clock.now,savedAt:run.note?.savedAt,manual});return true;},
+ },enabled);
+ scheduler.foreground(true);
+ await clock.advance(100);
+ scheduler.trigger('library');
+ scheduler.noteSaved();
+ await clock.advance(1200);
+ scheduler.noteSaved();
+ await clock.advance(1799);
+ expect(calls).toHaveLength(1);
+ await clock.advance(1);
+ expect(calls[1]).toEqual({at:3100,savedAt:100,manual:false});
+ scheduler.noteSaved();
+ await clock.advance(2999);
+ expect(calls).toHaveLength(2);
+ await clock.advance(1);
+ expect(calls[2]).toEqual({at:6100,savedAt:3100,manual:false});
+ scheduler.dispose();
+});
+
+test('memo dispatch respects the fault retry deadline and keeps the original save across failure',async()=>{
+ const clock=new Clock(),calls:(number|undefined)[]=[];
+ const scheduler=new WatchCloudScheduler({
+  now:()=>clock.now,delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(_manual,_mode,run){
+   run.bindIntent(undefined);calls.push(run.note?.savedAt);
+   if(calls.length===2){scheduler.deferUntil(40000);return false;}
+   return true;
+  },
+ },enabled);
+ scheduler.foreground(true);
+ await clock.advance(40);
+ scheduler.noteSaved();
+ await clock.advance(3000);
+ expect(calls).toEqual([undefined,40]);
+ scheduler.noteSaved();
+ await clock.advance(40000-clock.now-1);
+ expect(calls).toHaveLength(2);
+ await clock.advance(1);
+ expect(calls).toEqual([undefined,40,40]);
+ scheduler.dispose();
+});

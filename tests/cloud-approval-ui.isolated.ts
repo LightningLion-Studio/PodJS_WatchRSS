@@ -12,7 +12,7 @@ import type {ScrollEntry} from '../src/ui/ScrollEntries';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'cloud-approval-ui',setup(builder){builder.onLoad({filter:/\/(?:CloudSyncScreen|SyncV2Screen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
-const element=(kind:string,props:Node['props']):Node=>{const output=Object.create(props);Object.defineProperty(output,'children',{value:props.children,enumerable:true});return {kind,props:output};};
+const element=(kind:string,props:Node['props']):Node=>{const output=Object.create(props);Object.defineProperty(output,'children',kind==='Text'?{get:()=>props.children,enumerable:true}:{value:props.children,enumerable:true});return {kind,props:output};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(props:Node['props'])=>element('View',props),Text:(props:Node['props'])=>element('Text',props)}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(s:string)=>Array.from(s).length*10})}));
@@ -569,4 +569,62 @@ test('review Sync v2 history round trip and ordinary same-account credential rot
  expect(v2Reads-beforeGeneration).toBe(1);
  expect(find('查看历史')?.props.onPress).toBeFunction();
 
+});
+
+test('cloud progress shows only verified denominators and keeps count updates out of v2 snapshot reads',async()=>{
+ const {SyncProgress}=await import('../src/cloud/sync-progress');
+ let at=0,reads=0;
+ const progress=new SyncProgress(()=>at,()=>()=>{},()=>{});
+ const progressUi={subscribe:()=>()=>{},snapshot:async()=>{reads++;return {} as SyncV2UiState;}} as unknown as SyncV2UiPort;
+ const root=createRoot(stop=>{
+  stops.push(stop);
+  return CloudSyncScreen({width:233,height:233,active:()=>true,progress,syncV2:progressUi,
+   available:()=>true,load:async()=>syncSnapshot({phase:'idle',message:'',usedBytes:0,quotaBytes:1e9},'fixture'),
+   sync:{pending:false,start:async()=>{}},onPhone(){},onError(){},ref(){}});
+ });
+ await settle();
+ const snapshotReads=reads;
+ const values=()=>nodes(root).flatMap(node=>[node.props.children,node.props.accessibilityLabel]);
+ progress.start();
+ progress.stage('download');
+ progress.request('GET','https://example.test/functions/v1/sync/v2/objects/a')?.(0,120*1024);
+ at+=500;
+ progress.request('GET','https://example.test/functions/v1/sync/v2/objects/a')?.(0,0);
+ expect(values()).toContain('正在下载变更');
+ expect(values()).toContain('已接收 120.0 KB');
+ expect(values()).not.toContain('同步进度条');
+ at+=500;
+ progress.plan('items',40);
+ at+=500;
+ progress.advance(12);
+ expect(values()).toContain('已下载 12 / 40 项');
+ expect(values()).toContain('同步进度条');
+ await settle();
+ expect(reads).toBe(snapshotReads);
+});
+
+test('cloud screen owns its display lease only while its route is visible and the app is foreground',async()=>{
+ const [visible,setVisible]=createSignal(false),[covered,setCovered]=createSignal(false),[foreground,setForeground]=createSignal(true);
+ const calls:boolean[]=[];
+ let dispose=()=>{};
+ createRoot(stop=>{
+  dispose=stop;stops.push(stop);
+  return CloudSyncScreen({width:233,height:233,active:()=>visible()&&!covered()&&foreground(),
+   keepAwake:async(_owner,active)=>{calls.push(active);},
+   available:()=>true,load:async()=>null,sync:{pending:false,start:async()=>{}},onPhone(){},onError(){},ref(){}});
+ });
+ await settle();
+ expect(calls).toEqual([]);
+ setVisible(true);await settle();
+ setVisible(false);await settle();
+ expect(calls).toEqual([true,false]);
+ setVisible(true);await settle();
+ setCovered(true);await settle();
+ expect(calls.slice(-2)).toEqual([true,false]);
+ setCovered(false);await settle();
+ setForeground(false);await settle();
+ expect(calls.slice(-2)).toEqual([true,false]);
+ setForeground(true);await settle();
+ dispose();await settle();
+ expect(calls).toEqual([true,false,true,false,true,false,true,false]);
 });
