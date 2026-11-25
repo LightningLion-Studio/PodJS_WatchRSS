@@ -32,6 +32,7 @@ import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('screen');
+const UI_WORK_MAX_MS=30_000;
 import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
 import { supportsSystemShare, openSystemShare } from "../sharing/host.ts";
 import { routeShare, type ShareHandler } from "../sharing/policy.ts";
@@ -206,15 +207,29 @@ export default function WatchRSS(props: {
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
   const [pendingUiWork,setPendingUiWork]=createSignal(0);
+  const uiWorkReleases=new Set<()=>void>();
   const trackUiWork=()=>{
-    setPendingUiWork(count=>count+1);
-    let pending=true;
-    return ()=>{
-      if(!pending)return;
-      pending=false;
-      setPendingUiWork(count=>count-1);
+    const deadline=delay(UI_WORK_MAX_MS);
+    const done=()=>{
+      if(!uiWorkReleases.delete(done))return;
+      try{deadline.cancel();}
+      catch(error){logConsole.warn("Failed to cancel UI work deadline",error);}
+      finally{setPendingUiWork(count=>count-1);}
     };
+    uiWorkReleases.add(done);
+    setPendingUiWork(count=>count+1);
+    const expire=(message:string)=>{
+      if(!uiWorkReleases.has(done))return;
+      logConsole.warn(message);
+      done();
+    };
+    void deadline.result.then(
+      ()=>expire(`UI work exceeded ${UI_WORK_MAX_MS}ms; releasing Bluetooth warning gate`),
+      ()=>expire("UI work deadline failed; releasing Bluetooth warning gate"),
+    );
+    return done;
   };
+  onCleanup(()=>{for(const done of uiWorkReleases)done();});
   const withUiWork=async <T,>(operation:()=>Promise<T>):Promise<T>=>{
     const done=trackUiWork();
     try{return await operation();}
@@ -254,6 +269,22 @@ export default function WatchRSS(props: {
         `Reader progress ${context} flush timed out after ${outcome.timeoutMs}ms; continuing`,
       );
   };
+  function flushReaderProgress(entry:Entry,context:"exit"|"background",complete?:()=>void) {
+    const reader=entry.reader;
+    if(!reader)return;
+    const guard=context==="exit"?readerExit:backgroundReaderFlush;
+    // The guard releases navigation at its deadline while the write may still run.
+    let done:(()=>void)|undefined;
+    guard.begin(entry,()=>{
+      done=trackUiWork();
+      return reader.flushProgress();
+    },outcome=>{
+      try{
+        logReaderProgressFlush(context,outcome);
+        complete?.();
+      }finally{done?.();}
+    });
+  }
   let motion = new BackMotion(width);
   let editorBack: (() => void) | undefined;
   const [backOffset, setBackOffset] = createSignal(0);
@@ -341,14 +372,9 @@ export default function WatchRSS(props: {
     if (leaving.page !== "reader" || !leaving.reader)
       return finishPopPage(leaving);
     leaving.list?.scroller.stop();
-    readerExit.begin(
-      leaving,
-      () => withUiWork(leaving.reader!.flushProgress),
-      (outcome) => {
-        logReaderProgressFlush("exit", outcome);
-        if (current() === leaving) finishPopPage(leaving);
-      },
-    );
+    flushReaderProgress(leaving,"exit",()=>{
+      if(current()===leaving)finishPopPage(leaving);
+    });
     return true;
   }
   let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
@@ -690,12 +716,8 @@ export default function WatchRSS(props: {
         }
         saveActivity();
       }
-      if (value !== "active" && entry.page === "reader" && entry.reader)
-        backgroundReaderFlush.begin(
-          entry,
-          () => withUiWork(entry.reader!.flushProgress),
-          (outcome) => logReaderProgressFlush("background", outcome),
-        );
+      if (value !== "active" && entry.page === "reader")
+        flushReaderProgress(entry,"background");
     }),
   );
   let platformLoginRefresh = 0;

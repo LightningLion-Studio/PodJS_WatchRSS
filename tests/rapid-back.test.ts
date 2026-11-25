@@ -1,9 +1,9 @@
 import {expect,test} from 'bun:test';
-for(const scenario of ['4','8','delayed','timeout','lifecycle','bluetooth','bluetooth-modal','bluetooth-note-close','bluetooth-inline','bluetooth-search-modal','bluetooth-transition','bluetooth-cancel','note-actions','bluetooth-rss-save','bluetooth-note-restore',
+for(const scenario of ['4','8','delayed','timeout','reader-timeout-warning','reader-background-timeout-warning','lifecycle','bluetooth','bluetooth-modal','bluetooth-note-close','bluetooth-inline','bluetooth-search-modal','bluetooth-transition','bluetooth-cancel','note-actions','bluetooth-rss-save','bluetooth-note-restore',
  'bluetooth-note-body','bluetooth-note-empty','bluetooth-note-leave','bluetooth-note-download','bluetooth-note-load',
  'bluetooth-note-action-confirm','bluetooth-note-action-delete','bluetooth-note-action-pin','bluetooth-note-action-move',
  'bluetooth-note-action-pin-leave','bluetooth-note-action-delete-leave','bluetooth-note-action-move-leave','bluetooth-note-action-pin-leave-cancel',
- 'bluetooth-revalidation',
+ 'bluetooth-revalidation','bluetooth-background-replacement','bluetooth-note-action-pin-leave-deadline',
  'bluetooth-rss-action-confirm','bluetooth-rss-action-delete','bluetooth-rss-action-unread','bluetooth-rss-action-later',
  'bluetooth-rss-action-qr','bluetooth-rss-action-system','bluetooth-rss-action-leave','bluetooth-rss-action-cancel',
  'bluetooth-video-pan','bluetooth-feed-open','bluetooth-feed-actions','bluetooth-feed-reload','bluetooth-search-restore',

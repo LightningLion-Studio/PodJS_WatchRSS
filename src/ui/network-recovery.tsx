@@ -17,7 +17,7 @@ export function createHostNetworkRecovery(){
    const operation=read();
    return {
     ...operation,
-    result:operation.result.then(snapshot=>({status:internetAvailability(snapshot),order:snapshot.order,onBluetooth:bluetoothTransport(snapshot)})),
+    result:operation.result.then(snapshot=>({status:internetAvailability(snapshot),order:snapshot.order,onBluetooth:bluetoothTransport(snapshot),defaultNetworkId:snapshot.defaultNetworkId})),
    };
   },
  });

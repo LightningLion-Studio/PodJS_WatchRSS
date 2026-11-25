@@ -25,7 +25,7 @@ export function isTransportFailure(error: unknown,depth=0): boolean {
   || (e?.cause!==undefined&&isTransportFailure(e.cause,depth+1))
   || /(?:UnknownHostException|SocketTimeoutException|ConnectException|Unable to resolve host|failed to connect|Network is unreachable|timed out|DNS lookup failed|connection reset|unexpected end of stream|broken pipe)/i.test(message);
 }
-type Reading=InternetStatus|{status:InternetStatus;order:SnapshotOrder;onBluetooth?:boolean};
+type Reading=InternetStatus|{status:InternetStatus;order:SnapshotOrder;onBluetooth?:boolean;defaultNetworkId?:string};
 interface PendingCheck {request:HostOperation<Reading>;timeout?:HostOperation<void>;done:Promise<void>;finish():void}
 const RECOVERY_POLL_MS=5000;
 const RECOVERY_CHECK_TIMEOUT_MS=10000;
@@ -55,14 +55,15 @@ export class NetworkRecovery {
  private waiters=new Set<Waiter>();
  private listeners=new Set<()=>void>();
  private hint=false;
- private bluetoothDismissed=false;
+ private bluetoothNetworkId?:string;
+ private bluetoothDismissal?:{networkId?:string};
  constructor(private ports:RecoveryPorts){}
  get waiting(){return this.waiters.size>0;}
  get blocking(){return this.active&&this.waiting&&this.outageConfirmed;}
  // Keep a visible outage prompt through revalidation. Only a manual
  // check in flight disables Retry.
  get overlayStatus():InternetStatus{return this.retrying?'checking':'unavailable';}
- get bluetooth(){return this.active&&this.hint&&!this.bluetoothDismissed&&this.status==='bluetooth';}
+ get bluetooth(){return this.active&&this.hint&&!this.bluetoothDismissal&&this.status==='bluetooth';}
  preserveContent(usable:()=>boolean){
   this.content.add(usable);
   return ()=>{this.content.delete(usable);};
@@ -137,16 +138,16 @@ export class NetworkRecovery {
   this.lastOrder=undefined;
   this.offlineInvalidatedThrough=0;
   const generation=this.generation;
-  this.stop=this.ports.observe((status,order,onBluetooth)=>{
+  this.stop=this.ports.observe((status,order,onBluetooth,defaultNetworkId)=>{
    if(generation!==this.generation)return;
    // A subscription error has no sample. Keep the last confirmed state.
    if(!order&&status==='checking')return;
-   this.accept(status,order??{requested:++this.legacyOrder},onBluetooth);
+   this.accept(status,order??{requested:++this.legacyOrder},onBluetooth,defaultNetworkId);
   },(lastRequested,connectionChanged)=>{
    if(generation!==this.generation)return;
    // Wake callers of the obsolete check so they can wait for a fresh route.
    this.offlineInvalidatedThrough=lastRequested;
-   if(connectionChanged)this.bluetoothDismissed=false;
+   if(connectionChanged)this.bluetoothDismissal=undefined;
    this.cancelCheck();
    if(this.status!=='checking'){
     this.status='checking';
@@ -155,7 +156,7 @@ export class NetworkRecovery {
   });
   this.publish();
  }
- private accept(status:InternetStatus,order:SnapshotOrder,onBluetooth?:boolean){
+ private accept(status:InternetStatus,order:SnapshotOrder,onBluetooth?:boolean,defaultNetworkId?:string){
   if(status==='unavailable'&&order.requested<=this.offlineInvalidatedThrough)return;
   const last=this.lastOrder;
   if(last){
@@ -167,7 +168,15 @@ export class NetworkRecovery {
   this.lastOrder=order;
   this.status=status;
   // Availability can drop while the default transport remains Bluetooth.
-  if(onBluetooth===false||(onBluetooth===undefined&&status==='available'))this.bluetoothDismissed=false;
+  if(onBluetooth===false||(onBluetooth===undefined&&status==='available')){
+   this.bluetoothNetworkId=undefined;
+   this.bluetoothDismissal=undefined;
+  }else if(onBluetooth&&defaultNetworkId!==undefined){
+   this.bluetoothNetworkId=defaultNetworkId;
+   const dismissedId=this.bluetoothDismissal?.networkId;
+   // On resume the subscription may have missed an entire handover.
+   if(dismissedId!==undefined&&dismissedId!==defaultNetworkId)this.bluetoothDismissal=undefined;
+  }
   if(this.waiting)this.refreshUsable();else this.publish();
  }
  private check():Promise<void>{
@@ -197,7 +206,7 @@ export class NetworkRecovery {
    timeout?.cancel();
    try{
     if(typeof reading==='string')this.accept(reading,{requested});
-    else if(reading)this.accept(reading.status,reading.order,reading.onBluetooth);
+    else if(reading)this.accept(reading.status,reading.order,reading.onBluetooth,reading.defaultNetworkId);
    }finally{check.finish();}
   });
   return done;
@@ -209,7 +218,7 @@ export class NetworkRecovery {
   check?.timeout?.cancel();
   check?.request.cancel(reason);
  }
- dismissBluetooth(){this.bluetoothDismissed=true;this.publish();}
+ dismissBluetooth(){this.bluetoothDismissal={networkId:this.bluetoothNetworkId};this.publish();}
  /** Recheck the system route; a button press never assumes the internet works. */
  async retry(){
   if(!this.active||!this.waiting||this.retrying)return;

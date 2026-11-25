@@ -14,6 +14,9 @@ const noteAction=mode.startsWith('bluetooth-note-action-');
 const noteActionLeave=noteAction&&mode.includes('-leave');
 const noteActionCancel=noteAction&&mode.endsWith('-cancel');
 const revalidation=mode==='bluetooth-revalidation';
+const backgroundReplacement=mode==='bluetooth-background-replacement';
+const readerTimeout=mode==='reader-timeout-warning'||mode==='reader-background-timeout-warning';
+const workDeadline=mode==='bluetooth-note-action-pin-leave-deadline';
 const rssAction=mode.startsWith('bluetooth-rss-action-');
 const rssProbe=mode.startsWith('bluetooth-feed-');
 const rssFromReader=mode==='bluetooth-feed-reload';
@@ -41,7 +44,7 @@ const modalCalls:string[]=[];
 let inlineCloses=0,inlineOpens=0,inlineSession=0;
 let searchedFor:string|undefined;
 let savedDraft:{title:string;markdown:string}|undefined;
-let bluetooth=false,validated=true;const networkSubscriptions=new Set<number>();
+let bluetooth=false,validated=true,defaultNetworkId='old';const networkSubscriptions=new Set<number>();
 let videoState='stopped';
 let releaseVideoStop:(()=>void)|undefined;
 const transforms:{scaleMode?:string;panY?:number}[]=[];
@@ -60,7 +63,7 @@ ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=(source:string)=>{const id=next++;textures.set(id,source);return id;};
 ops.setImage=(id:number,handle:number)=>images.set(id,textures.get(handle)??'');ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
-(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery','input.text','system.share',...(videoCase?['media.video']:[])]),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
+(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery','input.text','system.share',...(videoCase?['media.video']:[])]),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t==='service.cancel'){timers.delete(r.id);return;}if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
  if(method==='runtime.delay'){if(args.milliseconds===2500)exitTimerStarted=true;timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
  else if(method==='input.inline.open'){
@@ -88,7 +91,7 @@ ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:nu
   if(method==='video.setTransform')transforms.push(args);
   value={ok:true,state:videoState,width:320,height:640,positionMs:0,durationMs:100000,volume:.8,volumeMax:1,hasRenderedFirstFrame:true};
  }
- else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated,wifi:!bluetooth,cellular:false,bluetooth};
+ else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated,wifi:!bluetooth,cellular:false,bluetooth,...(backgroundReplacement?{defaultNetworkId}:{})};
  else if(method==='discovery.networkSubscribe'){networkSubscriptions.add(args.subscriptionId);value={subscriptionId:args.subscriptionId};}
  else if(method==='discovery.networkUnsubscribe')networkSubscriptions.delete(args.subscriptionId);
  else if(method==='text.environment')value={density:2,fontScale:1,spValuesPx:[]};
@@ -174,7 +177,7 @@ activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :noteDownload||noteListLoad||safeRoute==='notes'?[{page:'home'},{page:'notes'}]
  :safeRoute==='settings'?[{page:'home'},{page:'settings'}]
- :safeRoute==='home'||revalidation||mode==='bluetooth-home-disclosure'?[{page:'home'}]
+ :safeRoute==='home'||revalidation||backgroundReplacement||mode==='bluetooth-home-disclosure'?[{page:'home'}]
  :mode.startsWith('bluetooth')&&!rssFromReader&&!videoCase
    ?[{page:'home'},{page:'articles',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
@@ -235,6 +238,43 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    await pump();
    press('我已了解');
    await assertOnce('home');
+   return;
+  }
+  if(backgroundReplacement){
+   expect(state()).toEqual(['home']);
+   const background=async()=>{
+    events.push({t:'lifecycle',state:'background'});
+    await pump();
+    expect(networkSubscriptions.size).toBe(0);
+   };
+   const foreground=async()=>{
+    events.push({t:'lifecycle',state:'active'});
+    await pump(4);
+    await network(true,0,'available');
+   };
+   await network(true,120,'available');
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+   await background();
+   await foreground();
+   await pump();
+   expect(warnings()).toHaveLength(0);
+
+   await background();
+   await network(false,80,'lost');
+   defaultNetworkId='replacement';
+   await network(true,80,'available');
+   await foreground();
+   expect(warnings()).toHaveLength(0);
+   await pump();
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+   await background();
+   await foreground();
+   await pump();
+   expect(warnings()).toHaveLength(0);
    return;
   }
   if(revalidation){
@@ -357,6 +397,20 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    }else if(operation==='leave')await back();
    await network(true);
    expect(warnings()).toHaveLength(0);
+   if(workDeadline){
+    await tick(30_000);
+    expect(warnings()).toHaveLength(0);
+    await pump();
+    expect(warnings()).toHaveLength(1);
+    press('继续');
+    await pump();
+    releaseOperation!();
+    await pump();
+    await network(false);
+    await network(true);
+    expect(warnings()).toHaveLength(1);
+    return;
+   }
    const cancel=noteActionCancel||operation==='cancel';
    if(cancel)await network(false);
    releaseOperation!();
@@ -651,6 +705,14 @@ else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  // Move the real reader so final progress is dirty before the BACK burst.
  events.push({t:'axis',axis:0,delta:12000});
  for(let i=0;i<12;i++)await tick();
+ if(mode==='reader-background-timeout-warning'){
+  events.push({t:'lifecycle',state:'background'});
+  await tick();
+  expect(exitTimerStarted).toBe(true);
+  expect(pendingSave).toBeDefined();
+  events.push({t:'lifecycle',state:'active'});
+  await tick();
+ }
  const count=mode==='8'?8:4;
  events.push(...Array.from({length:count},()=>({t:'back'})));
  await tick();
@@ -673,10 +735,19 @@ else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  expect(exitTimerStarted).toBe(true);
  expect(saveCalls).toBe(1);
  expect(pendingSave).toBeDefined();
- if(mode!=='timeout')pendingSave!();
+ if(mode!=='timeout'&&!readerTimeout)pendingSave!();
  for(let i=0;i<180;i++)await tick();
  expect(state()).toEqual(['home','articles']);
  expect(visible().some(v=>v.opacity===1&&v.offset===0)).toBe(true);
+ if(readerTimeout){
+  bluetooth=true;
+  for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason:'available'}});
+  for(let i=0;i<190;i++)await tick();
+  expect(connected().filter(node=>node.domAttrs?.accessibilityLabel==='继续')).toHaveLength(1);
+  events.push({t:'back'});
+  for(let i=0;i<30;i++)await tick();
+  expect(state()).toEqual(['home','articles']);
+ }
  // List -> home, with another burst arriving while its animation settles.
  events.push(...Array.from({length:8},()=>({t:'back'})));await tick();
  for(let i=0;i<8;i++)await tick();
