@@ -12,12 +12,16 @@ import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import org.junit.Test;
 
@@ -81,11 +85,7 @@ public final class NoteExitInstrumentationTest {
                 shell(test, "input tap 133 136"); // Commit the composed word in Gboard.
             }
 
-            // Dismiss via the IME. Android Back would also exercise the app's
-            // navigation callback on some Wear OS versions.
-            test.runOnMainSync(() -> context.getSystemService(InputMethodManager.class)
-                    .hideSoftInputFromWindow(body.getWindowToken(), 0));
-            waitFor(() -> !imeVisible(test), "Gboard remained visible");
+            dismissIme(test, activity, body);
             String[] value = {""};
             test.runOnMainSync(() -> value[0] = body.getText().toString());
             if (blank) {
@@ -98,14 +98,48 @@ public final class NoteExitInstrumentationTest {
 
             shell(test, swipeBack ? "input swipe 20 233 397 233 300" : "input tap 233 418");
             String listControl = blank ? "新建备忘录" : "备忘录：" + value[0].trim();
-            waitFor(() -> bodyField(test, activity) == null &&
-                    hasDescription(test.getUiAutomation().getRootInActiveWindow(), listControl),
-                    "Editor did not return to the notes list");
+            try {
+                waitFor(() -> bodyField(test, activity) == null, "Native editor body stayed attached");
+                waitFor(() -> hasDescription(test.getUiAutomation().getRootInActiveWindow(), listControl),
+                        "Notes list control missing after native editor detached");
+            } catch (AssertionError error) {
+                shell(test, "screencap -p /data/local/tmp/note-exit-" + swipeBack + "-" + blank + ".png");
+                throw error;
+            }
             List<String> after = new ArrayList<>(before);
             if (!blank) after.add(value[0]);
             assertEquals("Unexpected persisted note bodies", after, savedBodies(context));
         } finally {
             test.runOnMainSync(activity::finish);
+        }
+    }
+
+    private static void dismissIme(Instrumentation test, Activity activity, EditText body)
+            throws InterruptedException {
+        CountDownLatch animationEnded = new CountDownLatch(1);
+        View decor = activity.getWindow().getDecorView();
+        test.runOnMainSync(() -> {
+            // WindowManager can report the IME hidden before its input surface
+            // finishes animating out. Send the app exit input after onEnd.
+            decor.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
+                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                @Override public WindowInsets onProgress(WindowInsets insets,
+                        List<WindowInsetsAnimation> running) {
+                    return insets;
+                }
+
+                @Override public void onEnd(WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) animationEnded.countDown();
+                }
+            });
+            activity.getSystemService(InputMethodManager.class)
+                    .hideSoftInputFromWindow(body.getWindowToken(), 0);
+        });
+        try {
+            assertTrue("Gboard hide animation did not finish", animationEnded.await(5, TimeUnit.SECONDS));
+            waitFor(() -> !imeVisible(test), "Gboard remained visible");
+        } finally {
+            test.runOnMainSync(() -> decor.setWindowInsetsAnimationCallback(null));
         }
     }
 

@@ -2,10 +2,11 @@ import {modalInputKey} from "./modal-input.ts";
 import type {ModalInput,ModalInputRecovery} from "./service.ts";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Image, View } from "@pocketjs/framework/components";
-import { delay, textInput } from "@podjs/framework/services";
+import { delay, hostOperation, textInput } from "@podjs/framework/services";
 import { hasCapability, onLifecycleChange } from "@podjs/framework/watch";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { NoteDraftAutosave, type NoteDraftSaveState } from "../notes/draft-autosave.ts";
+import type { NoteDraftSaveState } from "../notes/draft-autosave.ts";
+import { noteDraftQueue } from "../notes/draft-queue.ts";
 import { RawTextHistory } from "../notes/raw-text-history.ts";
 import { noteMetadata } from "../notes/metadata.ts";
 import type { MemoNote } from "../notes/types.ts";
@@ -15,7 +16,9 @@ type InputSession={close():Promise<void>;setValue(value:string):Promise<void>};
 export interface NoteInlineEditorHandle { close:()=>void }
 export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
   const [status,setStatus]=createSignal<NoteDraftSaveState>(props.initial?"saved":"empty");
-  const draft=new NoteDraftAutosave(props.repository,props.initial,setStatus,props.onSaved,error=>props.onError(String(error)));
+  const session=noteDraftQueue(props.repository).open(props.initial);
+  const draft=session.draft;
+  const release=session.observe({state:setStatus,saved:props.onSaved,error:error=>props.onError(String(error))});
   const history=new RawTextHistory(draft.markdown);
   const [historyState,setHistoryState]=createSignal({undo:false,redo:false});
   const syncHistoryState=()=>setHistoryState({undo:history.canUndo,redo:history.canRedo});
@@ -28,20 +31,33 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
   };
   onFrame(()=>draft.tick(),()=>draft.state==="pending");
   const removeLifecycle=onLifecycleChange(state=>{
-    if(state!=="active"&&!closing)void draft.flush().catch(error=>props.onError(String(error)));
+    if(state!=="active"&&!closing)void session.flush().catch(error=>props.onError(String(error)));
   });
   let titleInput:InputSession|undefined,bodyInput:InputSession|undefined,disposed=false,closing=false;
-  const closeInputs=async()=>{await bodyInput?.close();await titleInput?.close();bodyInput=undefined;titleInput=undefined;};
+  const closeInputs=async()=>{
+    const inputs=[bodyInput,titleInput];bodyInput=undefined;titleInput=undefined;
+    await Promise.all(inputs.map(input=>input?.close()));
+  };
+  const savingInBackground=Symbol("savingInBackground");
   const close=async()=>{
     if(closing)return;closing=true;
     const deadline=hasCapability("runtime.timer")?delay(5000):undefined;
+    let note=draft.note;
+    let message:string|undefined;
     try{
-      const saving=draft.flush();
-      const note=deadline?await Promise.race([saving,deadline.result.then(()=>{throw new Error("备忘录保存超时，请重试");})]):await saving;
-      await closeInputs();
-      if(!disposed)props.onClose(note);
-    }catch(error){closing=false;if(!disposed)props.onError(String(error));}
-    finally{deadline?.cancel();}
+      const saving=session.close();
+      const timeout=deadline?.result.then<typeof savingInBackground>(()=>savingInBackground)
+        ??Promise.resolve<typeof savingInBackground>(savingInBackground);
+      const result=await Promise.race([saving,timeout]);
+      if(result===savingInBackground){note=draft.note;message="正在后台保存";}
+      else note=result;
+    }catch{
+      note=draft.note;message="备忘录待保存，可重新打开继续编辑";
+    }finally{deadline?.cancel();}
+    void closeInputs().catch(()=>{});
+    if(disposed)return;
+    if(message)void hostOperation("ui.toast",{message}).result.catch(()=>{});
+    props.onClose(note);
   };
   props.ref?.({close:()=>void close()});
   const inputKey=modalInputKey("note");
@@ -52,7 +68,7 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
     if(!skipTitle){
       const title=await props.fallbackInput("备忘录标题",draft.title,modalOptions('title'));
       if(!live())return;
-      if(title!==null){draft.setTitle(title);try{await draft.flush();}catch(saveError){if(live())props.onError(String(saveError));return;}}
+      if(title!==null){draft.setTitle(title);try{await session.flush();}catch(saveError){if(live())props.onError(String(saveError));return;}}
     }
     if(!live())return;
     const markdown=await props.fallbackInput("备忘录正文",draft.markdown,modalOptions('body'));
@@ -85,7 +101,7 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
     if(props.active===false&&inputKey&&props.inputRecovery)for(const part of ['title','body'])void props.inputRecovery.dismiss(`${inputKey}:${part}`).catch(()=>{});
   });
   onCleanup(()=>{disposed=true;
-    if(inputKey&&props.inputRecovery)for(const part of ['title','body'])void props.inputRecovery.dismiss(`${inputKey}:${part}`).catch(()=>{});removeLifecycle();draft.dispose();void closeInputs();});
+    if(inputKey&&props.inputRecovery)for(const part of ['title','body'])void props.inputRecovery.dismiss(`${inputKey}:${part}`).catch(()=>{});removeLifecycle();release();void closeInputs().catch(()=>{});});
   const statusText=()=>({empty:"未填写",pending:"待保存",saving:"保存中…",saved:"已保存",error:"保存失败，请重试"}[status()]);
   return <View class="absolute inset-0 bg-black">
     <View class="absolute top-[0] left-[0] right-[0] h-[56] bg-gradient-to-b from-[#000000] via-[#000000e6] to-transparent items-start justify-center flex-row">

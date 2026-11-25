@@ -1,3 +1,4 @@
+import {noteDraftQueue} from "../notes/draft-queue.ts";
 import {traceServiceWork} from '@podjs/framework/service-trace';
 import {prepareTextLayout} from '@podjs/framework/text-layout';
 import {prepareNotePreviewSteps,noteBlockSourceOffsets,type NotePreviewBlock} from '../notes/preview.ts';
@@ -55,8 +56,13 @@ export function NotesListScreen(props: NotesListScreenProps) {
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
   const load=async()=>{const version=++readVersion;try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion)setLoaded(true);}};
-  onMount(()=>void load());
-  createEffect(on(()=>props.refreshKey,()=>void load(),{defer:true}));
+  const draftQueue=noteDraftQueue(props.repository);
+  onMount(()=>{
+    onCleanup(draftQueue.subscribe(()=>void load()));
+    void load();
+    draftQueue.retryDetached();
+  });
+  createEffect(on(()=>props.refreshKey,()=>{void load();draftQueue.retryDetached();},{defer:true}));
   const cardLayouts=createMemo(()=>notes().map(note=>{
     const textWidth=props.width-2*padding-24;
     const title=measuredLines(note.title||"未命名笔记",textWidth,text=>getOps().measureText(text,22),2);
@@ -192,7 +198,9 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   async function reload(id:string){const version=++readVersion;try{const value=await traceServiceWork('note.readRequest',()=>props.repository.get(id));if(!disposed&&version===readVersion)traceServiceWork('note.setNote',()=>setNote(value));}catch(e){if(!disposed&&version===readVersion)fail(props,e);}}
   const edit=()=>{const current=note();setEditorSeed(current);setEditorAnchor(current?noteEditorAnchor(entries(),current.markdown,readerScroller.offset(),props.width,props.height,(text,slot)=>getOps().measureText(text,slot),{top:22,gap:0,horizontalInset:14}):undefined);setEditing(true);};
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
-  onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
+  const draftQueue=noteDraftQueue(props.repository);
+  onMount(async()=>{onCleanup(draftQueue.subscribe(()=>{if(!editing()&&props.noteId)void reload(props.noteId);}));
+    setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
   let modalRecoveryChecked=false;
   createEffect(()=>{
     if(!loaded()||editing()||props.active===false||!note()||!inputKey||!props.inputRecovery||modalRecoveryChecked)return;
