@@ -200,7 +200,9 @@ export default function WatchRSS(props: {
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
-  const bluetoothPageVisible=createMemo(()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().bluetooth);
+  const networkLayerEnabled=()=>cloudOwnerChoice()||recoveryEnabled(current());
+  const bluetoothPageVisible=createMemo(()=>networkLayerEnabled()&&visibleNetwork().bluetooth);
+  const networkPageBlocksSwipe=()=>bluetoothPageVisible()||(networkLayerEnabled()&&visibleNetwork().blocking);
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -326,6 +328,7 @@ export default function WatchRSS(props: {
         stack().length > 1 &&
         !disclosurePending() &&
         !networkFor(current()).blocking &&
+        !networkPageBlocksSwipe() &&
         motion.phase !== "settling" &&
         (current().player?.canSwipeBack?.() ?? true) &&
         current().page !== "reader-image" &&
@@ -358,7 +361,7 @@ export default function WatchRSS(props: {
     },
   },playerRotation,playerViewport));
   const backObserver = rightSwipeBack({rect:()=>
-    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && motion.phase!=="settling"
+    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
     start:beginBack,
@@ -1354,7 +1357,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !bluetoothPageVisible() });});
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);

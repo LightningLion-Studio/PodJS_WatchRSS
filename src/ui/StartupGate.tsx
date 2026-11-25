@@ -174,7 +174,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   const scroller=top?top.scroller:(destination()==='intro'?introHandle?.scroller():privacyScroller);
   scroller?.scrollBy(delta*48/(12*RelativeAxisUnits.PerDegree),{durMs:120});
  }));
- createGesture({region:{rect:()=>currentLegal()&&active()&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
+ createGesture({region:{rect:()=>currentLegal()&&active()&&!currentLegal()?.network.blocking&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
   onPanStart:c=>{currentLegal()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
   onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),
   onCancel:()=>{if(motion.phase==='dragging')motion.release(0,Date.now(),true);}});
