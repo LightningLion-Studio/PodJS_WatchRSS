@@ -292,7 +292,9 @@ function start(){
   v2Writers++;
   headPoll?.update();
   try{
-   await headPoll?.drainRead();
+   const reading=headPoll?.drainRead();
+   if(reading)await reading;
+   if(disposed||generation!==accountGeneration)throw Error('cloud_operation_superseded');
    const result=await runtime.reregister(confirmed);
    if(!disposed&&generation===accountGeneration){
     runtime.service.reset();
