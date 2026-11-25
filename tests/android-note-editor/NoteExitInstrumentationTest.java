@@ -37,7 +37,16 @@ public final class NoteExitInstrumentationTest {
         verifyExit(true, 138, "daa");
     }
 
+    @Test public void whitespaceOnlyThenCloseButtonReturnsWithoutSaving() throws Exception {
+        verifyExit(false, 233, "");
+    }
+
+    @Test public void whitespaceOnlyThenSwipeBackReturnsWithoutSaving() throws Exception {
+        verifyExit(true, 233, "");
+    }
+
     private void verifyExit(boolean swipeBack, int firstKeyX, String expected) throws Exception {
+        boolean blank = expected.isEmpty();
         Instrumentation test = InstrumentationRegistry.getInstrumentation();
         Context context = test.getTargetContext();
         assertEquals(APP, context.getPackageName());
@@ -52,8 +61,8 @@ public final class NoteExitInstrumentationTest {
             waitFor(() -> hasDescription(test.getUiAutomation().getRootInActiveWindow(), "备忘录"),
                     "Notes list missing");
             List<String> before = savedBodies(context);
-            assertTrue("Start with an empty notes list", before.size() <= 1);
-            if (before.size() == 1) {
+            assertTrue("Start with an empty notes list", before.size() <= 2);
+            for (int i = 0; i < before.size(); i++) {
                 shell(test, "input swipe 233 397 233 180 300");
                 SystemClock.sleep(600);
             }
@@ -64,9 +73,13 @@ public final class NoteExitInstrumentationTest {
             if (!imeVisible(test)) tapBody(test, body);
             waitFor(() -> imeVisible(test), "Gboard did not open");
             SystemClock.sleep(400);
-            for (int x : new int[]{firstKeyX, 44, 44}) shell(test, "input tap " + x + " 271");
-            SystemClock.sleep(400);
-            shell(test, "input tap 133 136"); // Commit the composed word in Gboard.
+            if (blank) {
+                shell(test, "input tap 233 410");
+            } else {
+                for (int x : new int[]{firstKeyX, 44, 44}) shell(test, "input tap " + x + " 271");
+                SystemClock.sleep(400);
+                shell(test, "input tap 133 136"); // Commit the composed word in Gboard.
+            }
 
             // Dismiss via the IME. Android Back would also exercise the app's
             // navigation callback on some Wear OS versions.
@@ -75,17 +88,22 @@ public final class NoteExitInstrumentationTest {
             waitFor(() -> !imeVisible(test), "Gboard remained visible");
             String[] value = {""};
             test.runOnMainSync(() -> value[0] = body.getText().toString());
-            assertTrue("Gboard text was not committed: " + value[0],
-                    expected.equalsIgnoreCase(value[0].trim()));
+            if (blank) {
+                assertEquals("Gboard space was not committed", " ", value[0]);
+            } else {
+                assertTrue("Gboard text was not committed: " + value[0],
+                        expected.equalsIgnoreCase(value[0].trim()));
+            }
             assertTrue("Editor closed before the tested action", body.isAttachedToWindow());
 
             shell(test, swipeBack ? "input swipe 20 233 397 233 300" : "input tap 233 418");
-            waitFor(() -> hasDescription(test.getUiAutomation().getRootInActiveWindow(),
-                    "备忘录：" + value[0].trim()), "Saved note did not appear in the list");
-            assertNull("Editor body still mounted", bodyField(test, activity));
+            String listControl = blank ? "新建备忘录" : "备忘录：" + value[0].trim();
+            waitFor(() -> bodyField(test, activity) == null &&
+                    hasDescription(test.getUiAutomation().getRootInActiveWindow(), listControl),
+                    "Editor did not return to the notes list");
             List<String> after = new ArrayList<>(before);
-            after.add(value[0]);
-            assertEquals("Raw body must be saved in exactly one new note", after, savedBodies(context));
+            if (!blank) after.add(value[0]);
+            assertEquals("Unexpected persisted note bodies", after, savedBodies(context));
         } finally {
             test.runOnMainSync(activity::finish);
         }

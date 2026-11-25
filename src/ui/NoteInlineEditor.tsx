@@ -2,8 +2,8 @@ import {modalInputKey} from "./modal-input.ts";
 import type {ModalInput,ModalInputRecovery} from "./service.ts";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Image, View } from "@pocketjs/framework/components";
-import { textInput } from "@podjs/framework/services";
-import { onLifecycleChange } from "@podjs/framework/watch";
+import { delay, textInput } from "@podjs/framework/services";
+import { hasCapability, onLifecycleChange } from "@podjs/framework/watch";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { NoteDraftAutosave, type NoteDraftSaveState } from "../notes/draft-autosave.ts";
 import { RawTextHistory } from "../notes/raw-text-history.ts";
@@ -34,8 +34,14 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
   const closeInputs=async()=>{await bodyInput?.close();await titleInput?.close();bodyInput=undefined;titleInput=undefined;};
   const close=async()=>{
     if(closing)return;closing=true;
-    try{const note=await draft.flush();await closeInputs();if(!disposed)props.onClose(note);}
-    catch(error){closing=false;if(!disposed)props.onError(String(error));}
+    const deadline=hasCapability("runtime.timer")?delay(5000):undefined;
+    try{
+      const saving=draft.flush();
+      const note=deadline?await Promise.race([saving,deadline.result.then(()=>{throw new Error("备忘录保存超时，请重试");})]):await saving;
+      await closeInputs();
+      if(!disposed)props.onClose(note);
+    }catch(error){closing=false;if(!disposed)props.onError(String(error));}
+    finally{deadline?.cancel();}
   };
   props.ref?.({close:()=>void close()});
   const inputKey=modalInputKey("note");

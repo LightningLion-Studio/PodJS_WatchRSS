@@ -35,3 +35,37 @@ test("a newer edit waits for the older save and wins",async()=>{
   expect(final?.markdown).toBe("第二版");
   draft.dispose();
 });
+
+test("whitespace-only new drafts finish without a database write",async()=>{
+  const draft=new NoteDraftAutosave({save:async()=>{throw Error("unexpected blank write");}},null);
+  draft.setMarkdown(" \r\n\t");
+  expect(draft.markdown).toBe(" \n\t");
+  expect(await draft.flush()).toBeNull();
+  expect(draft.state).toBe("empty");
+});
+
+test("clearing both fields leaves the existing note intact",async()=>{
+  const initial=saved("原有标题","原有正文");
+  const draft=new NoteDraftAutosave({save:async()=>{throw Error("unexpected blank write");}},initial);
+  draft.setTitle("");
+  draft.setMarkdown(" ");
+  expect(await draft.flush()).toBe(initial);
+});
+
+test("clearing a draft during its first save keeps the newly written note",async()=>{
+  const initial=saved("生成标题","普通正文");
+  let finish!: (note:MemoNote)=>void;
+  let writes=0;
+  const draft=new NoteDraftAutosave({save:async()=>{
+    if(++writes>1)throw Error("unexpected blank write");
+    return new Promise(resolve=>{finish=resolve;});
+  }},null);
+  draft.setMarkdown(initial.markdown);
+  const saving=draft.flush();
+  draft.setMarkdown(" ");
+  const closing=draft.flush();
+  finish(initial);
+  expect(await saving).toBe(initial);
+  expect(await closing).toBe(initial);
+  expect(writes).toBe(1);
+});
