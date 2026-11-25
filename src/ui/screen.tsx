@@ -1,7 +1,8 @@
+import {BluetoothWarningPage} from './NetworkUnavailableOverlay.tsx';
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {preserveNetworkContent} from '../network/context.ts';
 import {isNetworkRecoveryCancellation} from '../network/recovery.ts';
-import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer,observeNetworkRecovery} from './network-recovery.tsx';
+import {bindBluetoothWarningRoute,useBluetoothWarningConnection,createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer,observeNetworkRecovery} from './network-recovery.tsx';
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from '../cloud/status.ts';
 import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
@@ -102,7 +103,7 @@ import {
 } from "@podjs/framework/services";
 import { layoutText } from "../reader/index.ts";
 import type { AppServices, Article, Channel, ArticleQuery } from "./service.ts";
-import { createGesture } from "@pocketjs/framework/gesture";
+import { cancelActiveTouches, createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { BackMotion } from "@podjs/framework/navigation";
 import { HomeEntryPlacementStore } from "./home-placement.ts";
@@ -196,13 +197,14 @@ export default function WatchRSS(props: {
   const page = () => current().page;
   const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
   onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
-  const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && !cloudOwnerChoice();
+  const warningNetwork=useBluetoothWarningConnection();
+  const warningShown=()=>page()==='bluetooth-warning';
+  const contentRoute=()=>warningShown()?stack().at(-2)!:current();
+  const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && entry.page !== 'bluetooth-warning' && !cloudOwnerChoice();
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
-  const networkLayerEnabled=()=>cloudOwnerChoice()||recoveryEnabled(current());
-  const bluetoothPageVisible=createMemo(()=>networkLayerEnabled()&&visibleNetwork().bluetooth);
-  const networkPageBlocksSwipe=()=>bluetoothPageVisible()||(networkLayerEnabled()&&visibleNetwork().blocking);
+  const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -233,6 +235,7 @@ export default function WatchRSS(props: {
   function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
     if (
+      warningShown() ||
       (next === page() && Object.keys(data).length === 0) ||
       motion.phase !== "idle"
     )
@@ -241,8 +244,17 @@ export default function WatchRSS(props: {
     traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
   }
-  function finishPopPage(leaving: Entry) {
+  function finishPopPage(leaving: Entry, dismissWarning=true) {
     if (current() !== leaving || stack().length <= 1) return false;
+    if(leaving.page==='bluetooth-warning'){
+      motion.reset();
+      batch(()=>{
+        if(dismissWarning)warningNetwork.dismissBluetooth();
+        setStack(entries=>entries.slice(0,-1));
+        setBackOffset(0);
+      });
+      return true;
+    }
     const latestArticle =
       article()?.id === leaving.readerArticle?.id
         ? article()
@@ -309,7 +321,7 @@ export default function WatchRSS(props: {
     return true;
   }
   let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
-  const playerRotation=()=>current().player?.gestureRotation?.()??0;
+  const playerRotation=()=>contentRoute().player?.gestureRotation?.()??0;
   const playerViewport=()=>({x:0,y:0,w:width,h:height});
   let backPointerRotation = 0;
   const rememberBackRotation = () => { if (motion.phase === "idle") backPointerRotation = playerRotation(); };
@@ -327,6 +339,7 @@ export default function WatchRSS(props: {
       rect: () =>
         stack().length > 1 &&
         !disclosurePending() &&
+        !warningShown() &&
         !networkFor(current()).blocking &&
         !networkPageBlocksSwipe() &&
         motion.phase !== "settling" &&
@@ -361,7 +374,7 @@ export default function WatchRSS(props: {
     },
   },playerRotation,playerViewport));
   const backObserver = rightSwipeBack({rect:()=>
-    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
+    stack().length>1 && (warningShown()||usesImmersiveBackObserver(current())) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
     start:beginBack,
@@ -1357,6 +1370,15 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
+  const removeWarningRoute=()=>{cancelActiveTouches();finishPopPage(current(),false);};
+  createEffect(()=>{if(cloudOwnerChoice()&&warningShown())untrack(removeWarningRoute);});
+  bindBluetoothWarningRoute(warningNetwork,{
+    shown:warningShown,
+    canPush:()=>resumeReady()&&foreground()&&recoveryEnabled(current())&&!networkPageBlocksSwipe()&&!disclosurePending()
+      && backOffset()===0&&motion.phase==='idle',
+    push:()=>{cancelActiveTouches();setPage('bluetooth-warning');},
+    pop:removeWarningRoute,
+  });
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
@@ -1371,7 +1393,7 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
-    if (bluetoothPageVisible() || disclosurePending()) return true;
+    if (disclosurePending()) return true;
     if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
     const closeEditor = current().noteEditorBack;
@@ -1380,13 +1402,12 @@ export default function WatchRSS(props: {
       return true;
     }
     if (motion.phase !== "idle") return true;
-    editorBack = undefined;
-    motion.begin(0);
+    rememberBackRotation();
+    beginBack(0);
     motion.release(0, Date.now(), false, true);
     return true;
   });
   const removeAxis = onAxisDelta(RelativeAxis.Primary, (delta: number) => {
-    if (bluetoothPageVisible()) return;
     if (disclosurePending()) {
       const list = page() === "home" ? homeDisclosureList : current().disclosureList;
       list?.scroller.scrollBy((delta * rowHeight) / (12 * RelativeAxisUnits.PerDegree), {durMs:120});
@@ -1581,7 +1602,7 @@ export default function WatchRSS(props: {
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
     return (
-      <NetworkRecoveryProvider network={network} active={()=>active()&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
+      <NetworkRecoveryProvider network={network} active={()=>contentRoute()===entry&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
       <View
         class={
           entryPage() === "video"
@@ -1618,6 +1639,7 @@ export default function WatchRSS(props: {
           <Show
             when={
               !active() ||
+              entryPage() === "bluetooth-warning" ||
               !loading() ||
               entryPage() === "saved" ||
               entryPage() === "watch-later"
@@ -1628,6 +1650,9 @@ export default function WatchRSS(props: {
               </View>
             }
           >
+            <Show when={entryPage()==='bluetooth-warning'}>
+              <BluetoothWarningPage width={width} height={height} rotation={playerRotation()} onBack={()=>{if(active()&&motion.phase==='idle')popPage();}}/>
+            </Show>
             <HomeRoutes
               ownerChoiceNetwork={ownerChoiceNetwork}
               foreground={foreground}
@@ -1901,6 +1926,7 @@ export default function WatchRSS(props: {
       style={{ width, height }}
     >
       <For each={stack()}>{renderPage}</For>
+      <Show when={!warningShown()}>
       <TopNotice message={error()} width={width} height={height} round={metrics.shape==="round"}
         top={noticeFrame().top+38} maxWidth={noticeFrame().width-24} background="#4b2030" color="#ffd5dc" />
       <Show when={busy()}>
@@ -1918,7 +1944,8 @@ export default function WatchRSS(props: {
         state={speechState()}
         onOpen={() => setPage("speech-playback")}
       />
-      <Show when={cloudOwnerChoice()}>
+      </Show>
+      <Show when={cloudOwnerChoice()&&!warningShown()}>
         <NetworkRecoveryLayer network={ownerChoiceNetwork} width={width} height={height} round={metrics.shape==='round'}/>
       </Show>
       <Show when={recoveryEnabled(current())}>

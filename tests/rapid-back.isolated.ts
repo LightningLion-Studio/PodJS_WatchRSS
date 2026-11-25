@@ -6,6 +6,7 @@ for(const base of [Bun.resolveSync('@podjs/framework/watch',import.meta.dir),Bun
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+let bluetooth=false;const networkSubscriptions=new Set<number>();
 let clockMs=0,next=1;Date.now=()=>clockMs;
 const kv=new Map<string,string>(),events:any[]=[],timers=new Map<number,number>();
 let backEventsDelivered=0,saveCalls=0;let exitTimerStarted=false;
@@ -14,13 +15,17 @@ const ops:any={__viewport:{w:233,h:233},__scrollConfiguration:{touchSlopPx:8,min
 for(const name of ['destroyNode','insertBefore','removeChild','setStyle','setImage','setSprite','setFocus','animate','setAccessibility','setNavigationState'])ops[name]=()=>{};
 ops.createNode=()=>next++;
 ops.setProp=(id:number,key:number,value:number)=>{let p=props.get(id);if(!p)props.set(id,p=new Map());p.set(key,value);};
+ops.destroyNode=(id:number)=>texts.delete(id);
 ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=()=>next++;ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
-(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
+(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
  if(method==='runtime.delay'){if(args.milliseconds===2500)exitTimerStarted=true;timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
  else if(method==='media.video.stop'){}
+ else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated:true,wifi:!bluetooth,cellular:false,bluetooth};
+ else if(method==='discovery.networkSubscribe'){networkSubscriptions.add(args.subscriptionId);value={subscriptionId:args.subscriptionId};}
+ else if(method==='discovery.networkUnsubscribe')networkSubscriptions.delete(args.subscriptionId);
  else if(method==='text.environment')value={density:2,fontScale:1,spValuesPx:[]};
  else if(method==='text.layout')value={lines:[{start:0,end:args.text.length,visibleEnd:args.text.length}]};
  else if(method.includes('secure')||method.includes('file')){events.push({t:'service.result',id,ok:false,error:{code:'fixture',message:'unavailable'}});return;}
@@ -41,7 +46,8 @@ activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},[{page:'h
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
 const frame=(globalThis as any).frame;const watch=await import('@podjs/framework/watch');
-async function tick(dt=17){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}frame(0,undefined);for(let n=0;n<25;n++)await Promise.resolve();}
+const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
+async function tick(dt=17,touches:number[]=[]){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}frame(0,undefined,touches);for(let n=0;n<25;n++)await Promise.resolve();}
 
 const connected=()=>{const nodes:any[]=[];const walk=(n:any)=>{nodes.push(n);n.children.forEach(walk);};walk(rootMirror);return nodes;};
 const state=()=>{const data:any=activityStateHub.read().saved['watchrss.content-activity'];return data?.entries?.map((e:any)=>e.page) as string[];};
@@ -49,7 +55,54 @@ const visible=()=>connected().filter(n=>props.get(n.id)?.has(128)).map(n=>({offs
 const {expect,test}=await import('bun:test');
 const removeEventProbe=watch.__onHostEvent(event=>{if(event.t==='back')backEventsDelivered++;});
 const mode=process.env.RAPID_BACK_CASE??'4';
-test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
+if(mode==='bluetooth')test('production warning route uses the page stack and resets on reconnect',async()=>{
+ const pump=async(count=30)=>{for(let i=0;i<count;i++)await tick();};
+ const network=async(value:boolean)=>{
+  bluetooth=value;
+  for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason:'capabilities'}});
+  await pump();
+ };
+ const warning=()=>connected().find(node=>node.domAttrs?.accessibilityLabel==='继续');
+ try{
+  await pump(50);
+  expect(state()).toEqual(['home','articles','reader']);
+  expect(warning()).toBeUndefined();
+  await network(true);
+  expect(watch.navigationStateSnapshot().canGoBack).toBe(true);
+  expect(warning()).toBeDefined();
+  await tick(17,[__packTouch(1,46,46)]);
+  await tick(17,[__packTouch(1,166,46)]);
+  expect(visible().some(v=>v.offset===120&&v.opacity===1)).toBe(true);
+  expect(visible().some(v=>v.offset===0&&v.opacity===1)).toBe(true);
+  await tick();await pump();
+  expect(warning()).toBeUndefined();
+  expect(state()).toEqual(['home','articles','reader']);
+  await network(true);
+  expect(warning()).toBeUndefined();
+
+  await network(false);await network(true);
+  expect(warning()).toBeDefined();
+  events.push({t:'accessibility.action',nodeId:warning()!.id,action:'activate'});
+  await pump();
+  expect(warning()).toBeUndefined();
+  await network(true);
+  expect(warning()).toBeUndefined();
+
+  await network(false);await network(true);
+  expect(warning()).toBeDefined();
+  events.push({t:'back'});
+  await pump();
+  expect(warning()).toBeUndefined();
+  expect(state().at(-1)).toBe('reader');
+
+  await network(false);await network(true);
+  expect(warning()).toBeDefined();
+  await network(false);
+  expect(warning()).toBeUndefined();
+  expect(state().at(-1)).toBe('reader');
+ }finally{removeEventProbe();stop();}
+});
+else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  for(let i=0;i<50;i++)await tick();
  expect(state()).toEqual(['home','articles','reader']);
  // Move the real reader so final progress is dirty before the BACK burst.

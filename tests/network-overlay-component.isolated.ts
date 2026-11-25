@@ -6,9 +6,6 @@ import {NetworkRecovery} from '../src/network/recovery.ts';
 import {attachGesture,__runGestures,pushTouchBlock,type GestureOptions} from '@pocketjs/framework/gesture';
 import {__packTouch,__setTouches} from '../node_modules/@pocketjs/framework/framework/src/touch.ts';
 import {__advanceClock} from '../node_modules/@pocketjs/framework/framework/src/clock.ts';
-import {BackMotion} from '@podjs/framework/navigation';
-import {rightSwipeBack} from '../src/navigation/right-swipe-back.ts';
-import {playerGesture} from '../src/ui/player-gestures.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'network-overlay',setup(builder){builder.onLoad({filter:/\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const element=(kind:string,props:any)=>{const children=createMemo(()=>props.children);return {kind,props:mergeProps(props,{get children(){return children();}})};};
@@ -21,19 +18,6 @@ mock.module('@pocketjs/framework/gesture',()=>({attachGesture,__runGestures,push
  onCleanup(()=>handle.dispose());
  return handle;
 }}));
-const frameTicks=new Set<()=>void>();
-mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(tick:()=>void)=>{
- frameTicks.add(tick);
- onCleanup(()=>frameTicks.delete(tick));
-}}));
-import * as realInput from '@pocketjs/framework/input';
-const inputExports={...realInput};
-let hitTarget:any;
-mock.module('@pocketjs/framework/input',()=>({
- ...inputExports,
- hitFocusable:(x:number,y:number)=>x===116&&y===195?hitTarget:null,
- pressNode:(node:any)=>node.props.onPress(),
-}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string,slot:number)=>t.length*(slot===19?9:12)})}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(p:any)=>element('Spinner',p)}));
 type Snapshot = {active:boolean;internet:boolean;validated:boolean;wifi:boolean;cellular:boolean;bluetooth:boolean;snapshotSequence?:number};
@@ -70,163 +54,11 @@ test('actual route layer appears after failure, shows Checking on retry, disappe
  expect(text(root)).toContain('未检测到可用互联网');delayCheck=true;const retry=network.retry();expect(text(root)).toContain('正在检测网络连接');checkResolve('unavailable');await retry;
  notify('available');expect(await result).toBe('loaded');await flush();expect(text(root)).toBe('');expect(calls).toBe(2);stop();
 });
-const viewport=()=>({x:0,y:0,w:233,h:233});
-const gestureRegion={rect:viewport};
 function touchFrame(x?:number,y=100){
  __advanceClock();
  __setTouches(x===undefined?[]:[__packTouch(1,x,y)]);
  __runGestures();
- for(const tick of frameTicks)tick();
 }
-function settleSwipe(){for(let i=0;i<14;i++)touchFrame();}
-async function bluetoothLayer(rotation=0){
- let reportNetwork!:(status:'bluetooth'|'available')=>void;
- const network=new NetworkRecovery({observe:fn=>{reportNetwork=fn;fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
- let tree:unknown;
- const dispose=createRoot(stop=>{
-  tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
-   return createComponent(NetworkRecoveryLayer,{network,width:233,height:233,round:true,rotation});
-  }});
-  return stop;
- });
- await network.run(async()=>true);
- await flush();
- const page=()=>nodes(tree).find(node=>node.props.accessibilityLabel==='互联网');
- expect(page().props.class).toBe('absolute inset-0 bg-[#000000]');
- expect(text(tree)).toContain(networkMessages.bluetooth.guidance);
- expect(text(tree)).toContain(networkMessages.bluetooth.status);
- expect(nodes(tree).some(node=>node.props.style?.bgColor==='#ffa726')).toBe(true);
- return {network,dispose,page,reportNetwork};
-}
-for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right swipe owns ${mode} input and next swipe returns`,async()=>{
- const motion=new BackMotion(233);
- let backStarts=0,competingPans=0;
- const start=(dx:number)=>{backStarts++;motion.begin(dx);};
- const end=(vx:number)=>motion.release(vx,0);
- const move=(dx:number)=>motion.move(dx);
- const cancel=()=>{if(motion.phase==='dragging')motion.release(0,0,true);};
- const rotation=mode==='rotated'?90:0;
- const page=attachGesture(playerGesture(mode==='immersive'
-  ? rightSwipeBack(gestureRegion,{start,move,end,cancel})
-  : {region:gestureRegion,axis:'x',panSlop:8,onPanStart:c=>start(c.dx),onPanMove:c=>move(c.dx),onPanEnd:c=>end(c.vx),onCancel:cancel},
-  ()=>rotation,viewport));
- const layer=await bluetoothLayer(rotation);
- const competing=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanStart(){competingPans++;}});
- try{
-  touchFrame(46,46);
-  touchFrame(rotation?46:166,rotation?166:46);
-  expect(layer.page().props.style).toEqual({translateX:rotation?-0:120,translateY:rotation?120:0});
-  for(let i=0;i<8;i++)touchFrame(rotation?46:166,rotation?166:46);
-  expect(backStarts).toBe(0);
-  expect(competingPans).toBe(0);
-  expect(motion.offset).toBe(0);
-  touchFrame();
-  expect(layer.network.bluetooth).toBe(true);
-  settleSwipe();
-  expect(layer.page()).toBeUndefined();
-  expect(layer.network.bluetooth).toBe(false);
-  expect(backStarts).toBe(0);
-
-  competing.dispose();
-  if(rotation){touchFrame(46,46);touchFrame(46,176);}
-  else {touchFrame(46,46);touchFrame(176,46);}
-  touchFrame();
-  expect(backStarts).toBe(1);
-  expect(motion.tick(1000)).toBe('commit');
- }finally{touchFrame();competing.dispose();layer.dispose();page.dispose();}
-});
-for(const action of ['swipe','Continue'] as const)test(`one ${action} dismisses both Bluetooth notices until the next Bluetooth connection`,async()=>{
- const bottom=await bluetoothLayer();
- const top=await bluetoothLayer();
- try{
-  expect(bottom.page()).toBeUndefined();
-  if(action==='swipe'){
-   touchFrame(46,46);touchFrame(166,46);
-   expect(top.page().props.style.translateX).toBe(120);
-   expect(bottom.page()).toBeUndefined();
-   touchFrame();settleSwipe();
-  }else{
-   hitTarget=nodes(top.page()).find(node=>node.props.accessibilityLabel==='继续');
-   touchFrame(116,195);touchFrame();
-  }
-
-  expect([bottom.network.bluetooth,top.network.bluetooth]).toEqual([false,false]);
-  expect(bottom.page()).toBeUndefined();
-  expect(top.page()).toBeUndefined();
-  bottom.network.requestStarted();
-  top.network.requestStarted();
-  expect(bottom.page()).toBeUndefined();
-  expect(top.page()).toBeUndefined();
-
-  bottom.reportNetwork('available');
-  top.reportNetwork('available');
-  bottom.reportNetwork('bluetooth');
-  top.reportNetwork('bluetooth');
-  expect([bottom.network.bluetooth,top.network.bluetooth]).toEqual([true,true]);
-  expect(bottom.page()).toBeUndefined();
-  expect(top.page().props.style.translateX).toBe(0);
- }finally{hitTarget=undefined;touchFrame();top.dispose();bottom.dispose();}
-});
-test('Bluetooth layer changes during a drag never transfer the active contact',async()=>{
- const bottom=await bluetoothLayer();
- const top=await bluetoothLayer();
- try{
-  bottom.reportNetwork('available');
-  touchFrame(46,46);touchFrame(166,46);
-  bottom.reportNetwork('bluetooth');
-  expect(bottom.page()).toBeUndefined();
-  expect(top.page().props.style.translateX).toBe(120);
-
-  top.reportNetwork('available');
-  expect(top.page()).toBeUndefined();
-  touchFrame(200,46);touchFrame();settleSwipe();
-  expect(bottom.network.bluetooth).toBe(true);
-  expect(bottom.page().props.style.translateX).toBe(0);
- }finally{touchFrame();top.dispose();bottom.dispose();}
-});
-test('Slow short Bluetooth swipe returns to its origin and keeps the page',async()=>{
- const layer=await bluetoothLayer();
- try{
-  touchFrame(55);touchFrame(75);
-  expect(layer.page().props.style.translateX).toBe(20);
-  for(let i=0;i<8;i++)touchFrame(75);
-  touchFrame();
-  const first=layer.page().props.style.translateX;
-  expect(first).toBeGreaterThan(0);
-  expect(first).toBeLessThan(20);
-  settleSwipe();
-  expect(layer.page().props.style).toEqual({translateX:0,translateY:0});
-  expect(layer.network.bluetooth).toBe(true);
- }finally{touchFrame();layer.dispose();}
-});
-test('Bluetooth page blocks the lower route and Continue dismisses it',async()=>{
- const inputs:string[]=[];
- const vertical=attachGesture({region:gestureRegion,axis:'y',panSlop:8,onPanStart:()=>inputs.push('scroll')});
- const layer=await bluetoothLayer();
- // Even recognizers registered after the overlay must be blocked.
- const horizontal=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanStart:()=>inputs.push('horizontal')});
- const tap=attachGesture({region:gestureRegion,onDown:()=>inputs.push('down'),onTap:()=>inputs.push('tap')});
- try{
-  for(const [x,y] of [[100,55],[100,155],[55,100]]){
-   touchFrame(100,100);touchFrame(x,y);touchFrame();
-   expect(layer.page().props.style).toEqual({translateX:0,translateY:0});
-  }
-  touchFrame(45,40);touchFrame();
-  expect(inputs).toEqual([]);
-  expect(layer.network.bluetooth).toBe(true);
-
-  hitTarget=nodes(layer.page()).find(node=>node.props.accessibilityRole==='button');
-  expect(hitTarget.props.accessibilityLabel).toBe('继续');
-  touchFrame(116,195);touchFrame();
-  expect(layer.page()).toBeUndefined();
-  expect(layer.network.bluetooth).toBe(false);
-  expect(inputs).toEqual([]);
-
-  touchFrame(45,40);touchFrame();
-  expect(inputs).toEqual(['down','tap']);
- }finally{hitTarget=undefined;touchFrame();layer.dispose();tap.dispose();horizontal.dispose();vertical.dispose();}
-});
-
 test('unavailable network stays on the blocking Retry overlay after a right swipe',async()=>{
  const network=new NetworkRecovery({observe:fn=>{fn('unavailable');return()=>{};},check:async()=> 'unavailable'});
  let tree:unknown;
@@ -242,7 +74,7 @@ test('unavailable network stays on the blocking Retry overlay after a right swip
   const overlay=()=>nodes(tree).find(node=>node.props.accessibilityLabel==='互联网');
   expect(overlay().props.class).toBe('absolute inset-0 bg-[#000000f0]');
   expect(overlay().props.onPress).toBeFunction();
-  touchFrame(46,46);touchFrame(166,46);touchFrame();settleSwipe();
+  touchFrame(46,46);touchFrame(166,46);touchFrame();
   expect(network.blocking).toBe(true);
   expect(overlay().props.style).toBeUndefined();
   expect(nodes(overlay()).find(node=>node.props.accessibilityRole==='button').props.accessibilityLabel).toBe('重试');

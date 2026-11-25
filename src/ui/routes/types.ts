@@ -20,6 +20,7 @@ export type Page =
   | "remote-input"
   | "log-upload"
   | "log-upload-history"
+  | "bluetooth-warning"
   | "bluetooth-connection"
   | "phone-connection-unavailable"
   | "tts-config"

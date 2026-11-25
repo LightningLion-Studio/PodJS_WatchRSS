@@ -1,9 +1,10 @@
-import {batch,createEffect,createSignal,onCleanup,Show,type JSX} from 'solid-js';
+import {createContext,createEffect,createSignal,onCleanup,untrack,useContext,Show,type JSX} from 'solid-js';
+import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
 import {internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
 import {NetworkRecovery} from '../network/recovery.ts';
-import {NetworkUnavailableOverlay,NetworkBluetoothPage} from './NetworkUnavailableOverlay.tsx';
+import {NetworkUnavailableOverlay} from './NetworkUnavailableOverlay.tsx';
 
 export function createHostNetworkRecovery(){
  const read=orderNetworkSnapshots(()=>hostServices.hostOperation<NetworkSnapshot>('discovery.networkSnapshot',{}));
@@ -33,27 +34,41 @@ export function observeNetworkRecovery(network:()=>NetworkRecovery){
  return ()=>{revision();return network();};
 }
 
-// Layer mount order follows paint order. Keep that order when a lower route
-// reports Bluetooth later, so a network update never steals the top page.
-type RecoveryLayer={network:()=>NetworkRecovery;wantsBluetooth:()=>boolean};
-const [bluetoothLayers,setBluetoothLayers]=createSignal<readonly RecoveryLayer[]>([]);
+// The startup and content stacks hand off the same connection observer.
+const BluetoothWarningContext=createContext<NetworkRecovery>();
+export function useBluetoothWarningConnection(){
+ const existing=useContext(BluetoothWarningContext);
+ if(existing)return existing;
+ const network=createHostNetworkRecovery();
+ const update=(state:ReturnType<typeof lifecycle>)=>{
+  network.setActive(state==='active');
+  if(state==='active')network.requestStarted();
+ };
+ const stop=onLifecycleChange(update);
+ update(lifecycle());
+ onCleanup(()=>{stop();network.dispose();});
+ return network;
+}
+export function BluetoothWarningConnection(props:{children:JSX.Element}){
+ const network=useBluetoothWarningConnection();
+ return <BluetoothWarningContext.Provider value={network}>{props.children}</BluetoothWarningContext.Provider>;
+}
 
-function dismissBluetoothPages(){
- // Publish every dismissal before rendering again so a waiting page cannot flash.
- batch(()=>{
-  const networks=new Set(bluetoothLayers().map(layer=>layer.network()));
-  for(const network of networks){
-   if(network.status==='bluetooth')network.dismissBluetooth();
+export function bindBluetoothWarningRoute(network:NetworkRecovery,route:{
+ shown:()=>boolean;canPush:()=>boolean;push:()=>void;pop:()=>void;
+}){
+ const connection=observeNetworkRecovery(()=>network);
+ createEffect(()=>{
+  const status=connection().status;
+  if(route.shown()){
+   if(status==='available'||status==='unavailable')untrack(route.pop);
+  }else if(connection().bluetooth&&route.canPush()){
+   untrack(route.push);
   }
  });
 }
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
  const network=observeNetworkRecovery(()=>props.network);
- const layer={network,wantsBluetooth:()=>network().bluetooth&&!network().blocking};
- setBluetoothLayers(layers=>[layer,...layers]);
- onCleanup(()=>setBluetoothLayers(layers=>layers.filter(candidate=>candidate!==layer)));
- const ownsBluetoothPage=()=>bluetoothLayers().find(candidate=>candidate.wantsBluetooth())===layer;
- return <><Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onAction={()=>void props.network.retry()}/></Show>
-  <Show when={ownsBluetoothPage()&&network()} keyed>{_scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={dismissBluetoothPages}/>}</Show></>;
+ return <Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onAction={()=>void props.network.retry()}/></Show>;
 }
