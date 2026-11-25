@@ -3,7 +3,8 @@ import type {ModalInput,ModalInputRecovery} from "./service.ts";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Image, View } from "@pocketjs/framework/components";
 import { delay, textInput } from "@podjs/framework/services";
-import { hasCapability, onLifecycleChange } from "@podjs/framework/watch";
+import { safeTopBlock } from "@podjs/framework/watch-ui";
+import { getDisplayMetrics, hasCapability, onLifecycleChange } from "@podjs/framework/watch";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { NoteDraftAutosave, type NoteDraftSaveState } from "../notes/draft-autosave.ts";
 import { RawTextHistory } from "../notes/raw-text-history.ts";
@@ -13,7 +14,7 @@ import type { MemoRepository } from "../notes/repository.ts";
 
 type InputSession={close():Promise<void>;setValue(value:string):Promise<void>};
 export interface NoteInlineEditorHandle { close:()=>void }
-export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
+export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onCloseStart?:()=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
   const [status,setStatus]=createSignal<NoteDraftSaveState>(props.initial?"saved":"empty");
   const draft=new NoteDraftAutosave(props.repository,props.initial,setStatus,props.onSaved,error=>props.onError(String(error)));
   const history=new RawTextHistory(draft.markdown);
@@ -33,7 +34,8 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
   let titleInput:InputSession|undefined,bodyInput:InputSession|undefined,disposed=false,closing=false;
   const closeInputs=async()=>{await bodyInput?.close();await titleInput?.close();bodyInput=undefined;titleInput=undefined;};
   const close=async()=>{
-    if(closing)return;closing=true;
+    if(closing||disposed)return;closing=true;
+    props.onCloseStart?.();
     const deadline=hasCapability("runtime.timer")?delay(5000):undefined;
     try{
       const saving=draft.flush();
@@ -62,6 +64,10 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
   };
   onMount(async()=>{
     const inset=14,fieldWidth=props.width-2*inset,bodyTop=props.initial?108:80.5;
+    const round=getDisplayMetrics().shape==="round";
+    const title=round?safeTopBlock(props.width,props.height,()=>29.3,{minTop:42.5,maxWidth:fieldWidth}):undefined;
+    const body=round?safeTopBlock(props.width,props.height,()=>24,{minTop:bodyTop,margin:9}):undefined;
+    const bodyInset=Math.max(inset,body?.x??inset);
     const documentId="note-editor";
     const viewportHeight=Math.max(56,props.height-42-56);
     try{
@@ -70,9 +76,9 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
         if(!live())return;
         if(titlePending||bodyPending){await fallback(bodyPending);return;}
       }
-      titleInput=await textInput.openInline(draft.title,{x:inset,y:42.5,width:fieldWidth,height:29.3},value=>draft.setTitle(value),undefined,{hint:props.initial?"未命名笔记":"新建备忘录",fontSizeSp:21.7,fontWeight:700,includeFontPadding:false,textAlign:"center",autoFocus:false,document:{id:documentId,role:"title",viewportHeight,viewportOverhangDp:1,metadata:props.initial?noteMetadata(props.initial):undefined}});
+      titleInput=await textInput.openInline(draft.title,{x:inset,y:42.5,width:fieldWidth,height:29.3},value=>draft.setTitle(value),undefined,{hint:props.initial?"未命名笔记":"新建备忘录",fontSizeSp:21.7,fontWeight:700,includeFontPadding:false,textAlign:"center",autoFocus:false,horizontalPaddingDp:title?title.x-inset:undefined,document:{id:documentId,role:"title",viewportHeight,viewportOverhangDp:1,roundSafe:round,swipeBack:true,metadata:props.initial?noteMetadata(props.initial):undefined}});
       if(disposed){await closeInputs();return;}
-      bodyInput=await textInput.openInline(draft.markdown,{x:inset,y:bodyTop,width:fieldWidth,height:Math.max(56,props.height-bodyTop-56)},changeMarkdown,undefined,{hint:"直接输入原始文本",fontSizeSp:17,fontWeight:400,includeFontPadding:false,multiline:true,keepExisting:true,selectionStart:props.initialSelection,horizontalPaddingDp:0,verticalPaddingDp:0,autoFocus:false,document:{id:documentId,role:"body",viewportHeight,unfocusedCaretColor:"#ff6026"}});
+      bodyInput=await textInput.openInline(draft.markdown,{x:bodyInset,y:body?.y??bodyTop,width:props.width-2*bodyInset,height:Math.max(56,props.height-bodyTop-56)},changeMarkdown,undefined,{hint:"直接输入原始文本",fontSizeSp:17,fontWeight:400,includeFontPadding:false,multiline:true,keepExisting:true,selectionStart:props.initialSelection,horizontalPaddingDp:0,verticalPaddingDp:0,autoFocus:false,document:{id:documentId,role:"body",viewportHeight,unfocusedCaretColor:"#ff6026"}});
       if(disposed)await closeInputs();
     }catch(error){
       await closeInputs().catch(()=>{});

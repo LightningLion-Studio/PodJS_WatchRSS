@@ -103,6 +103,7 @@ export type RouteEntry = {
   list?: Pick<VirtualListHandle, "scroller">;
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
+  noteEditorBack?: () => void;
   player?: {
     reloadAttempts?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["reloadAttempts"];
     shellState?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellState"];

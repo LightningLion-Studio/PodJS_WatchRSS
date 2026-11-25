@@ -12,6 +12,9 @@ import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {noteBodyLayoutSteps} from '../notes/native-layout-input.ts';
 import { For, Show, createEffect, createMemo, createSignal, untrack, onMount, onCleanup, on } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
+import { createGesture } from "@pocketjs/framework/gesture";
+import { onFrame } from "@pocketjs/framework/lifecycle";
+import { rectInsideCircle } from "@podjs/framework/watch-ui";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { centredBounds, textWidthBound } from "./round-bounds.ts";
@@ -96,8 +99,38 @@ export function NotesListScreen(props: NotesListScreenProps) {
   </View></Show>;
 }
 
-export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean }
-export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
+export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean; editorClose?:()=>void }
+export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
+
+function NoteEditButton(props:{width:number;height:number;active:()=>boolean;visible:()=>boolean;backOffset?:()=>number;onEdit:()=>void;background:string;color:string}) {
+  const metrics=getDisplayMetrics();
+  const circle={cx:props.width/2,cy:props.height/2,radius:Math.min(props.width,props.height)/2};
+  const target={x:(props.width-60)/2,y:props.height-52,width:60,height:48};
+  while(metrics.shape==="round"&&target.width>48&&!rectInsideCircle(target,circle)){
+    target.x+=.5;
+    target.width--;
+  }
+  const slop=metrics.scrollConfiguration
+    ? metrics.scrollConfiguration.touchSlopPx*metrics.logicalHeight/metrics.physicalHeight
+    : 8;
+  let downAt=0;
+  createGesture({
+    region:{rect:()=>props.active()&&props.visible()?{x:target.x+(props.backOffset?.()??0),y:target.y,w:target.width,h:target.height}:null},
+    onDown:()=>{downAt=Date.now();},
+    onLongPress:()=>{},
+    onTap:contact=>{
+      if(props.active()&&Date.now()-downAt<500&&Math.hypot(contact.dx,contact.dy)<slop)props.onEdit();
+    },
+  });
+  return <View onPress={props.onEdit} focusable={props.visible()} accessibilityRole="button" accessibilityLabel="编辑备忘录"
+    class="absolute items-center justify-center active:scale-96"
+    style={{insetL:target.x,insetT:target.y,width:target.width,height:target.height,opacity:props.visible()?1:0}}>
+    <View class="w-[44] h-[32] rounded-[47] items-center justify-center" style={{bgColor:props.background}}>
+      <Text class="text-sm" style={{textColor:props.color}}>编辑</Text>
+    </View>
+  </View>;
+}
+
 interface NoteHeaderLayout {title:number;subtitle:number;titleLines:readonly ParagraphLine[];subtitleLines:readonly ParagraphLine[]}
 export function NoteDetailScreen(props: NoteDetailScreenProps) {
   const [createMode,setCreateMode]=restoredSignal('retained','note-create-mode',!props.noteId,booleanState);
@@ -190,7 +223,18 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
   async function reload(id:string){const version=++readVersion;try{const value=await traceServiceWork('note.readRequest',()=>props.repository.get(id));if(!disposed&&version===readVersion)traceServiceWork('note.setNote',()=>setNote(value));}catch(e){if(!disposed&&version===readVersion)fail(props,e);}}
-  const edit=()=>{const current=note();setEditorSeed(current);setEditorAnchor(current?noteEditorAnchor(entries(),current.markdown,readerScroller.offset(),props.width,props.height,(text,slot)=>getOps().measureText(text,slot),{top:22,gap:0,horizontalInset:14}):undefined);setEditing(true);};
+  const edit=()=>{const current=note();if(!current||editing())return;readerScroller.stop();setEditorSeed(current);setEditorAnchor(current?noteEditorAnchor(entries(),current.markdown,readerScroller.offset(),props.width,props.height,(text,slot)=>getOps().measureText(text,slot),{top:22,gap:0,horizontalInset:14}):undefined);setEditing(true);};
+  let editPending=false;
+  const requestEdit=()=>{
+    if(props.active===false||download()||editing())return;
+    if(props.transitionIdle?.()===false){editPending=true;return;}
+    edit();
+  };
+  onFrame(()=>{
+    if(!editPending||props.transitionIdle?.()===false)return;
+    editPending=false;
+    if(props.active!==false)requestEdit();
+  },()=>editPending);
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
   onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
   let modalRecoveryChecked=false;
@@ -211,8 +255,8 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     {height:42,render:()=>null}
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
-  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><Show when={editButtonVisible()}><View class="absolute left-[0] right-[0] bottom-[0] h-[56] items-center justify-center"><View onPress={edit} focusable accessibilityRole="button" accessibilityLabel="编辑备忘录" class="h-[32] w-[44] rounded-[47] items-center justify-center active:scale-96" style={{bgColor:editBackground()}}><Text class="text-sm" style={{textColor:bodyColor()}}>编辑</Text></View></View></Show><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
-    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack});}}/>
+  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><NoteEditButton width={props.width} height={props.height} active={()=>props.active!==false&&!download()} visible={editButtonVisible} backOffset={props.backOffset} onEdit={requestEdit} background={editBackground()} color={bodyColor()}/><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
+    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editorClose});}}/>
   </Show></Show>;
 }
 

@@ -217,6 +217,7 @@ export default function WatchRSS(props: {
       );
   };
   let motion = new BackMotion(width);
+  let editorBack: (() => void) | undefined;
   const [backOffset, setBackOffset] = createSignal(0);
   // Keep the previous route mounted for restoration. Paint it when a back swipe reveals it.
   const backUnderlay = createMemo(() =>
@@ -309,6 +310,7 @@ export default function WatchRSS(props: {
   let backPointerRotation = 0;
   const rememberBackRotation = () => { if (motion.phase === "idle") backPointerRotation = playerRotation(); };
   const beginBack = (dx: number) => {
+    editorBack = current().noteEditorBack;
     const axis = rotateVector(1, 0, backPointerRotation);
     const extent = Math.min(width / Math.abs(axis.x), height / Math.abs(axis.y));
     motion = new BackMotion(extent);
@@ -369,7 +371,15 @@ export default function WatchRSS(props: {
   onFrame(() => {
     if (motion.phase !== "settling") return;
     const result = motion.tick(Date.now());
-    if (result === "commit") popPage();
+    if (result === "commit" && editorBack) {
+      // A swipe that began in the editor owns that editor's close. It cannot
+      // pop the reader if the close button or a system Back already won.
+      const close = editorBack;
+      editorBack = undefined;
+      motion.reset();
+      setBackOffset(0);
+      close();
+    } else if (result === "commit") popPage();
     else setBackOffset(motion.offset);
   },()=>motion.phase==="settling");
   const contentHeight = height - 36;
@@ -1359,7 +1369,13 @@ export default function WatchRSS(props: {
     if (disclosurePending()) return true;
     if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
+    const closeEditor = current().noteEditorBack;
+    if (closeEditor) {
+      closeEditor();
+      return true;
+    }
     if (motion.phase !== "idle") return true;
+    editorBack = undefined;
     motion.begin(0);
     motion.release(0, Date.now(), false, true);
     return true;
@@ -1779,6 +1795,9 @@ export default function WatchRSS(props: {
               width={width}
               height={height}
               services={props.services}
+              backOffset={() => backTranslation().x}
+              transitionIdle={() => motion.phase === "idle"}
+              cancelBack={() => { editorBack = undefined; motion.reset(); setBackOffset(0); }}
               refreshKey={notesRefreshKey}
               bumpRefreshKey={() => setNotesRefreshKey((value) => value + 1)}
               preset={readerPreset}

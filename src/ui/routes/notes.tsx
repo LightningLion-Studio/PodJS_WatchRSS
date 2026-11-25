@@ -16,6 +16,9 @@ interface NotesRoutesProps {
   onStateChange?:()=>void;
   page: () => Page;
   active: () => boolean;
+  backOffset: () => number;
+  transitionIdle: () => boolean;
+  cancelBack: () => void;
   width: number;
   height: number;
   services: AppServices;
@@ -70,6 +73,9 @@ export function NotesRoutes(props: NotesRoutesProps) {
           }}
           input={(title, value, options) => props.services.input(title, value, options)}
           inputRecovery={props.services.inputRecovery}
+          backOffset={props.backOffset}
+          transitionIdle={props.transitionIdle}
+          onCloseStart={() => { if (props.active()) props.cancelBack(); }}
           onBack={finishEditing}
           onError={props.setError}
           ref={(value) => {
@@ -77,6 +83,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
               ? { scroller: value.scroller }
               : undefined;
             props.entry.internalBack = value.goBack;
+            props.entry.noteEditorBack = value.editorClose;
           }}
         />
       </Show>
