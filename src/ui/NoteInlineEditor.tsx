@@ -14,9 +14,15 @@ import type { MemoRepository } from "../notes/repository.ts";
 
 type InputSession={close():Promise<void>;setValue(value:string):Promise<void>};
 export interface NoteInlineEditorHandle { close:()=>void }
-export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onCloseStart?:()=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
+export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;withUiWork?: <T>(operation: () => Promise<T>) => Promise<T>;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onCloseStart?:()=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
   const [status,setStatus]=createSignal<NoteDraftSaveState>(props.initial?"saved":"empty");
-  const draft=new NoteDraftAutosave(props.repository,props.initial,setStatus,props.onSaved,error=>props.onError(String(error)));
+  const store: Pick<MemoRepository, "save"> = {
+    save: input => {
+      const write = () => props.repository.save(input);
+      return props.withUiWork ? props.withUiWork(write) : write();
+    },
+  };
+  const draft=new NoteDraftAutosave(store,props.initial,setStatus,props.onSaved,error=>props.onError(String(error)));
   const history=new RawTextHistory(draft.markdown);
   const [historyState,setHistoryState]=createSignal({undo:false,redo:false});
   const syncHistoryState=()=>setHistoryState({undo:history.canUndo,redo:history.canRedo});

@@ -14,6 +14,7 @@ type NoteDetailProps = Parameters<typeof NoteDetailScreen>[0];
 interface NotesRoutesProps {
   entry: RouteEntry;
   onStateChange?:()=>void;
+  withUiWork: <T>(operation: () => Promise<T>) => Promise<T>;
   page: () => Page;
   active: () => boolean;
   backOffset: () => number;
@@ -60,6 +61,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
           height={props.height}
           repository={memoRepository}
           refreshKey={props.refreshKey()}
+          withUiWork={props.withUiWork}
           noteId={props.entry.noteId}
           onNoteIdentity={id=>{props.entry.noteId=id;props.onStateChange?.();}}
           preset={props.preset()}
@@ -96,7 +98,12 @@ export function NotesRoutes(props: NotesRoutesProps) {
           repository={memoRepository}
           refreshKey={props.refreshKey()}
           noteId={props.entry.noteId!}
+          withUiWork={props.withUiWork}
           onDone={finishEditing}
+          onWriteDone={() => {
+            if (props.active()) finishEditing();
+            else props.bumpRefreshKey();
+          }}
           onError={props.setError}
           ref={(value) => {
             props.entry.list = value;

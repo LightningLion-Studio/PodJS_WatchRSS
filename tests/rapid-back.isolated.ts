@@ -11,6 +11,9 @@ const restoredNoteCase=['bluetooth-note-restore','bluetooth-note-body','bluetoot
 const noteDownload=mode==='bluetooth-note-download';
 const noteListLoad=mode==='bluetooth-note-load';
 const noteAction=mode.startsWith('bluetooth-note-action-');
+const noteActionLeave=noteAction&&mode.includes('-leave');
+const noteActionCancel=noteAction&&mode.endsWith('-cancel');
+const revalidation=mode==='bluetooth-revalidation';
 const rssAction=mode.startsWith('bluetooth-rss-action-');
 const rssProbe=mode.startsWith('bluetooth-feed-');
 const rssFromReader=mode==='bluetooth-feed-reload';
@@ -38,7 +41,7 @@ const modalCalls:string[]=[];
 let inlineCloses=0,inlineOpens=0,inlineSession=0;
 let searchedFor:string|undefined;
 let savedDraft:{title:string;markdown:string}|undefined;
-let bluetooth=false;const networkSubscriptions=new Set<number>();
+let bluetooth=false,validated=true;const networkSubscriptions=new Set<number>();
 let videoState='stopped';
 let releaseVideoStop:(()=>void)|undefined;
 const transforms:{scaleMode?:string;panY?:number}[]=[];
@@ -85,7 +88,7 @@ ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:nu
   if(method==='video.setTransform')transforms.push(args);
   value={ok:true,state:videoState,width:320,height:640,positionMs:0,durationMs:100000,volume:.8,volumeMax:1,hasRenderedFirstFrame:true};
  }
- else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated:true,wifi:!bluetooth,cellular:false,bluetooth};
+ else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated,wifi:!bluetooth,cellular:false,bluetooth};
  else if(method==='discovery.networkSubscribe'){networkSubscriptions.add(args.subscriptionId);value={subscriptionId:args.subscriptionId};}
  else if(method==='discovery.networkUnsubscribe')networkSubscriptions.delete(args.subscriptionId);
  else if(method==='text.environment')value={density:2,fontScale:1,spValuesPx:[]};
@@ -171,7 +174,7 @@ activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :noteDownload||noteListLoad||safeRoute==='notes'?[{page:'home'},{page:'notes'}]
  :safeRoute==='settings'?[{page:'home'},{page:'settings'}]
- :safeRoute==='home'||mode==='bluetooth-home-disclosure'?[{page:'home'}]
+ :safeRoute==='home'||revalidation||mode==='bluetooth-home-disclosure'?[{page:'home'}]
  :mode.startsWith('bluetooth')&&!rssFromReader&&!videoCase
    ?[{page:'home'},{page:'articles',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
@@ -188,9 +191,9 @@ const {expect,test}=await import('bun:test');
 const removeEventProbe=watch.__onHostEvent(event=>{if(event.t==='back')backEventsDelivered++;});
 if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}`,async()=>{
  const pump=async(count=80)=>{for(let i=0;i<count;i++)await tick();};
- const network=async(value:boolean,frames=80)=>{
+ const network=async(value:boolean,frames=80,reason='capabilities')=>{
   bluetooth=value;
-  for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason:'capabilities'}});
+  for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason}});
   await pump(frames);
  };
  const warnings=()=>connected().filter(node=>node.domAttrs?.accessibilityLabel==='继续');
@@ -234,6 +237,40 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    await assertOnce('home');
    return;
   }
+  if(revalidation){
+   expect(state()).toEqual(['home']);
+   await network(true);
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+
+   validated=false;
+   await network(true);
+   expect(warnings()).toHaveLength(0);
+   validated=true;
+   await network(true);
+   expect(warnings()).toHaveLength(0);
+
+   await network(false);
+   await network(true,80,'available');
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+
+   // The default network can be replaced without an intervening non-Bluetooth snapshot.
+   await network(true,80,'available');
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+   events.push({t:'lifecycle',state:'background'});
+   await pump();
+   events.push({t:'lifecycle',state:'active'});
+   await pump();
+   // The first available callback after resubscribing describes the current default.
+   await network(true,80,'available');
+   expect(warnings()).toHaveLength(0);
+   return;
+  }
   if(safeRoute){
    await network(true,50);
    expect(warning()).toBeUndefined();
@@ -267,7 +304,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    return;
   }
   if(noteAction||rssAction){
-   const operation=mode.split('-').at(-1);
+   const operation=mode.split('-')[3];
    const destination=noteAction?'notes':'articles';
    if(operation==='confirm'||operation==='delete'){
     press('删除');
@@ -312,13 +349,24 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    }
    await pump();
    expect(releaseOperation).toBeDefined();
-   if(operation==='leave')await back();
+   if(noteActionLeave){
+    // Delete and move each have an inner confirmation or picker to close first.
+    if(operation==='delete'||operation==='move')await back();
+    await back();
+    expect(state().at(-1)).toBe(destination);
+   }else if(operation==='leave')await back();
    await network(true);
-   expect(warning()).toBeUndefined();
-   if(operation==='cancel')await network(false);
+   expect(warnings()).toHaveLength(0);
+   const cancel=noteActionCancel||operation==='cancel';
+   if(cancel)await network(false);
    releaseOperation!();
-   await pump();
-   if(operation==='cancel'){
+   if(noteActionLeave){
+    await pump(58);
+    expect(warnings()).toHaveLength(0);
+    await pump(8);
+    expect(warnings()).toHaveLength(cancel?0:1);
+   }else await pump();
+   if(cancel){
     expect(state().at(-1)).toBe(destination);
     expect(warning()).toBeUndefined();
     await network(true);

@@ -1,5 +1,5 @@
 import type {HostOperation} from '@podjs/framework/services';
-import type {SnapshotOrder} from '../onboarding/network.ts';
+import type {InternetListener,SnapshotOrder} from '../onboarding/network.ts';
 import type {InternetStatus} from '../onboarding/state.ts';
 
 /** An HTTP response anywhere in the bounded cause chain takes priority over timeout text. */
@@ -25,13 +25,13 @@ export function isTransportFailure(error: unknown,depth=0): boolean {
   || (e?.cause!==undefined&&isTransportFailure(e.cause,depth+1))
   || /(?:UnknownHostException|SocketTimeoutException|ConnectException|Unable to resolve host|failed to connect|Network is unreachable|timed out|DNS lookup failed|connection reset|unexpected end of stream|broken pipe)/i.test(message);
 }
-type Reading=InternetStatus|{status:InternetStatus;order:SnapshotOrder};
+type Reading=InternetStatus|{status:InternetStatus;order:SnapshotOrder;onBluetooth?:boolean};
 interface PendingCheck {request:HostOperation<Reading>;timeout?:HostOperation<void>;done:Promise<void>;finish():void}
 const RECOVERY_POLL_MS=5000;
 const RECOVERY_CHECK_TIMEOUT_MS=10000;
 const UNCONFIRMED_WAIT_MS=15000;
 export type RecoveryPorts={
- observe(listener:(status:InternetStatus,order?:SnapshotOrder)=>void,invalidateOffline:(lastRequested:number)=>void):()=>void;
+ observe(listener:InternetListener,invalidateOffline:(lastRequested:number,connectionChanged?:boolean)=>void):()=>void;
  delay?(ms:number):HostOperation<void>;
 }&({startCheck():HostOperation<Reading>}|{check():Promise<Reading>});
 const cancelled=()=>Object.assign(new Error('操作已取消'),{code:'cancelled',networkRecoveryCancelled:true});
@@ -137,15 +137,16 @@ export class NetworkRecovery {
   this.lastOrder=undefined;
   this.offlineInvalidatedThrough=0;
   const generation=this.generation;
-  this.stop=this.ports.observe((status,order)=>{
+  this.stop=this.ports.observe((status,order,onBluetooth)=>{
    if(generation!==this.generation)return;
    // A subscription error has no sample. Keep the last confirmed state.
    if(!order&&status==='checking')return;
-   this.accept(status,order??{requested:++this.legacyOrder});
-  },lastRequested=>{
+   this.accept(status,order??{requested:++this.legacyOrder},onBluetooth);
+  },(lastRequested,connectionChanged)=>{
    if(generation!==this.generation)return;
    // Wake callers of the obsolete check so they can wait for a fresh route.
    this.offlineInvalidatedThrough=lastRequested;
+   if(connectionChanged)this.bluetoothDismissed=false;
    this.cancelCheck();
    if(this.status!=='checking'){
     this.status='checking';
@@ -154,7 +155,7 @@ export class NetworkRecovery {
   });
   this.publish();
  }
- private accept(status:InternetStatus,order:SnapshotOrder){
+ private accept(status:InternetStatus,order:SnapshotOrder,onBluetooth?:boolean){
   if(status==='unavailable'&&order.requested<=this.offlineInvalidatedThrough)return;
   const last=this.lastOrder;
   if(last){
@@ -165,7 +166,8 @@ export class NetworkRecovery {
   }
   this.lastOrder=order;
   this.status=status;
-  if(status!=='bluetooth')this.bluetoothDismissed=false;
+  // Availability can drop while the default transport remains Bluetooth.
+  if(onBluetooth===false||(onBluetooth===undefined&&status==='available'))this.bluetoothDismissed=false;
   if(this.waiting)this.refreshUsable();else this.publish();
  }
  private check():Promise<void>{
@@ -195,7 +197,7 @@ export class NetworkRecovery {
    timeout?.cancel();
    try{
     if(typeof reading==='string')this.accept(reading,{requested});
-    else if(reading)this.accept(reading.status,reading.order);
+    else if(reading)this.accept(reading.status,reading.order,reading.onBluetooth);
    }finally{check.finish();}
   });
   return done;

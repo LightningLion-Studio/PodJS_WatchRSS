@@ -234,6 +234,8 @@ export default function WatchRSS(props: {
       ((...args:Parameters<NonNullable<AppServices['listNovelChapters']>>)=>withUiWork(()=>props.services.listNovelChapters!(...args))),
     hasSummaryAccount:props.services.hasSummaryAccount&&
       (()=>withUiWork(()=>props.services.hasSummaryAccount!())),
+    confirmAddChannel:props.services.confirmAddChannel&&
+      ((token:string)=>withUiWork(()=>props.services.confirmAddChannel!(token))),
   });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -341,7 +343,7 @@ export default function WatchRSS(props: {
     leaving.list?.scroller.stop();
     readerExit.begin(
       leaving,
-      () => leaving.reader!.flushProgress(),
+      () => withUiWork(leaving.reader!.flushProgress),
       (outcome) => {
         logReaderProgressFlush("exit", outcome);
         if (current() === leaving) finishPopPage(leaving);
@@ -479,6 +481,7 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
+    trackUiWork,
     current,
     setArticles,
     setLoading,
@@ -690,7 +693,7 @@ export default function WatchRSS(props: {
       if (value !== "active" && entry.page === "reader" && entry.reader)
         backgroundReaderFlush.begin(
           entry,
-          () => entry.reader!.flushProgress(),
+          () => withUiWork(entry.reader!.flushProgress),
           (outcome) => logReaderProgressFlush("background", outcome),
         );
     }),
@@ -1029,10 +1032,18 @@ export default function WatchRSS(props: {
       done();
     }
   }
+  const beginRssAction = () => {
+    const done = trackUiWork();
+    setBusy(true);
+    return () => {
+      setBusy(false);
+      done();
+    };
+  };
   async function openArticleActions(item: Article) {
     if (busy()) return;
     const origin = current();
-    setBusy(true);
+    const done = beginRssAction();
     try {
       const full = await props.services.getArticle(item.id,article());
       if (current() === origin) {
@@ -1042,14 +1053,14 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function deleteArticle() {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    setBusy(true);
+    const done = beginRssAction();
     try {
       await props.services.deleteArticle(selected.id);
       setArticles((items) => items.filter((item) => item.id !== selected.id));
@@ -1058,7 +1069,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function saveArticleState(
@@ -1069,7 +1080,7 @@ export default function WatchRSS(props: {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    setBusy(true);
+    const done = beginRssAction();
     try {
       await props.services.setSaveState(selected.id, type, saved);
       const patch = type === "favorite" ? { saved } : { watchLater: saved };
@@ -1091,14 +1102,14 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function markArticleUnread() {
     const selected = article();
     if (!selected?.read || busy()) return;
     const origin = current();
-    setBusy(true);
+    const done = beginRssAction();
     try {
       await props.services.markRead(selected.id, false);
       setArticle({ ...selected, read: false });
@@ -1116,7 +1127,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function toggleFeedSave(
@@ -1125,7 +1136,7 @@ export default function WatchRSS(props: {
   ) {
     if (busy()) return;
     const saved = type === "favorite" ? !item.saved : !item.watchLater;
-    setBusy(true);
+    const done = beginRssAction();
     try {
       await props.services.setSaveState(item.id, type, saved);
       setArticles((items) =>
@@ -1141,13 +1152,13 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function openChannelSettings(id: string) {
     if (busy()) return;
     const origin = current();
-    setBusy(true);
+    const done = beginRssAction();
     try {
       const [enabled, playback] = await Promise.all([
         props.services.getChannelOriginalMode(id),
@@ -1159,7 +1170,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   async function channelAction(
@@ -1174,7 +1185,7 @@ export default function WatchRSS(props: {
       | "clear",
   ) {
     if (busy()) return;
-    setBusy(true);
+    const done = beginRssAction();
     setError("");
     try {
       if (action === "original") {
@@ -1230,7 +1241,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      done();
     }
   }
   function searchChannel(id: string) {
@@ -1853,6 +1864,7 @@ export default function WatchRSS(props: {
             />
             <NotesRoutes
               onStateChange={saveActivity}
+              withUiWork={withUiWork}
               entry={entry}
               page={entryPage}
               active={active}

@@ -4,20 +4,20 @@ import {onFrame} from '@pocketjs/framework/lifecycle';
 import {__onHostEvent,lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
-import {internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
+import {bluetoothTransport,internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
 import {NetworkRecovery} from '../network/recovery.ts';
 import {NetworkUnavailableOverlay} from './NetworkUnavailableOverlay.tsx';
 
 export function createHostNetworkRecovery(){
  const read=orderNetworkSnapshots(()=>hostServices.hostOperation<NetworkSnapshot>('discovery.networkSnapshot',{}));
  return new NetworkRecovery({
-  observe:(listener,invalidateOffline)=>observeHostInternet(listener,()=>read().result,()=>invalidateOffline(read.lastRequested())),
+  observe:(listener,invalidateOffline)=>observeHostInternet(listener,()=>read().result,connectionChanged=>invalidateOffline(read.lastRequested(),connectionChanged)),
   delay:hostServices.delay,
   startCheck:()=>{
    const operation=read();
    return {
     ...operation,
-    result:operation.result.then(snapshot=>({status:internetAvailability(snapshot),order:snapshot.order})),
+    result:operation.result.then(snapshot=>({status:internetAvailability(snapshot),order:snapshot.order,onBluetooth:bluetoothTransport(snapshot)})),
    };
   },
  });

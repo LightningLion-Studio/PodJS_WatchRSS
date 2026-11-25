@@ -3,6 +3,12 @@ import {appLogger} from '../logs/app-logger.ts';
 import type {InternetStatus} from './state.ts';
 export interface SnapshotOrder {requested:number;captured?:number}
 export interface NetworkSnapshot {snapshotSequence?:number;order?:SnapshotOrder;internetStatusOverride?:InternetStatus;active:boolean;internet:boolean;validated:boolean;wifi:boolean;cellular:boolean;bluetooth:boolean}
+export function bluetoothTransport(snapshot:NetworkSnapshot):boolean|undefined {
+ if(snapshot.internetStatusOverride==='checking')return undefined;
+ if(snapshot.internetStatusOverride)return snapshot.internetStatusOverride==='bluetooth';
+ return snapshot.active&&snapshot.bluetooth&&!snapshot.wifi&&!snapshot.cellular;
+}
+export type InternetListener=(status:InternetStatus,order?:SnapshotOrder,onBluetooth?:boolean)=>void;
 export function internetAvailability(snapshot:NetworkSnapshot):InternetStatus {
  if(snapshot.internetStatusOverride)return snapshot.internetStatusOverride;
  if(!snapshot.active||!snapshot.internet||!snapshot.validated)return 'unavailable';
@@ -31,16 +37,16 @@ export interface InternetPorts {
  subscribe(change:()=>void,error:()=>void):()=>void;
 }
 /** Re-read the active route on changes; a local Wi-Fi callback alone does not prove internet access. */
-export function observeInternet(ports:InternetPorts,listener:(status:InternetStatus,order?:SnapshotOrder)=>void,reportSnapshots=false):()=>void {
+export function observeInternet(ports:InternetPorts,listener:InternetListener,reportSnapshots=false):()=>void {
  let stopped=false,running=false,dirty=false,last:InternetStatus='checking';
- const emit=(status:InternetStatus,order?:SnapshotOrder,valid=false)=>{
+ const emit=(status:InternetStatus,snapshot?:NetworkSnapshot)=>{
   if(stopped)return;
   const changed=status!==last;
   last=status;
   if(changed)appLogger.i('InternetAvailabilityMonitor',`status=${status}`);
   // Recovery also reads snapshots on demand. A fresh observation can
   // supersede one of those reads even when this observer missed the outage.
-  if(changed||valid&&reportSnapshots)listener(status,order);
+  if(changed||snapshot&&reportSnapshots)listener(status,snapshot?.order,snapshot&&bluetoothTransport(snapshot));
  };
  const refresh=()=>{
   if(stopped)return;
@@ -54,7 +60,7 @@ export function observeInternet(ports:InternetPorts,listener:(status:InternetSta
      let snapshot:NetworkSnapshot,status:InternetStatus;
      try{snapshot=await ports.snapshot();status=internetAvailability(snapshot);}
      catch{if(!dirty)emit('checking');continue;}
-     if(!dirty)emit(status,snapshot.order,true);
+     if(!dirty)emit(status,snapshot);
     }
    }finally{running=false;}
   })();

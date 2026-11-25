@@ -40,7 +40,7 @@ import { resolvedReaderStyle, type ReaderPreset } from "../reader/preset.ts";
 import type { ReaderBackgroundSnapshot } from "../reader/background-assets.ts";
 
 export type NotesInput = ModalInput;
-interface BaseProps { repository: MemoRepository; height:number; width:number; onError?:(message:string)=>void }
+interface BaseProps { repository: MemoRepository; withUiWork?: <T>(operation: () => Promise<T>) => Promise<T>; height:number; width:number; onError?:(message:string)=>void }
 const fail = (props: BaseProps, error: unknown) => props.onError?.(error instanceof Error ? error.message : String(error));
 function preview(note: MemoNote): string { const lines=note.plainText.split("\n").map(v=>v.trim()).filter(Boolean); if(lines[0]===note.title.trim()) lines.shift(); return lines.join(" ").slice(0,120)||"暂无摘要"; }
 
@@ -272,12 +272,12 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack,editing})}/><NoteEditButton width={props.width} height={props.height} active={()=>props.active!==false&&!download()} visible={editButtonVisible} backOffset={props.backOffset} onEdit={requestEdit} background={editBackground()} color={bodyColor()}/><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
-    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editing,editorClose});}}/>
+    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} withUiWork={props.withUiWork} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editing,editorClose});}}/>
   </Show></Show>;
 }
 
 export interface NoteActionsHandle { scroller:Scroller; goBack:()=>boolean }
-export interface NoteActionsScreenProps extends BaseProps { noteId:string; refreshKey?:number; onDone:()=>void; ref?:(value:NoteActionsHandle)=>void }
+export interface NoteActionsScreenProps extends BaseProps { noteId:string; refreshKey?:number; onDone:()=>void; onWriteDone?:()=>void; ref?:(value:NoteActionsHandle)=>void }
 export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const [note,setNote]=createSignal<MemoNote|null>(null), [folders,setFolders]=createSignal<MemoFolder[]>([]), [selectingFolder,setSelectingFolder]=createSignal(false), [confirmDelete,setConfirmDelete]=createSignal(false), [busy,setBusy]=createSignal(false);
   let readVersion=0,disposed=false;
@@ -285,7 +285,21 @@ export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const reload=async()=>{const version=++readVersion;try{const [value,groups]=await Promise.all([props.repository.get(props.noteId),props.repository.listFolders()]);if(disposed||version!==readVersion)return;setNote(value);setFolders(groups);if(!value){setSelectingFolder(false);setConfirmDelete(false);}}catch(e){if(!disposed&&version===readVersion)fail(props,e);}};
   onMount(()=>void reload());
   createEffect(on(()=>props.refreshKey,()=>void reload(),{defer:true}));
-  const act=async(operation:()=>Promise<unknown>)=>{if(busy())return;setBusy(true);try{await operation();props.onDone();}catch(e){fail(props,e);}finally{if(!disposed)setBusy(false);}};
+  const act = async (operation: () => Promise<unknown>) => {
+    if (busy()) return;
+    setBusy(true);
+    const write = async () => {
+      await operation();
+      (props.onWriteDone ?? props.onDone)();
+    };
+    try {
+      await (props.withUiWork ? props.withUiWork(write) : write());
+    } catch (error) {
+      fail(props, error);
+    } finally {
+      if (!disposed) setBusy(false);
+    }
+  };
   const button=(label:string,onPress:()=>void,danger=false,enabled=true)=><View onPress={enabled&&!busy()?onPress:undefined} focusable={enabled&&!busy()} accessibilityRole="button" accessibilityLabel={label} style={{insetL:(props.width-160)/2-9}} class="absolute top-[0] w-[160] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class={danger?"text-[17px] leading-[23px] text-[#e54d4d]":enabled?"text-[17px] leading-[23px] text-[#f5f5f5]":"text-[17px] leading-[23px] text-[#999999]"}>{label}</Text></View>;
   // Visible content is the centred 160-wide pill, not the full 215-wide row.
   const pill={x:(props.width-160)/2-9,y:0,width:160,height:48};
