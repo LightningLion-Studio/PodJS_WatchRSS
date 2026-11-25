@@ -1,4 +1,4 @@
-import {createEffect,createSignal,onCleanup,Show,type JSX} from 'solid-js';
+import {batch,createEffect,createSignal,onCleanup,Show,type JSX} from 'solid-js';
 import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
 import {internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
@@ -35,14 +35,25 @@ export function observeNetworkRecovery(network:()=>NetworkRecovery){
 
 // Layer mount order follows paint order. Keep that order when a lower route
 // reports Bluetooth later, so a network update never steals the top page.
-const [bluetoothLayers,setBluetoothLayers]=createSignal<readonly (()=>boolean)[]>([]);
+type RecoveryLayer={network:()=>NetworkRecovery;wantsBluetooth:()=>boolean};
+const [bluetoothLayers,setBluetoothLayers]=createSignal<readonly RecoveryLayer[]>([]);
+
+function dismissBluetoothPages(){
+ // Publish every dismissal before rendering again so a waiting page cannot flash.
+ batch(()=>{
+  const networks=new Set(bluetoothLayers().map(layer=>layer.network()));
+  for(const network of networks){
+   if(network.status==='bluetooth')network.dismissBluetooth();
+  }
+ });
+}
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
  const network=observeNetworkRecovery(()=>props.network);
- const wantsBluetooth=()=>network().bluetooth&&!network().blocking;
- setBluetoothLayers(layers=>[wantsBluetooth,...layers]);
- onCleanup(()=>setBluetoothLayers(layers=>layers.filter(layer=>layer!==wantsBluetooth)));
- const ownsBluetoothPage=()=>bluetoothLayers().find(wantsPage=>wantsPage())===wantsBluetooth;
+ const layer={network,wantsBluetooth:()=>network().bluetooth&&!network().blocking};
+ setBluetoothLayers(layers=>[layer,...layers]);
+ onCleanup(()=>setBluetoothLayers(layers=>layers.filter(candidate=>candidate!==layer)));
+ const ownsBluetoothPage=()=>bluetoothLayers().find(candidate=>candidate.wantsBluetooth())===layer;
  return <><Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onAction={()=>void props.network.retry()}/></Show>
-  <Show when={ownsBluetoothPage()&&network()} keyed>{scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={()=>scope.dismissBluetooth()}/>}</Show></>;
+  <Show when={ownsBluetoothPage()&&network()} keyed>{_scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={dismissBluetoothPages}/>}</Show></>;
 }
