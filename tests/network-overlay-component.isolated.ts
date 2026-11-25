@@ -134,6 +134,26 @@ for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right 
   expect(motion.tick(1000)).toBe('commit');
  }finally{touchFrame();competing.dispose();layer.dispose();page.dispose();}
 });
+test('two active Bluetooth layers display and dismiss only the top page per swipe',async()=>{
+ const bottom=await bluetoothLayer();
+ const top=await bluetoothLayer();
+ try{
+  touchFrame(46,46);touchFrame(166,46);
+  const bottomOffset=bottom.page()?.props.style.translateX ?? 0;
+  const visibleCount=[bottom.page(),top.page()].filter(Boolean).length;
+  expect(top.page().props.style.translateX).toBe(120);
+  touchFrame();settleSwipe();
+
+  expect([bottomOffset,bottom.network.bluetooth,top.network.bluetooth]).toEqual([0,true,false]);
+  expect(visibleCount).toBe(1);
+  expect(top.page()).toBeUndefined();
+  expect(bottom.page().props.style.translateX).toBe(0);
+
+  touchFrame(46,46);touchFrame(166,46);touchFrame();settleSwipe();
+  expect(bottom.network.bluetooth).toBe(false);
+  expect(bottom.page()).toBeUndefined();
+ }finally{touchFrame();top.dispose();bottom.dispose();}
+});
 test('Slow short Bluetooth swipe returns to its origin and keeps the page',async()=>{
  const layer=await bluetoothLayer();
  try{
