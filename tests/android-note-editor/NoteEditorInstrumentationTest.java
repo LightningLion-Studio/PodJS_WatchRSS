@@ -39,7 +39,7 @@ public final class NoteEditorInstrumentationTest {
    waitForText(instrumentation,body,"第一行\n第二行\n第三行",6000);
    assertRow(context,"  原始标题  ","第一行\n第二行\n第三行",6000);
    instrumentation.runOnMainSync(()->title.setText(""));
-   assertRow(context,"","第一行\n第二行\n第三行",6000);
+   assertRow(context,"第一行","第一行\n第二行\n第三行",6000);
    instrumentation.runOnMainSync(()->title.setText("关闭前的新标题"));
    instrumentation.runOnMainSync(()->{InputMethodManager imm=(InputMethodManager)context.getSystemService(Context.INPUT_METHOD_SERVICE);imm.hideSoftInputFromWindow(body.getWindowToken(),0);body.clearFocus();});
    Thread.sleep(300);

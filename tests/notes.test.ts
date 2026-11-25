@@ -117,6 +117,23 @@ describe("draft saving after a synced deletion",()=>{
 
 
 describe("three-word title persistence",()=>{
+  test("closing a body-only draft keeps its derived title and writes once",async()=>{
+    const {repo}=repository();
+    await repo.initialize();
+    let writes=0;
+    const draft=new NoteDraftAutosave({save:input=>{
+      if(++writes>1)throw new Error("draft attempted to write the same content again");
+      return repo.save(input);
+    }},null);
+    draft.setMarkdown("saa");
+    const note=await draft.flush();
+    expect(note).toMatchObject({title:"saa",markdown:"saa"});
+    expect(draft.title).toBe("");
+    expect(draft.state).toBe("saved");
+    expect(await draft.flush()).toBe(note);
+    expect(await repo.list()).toEqual([note!]);
+    expect(writes).toBe(1);
+  });
   test("missing, empty and whitespace titles derive; omitted nonblank titles stay raw",async()=>{
     const {repo}=repository();await repo.initialize();
     const markdown="\nHello, big world again\nsecond";
