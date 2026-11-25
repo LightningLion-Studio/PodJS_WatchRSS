@@ -32,7 +32,6 @@ import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('screen');
-const BACKGROUND_WRITE_MAX_MS=30_000;
 import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
 import { supportsSystemShare, openSystemShare } from "../sharing/host.ts";
 import { routeShare, type ShareHandler } from "../sharing/policy.ts";
@@ -71,7 +70,6 @@ import {
   batch,
   createEffect,
   createMemo,
-  createRenderEffect,
   createSignal,
   onCleanup,
   onMount,
@@ -176,18 +174,19 @@ export default function WatchRSS(props: {
   const activityEntries=startupActivityNavigation(activityStateHub.read(),debugGate.allowed);
   const startupNeedsChannels=(activityEntries?.length??0)<=1||!!activityEntries?.some(entry=>entry.channelId);
   const [resumeReady, setResumeReady] = createSignal(false);
+  const [activityReady, setActivityReady] = createSignal(false);
   let startupDisposed=false;
   onCleanup(()=>{startupDisposed=true;});
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
   const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
-    if(!resumeReady())return;
+    if(!activityReady())return;
     traceServiceWork("navigation.checkpoints",()=>{for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();});
     const next=captureActivityNavigation(activityStateHub.read(),stack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
   }));
   onCleanup(onLifecycleCheckpoint(()=>{
-    if(!resumeReady())return;
+    if(!activityReady())return;
     saveActivity();
   }));
   const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
@@ -197,8 +196,8 @@ export default function WatchRSS(props: {
   const networkScopes=new WeakMap<Entry,ReturnType<typeof createHostNetworkRecovery>>();
   const networkFor=(entry:Entry)=>{let scope=networkScopes.get(entry);if(!scope){scope=createHostNetworkRecovery();networkScopes.set(entry,scope);}return scope;};
   const page = () => current().page;
-  let accountStatus=readCloudAccountStatus();
-  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!accountStatus?.ownerChoiceRequired);
+  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
+  onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
   const warningNetwork=useBluetoothWarningConnection();
   const warningShown=()=>page()==='bluetooth-warning';
   const contentRoute=()=>warningShown()?stack().at(-2)!:current();
@@ -207,91 +206,14 @@ export default function WatchRSS(props: {
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
-  const [pendingUiWork,setPendingUiWork]=createSignal(0);
-  const uiWorkReleases=new Set<()=>void>();
-  const trackUiWork=(kind:"navigation"|"local-write"|"modal"|"playback")=>{
-    const deadline=kind==="local-write"?delay(BACKGROUND_WRITE_MAX_MS):undefined;
-    const done=()=>{
-      if(!uiWorkReleases.delete(done))return;
-      try{deadline?.cancel();}
-      catch(error){logConsole.warn("Failed to cancel UI work deadline",error);}
-      finally{setPendingUiWork(count=>count-1);}
-    };
-    uiWorkReleases.add(done);
-    setPendingUiWork(count=>count+1);
-    const expire=(message:string)=>{
-      if(!uiWorkReleases.has(done))return;
-      logConsole.warn(message);
-      done();
-    };
-    void deadline?.result.then(
-      ()=>expire(`UI work exceeded ${BACKGROUND_WRITE_MAX_MS}ms; releasing Bluetooth warning gate`),
-      ()=>expire("UI work deadline failed; releasing Bluetooth warning gate"),
-    );
-    return done;
-  };
-  onCleanup(()=>{for(const done of uiWorkReleases)done();});
-  const withUiWork=async <T,>(operation:()=>Promise<T>,kind:"local-write"|"modal"|"playback"):Promise<T>=>{
-    const done=trackUiWork(kind);
-    try{return await operation();}
-    finally{done();}
-  };
-  let pendingNavigation:{origin:Entry;done:()=>void}|undefined;
-  createRenderEffect(()=>{
-    const route=contentRoute();
-    if(pendingNavigation&&pendingNavigation.origin!==route)pendingNavigation.done();
-  });
-  onCleanup(()=>pendingNavigation?.done());
-  onCleanup(subscribeCloudAccountStatus(()=>{
-    const next=readCloudAccountStatus();
-    const ownerChoice=!!next?.ownerChoiceRequired;
-    if(next?.accountScope!==accountStatus?.accountScope||
-       next?.accountId!==accountStatus?.accountId||
-       next?.accountRevision!==accountStatus?.accountRevision||ownerChoice)
-      pendingNavigation?.done();
-    accountStatus=next;
-    setCloudOwnerChoice(ownerChoice);
-  }));
-  onCleanup(props.services.subscribeAccountStatus(change=>{
-    if(change?.kind==="account"&&change.account===null)pendingNavigation?.done();
-  }));
-  function beginNavigation(showBusy=false) {
-    const origin=contentRoute();
-    const release=trackUiWork("navigation");
-    pendingNavigation?.done();
-    const active=()=>pendingNavigation===intent&&contentRoute()===origin&&foreground()&&!cloudOwnerChoice()&&
-      (warningShown()||motion.phase==="idle");
-    const revealOrigin=()=>{
-      if(!active())return false;
-      // A warning above the origin must not turn a completed navigation into a no-op.
-      if(warningShown())removeWarningRoute();
-      return true;
-    };
-    const done=()=>{
-      if(pendingNavigation===intent){
-        pendingNavigation=undefined;
-        if(showBusy)setNavigationBusy(false);
-      }
-      release();
-    };
-    // The intent object is the generation token for all of its continuations.
-    const intent={origin,done};
-    pendingNavigation=intent;
-    if(showBusy)setNavigationBusy(true);
-    return {active,revealOrigin,done};
-  }
+  const [nativeInputOpen,setNativeInputOpen]=createSignal(false);
+  const [systemShareOpen,setSystemShareOpen]=createSignal(false);
   const routeServices:AppServices=Object.assign(Object.create(props.services),{
-    input:(...args:Parameters<AppServices['input']>)=>withUiWork(()=>props.services.input(...args),"modal"),
-    openInlineInput:props.services.openInlineInput&&
-      (async (...args:Parameters<NonNullable<AppServices['openInlineInput']>>)=>{
-        const done=trackUiWork("modal");
-        try{
-          const session=await props.services.openInlineInput!(...args);
-          return {...session,close:async()=>{try{await session.close();}finally{done();}}};
-        }catch(error){done();throw error;}
-      }),
-    confirmAddChannel:props.services.confirmAddChannel&&
-      ((token:string)=>withUiWork(()=>props.services.confirmAddChannel!(token),"local-write")),
+    input:async (...args:Parameters<AppServices['input']>)=>{
+      setNativeInputOpen(true);
+      try{return await props.services.input(...args);}
+      finally{setNativeInputOpen(false);}
+    },
   });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -314,16 +236,9 @@ export default function WatchRSS(props: {
     const reader=entry.reader;
     if(!reader)return;
     const guard=context==="exit"?readerExit:backgroundReaderFlush;
-    // The guard releases navigation at its deadline while the write may still run.
-    let done:(()=>void)|undefined;
-    guard.begin(entry,()=>{
-      done=trackUiWork("local-write");
-      return reader.flushProgress();
-    },outcome=>{
-      try{
-        logReaderProgressFlush(context,outcome);
-        complete?.();
-      }finally{done?.();}
+    guard.begin(entry,()=>reader.flushProgress(),outcome=>{
+      logReaderProgressFlush(context,outcome);
+      complete?.();
     });
   }
   let motion = new BackMotion(width);
@@ -335,15 +250,32 @@ export default function WatchRSS(props: {
   );
   const [backRotation, setBackRotation] = createSignal(0);
   const backTranslation = createMemo(() => backOffset() === 0 ? { x: 0, y: 0 } : rotateVector(backOffset(), 0, backRotation()));
-  function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
-  function setPageImpl(next: Page, data: Partial<Entry> = {}) {
+  // Hold completed navigation while the current back gesture finishes.
+  // Requests still in flight never participate in this queue.
+  const afterBack: {apply:()=>void;cancel?:()=>void}[]=[];
+  function navigate(apply:()=>void,cancel?:()=>void) {
+    if(startupDisposed){cancel?.();return;}
+    if(motion.phase==="idle")batch(apply);
+    else afterBack.push({apply,cancel});
+  }
+  onFrame(()=>{
+    if(motion.phase!=="idle")return;
+    for(const {apply,cancel} of afterBack.splice(0))navigate(apply,cancel);
+  },()=>afterBack.length>0&&motion.phase==="idle");
+  onCleanup(()=>{for(const {cancel} of afterBack.splice(0))cancel?.();});
+  function waitForBack():Promise<boolean> {
+    return new Promise(resolve=>navigate(()=>resolve(true),()=>resolve(false)));
+  }
+  function setPage(next: Page,data: Partial<Entry> = {}) {
+    navigate(()=>traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))));
+  }
+  function setPageImpl(next: Page, data: Partial<Entry>) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
-    if (
-      warningShown() ||
-      (next === page() && Object.keys(data).length === 0) ||
-      motion.phase !== "idle"
-    )
-      return;
+    if(warningShown()){
+      if(next==="bluetooth-warning")return;
+      removeWarningRoute();
+    }
+    if(next===page()&&Object.keys(data).length===0)return;
     traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(current()));
     traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
@@ -530,9 +462,7 @@ export default function WatchRSS(props: {
   const [article, setArticle] = createSignal<Article | null>(null);
   const [pageLoad,setPageLoad]=createSignal<{entry:Entry}|undefined>(startupNeedsChannels&&!homeSnapshot?{entry:current()}:undefined);
   const loading=()=>pageLoad()?.entry===contentRoute();
-  const [actionBusy,setBusy]=createSignal(false);
-  const [navigationBusy,setNavigationBusy]=createSignal(false);
-  const busy=()=>navigationBusy()||actionBusy();
+  const [busy,setBusy]=createSignal(false);
   const [homeRefreshing,setHomeRefreshing]=createSignal(false);
   const [errorMessage,setError]=createSignal("");
   // Loading replaces the browsing surface only for the route that owns it.
@@ -557,7 +487,6 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
-    trackUiWork:()=>trackUiWork("local-write"),
     current,
     setArticles,
     startPageLoading,
@@ -649,36 +578,36 @@ export default function WatchRSS(props: {
     if (shareAlive) setSystemShareAvailable(value);
   });
   const share: ShareHandler = (input, qr, onDone) => {
-    const source = current();
+    const source = contentRoute();
     const finishSource =
       source.page === "rss-actions" ||
       (source.page === "bili" && source.biliRoute?.name === "actions") ||
       (source.page === "douyin" && source.douyinRoute?.name === "actions");
-    const done=trackUiWork("modal");
-    void shareEnvironment
-      .then(async (supported) => {
-        if (!shareAlive || current() !== source || motion.phase !== "idle")
-          return;
-        const outcome = await routeShare(input, settings().shareUseSystem && supported, {
-          text: openSystemShare,
-          qr,
-          unavailable: () => {
-            void hostToast("暂无可分享链接");
+    void shareEnvironment.then(supported => {
+      navigate(() => {
+        if (!shareAlive || contentRoute() !== source) return;
+        void routeShare(input, settings().shareUseSystem && supported, {
+          text: async text => {
+            setSystemShareOpen(true);
+            try { await openSystemShare(text); }
+            finally { setSystemShareOpen(false); }
           },
+          qr,
+          unavailable: () => { void hostToast("暂无可分享链接"); },
+        }).then(outcome => {
+          if (!shareAlive) return;
+          if (onDone && outcome !== "none") onDone();
+          else if (finishSource) {
+            source.list?.scroller.stop();
+            setStack(entries => entries.length > 1
+              ? entries.filter(entry => entry !== source)
+              : entries);
+          }
+        }).catch(error => {
+          if (shareAlive) setError(String(error));
         });
-        if (shareAlive && onDone && outcome !== "none") onDone();
-        else if (shareAlive && finishSource) {
-          source.list?.scroller.stop();
-          setStack((entries) =>
-            entries.length > 1
-              ? entries.filter((entry) => entry !== source)
-              : entries,
-          );
-        }
-      })
-      .catch((e) => {
-        if (shareAlive) setError(String(e));
-      }).finally(done);
+      });
+    });
   };
   createEffect(() =>
     props.onSyncMediaKeepAliveChange?.(settings().syncMediaKeepAlive),
@@ -757,7 +686,6 @@ export default function WatchRSS(props: {
   onCleanup(() => { homeNoticesAlive = false; });
   onCleanup(
     onLifecycleChange((value) => {
-      if(value!=="active")pendingNavigation?.done();
       setForeground(value === "active");
       const entry = current();
       if (value !== "active") {
@@ -791,7 +719,7 @@ export default function WatchRSS(props: {
   });
   createEffect(() => {
     idleHit(11);const entries = stack();
-    if (resumeReady()) {
+    if (activityReady()) {
       informationActivity.prune(entries);saveActivity();
     }
   });
@@ -946,12 +874,13 @@ export default function WatchRSS(props: {
   }
   async function restoreStartupNavigation() {
     const baseline=stack();let owned=baseline;
+    const ownsStack=(entries:Entry[])=>contentRoute()===entries.at(-1);
     try {
       if(startupNeedsChannels){
         if(homeSnapshot)void loadChannels(false);
         else await loadChannels();
       }
-      if(startupDisposed||stack()!==baseline)return;
+      if(startupDisposed||!ownsStack(baseline))return;
       if(activityEntries){
         const entries=await resolveActivityNavigation(activityEntries,{
           hasChannel:id=>channels().some(channel=>channel.id===id),article:id=>props.services.getArticle(id),
@@ -959,9 +888,16 @@ export default function WatchRSS(props: {
         });
         for(const entry of entries)await informationActivity.restore(entry);
         if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
-        if(startupDisposed||stack()!==baseline)return;
+        if(startupDisposed||!ownsStack(baseline))return;
+        if(!await waitForBack()||!ownsStack(baseline))return;
         owned=entries;
-        batch(()=>{setStack(entries);const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);if(lastReader)setArticle(lastReader.readerArticle!);});
+        batch(()=>{
+          removeWarningRoute();
+          setStack(entries);
+          const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);
+          if(lastReader)setArticle(lastReader.readerArticle!);
+          setActivityReady(true);
+        });
         const destination=entries.at(-1);
         if(destination?.page==='articles'&&destination.channelId)
           await loadFeedArticles(destination.channelId,Number(routeMemory(destination).retained.feedCount)||12,true);
@@ -973,17 +909,17 @@ export default function WatchRSS(props: {
         }
       }
     } catch (error) {
-      if(!startupDisposed&&stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
+      if(!startupDisposed&&ownsStack(owned))setError(`无法恢复上次内容：${String(error)}`);
     } finally {
       if(!startupDisposed){
-        setResumeReady(true);
+        batch(()=>{setActivityReady(true);setResumeReady(true);});
         if(!startupNeedsChannels)void loadChannels(false);
       }
     }
   }
   let firstScreenSignaled=false;
   createEffect(()=>{
-    const route=current();
+    const route=contentRoute();
     if(firstScreenSignaled||(!resumeReady()&&!(homeSnapshot&&route.page==="home")))return;
     const ready=()=>{
       firstScreenSignaled=true;
@@ -1021,30 +957,28 @@ export default function WatchRSS(props: {
   }));
   // Finishing a flow (for example watch pairing) returns to the home page instead of the page it started from.
   function goHome() {
-    if (motion.phase !== "idle") return;
-    if (stack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
-    else setStack([{ page: "home" }]);
-    kv.set("page", "home");
-    void loadChannels();
+    navigate(()=>{
+      removeWarningRoute();
+      if (stack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
+      else setStack([{ page: "home" }]);
+      kv.set("page", "home");
+      void loadChannels();
+    });
   }
   async function go(next: Page) {
-    if (motion.phase !== "idle") return;
     if (next === "notes") {
-      const navigation=beginNavigation(true);
+      if (busy()) return;
+      setBusy(true);
       try {
-        if(!navigation.active())return;
         await memoRepository.initialize();
-        if(navigation.revealOrigin()){
-          setPage(next);
-          kv.set("page", next);
-        }
-      } catch (e) {
-        if(navigation.revealOrigin())setError(String(e));
+      } catch (error) {
+        if(!startupDisposed)setError(String(error));
+        return;
       } finally {
-        navigation.done();
+        setBusy(false);
       }
-      return;
     }
+    if(!await waitForBack())return;
     setPage(next);
     kv.set("page", next);
     if (next === "home") await loadChannels();
@@ -1057,78 +991,66 @@ export default function WatchRSS(props: {
       await loadSaved(next === "saved" ? "favorite" : "watchLater");
   }
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
-    const navigation=beginNavigation();
     const origin=contentRoute();
     const previousReader=replaceReader&&origin.page==="reader"?origin:undefined;
     try {
-      if(!navigation.active())return;
       const full = await props.services.getArticle(item.id,article());
-      if(!navigation.active())return;
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
       if(available)await props.services.markRead(item.id);
-      if(!navigation.revealOrigin())return;
-      setArticle({ ...full, read });
-      // Reopening an already-read article must not rebuild the retained feed
-      // and synchronously remeasure every card for an unchanged read flag.
-      if(available)setArticles((items) => markFeedArticleRead(items,item.id));
-      setChannels((items) => !available||item.read ? items :
-        items.map((c) =>
-          c.id === item.channelId && !item.read
-            ? { ...c, unreadCount: Math.max(0, (c.unreadCount ?? 0) - 1) }
-            : c,
-        ),
-      );
-      traceServiceWork("reader.setPage",()=>setPage("reader", {
-        readerArticle: { ...full, read },
-        readerFromWatchLater: fromWatchLater,
-      }));
-      if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
+      navigate(()=>{
+        const active = contentRoute();
+        if(active.page==="reader"&&active.readerArticle?.id===full.id)return;
+        setArticle({ ...full, read });
+        // Reopening an already-read article must not rebuild the retained feed
+        // and synchronously remeasure every card for an unchanged read flag.
+        if(available)setArticles((items) => markFeedArticleRead(items,item.id));
+        setChannels((items) => !available||item.read ? items :
+          items.map((c) =>
+            c.id === item.channelId && !item.read
+              ? { ...c, unreadCount: Math.max(0, (c.unreadCount ?? 0) - 1) }
+              : c,
+          ),
+        );
+        traceServiceWork("reader.setPage",()=>setPage("reader", {
+          readerArticle: { ...full, read },
+          readerFromWatchLater: fromWatchLater,
+        }));
+        if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
+      });
     } catch (e) {
-      if(navigation.revealOrigin())setError(String(e));
-    } finally {
-      navigation.done();
+      if(!startupDisposed)setError(String(e));
     }
   }
-  const beginRssAction = () => {
-    const releaseWrite=trackUiWork("local-write");
-    setBusy(true);
-    return {releaseWrite,done:()=>{
-      setBusy(false);
-      releaseWrite();
-    }};
-  };
   async function openArticleActions(item: Article) {
     if (busy()) return;
-    const navigation=beginNavigation(true);
+    setBusy(true);
     try {
-      if(!navigation.active())return;
       const full = await props.services.getArticle(item.id,article());
-      if (navigation.revealOrigin()) {
+      navigate(()=>{
         setArticle(full ?? item);
         setPage("rss-actions");
-      }
+      });
     } catch (e) {
-      if(navigation.revealOrigin())setError(String(e));
+      if(!startupDisposed)setError(String(e));
     } finally {
-      navigation.done();
+      setBusy(false);
     }
   }
   async function deleteArticle() {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    const {done,releaseWrite} = beginRssAction();
+    setBusy(true);
     try {
       await props.services.deleteArticle(selected.id);
-      releaseWrite();
       setArticles((items) => items.filter((item) => item.id !== selected.id));
       if (current() === origin && popPage(true)) setArticle(null);
       await loadChannels(false);
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
+      setBusy(false);
     }
   }
   async function saveArticleState(
@@ -1139,7 +1061,7 @@ export default function WatchRSS(props: {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    const {done} = beginRssAction();
+    setBusy(true);
     try {
       await props.services.setSaveState(selected.id, type, saved);
       const patch = type === "favorite" ? { saved } : { watchLater: saved };
@@ -1161,14 +1083,14 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
+      setBusy(false);
     }
   }
   async function markArticleUnread() {
     const selected = article();
     if (!selected?.read || busy()) return;
     const origin = current();
-    const {done} = beginRssAction();
+    setBusy(true);
     try {
       await props.services.markRead(selected.id, false);
       setArticle({ ...selected, read: false });
@@ -1186,7 +1108,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
+      setBusy(false);
     }
   }
   async function toggleFeedSave(
@@ -1195,7 +1117,7 @@ export default function WatchRSS(props: {
   ) {
     if (busy()) return;
     const saved = type === "favorite" ? !item.saved : !item.watchLater;
-    const {done} = beginRssAction();
+    setBusy(true);
     try {
       await props.services.setSaveState(item.id, type, saved);
       setArticles((items) =>
@@ -1211,27 +1133,26 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
+      setBusy(false);
     }
   }
   async function openChannelSettings(id: string) {
     if (busy()) return;
-    const navigation=beginNavigation(true);
+    setBusy(true);
     try {
-      if(!navigation.active())return;
       const [enabled, playback] = await Promise.all([
         props.services.getChannelOriginalMode(id),
         props.services.getChannelPlaybackSettings(id),
       ]);
-      if (navigation.revealOrigin()) {
+      navigate(()=>{
         setOriginalModes((m) => ({ ...m, [id]: enabled }));
         setChannelPlayback((m) => ({ ...m, [id]: playback }));
         setPage("channel-settings", { channelId: id });
-      }
+      });
     } catch (e) {
-      if(navigation.revealOrigin())setError(String(e));
+      if(!startupDisposed)setError(String(e));
     } finally {
-      navigation.done();
+      setBusy(false);
     }
   }
   async function channelAction(
@@ -1246,7 +1167,7 @@ export default function WatchRSS(props: {
       | "clear",
   ) {
     if (busy()) return;
-    const {done,releaseWrite} = beginRssAction();
+    setBusy(true);
     setError("");
     try {
       if (action === "original") {
@@ -1269,13 +1190,11 @@ export default function WatchRSS(props: {
         }));
       } else if (action === "move") {
         await props.services.moveChannelToTop(id);
-        releaseWrite();
         setChannels(await props.services.listChannels());
       } else if (action === "pin") {
         const channel = channels().find((item) => item.id === id);
         if (!channel) return;
         await props.services.setChannelPinned(id, !channel.isPinned);
-        releaseWrite();
         setChannels(await props.services.listChannels());
       } else if (action === "read") {
         await props.services.markChannelRead(id);
@@ -1299,12 +1218,12 @@ export default function WatchRSS(props: {
         await props.services.deleteChannel(id);
         setChannels((items) => items.filter((c) => c.id !== id));
         setArticles((items) => items.filter((a) => a.channelId !== id));
-        setStack([{ page: "home" }]);
+        navigate(()=>{removeWarningRoute();setStack([{ page: "home" }]);});
       }
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
+      setBusy(false);
     }
   }
   function searchChannel(id: string) {
@@ -1484,7 +1403,11 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  function removeWarningRoute(){cancelActiveTouches();finishPopPage(current());}
+  function removeWarningRoute(){
+    if(!warningShown())return;
+    cancelActiveTouches();
+    finishPopPage(current());
+  }
   createEffect(()=>{if(cloudOwnerChoice()&&warningShown())untrack(removeWarningRoute);});
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
@@ -1572,7 +1495,7 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
-    if (warningShown() || page() === "bluetooth-connection") return;
+    if (page() === "bluetooth-connection") return;
     const url = takeRemoteInput();
     if (url === undefined) return;
     if (page() === "remote-input") popPage(true);
@@ -1631,13 +1554,14 @@ export default function WatchRSS(props: {
     videoLoading,
     deleteBuiltin,
   } = createMediaRouteController({
-    network:()=>networkFor(current()),
+    network:()=>networkFor(contentRoute()),
     initialVideoBounds:()=>hasCapability("media.video.sessions")?{x:0,y:0,width,height,visible:false}:undefined,
     onActivityStateChange:saveActivity,
     onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
     services: props.services,
-    current,
-    motion,
+    current:contentRoute,
+    motion:{get phase(){return motion.phase;}},
+    waitForBack,
     busy,
     setBusy,
     setError,
@@ -1686,6 +1610,7 @@ export default function WatchRSS(props: {
   };
   const openAddedChannel = async (channel: Channel) => {
     await loadChannels();
+    if(!await waitForBack())return;
     if (page() === "add-rss") setStack((entries) => entries.slice(0, -1));
     if (channel.url === "builtin:bili") await biliNavigate({ name: "entry" });
     else if (channel.url === "builtin:douyin")
@@ -1745,8 +1670,7 @@ export default function WatchRSS(props: {
         >
           <Show
             when={
-              !active() ||
-              entryPage() === "bluetooth-warning" ||
+              contentRoute() !== entry ||
               !loading() ||
               entryPage() === "saved" ||
               entryPage() === "watch-later"
@@ -1785,12 +1709,12 @@ export default function WatchRSS(props: {
               refresh={refresh}
               openBili={biliNavigate}
               openDouyin={douyinNavigate}
-              openFeed={(channel) => {
+              openFeed={(channel) => navigate(() => {
                 setFeedVisibleCount(12);
                 setFeedHasMore(false);
                 setPage("articles", { channelId: channel.id });
                 void loadFeedArticles(channel.id, 12, true);
-              }}
+              })}
               channelAction={channelAction}
               openInformation={informationNavigate}
               setError={setError}
@@ -1855,7 +1779,6 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
-              trackPlaybackRelease={operation=>{void withUiWork(()=>operation,"playback");}}
               onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
@@ -1883,7 +1806,7 @@ export default function WatchRSS(props: {
               saveMediaSetting={(platform, key, value) =>
                 kv.set(`watchrss.${platform}.${key}`, value)
               }
-              deleteBuiltin={platform=>withUiWork(()=>deleteBuiltin(platform),"local-write")}
+              deleteBuiltin={deleteBuiltin}
               share={share}
               openBili={biliNavigate}
               openDouyin={douyinNavigate}
@@ -1928,7 +1851,6 @@ export default function WatchRSS(props: {
             />
             <NotesRoutes
               onStateChange={saveActivity}
-              withUiWork={operation=>withUiWork(operation,"local-write")}
               entry={entry}
               page={entryPage}
               active={active}
@@ -2026,22 +1948,19 @@ export default function WatchRSS(props: {
 
   // Each entry here is a browsing surface. A new route must explicitly opt in.
   const warningBrowseReady:Partial<Record<Page,(entry:Entry)=>boolean>>={
-    home:entry=>entry.browseReady?.()===true&&!homeNoticeVisible()&&!homeDisclosurePending(),
-    articles:entry=>!!entry.list&&entry.browseReady?.()===true,
-    notes:entry=>entry.browseReady?.()===true,
-    settings:entry=>!!entry.list,
+    home:entry=>entry.browseReady?.()!==false&&!homeNoticeVisible()&&!homeDisclosurePending(),
+    articles:entry=>entry.browseReady?.()!==false,
+    notes:entry=>entry.browseReady?.()!==false,
+    settings:()=>true,
   };
   bindBluetoothWarningRoute(warningNetwork,{
     shown:warningShown,
-    idleRoute:()=>{
+    canShow:()=>{
       const entry=current();
-      if(!warningBrowseReady[entry.page]?.(entry))return;
-      if(!resumeReady()||!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe())return;
-      if(motion.phase!=='idle'||pendingUiWork()||loading())return;
-      if(playingSource()||videoLoading())return;
-      const scroller=entry.list?.scroller;
-      if(scroller&&scroller.state()!=='idle')return;
-      return entry;
+      if(!warningBrowseReady[entry.page]?.(entry))return false;
+      if(!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe()||nativeInputOpen()||systemShareOpen())return false;
+      if(motion.phase!=='idle'||afterBack.length||playingSource())return false;
+      return (entry.list?.scroller.state()??'idle')==='idle';
     },
     push:()=>setPage('bluetooth-warning'),
     pop:removeWarningRoute,

@@ -58,6 +58,7 @@ interface MediaControllerDependencies {
   services: AppServices;
   current: () => RouteEntry;
   motion: { readonly phase: string };
+  waitForBack?: () => Promise<boolean>;
   busy: Accessor<boolean>;
   setBusy: Setter<boolean>;
   setError: Setter<string>;
@@ -127,6 +128,7 @@ export function createMediaRouteController(
     benchmark.mark('startup_stage',source.startupSeq??0,{startup_stage:'backdrop_start'});
     await video.captureBackdrop({ opaque: source.immersive === true });
     benchmark.mark('startup_stage',source.startupSeq??0,{startup_stage:'backdrop_done'});
+    if(dependencies.waitForBack&&!await dependencies.waitForBack())return;
     if(!canOpen())return;
     if (
       dependencies.current() !== origin ||

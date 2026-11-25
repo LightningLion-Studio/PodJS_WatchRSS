@@ -16,12 +16,23 @@ const noteActionCancel=noteAction&&mode.endsWith('-cancel');
 const revalidation=mode==='bluetooth-revalidation';
 const backgroundReplacement=mode==='bluetooth-background-replacement';
 const readerTimeout=mode==='reader-timeout-warning'||mode==='reader-background-timeout-warning';
-const workDeadline=mode==='bluetooth-note-action-pin-leave-deadline';
 const rssAction=mode.startsWith('bluetooth-rss-action-');
 const rssProbe=mode.startsWith('bluetooth-feed-');
 const slowArticleOpen=mode.startsWith('bluetooth-feed-open-slow');
-const navigationBackground=mode==='bluetooth-feed-open-slow-background';
-const navigationAccount=mode==='bluetooth-feed-open-slow-account';
+const warningThenOpen=mode.startsWith('bluetooth-feed-open-with-warning');
+const restoredFeedStall=mode==='bluetooth-feed-restored-stall';
+const shareQuery=mode==='bluetooth-share-query';
+const listPull=mode==='bluetooth-list-pull';
+const listFling=mode==='bluetooth-list-fling';
+const swipeMenu=mode==='bluetooth-swipe-menu';
+const listProbe=listPull||listFling||swipeMenu;
+const writeFailure=process.env.REVIEW_WRITE_FAILURE;
+const holdDraft=process.env.REVIEW_HOLD_DRAFT==='1';
+const emptyDraft=process.env.REVIEW_EMPTY_DRAFT==='1';
+const readerLate=mode==='reader-timeout-late'||mode==='reader-timeout-late-reject';
+const hostPending=Number(process.env.REVIEW_HOST_PENDING??0);
+const navigationBackground=mode.startsWith('bluetooth-feed-open-slow-background');
+const navigationAccount=mode.startsWith('bluetooth-feed-open-slow-account');
 const backgroundRead=mode==='bluetooth-safe-settings-background-read';
 const settingsQuery=mode==='bluetooth-safe-settings-account-query';
 const stalledFeedReload=mode==='bluetooth-feed-stalled-reload-leave';
@@ -32,16 +43,19 @@ const searchRestore=mode==='bluetooth-search-restore';
 const safeRoute=backgroundRead||settingsQuery?'settings':mode.startsWith('bluetooth-safe-') ? mode.slice('bluetooth-safe-'.length) : undefined;
 let releaseOperation: (()=>void)|undefined;
 let releaseShare: (()=>void)|undefined;
+let releaseShareQuery: (()=>void)|undefined;
 let releaseRecovery: ((pending:boolean)=>void)|undefined;
 let releaseFeed: (()=>void)|undefined;
 let releaseNotes: (()=>void)|undefined;
 const recoveryDismissals:string[]=[];
-const deferOperation=()=>new Promise<void>(resolve=>{releaseOperation=resolve;});
+const deferOperation=()=>new Promise<void>((resolve,reject)=>{
+ releaseOperation=()=>writeFailure?reject(Object.assign(new Error(writeFailure),{code:writeFailure})):resolve();
+});
 const noteCase=mode==='bluetooth-modal'||mode==='bluetooth-note-close'||restoredNoteCase;
 const noteActionsCase=mode==='note-actions';
 const rssSaveCase=mode==='bluetooth-rss-save';
 const searchCase=mode==='bluetooth-inline'||mode==='bluetooth-search-modal'||searchRestore;
-let resolveModal!:(value:string)=>void,resolveInlineClose!:()=>void;
+let resolveModal!:(value:string|null)=>void,resolveInlineClose!:()=>void;
 let resolveFavorite:(()=>void)|undefined;
 let resolveTitlePending:((pending:boolean)=>void)|undefined;
 let titleRecoveryKey:string|undefined;
@@ -57,6 +71,7 @@ const transforms:{scaleMode?:string;panY?:number}[]=[];
 let clockMs=0,next=1;Date.now=()=>clockMs;
 const kv=new Map<string,string>();
 const events:any[]=[],timers=new Map<number,number>();
+let sqlCommits=0,completedSaves=0,completedWrites=0;
 let backEventsDelivered=0,saveCalls=0;let exitTimerStarted=false;
 const props=new Map<number,Map<number,number>>(),texts=new Map<number,string>();
 const textures=new Map<number,string>(),images=new Map<number,string>();
@@ -69,7 +84,7 @@ ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=(source:string)=>{const id=next++;textures.set(id,source);return id;};
 ops.setImage=(id:number,handle:number)=>images.set(id,textures.get(handle)??'');ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
-(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery','input.text','system.share',...(videoCase?['media.video']:[])]),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t==='service.cancel'){timers.delete(r.id);return;}if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
+(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery','input.text','system.share',...(videoCase?['media.video']:[]),...(hostPending?['data.sqlite']:[])]),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t==='service.cancel'){timers.delete(r.id);return;}if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
  if(method==='runtime.delay'){if(args.milliseconds===2500)exitTimerStarted=true;timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
  else if(method==='input.inline.open'){
@@ -81,7 +96,12 @@ ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:nu
   resolveInlineClose=()=>events.push({t:'service.result',id,ok:true,value:null});
   return;
  }
- else if(method==='share.environment')value={sdkInt:33,wearOs:false};
+ else if(method==='sql.query')value=[{article_id:12}];
+ else if(method==='sql.transaction'){sqlCommits++;value=[1];}
+ else if(method==='share.environment'){
+  value={sdkInt:33,wearOs:false};
+  if(shareQuery){releaseShareQuery=()=>events.push({t:'service.result',id,ok:true,value});return;}
+ }
  else if(method==='share.text'){releaseShare=()=>events.push({t:'service.result',id,ok:true,value:null});return;}
  else if(videoCase&&method.startsWith('video.')){
   if(method==='video.prepare')videoState='ready';
@@ -116,8 +136,18 @@ const {activityStateHub}=await import('../src/navigation/activity-host.ts');
 const {captureActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {INITIAL_DISCLOSURE_KEY}=await import('../src/announcement/platform.ts');
 if(mode!=='bluetooth-home-disclosure')kv.set(INITIAL_DISCLOSURE_KEY,'true');
-const article={id:'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',link:'https://example.invalid/article',contentBlocks:videoCase?[{type:'video' as const,url:'https://example.invalid/video.mp4'}]:undefined,content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
-let pendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://watchrss.local/import-content'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>(r=>{pendingSave=r;});}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='openInlineInput'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
+const article={id:hostPending?'12':'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',link:'https://example.invalid/article',contentBlocks:videoCase?[{type:'video' as const,url:'https://example.invalid/video.mp4'}]:undefined,content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
+let pendingSave:(()=>void)|undefined,rejectPendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://watchrss.local/import-content'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>((resolve,reject)=>{pendingSave=resolve;rejectPendingSave=()=>reject(Error("fixture late write reject"));});completedSaves++;}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='openInlineInput'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
+if(hostPending){
+ const {db}=await import('../src/services.ts');
+ const {SqlReadingProgressStore}=await import('../src/reader/sql-progress.ts');
+ const {ReadingProgressStore}=await import('../src/reader/progress.ts');
+ const store=new SqlReadingProgressStore(db,new ReadingProgressStore({get:async()=>null,set:async()=>{}}));
+ services.readingProgress={
+  load:async()=>({offset:0,progress:0,updatedAt:0}),
+  saveSnapshot:store.saveSnapshot.bind(store),
+ };
+}
 if(noteCase||noteActionsCase||noteAction||noteDownload||noteListLoad||safeRoute==='notes'){
  const {memoRepository}=await import('../src/services.ts');
  memoRepository.initialize=async()=>{};
@@ -126,7 +156,7 @@ if(noteCase||noteActionsCase||noteAction||noteDownload||noteListLoad||safeRoute=
   return [existingNote];
  };
  memoRepository.listFolders=async()=>[{folderId:'folder',name:'示例目录',sortOrder:1,updatedAt:1,modifiedBy:'fixture',deleted:false,deletedAt:0}];
- const writeNote=async()=>{await deferOperation();return existingNote;};
+ const writeNote=async()=>{await deferOperation();completedWrites++;return existingNote;};
  memoRepository.setPinned=writeNote;
  memoRepository.move=writeNote;
  memoRepository.delete=writeNote;
@@ -137,13 +167,14 @@ if(noteCase||noteActionsCase||noteAction||noteDownload||noteListLoad||safeRoute=
  };
  memoRepository.get=async()=>existingNote;
  memoRepository.save=async draft=>{
+  if(holdDraft&&draft.markdown==='Typed body'&&!releaseOperation)await deferOperation();
   savedDraft={title:draft.title??'',markdown:draft.markdown};
   return {...existingNote,...savedDraft,plainText:draft.markdown};
  };
  services.input=(title:string,_value:string,options?:{restorationKey?:string})=>{
   modalCalls.push(title);
   openedModalKey=options?.restorationKey;
-  return new Promise<string>(resolve=>{resolveModal=resolve;});
+  return new Promise<string|null>(resolve=>{resolveModal=resolve;});
  };
  services.inputRecovery={pending:async()=>false,dismiss:async()=>{}};
  if(restoredNoteCase)services.inputRecovery.pending=(key:string)=>{
@@ -162,7 +193,7 @@ if(rssSaveCase)services.setSaveState=()=>new Promise<void>(resolve=>{resolveFavo
 if(searchCase){
  const {textInput}=await import('@podjs/framework/services');
  services.openInlineInput=mode==='bluetooth-inline'?textInput.openInline:undefined;
- services.input=(title:string)=>{modalCalls.push(title);return new Promise<string>(resolve=>{resolveModal=resolve;});};
+ services.input=(title:string)=>{modalCalls.push(title);return new Promise<string|null>(resolve=>{resolveModal=resolve;});};
  if(searchRestore)services.inputRecovery={
   pending:(key:string)=>key.endsWith(':rss-search')?new Promise<boolean>(resolve=>{releaseRecovery=resolve;}):Promise.resolve(false),
   dismiss:async(key:string)=>{recoveryDismissals.push(key);},
@@ -170,23 +201,31 @@ if(searchCase){
  services.searchArticles=async(_channelId:string,keyword:string)=>{searchedFor=keyword;return [];};
 }
 if(rssAction){
- services.setSaveState=deferOperation;
- services.markRead=deferOperation;
- services.deleteArticle=deferOperation;
+ const writeRss=async()=>{await deferOperation();completedWrites++;};
+ services.setSaveState=writeRss;
+ services.markRead=writeRss;
+ services.deleteArticle=writeRss;
 }
-if(mode==='bluetooth-feed-open'||mode==='bluetooth-feed-open-with-warning'||slowArticleOpen)services.markRead=()=>new Promise<void>((resolve,reject)=>{
- releaseOperation=(mode==='bluetooth-feed-open-slow-fail'||navigationAccount)?()=>reject(new Error('fixture markRead failed')):resolve;
-});
-if(mode==='bluetooth-feed-actions')services.getArticle=async()=>{await deferOperation();return article;};
-if(rssFromReader)services.listArticles=async()=>{
+let releaseSecondOpen:(()=>void)|undefined;
+if(mode==='bluetooth-feed-open'||warningThenOpen||slowArticleOpen)services.markRead=()=>{
+ if(releaseOperation)return new Promise<void>(resolve=>{releaseSecondOpen=resolve;});
+ return new Promise<void>((resolve,reject)=>{
+  releaseOperation=mode.endsWith('-fail')||mode.endsWith('-error')
+   ?()=>reject(new Error('fixture markRead failed')):resolve;
+ });
+};
+if(mode.startsWith('bluetooth-feed-actions'))services.getArticle=async()=>{await deferOperation();return article;};
+if(rssFromReader||restoredFeedStall)services.listArticles=async()=>{
  await new Promise<void>(resolve=>{releaseFeed=resolve;});
  return [article];
 };
+if(listPull)services.refresh=deferOperation;
+if(listProbe)services.listArticles=async()=>Array.from({length:10},(_,i)=>({...article,id:'item-'+i,title:'Article '+i}));
 if(shareSystem)new (await import('../src/settings/store.ts')).SettingsStore().update({shareUseSystem:true});
 activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  ?[{page:'home'},{page:'notes'},{page:'note-detail',noteId:restoredNoteCase?'fixture-note':undefined}]
  :noteActionsCase||noteAction?[{page:'home'},{page:'notes'},{page:'note-actions',noteId:'fixture-note'}]
- :rssSaveCase||rssAction?[{page:'home'},{page:'articles',channelId:'feed'},{page:'rss-actions',articleId:article.id}]
+ :rssSaveCase||rssAction||shareQuery?[{page:'home'},{page:'articles',channelId:'feed'},{page:'rss-actions',articleId:article.id}]
  :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :noteDownload||noteListLoad||safeRoute==='notes'?[{page:'home'},{page:'notes'}]
  :safeRoute==='settings'?[{page:'home'},{page:'settings'}]
@@ -195,16 +234,16 @@ activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
    ?[{page:'home'},{page:'articles',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
 const {connectCloudAccountStatus,notifyCloudAccountStatus}=await import('../src/cloud/status.ts');
-let accountRevision=1;
-const disconnectAccount=navigationAccount?connectCloudAccountStatus(()=>({
- accountId:`fixture-${accountRevision}`,accountScope:`scope-${accountRevision}`,accountRevision,
+let accountRevision=1,ownerChoiceRequired=false;
+let disconnectAccount=navigationAccount?connectCloudAccountStatus(()=>({
+ accountId:`fixture-${accountRevision}`,accountScope:`scope-${accountRevision}`,accountRevision,ownerChoiceRequired,
  message:'fixture',usedBytes:0,quotaBytes:0,
 })):undefined;
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
 const frame=(globalThis as any).frame;const watch=await import('@podjs/framework/watch');
 const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
-async function tick(dt=17,touches:number[]=[],hits?:number[]){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}frame(0,undefined,touches,hits);for(let n=0;n<25;n++)await Promise.resolve();}
+async function tick(dt=17,touches:number[]=[],hits?:number[],buttons=0){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}frame(buttons,undefined,touches,hits);for(let n=0;n<25;n++)await Promise.resolve();}
 
 const connected=()=>{const nodes:any[]=[];const walk=(n:any)=>{nodes.push(n);n.children.forEach(walk);};walk(rootMirror);return nodes;};
 const state=()=>{const data:any=activityStateHub.read().saved['watchrss.content-activity'];return data?.entries?.map((e:any)=>e.page) as string[];};
@@ -212,8 +251,8 @@ const visible=()=>connected().filter(n=>props.get(n.id)?.has(128)).map(n=>({offs
 const {expect,test}=await import('bun:test');
 const removeEventProbe=watch.__onHostEvent(event=>{if(event.t==='back')backEventsDelivered++;});
 if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}`,async()=>{
- const pump=async(count=80)=>{for(let i=0;i<count;i++)await tick();};
- const network=async(value:boolean,frames=80,reason='capabilities')=>{
+ const pump=async(count=190)=>{for(let i=0;i<count;i++)await tick();};
+ const network=async(value:boolean,frames=190,reason='capabilities')=>{
   bluetooth=value;
   for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason}});
   await pump(frames);
@@ -227,7 +266,10 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   expect(node?.onPress,label).toBeDefined();
   return node.onPress as ()=>void;
  };
- const press=(label:string)=>pressHandler(label)();
+ const press=(label:string)=>{
+  events.push({t:'accessibility.action',nodeId:-1,action:'activate'});
+  pressHandler(label)();
+ };
  const back=async()=>{events.push({t:'back'});await pump();};
  const displayed=(text:string)=>connected().some(node=>{
   if(texts.get(node.id)!==text&&node.domAttrs?.accessibilityLabel!==text)return false;
@@ -251,6 +293,72 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
  try{
   await pump(50);
 
+  if(swipeMenu){
+   const target=connected().find(node=>texts.get(node.id)==='Article 0');
+   expect(target).toBeDefined();
+   for(const x of [180,155,130,105,80])await tick(17,[__packTouch(1,x,130)],[target!.id]);
+   await tick();
+   await pump();
+   const offset=()=>connected().map(node=>props.get(node.id)?.get(128)??0).find(offset=>offset<-20);
+   expect(offset()).toBeDefined();
+   await network(true);
+   expect(warnings()).toHaveLength(0);
+   expect(offset()).toBeDefined();
+   press('Article 0');
+   await pump();
+   expect(warnings()).toHaveLength(1);
+   return;
+  }
+  if(listProbe){
+   expect(state().at(-1)).toBe('articles');
+   await network(true,30);
+   expect(warnings()).toHaveLength(0);
+   const target=connected().find(node=>texts.get(node.id)==='Article 0');
+   expect(target).toBeDefined();
+   const contact=(y:number)=>[__packTouch(1,116,y)];
+   const translated=()=>connected().map(node=>props.get(node.id)?.get(129)??0).filter(offset=>offset!==0).sort((a,b)=>a-b);
+   let retainedOffset:number[]|undefined;
+   if(mode==='bluetooth-list-pull'){
+    await tick(17,contact(75),[target!.id]);
+    for(const y of [100,120,144,163])await tick(17,contact(y),[target!.id]);
+    await tick();
+    expect(releaseOperation).toBeDefined();
+    await pump();
+    expect(warnings()).toHaveLength(1);
+    releaseOperation!();
+   }else{
+    await tick(17,contact(185),[target!.id]);
+    for(const y of [165,140,115,90,65])await tick(17,contact(y),[target!.id]);
+    await tick();
+    const atRelease=translated();
+    await pump(4);
+    const afterRelease=translated();
+
+    expect(afterRelease).not.toEqual(atRelease);
+    expect(warnings()).toHaveLength(0);
+    let previous=afterRelease, stableFrames=0;
+    for(let i=0;i<220&&stableFrames<6;i++){
+     await tick();
+     const now=translated();
+     if(JSON.stringify(previous)!==JSON.stringify(now))expect(warnings()).toHaveLength(0);
+     stableFrames=JSON.stringify(previous)===JSON.stringify(now)?stableFrames+1:0;
+     previous=now;
+    }
+    expect(stableFrames).toBe(6);
+    retainedOffset=previous;
+    expect(retainedOffset.some(offset=>offset<0)).toBe(true);
+
+
+   }
+   await pump();
+   expect(warnings()).toHaveLength(1);
+   press('继续');
+   await pump();
+   expect(warnings()).toHaveLength(0);
+   expect(state().at(-1)).toBe('articles');
+   if(retainedOffset)expect(translated()).toEqual(retainedOffset);
+   return;
+  }
   if(mode==='bluetooth-home-disclosure'){
    await network(true);
    expect(warning()).toBeUndefined();
@@ -272,7 +380,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     await pump(4);
     await network(true,0,'available');
    };
-   await network(true,120,'available');
+   await network(true,190,'available');
    expect(warnings()).toHaveLength(1);
    press('继续');
    await pump();
@@ -286,9 +394,15 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    defaultNetworkId='replacement';
    await network(true,80,'available');
    await foreground();
-   expect(warnings()).toHaveLength(0);
    await pump();
    expect(warnings()).toHaveLength(1);
+   const previous=warning()!.id;
+   await background();
+   defaultNetworkId='replacement-while-visible';
+   await foreground();
+   await pump();
+   expect(warnings()).toHaveLength(1);
+   expect(warning()!.id).not.toBe(previous);
    press('继续');
    await pump();
    await background();
@@ -342,6 +456,27 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    expect(warnings()).toHaveLength(1);
    return;
   }
+  if(mode==='bluetooth-idle-input'){
+   await network(true,2);
+   await tick(17,[__packTouch(1,116,130)]);
+   await tick(3100,[__packTouch(1,116,130)]);
+   expect(warning()).toBeUndefined();
+   await tick();
+   await tick(2999);
+   expect(warning()).toBeUndefined();
+   events.push({t:'axis',axis:0,delta:0});
+   await tick();
+   await tick(2999);
+   expect(warning()).toBeUndefined();
+   await tick(1,[],undefined,1);
+   await tick();
+   await tick(2999);
+   expect(warning()).toBeUndefined();
+   await tick(1);
+   expect(state().at(-1)).toBe('articles');
+   expect(warnings()).toHaveLength(1);
+   return;
+  }
   if(safeRoute){
    await network(true,50);
    expect(warning()).toBeUndefined();
@@ -351,18 +486,43 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     expect(warning()).toBeUndefined();
     await network(false);
     expect(warning()).toBeUndefined();
-    await network(true,50);
-    expect(warning()).toBeUndefined();
    }
+   await network(true);
    await assertOnce(safeRoute);
    return;
   }
   if(noteListLoad){
    expect(releaseNotes).toBeDefined();
    await network(true);
-   expect(warning()).toBeUndefined();
+   expect(warnings()).toHaveLength(1);
    releaseNotes!();
+   await pump();
+   expect(warnings()).toHaveLength(1);
    await assertOnce('notes');
+   return;
+  }
+  if(shareQuery){
+   expect(releaseShareQuery).toBeDefined();
+   press('分享');
+   await back();
+   expect(state().at(-1)).toBe('articles');
+   await network(true);
+   expect(warnings()).toHaveLength(1);
+   releaseShareQuery!();
+   await pump();
+   expect(displayed(article.link)).toBe(false);
+   await assertOnce('articles');
+   return;
+  }
+  if(restoredFeedStall){
+   expect(state()).toEqual(['home','articles']);
+   expect(releaseFeed).toBeDefined();
+   await back();
+   expect(displayed('Test feed')).toBe(true);
+   await network(true);
+   expect(warnings()).toHaveLength(1);
+   releaseFeed!();
+   await assertOnce('home');
    return;
   }
   if(noteDownload){
@@ -409,6 +569,8 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
      expect(displayed(article.link)).toBe(false);
     }else{
      expect(releaseShare).toBeDefined();
+     await back();
+     expect(state().at(-1)).toBe('articles');
      await network(true);
      expect(warning()).toBeUndefined();
      releaseShare!();
@@ -425,32 +587,20 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     if(operation==='delete'||operation==='move')await back();
     await back();
     expect(state().at(-1)).toBe(destination);
-   }else if(operation==='leave')await back();
-   await network(true);
-   expect(warnings()).toHaveLength(0);
-   if(workDeadline){
-    await tick(30_000);
-    expect(warnings()).toHaveLength(0);
-    await pump();
-    expect(warnings()).toHaveLength(1);
-    press('继续');
-    await pump();
-    releaseOperation!();
-    await pump();
-    await network(false);
-    await network(true);
-    expect(warnings()).toHaveLength(1);
-    return;
+   }else if(operation==='leave'||(rssAction&&writeFailure)){
+    if(operation==='delete')await back();
+    await back();
    }
+   await network(true);
+   expect(warnings()).toHaveLength(state().at(-1)===destination?1:0);
    const cancel=noteActionCancel||operation==='cancel';
    if(cancel)await network(false);
    releaseOperation!();
-   if(noteActionLeave){
-    await pump(58);
-    expect(warnings()).toHaveLength(0);
-    await pump(8);
-    expect(warnings()).toHaveLength(cancel?0:1);
-   }else await pump();
+   await pump();
+   expect(completedWrites).toBe(writeFailure?0:1);
+   if(writeFailure){
+    for(let i=0;i<2&&state().at(-1)!==destination;i++)await back();
+   }
    if(cancel){
     expect(state().at(-1)).toBe(destination);
     expect(warning()).toBeUndefined();
@@ -488,80 +638,144 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    expect(warning()).toBeUndefined();
    await back();
    expect(releaseVideoStop).toBeDefined();
-   expect(warning()).toBeUndefined();
+   expect(warnings()).toHaveLength(1);
    releaseVideoStop!();
    await assertOnce('articles');
    return;
   }
-  if(mode==='bluetooth-feed-open-with-warning'){
+  if(warningThenOpen){
    const open=pressHandler('Article');
    await network(true);
    expect(warnings()).toHaveLength(1);
-   // Deliver the article callback after the warning has reached the stack.
+   const close=pressHandler('继续');
    open();
    await pump();
    expect(releaseOperation).toBeDefined();
+   const dragging=mode.endsWith('-dragging');
+   const settling=mode.endsWith('-settling');
+   if(dragging||settling||mode.endsWith('-after-swipe')){
+    await tick(17,[__packTouch(1,46,46)]);
+    await tick(17,[__packTouch(1,165,46)]);
+    expect(visible().some(v=>v.offset===119&&v.opacity===1)).toBe(true);
+    if(!dragging)await tick();
+    if(mode.endsWith('-after-swipe'))await pump();
+   }
+   if(mode.endsWith('-continue'))close();
    releaseOperation!();
+   if(dragging){
+    await tick(17,[__packTouch(1,165,46)]);
+    expect(state().at(-1)).toBe('articles');
+    await tick();
+   }
    await pump();
-   expect(state().at(-1)).toBe('reader');
-   expect(warnings()).toHaveLength(0);
-   await back();
+   if(mode.endsWith('-error')){
+    expect(warnings()).toHaveLength(1);
+    close();
+    await pump();
+    expect(displayed('Error: fixture markRead failed')).toBe(true);
+   }else{
+    expect(state().at(-1)).toBe('reader');
+    if(mode.endsWith('-stale-continue'))close();
+    await pump();
+    expect(state().at(-1)).toBe('reader');
+    await back();
+   }
    expect(state().at(-1)).toBe('articles');
+   expect(warnings()).toHaveLength(0);
+   await network(true);
    expect(warnings()).toHaveLength(0);
    return;
   }
   if(slowArticleOpen){
+   const open=pressHandler('Article');
    press('Article');
-   await pump();
+   await pump(10);
    expect(releaseOperation).toBeDefined();
-   await network(true);
-   expect(warnings()).toHaveLength(0);
-   if(navigationBackground||navigationAccount){
-    if(navigationBackground){
-     events.push({t:'lifecycle',state:'background'});
-     await pump();
-     events.push({t:'lifecycle',state:'active'});
-     await pump(10);
-    }else{
-     accountRevision++;
-     notifyCloudAccountStatus();
-    }
-    await assertOnce('articles');
-    press('继续');
-    await pump();
-    releaseOperation!();
-    await pump();
-    expect(state()).toEqual(['home','articles']);
-    expect(displayed('Error: fixture markRead failed')).toBe(false);
+   if(mode.endsWith('-cloud-init'))disconnectAccount=connectCloudAccountStatus(()=>({
+    accountId:'',accountScope:'',accountRevision:0,message:'',usedBytes:0,quotaBytes:0,
+   }));
+   const rebound=mode.endsWith('-rebound');
+   if(rebound){
+    await tick(17,[__packTouch(1,46,46)]);
+    const held=[__packTouch(1,76,46)];
+    await network(true,0);
+    await tick(17,held);
+    for(let i=0;i<190;i++)await tick(17,held);
+    expect(visible().some(v=>v.offset===30&&v.opacity===1)).toBe(true);
     expect(warnings()).toHaveLength(0);
+    releaseOperation!();
+    for(let i=0;i<10;i++)await tick(17,held);
+    expect(state().at(-1)).toBe('articles');
+    await tick();
+    await pump();
+    expect(state()).toEqual(['home','articles','reader']);
+    await back();
+    await assertOnce('articles');
     return;
    }
-   await tick(30_000);
-   await pump();
-   const warningBeforeReply=warnings().length;
-   if(mode==='bluetooth-feed-open-slow-cancel'){
-    await back();
-    expect(state()).toEqual(['home']);
-    // Back releases the navigation gate even if markRead is still pending.
+   if(navigationBackground){
+    events.push({t:'lifecycle',state:'background'});
+    await network(true);
+    expect(warnings()).toHaveLength(0);
+    events.push({t:'lifecycle',state:'active'});
+   }else if(navigationAccount){
+    accountRevision++;
+    ownerChoiceRequired=true;
+    notifyCloudAccountStatus();
+    await network(true);
+    expect(warnings()).toHaveLength(0);
+    ownerChoiceRequired=false;
+    notifyCloudAccountStatus();
+   }
+   await network(true);
+   expect(warnings()).toHaveLength(1);
+   if(mode==='bluetooth-feed-open-slow'){
+    await tick(31_000);
     expect(warnings()).toHaveLength(1);
+   }
+   if(mode.endsWith('-destroy')){
+    stop();
     releaseOperation!();
     await pump();
-    expect(state()).toEqual(['home']);
-   }else{
-    releaseOperation!();
-    // Observe the result before the fallback warning can start a new idle interval.
-    await pump(20);
-    if(mode==='bluetooth-feed-open-slow-fail'){
-     expect(displayed('Error: fixture markRead failed')).toBe(true);
-     await assertOnce('articles');
-    }else{
-     if(warnings().length){press('继续');await pump();}
-     expect(state().at(-1)).toBe('reader');
-     await back();
-     await assertOnce('articles');
+    expect(warnings()).toHaveLength(0);
+    expect(state()).toEqual(['home','articles']);
+    return;
+   }
+   if(mode.endsWith('-back')||mode.endsWith('-reenter')){
+    await back();
+    await back();
+    expect(state().at(-1)).toBe('home');
+    if(mode.endsWith('-reenter')){
+     press('Test feed');
+     await pump();
+     expect(state().at(-1)).toBe('articles');
+     press('Article');
+     await pump();
+     expect(releaseSecondOpen).toBeDefined();
     }
    }
-   expect(warningBeforeReply).toBe(0);
+   if(mode.endsWith('-retry')){
+    open();
+    await pump();
+    expect(releaseSecondOpen).toBeDefined();
+   }
+   releaseOperation!();
+   await pump();
+   if(mode.endsWith('-fail')){
+    expect(warnings()).toHaveLength(1);
+    press('继续');
+    await pump();
+    expect(displayed('Error: fixture markRead failed')).toBe(true);
+   }else{
+    expect(state().at(-1)).toBe('reader');
+    releaseSecondOpen?.();
+    await pump();
+    expect(state().filter(page=>page==='reader')).toHaveLength(1);
+    expect(warnings()).toHaveLength(0);
+    await back();
+   }
+   await network(true);
+   expect(warnings()).toHaveLength(0);
    return;
   }
   if(rssProbe){
@@ -575,12 +789,13 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
      return;
     }
     await network(true);
-    expect(warning()).toBeUndefined();
+    expect(warnings()).toHaveLength(1);
     releaseFeed!();
-    await pump(10);
+    press('继续');
+    await pump();
     expect(displayed('Article')).toBe(true);
    }else{
-    if(mode==='bluetooth-feed-actions'){
+    if(mode.startsWith('bluetooth-feed-actions')){
      const title=connected().find(node=>texts.get(node.id)==='Article');
      expect(title).toBeDefined();
      for(let i=0;i<60;i++)await tick(17,[__packTouch(1,116,130)],[title!.id]);
@@ -589,15 +804,27 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     await pump();
     expect(releaseOperation).toBeDefined();
     await network(true);
-    expect(warning()).toBeUndefined();
+    expect(warnings()).toHaveLength(1);
+    const leave=mode==='bluetooth-feed-actions-leave';
+    if(leave){
+     await back();
+     await back();
+     expect(state()).toEqual(['home']);
+    }
     releaseOperation!();
     await pump();
-    if(mode==='bluetooth-feed-actions')expect(displayed('标为未读')).toBe(true);
+    if(mode.startsWith('bluetooth-feed-actions'))expect(displayed('标为未读')).toBe(true);
     else expect(state().at(-1)).toBe('reader');
     expect(warning()).toBeUndefined();
     await back();
+    if(leave){
+     expect(state()).toEqual(['home']);
+     expect(warnings()).toHaveLength(0);
+     return;
+    }
    }
-   await assertOnce('articles');
+   expect(state().at(-1)).toBe('articles');
+   expect(warnings()).toHaveLength(0);
    return;
   }
   if(noteActionsCase){
@@ -680,12 +907,24 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     expect(modalCalls).toEqual(['备忘录标题']);
     await network(true);
     expect(warning()).toBeUndefined();
-    resolveModal('Typed title');
+    resolveModal(emptyDraft?null:'Typed title');
     await pump();
     expect(modalCalls).toEqual(['备忘录标题','备忘录正文']);
     expect(warning()).toBeUndefined();
-    resolveModal('Typed body');
+    resolveModal(emptyDraft?null:'Typed body');
     await pump();
+    if(holdDraft){
+     expect(releaseOperation).toBeDefined();
+     expect(warning()).toBeUndefined();
+     releaseOperation!();
+     await pump();
+     if(writeFailure){
+      expect(state().at(-1)).toBe('note-detail');
+      expect(warning()).toBeUndefined();
+      press('关闭编辑，保存失败，请重试');
+      await pump();
+     }
+    }
    }else{
     events.push({t:'back'});
     await pump(5);
@@ -696,7 +935,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     await pump();
    }
    expect(warning()).toBeDefined();
-   if(mode==='bluetooth-modal')expect(savedDraft).toEqual({title:'Typed title',markdown:'Typed body'});
+   if(mode==='bluetooth-modal')expect(savedDraft).toEqual(emptyDraft?undefined:{title:'Typed title',markdown:'Typed body'});
    expect(state().at(-1)).toBe('notes');
    events.push({t:'back'});
    await pump();
@@ -807,6 +1046,26 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   expect(state().at(-1)).toBe('articles');
  }finally{disconnectAccount?.();removeEventProbe();stop();}
 });
+else if(hostPending)test(`reader saves with ${hostPending} occupied host operations`,async()=>{
+ const {delay,serviceResourceCounts}=await import('@podjs/framework/services');
+ for(let i=0;i<50;i++)await tick(8);
+ expect(state()).toEqual(['home','articles','reader']);
+ events.push({t:'axis',axis:0,delta:12000});
+ for(let i=0;i<6;i++)await tick(8);
+ const occupied=Array.from({length:hostPending-serviceResourceCounts().pending},()=>delay(90_000));
+ for(const request of occupied)void request.result.catch(()=>{});
+ try{
+  expect(serviceResourceCounts().pending).toBe(hostPending);
+  events.push({t:'back'});
+  for(let i=0;i<31;i++)await tick(8);
+  expect(exitTimerStarted).toBe(true);
+  expect(sqlCommits).toBe(1);
+ }finally{
+  for(const request of occupied)request.cancel();
+  removeEventProbe();
+  stop();
+ }
+});
 else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  for(let i=0;i<50;i++)await tick();
  expect(state()).toEqual(['home','articles','reader']);
@@ -843,15 +1102,23 @@ else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  expect(exitTimerStarted).toBe(true);
  expect(saveCalls).toBe(1);
  expect(pendingSave).toBeDefined();
- if(mode!=='timeout'&&!readerTimeout)pendingSave!();
+ if(mode!=='timeout'&&!readerTimeout&&!readerLate)pendingSave!();
  for(let i=0;i<180;i++)await tick();
  expect(state()).toEqual(['home','articles']);
  expect(visible().some(v=>v.opacity===1&&v.offset===0)).toBe(true);
- if(readerTimeout){
+ if(readerTimeout||readerLate){
   bluetooth=true;
   for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason:'available'}});
   for(let i=0;i<190;i++)await tick();
   expect(connected().filter(node=>node.domAttrs?.accessibilityLabel==='继续')).toHaveLength(1);
+  if(readerLate){
+   if(mode.endsWith('-reject'))rejectPendingSave!();
+   else pendingSave!();
+   for(let i=0;i<10;i++)await tick();
+   expect(completedSaves).toBe(mode.endsWith('-reject')?0:1);
+   expect(saveCalls).toBe(1);
+   expect(connected().filter(node=>node.domAttrs?.accessibilityLabel==='继续')).toHaveLength(1);
+  }
   events.push({t:'back'});
   for(let i=0;i<30;i++)await tick();
   expect(state()).toEqual(['home','articles']);

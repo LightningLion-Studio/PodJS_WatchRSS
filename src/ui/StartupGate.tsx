@@ -136,7 +136,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  const clock=useMinuteClock(()=>active()&&presetState()?.selection.mode==='SYSTEM');
  onCleanup(onLifecycleChange(value=>setActive(value==='active')));
  const preset=createMemo(()=>{const state=presetState();return state?.records.length?activeReaderPreset(state,clock()):defaultReaderPreset(undefined,undefined,true,settings.load().fontSizeSp);});
- type LegalEntry={page:StartupLegalPage;network:ReturnType<typeof createHostNetworkRecovery>;scroller?:Scroller;browseReady?:()=>boolean;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
+ type LegalEntry={page:StartupLegalPage;network:ReturnType<typeof createHostNetworkRecovery>;scroller?:Scroller;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
  type LegalRoute=LegalEntry|{page:"bluetooth-warning"};
  const initialLegal=untrack(props.restoreLegal);
  const [legal,setLegal]=createSignal<LegalRoute[]>(initialLegal.pages.map((page,index)=>({page,network:createHostNetworkRecovery(),restoredState:initialLegal.snapshots[index]??undefined,restoreMode:initialLegal.restoreModes?.[index]??'recreated'})));
@@ -162,7 +162,6 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   props.saveLegal({pages:documents.map(entry=>entry.page),snapshots:documents.map(entry=>entry.page==='beian'?null:entry.snapshot?.()??entry.restoredState??null)});
  };
  const cacheSnapshot=(entry:LegalEntry,snapshot:InformationSnapshot)=>{if(entry.page==='beian'||!legal().includes(entry))return;entry.restoredState=snapshot;saveLegal(legal());};
- const openLegal=(page:InformationPage)=>{if(warningShown()||motion.phase!=='idle')return;if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;legalContent()?.scroller?.stop();const entries=[...legal(),{page,network:createHostNetworkRecovery()}];saveLegal(entries);setLegal(entries);};
  const closeLegal=()=>{
   const entries=legal().slice(0,-1);
   motion.reset();
@@ -173,6 +172,17 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
    }
    setLegal(entries);
    setOffset(0);
+  });
+ };
+ const openLegal=(page:InformationPage)=>{
+  if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;
+  if(motion.phase!=='idle'&&!warningShown())return;
+  batch(()=>{
+   if(warningShown()){cancelActiveTouches();closeLegal();}
+   legalContent()?.scroller?.stop();
+   const entries=[...legal(),{page,network:createHostNetworkRecovery()}];
+   saveLegal(entries);
+   setLegal(entries);
   });
  };
  const legalNetwork=observeNetworkRecovery(()=>legalContent()?.network??warningNetwork);
@@ -208,21 +218,17 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   setPresetState(presets.setThemeMode(readerChrome(preset()).dark?'LIGHT':'DARK'));
   notifyReaderPresetsChanged();
  });
- let openingBrowser=false;
  const openLegalUrl=async(url:string)=>{
-  openingBrowser=true;
   try{await openBrowserUrl(url,'information',preset());}
   catch(error){setError(browserOpenFailureMessage(error));}
-  finally{openingBrowser=false;}
  };
  bindBluetoothWarningRoute(warningNetwork,{
   shown:warningShown,
-  idleRoute:()=>{
+  canShow:()=>{
    const entry=legalContent();
-   if(!entry||!active()||error()||legalNetwork().blocking||openingBrowser||motion.phase!=='idle')return;
-   if(entry.browseReady?.()!==true)return;
-   if(entry.scroller&&entry.scroller.state()!=='idle')return;
-   return entry;
+   return !!entry&&(entry.page==='privacy'||entry.page==='useragreement')
+    &&active()&&!error()&&!legalNetwork().blocking&&motion.phase==='idle'
+    &&(entry.scroller?.state()??'idle')==='idle';
   },
   push:()=>setLegal(entries=>[...entries,{page:'bluetooth-warning'}]),
   pop:()=>{cancelActiveTouches();closeLegal();},
@@ -235,9 +241,9 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   </View>
   <For each={legal()}>{entry=>entry.page==='bluetooth-warning'
    ? <View class="absolute inset-0 bg-black overflow-hidden" style={{translateX:offset()}}>
-      <BluetoothWarningPage width={width} height={height} onBack={()=>{if(warningShown()&&motion.phase==='idle')closeLegal();}}/>
+      <BluetoothWarningPage width={width} height={height} onBack={()=>{if(currentRoute()===entry&&motion.phase==='idle')closeLegal();}}/>
      </View>
-   : <NetworkRecoveryProvider network={entry.network} active={()=>legalContent()===entry&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={openLegalUrl} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;entry.browseReady=value.browseReady;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
+   : <NetworkRecoveryProvider network={entry.network} active={()=>legalContent()===entry&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={openLegalUrl} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
  </View>;
 }

@@ -9,7 +9,9 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'startup-ready-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const scenario=process.env.WRSS_STARTUP_FIXTURE;
-const legalCase=scenario==='bluetooth-legal';
+const firstRunAgreement=scenario==='bluetooth-first-run';
+const legalCase=scenario?.startsWith('bluetooth-')??false;
+const legalPage=scenario==='bluetooth-useragreement'?'useragreement':'privacy';
 let bluetooth=legalCase;
 const subscriptions=new Set<number>();
 let releaseLegal:(()=>void)|undefined;
@@ -23,7 +25,8 @@ for(const name of ['insertBefore','removeChild','setStyle','setImage','setSprite
 ops.destroyNode=(id:number)=>props.delete(id);
 ops.createNode=()=>next++;
 ops.setProp=(id:number,key:number,value:number)=>{let p=props.get(id);if(!p)props.set(id,p=new Map());p.set(key,value);};
-ops.setText=ops.replaceText=()=>{};
+const texts=new Map<number,string>();
+ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=()=>next++;ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
 const pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','host.lifecycle','text.layout',...(legalCase?['net.discovery','net.download','data.files.chunks','text.environment','text.raster']:[])]),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:unknown=null;const {method,id,args}=r;
@@ -80,8 +83,8 @@ const empty={saved:{},retained:{}};
 const contentState:ActivityState=captureActivityNavigation(empty,scenario==='settings'?[{page:'home'},{page:'settings'}]:
  legalCase||scenario==='feed'||scenario==='missing'?[{page:'home'},{page:'articles',channelId:scenario==='missing'?'missing':channel.id}]:[{page:'home'}]);
 const taskState=legalCase?captureLegalNavigation(captureIntro(contentState,{
- page:3,agreed:true,agreementError:false,offlineWarning:false,internet:'bluetooth',
-}),{pages:['privacy'],snapshots:[null]}):contentState;
+ page:firstRunAgreement?1:3,agreed:!firstRunAgreement,agreementError:false,offlineWarning:false,internet:'bluetooth',
+}),{pages:firstRunAgreement?[]:[legalPage],snapshots:firstRunAgreement?[]:[null]}):contentState;
 const state=()=>((activityStateHub.read().saved['watchrss.content-activity'] as {entries?:{page:string}[]}|undefined)?.entries??[]).map(entry=>entry.page);
 const released:{ms:number;pages:string[];articleDataReady:boolean;paintAcknowledged:boolean}[]=[],paint:number[]=[];
 let articleDataReady=false;
@@ -113,17 +116,18 @@ async function tick(touches:number[]=[]){
  (globalThis as unknown as {frame:(delta:number,analog:undefined,touches:number[])=>void}).frame(0,undefined,touches);
  for(let step=0;step<40;step++)await Promise.resolve();
 }
-if(legalCase)test('Bluetooth waits for a startup legal document and shares dismissal with content',async()=>{
- let mountedContent=0;
- const storage={get:()=>({oobeSeenVersion:0,privacyPolicyAgreedVersion:0}),set:()=>{}};
+if(legalCase)test(`startup Bluetooth advisory: ${scenario}`,async()=>{
+ let mountedContent=0,consentWrites=0;
+ const storage={get:()=>({oobeSeenVersion:0,privacyPolicyAgreedVersion:0}),set:()=>{consentWrites++;}};
  const stop=render(()=>{setStyleResolver(()=>0);return StartupGate({storage,content:()=>{mountedContent++;return WatchRSS({services});}});},{ops:ops as never});
- const labels=(text:string)=>{
-  const matches:number[]=[];
-  const walk=(node:typeof rootMirror)=>{if(node.domAttrs?.accessibilityLabel===text)matches.push(node.id);node.children.forEach(walk);};
+ const nodes=()=>{
+  const result:typeof rootMirror[]=[];
+  const walk=(node:typeof rootMirror)=>{result.push(node);node.children.forEach(walk);};
   walk(rootMirror);
-  return matches;
+  return result;
  };
- const pump=async(count=120)=>{for(let i=0;i<count;i++)await tick();};
+ const labels=(text:string)=>nodes().filter(node=>node.domAttrs?.accessibilityLabel===text).map(node=>node.id);
+ const pump=async(count=310)=>{for(let i=0;i<count;i++)await tick();};
  const activate=async(nodeId:number|undefined)=>{
   expect(nodeId).toBeDefined();
   events.push({t:'accessibility.action',nodeId,action:'activate'});
@@ -135,16 +139,47 @@ if(legalCase)test('Bluetooth waits for a startup legal document and shares dismi
   await pump();
  };
  try{
-  await pump();
-  expect(mountedContent).toBe(0);
-  expect(releaseLegal).toBeDefined();
-  expect(labels('继续')).toHaveLength(1);
-  releaseLegal!();
   await pump(50);
+  expect(mountedContent).toBe(0);
+  if(firstRunAgreement){
+   const checkbox=()=>{
+    const node=nodes().find(node=>node.domAttrs?.accessibilityLabel==='同意用户协议与隐私政策');
+    return (node?.domAttrs?.accessibilityState as {checked?:boolean}|undefined)?.checked;
+   };
+   expect(checkbox()).toBe(false);
+   let link=nodes().find(node=>texts.get(node.id)?.includes('用户协议'));
+   while(link&&!link.onPress)link=link.parent??undefined;
+   expect(link?.onPress).toBeDefined();
+   events.push({t:'accessibility.action',nodeId:-1,action:'activate'});
+   link!.onPress!();
+   await pump(20);
+   expect(releaseLegal).toBeDefined();
+   expect(labels('继续')).toHaveLength(0);
+   await pump();
+   expect(labels('继续')).toHaveLength(1);
+   releaseLegal!();
+   await activate(labels('继续')[0]);
+   expect(labels('协议正文')).toHaveLength(1);
+   expect(labels('继续')).toHaveLength(0);
+   events.push({t:'back'});
+   await pump();
+   expect(labels('协议正文')).toHaveLength(0);
+   expect(checkbox()).toBe(false);
+   await activate(labels('下一页')[0]);
+   expect(checkbox()).toBe(false);
+   expect(mountedContent).toBe(0);
+   expect(consentWrites).toBe(0);
+   return;
+  }
+  expect(releaseLegal).toBeDefined();
   expect(labels('继续')).toHaveLength(1);
   await pump();
   expect(labels('继续')).toHaveLength(2);
-  expect(restoreLegalNavigation(activityStateHub.read()).pages).toEqual(['privacy']);
+  releaseLegal!();
+  await pump();
+  expect(labels('继续')).toHaveLength(2);
+  expect(restoreLegalNavigation(activityStateHub.read()).pages).toEqual([legalPage]);
+  expect(consentWrites).toBe(0);
   const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
   for(const contacts of [[__packTouch(1,166,80)],[__packTouch(1,166,80),__packTouch(2,90,130)]]){
    await tick([__packTouch(1,46,80)]);

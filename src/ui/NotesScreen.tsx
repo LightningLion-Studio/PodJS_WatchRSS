@@ -40,7 +40,7 @@ import { resolvedReaderStyle, type ReaderPreset } from "../reader/preset.ts";
 import type { ReaderBackgroundSnapshot } from "../reader/background-assets.ts";
 
 export type NotesInput = ModalInput;
-interface BaseProps { repository: MemoRepository; withUiWork?: <T>(operation: () => Promise<T>) => Promise<T>; height:number; width:number; onError?:(message:string)=>void }
+interface BaseProps { repository: MemoRepository; height:number; width:number; onError?:(message:string)=>void }
 const fail = (props: BaseProps, error: unknown) => props.onError?.(error instanceof Error ? error.message : String(error));
 function preview(note: MemoNote): string { const lines=note.plainText.split("\n").map(v=>v.trim()).filter(Boolean); if(lines[0]===note.title.trim()) lines.shift(); return lines.join(" ").slice(0,120)||"暂无摘要"; }
 
@@ -53,8 +53,7 @@ export interface NotesListScreenProps extends BaseProps {
 export function NotesListScreen(props: NotesListScreenProps) {
   const [notes,setNotes]=createSignal<MemoNote[]>([]), [loaded,setLoaded]=createSignal(false);
   const [download,setDownload]=createSignal(false);
-  const [openingDownload,setOpeningDownload]=createSignal(false);
-  props.onBrowseReady?.(()=>loaded()&&!download()&&!openingDownload());
+  props.onBrowseReady?.(()=>!download());
   let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
   const phonePrompt=()=>measuredLines("下载手机端app以在手机上编辑和同步内容",props.width-2*padding-20,text=>getOps().measureText(text,22),2).join("\n");
@@ -98,7 +97,7 @@ export function NotesListScreen(props: NotesListScreenProps) {
   };
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} gap={gap} padding={padding} verticalPadding={verticalPadding} inputActive={()=>!download()} onTap={contact=>onTap(contact.x,contact.y)} onLongPress={contact=>onLongPress(contact.x,contact.y)} ref={handle=>{scroller=handle.scroller;roundStart=()=>handle.roundInsets?.().start??0;props.ref?.(handle);}}/>
-    <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onOpeningChange={setOpeningDownload} onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show>
+    <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show>
   </View></Show>;
 }
 
@@ -272,7 +271,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack,editing})}/><NoteEditButton width={props.width} height={props.height} active={()=>props.active!==false&&!download()} visible={editButtonVisible} backOffset={props.backOffset} onEdit={requestEdit} background={editBackground()} color={bodyColor()}/><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
-    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} withUiWork={props.withUiWork} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editing,editorClose});}}/>
+    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editing,editorClose});}}/>
   </Show></Show>;
 }
 
@@ -288,12 +287,9 @@ export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const act = async (operation: () => Promise<unknown>) => {
     if (busy()) return;
     setBusy(true);
-    const write = async () => {
+    try {
       await operation();
       (props.onWriteDone ?? props.onDone)();
-    };
-    try {
-      await (props.withUiWork ? props.withUiWork(write) : write());
     } catch (error) {
       fail(props, error);
     } finally {

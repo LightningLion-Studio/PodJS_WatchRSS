@@ -6,7 +6,6 @@ import type { RouteEntry } from "./types.ts";
 
 interface SavedControllerDependencies {
   services: AppServices;
-  trackUiWork: () => () => void;
   current: () => RouteEntry;
   setArticles: Setter<Article[]>;
   startPageLoading: () => () => void;
@@ -83,7 +82,6 @@ export function createSavedRouteController(
   async function removeSaved(item: SavedDisplayItem) {
     const type =
       dependencies.current().page === "saved" ? "favorite" : "watchLater";
-    const done = dependencies.trackUiWork();
     try {
       await dependencies.services.setSaveState(item.articleId!, type, false);
       clearSavedUndo();
@@ -104,8 +102,6 @@ export function createSavedRouteController(
       );
     } catch (error) {
       dependencies.setError(String(error));
-    } finally {
-      done();
     }
   }
 
@@ -114,26 +110,21 @@ export function createSavedRouteController(
     if (!undo) return;
     const origin = dependencies.current();
     clearSavedUndo();
-    const done = dependencies.trackUiWork();
     try {
       await dependencies.services.setSaveState(
         undo.item.articleId!,
         undo.type,
         true,
       );
-      done();
       if (dependencies.current() === origin) await loadSaved(undo.type);
     } catch (error) {
       dependencies.setError(String(error));
-    } finally {
-      done();
     }
   }
 
   async function reorderSaved(items: SavedDisplayItem[]) {
     const origin = dependencies.current();
     const type = origin.page === "saved" ? "favorite" : "watchLater";
-    const done = dependencies.trackUiWork();
     try {
       setSavedEntries(items);
       await dependencies.services.reorderSavedArticles(
@@ -142,10 +133,7 @@ export function createSavedRouteController(
       );
     } catch (error) {
       dependencies.setError(String(error));
-      done();
       if (dependencies.current() === origin) await loadSaved(type);
-    } finally {
-      done();
     }
   }
 

@@ -1,4 +1,4 @@
-import {createContext,createEffect,createSignal,onCleanup,untrack,useContext,Show,type JSX} from 'solid-js';
+import {batch,createContext,createEffect,createSignal,onCleanup,untrack,useContext,Show,type JSX} from 'solid-js';
 import {gestureResourceCounts} from '@pocketjs/framework/gesture';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import {__onHostEvent,lifecycle,onLifecycleChange} from '@podjs/framework/watch';
@@ -56,42 +56,39 @@ export function BluetoothWarningConnection(props:{children:JSX.Element}){
  return <BluetoothWarningContext.Provider value={network}>{props.children}</BluetoothWarningContext.Provider>;
 }
 
-const BLUETOOTH_WARNING_IDLE_MS=1000;
+const BLUETOOTH_WARNING_IDLE_MS=3000;
 
 export function bindBluetoothWarningRoute(network:NetworkRecovery,route:{
- shown:()=>boolean;idleRoute:()=>object|undefined;push:()=>void;pop:()=>void;
+ shown:()=>boolean;canShow:()=>boolean;push:()=>void;pop:()=>void;
 }){
  const connection=observeNetworkRecovery(()=>network);
  createEffect(()=>{
-  const status=connection().status;
-  if(route.shown()&&(status==='available'||status==='unavailable'))untrack(route.pop);
+  const current=connection();
+  // An eligible Bluetooth connection while the advisory is on the stack
+  // belongs to a new connection. Remove the previous connection's page first.
+  if(route.shown()&&(current.bluetooth||current.status==='available'||current.status==='unavailable'))
+   untrack(route.pop);
  });
 
- const candidate=()=>connection().bluetooth&&!route.shown()?route.idleRoute():undefined;
- let observedRoute:object|undefined,idleRoute:object|undefined,idleSince:number|undefined;
- const resetIdle=()=>{idleSince=undefined;};
- // Reset on reactive changes even if the host skips frames while the route is busy.
- createEffect(()=>{
-  const entry=candidate();
-  if(entry!==observedRoute)resetIdle();
-  observedRoute=entry;
- });
+ const candidate=()=>connection().bluetooth&&!route.shown()&&route.canShow();
+ let lastInput=Date.now();
+ let inputHeld=false;
+ const recordInput=()=>{lastInput=Date.now();};
  onCleanup(__onHostEvent(event=>{
   if(event.t==='axis'||event.t==='input.scroll'||event.t==='back'||event.t==='accessibility.action'
-   ||event.t==='touchCancel'||event.t==='lifecycle')resetIdle();
+   ||event.t==='touchCancel')recordInput();
  }));
  onFrame(buttons=>{
-  const entry=candidate();
-  if(entry!==idleRoute)resetIdle();
-  idleRoute=entry;
-  if(!entry||buttons||gestureResourceCounts().contacts>0){resetIdle();return;}
-  const now=Date.now();
-  if(idleSince===undefined||now<idleSince)idleSince=now;
-  if(now-idleSince<BLUETOOTH_WARNING_IDLE_MS)return;
-  route.push();
-  // Consume the advisory once it is on either stack.
-  if(route.shown())network.dismissBluetooth();
- },()=>candidate()!==undefined&&gestureResourceCounts().contacts===0);
+  const held=!!buttons||gestureResourceCounts().contacts>0;
+  if(held||inputHeld||Date.now()<lastInput)recordInput();
+  inputHeld=held;
+  if(held||!candidate()||Date.now()-lastInput<BLUETOOTH_WARNING_IDLE_MS)return;
+  batch(()=>{
+   route.push();
+   // Consume the advisory once it is on either stack.
+   if(route.shown())network.dismissBluetooth();
+  });
+ },candidate);
 }
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
