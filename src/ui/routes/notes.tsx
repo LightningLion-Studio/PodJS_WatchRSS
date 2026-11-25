@@ -74,6 +74,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
           }}
           input={(title, value, options) => props.services.input(title, value, options)}
           inputRecovery={props.services.inputRecovery}
+          onInputBusy={value => { props.entry.noteInputBusy = value; }}
           backOffset={props.backOffset}
           transitionIdle={props.transitionIdle}
           onCloseStart={() => { if (props.active()) props.cancelBack(); }}
@@ -85,7 +86,6 @@ export function NotesRoutes(props: NotesRoutesProps) {
               : undefined;
             props.entry.internalBack = value.goBack;
             props.entry.noteEditorBack = value.editorClose;
-            props.entry.noteEditing = value.editing;
           }}
         />
       </Show>

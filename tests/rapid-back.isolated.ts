@@ -7,9 +7,16 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const mode=process.env.RAPID_BACK_CASE??'4';
-const noteCase=mode==='bluetooth-modal'||mode==='bluetooth-note-close';
+const restoredNoteCase=mode==='bluetooth-note-restore';
+const noteCase=mode==='bluetooth-modal'||mode==='bluetooth-note-close'||restoredNoteCase;
+const noteActionsCase=mode==='note-actions';
+const rssSaveCase=mode==='bluetooth-rss-save';
 const searchCase=mode==='bluetooth-inline'||mode==='bluetooth-search-modal';
 let resolveModal!:(value:string)=>void,resolveInlineClose!:()=>void;
+let resolveFavorite:(()=>void)|undefined;
+let resolveTitlePending:((pending:boolean)=>void)|undefined;
+let titleRecoveryKey:string|undefined;
+let openedModalKey:string|undefined;
 const modalCalls:string[]=[];
 let inlineCloses=0,inlineOpens=0,inlineSession=0;
 let searchedFor:string|undefined;
@@ -59,20 +66,35 @@ const {activityStateHub}=await import('../src/navigation/activity-host.ts');
 const {captureActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const article={id:'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
 let pendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://example.com/rss'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>(r=>{pendingSave=r;});}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='openInlineInput'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
-if(noteCase){
+if(noteCase||noteActionsCase){
  const {memoRepository}=await import('../src/services.ts');
  memoRepository.initialize=async()=>{};
  memoRepository.list=async()=>[];
- memoRepository.save=async draft=>{
-  savedDraft={title:draft.title,markdown:draft.markdown};
-  return {noteId:'fixture-note',title:draft.title,markdown:draft.markdown,plainText:draft.markdown,createdAt:1,updatedAt:1,pinned:false} as any;
+ memoRepository.listFolders=async()=>[];
+ const existingNote={
+  noteId:'fixture-note',folderId:null,title:'Fixture note',markdown:'Fixture body',plainText:'Fixture body',
+  contentHash:'',baseContentHash:'',baseMarkdown:'',createdAt:1,updatedAt:1,modifiedBy:'fixture',
+  pinned:false,deleted:false,deletedAt:0,
  };
- services.input=(title:string)=>{
+ memoRepository.get=async()=>existingNote;
+ memoRepository.save=async draft=>{
+  savedDraft={title:draft.title??'',markdown:draft.markdown};
+  return {...existingNote,...savedDraft,plainText:draft.markdown};
+ };
+ services.input=(title:string,_value:string,options?:{restorationKey?:string})=>{
   modalCalls.push(title);
+  openedModalKey=options?.restorationKey;
   return new Promise<string>(resolve=>{resolveModal=resolve;});
  };
  services.inputRecovery={pending:async()=>false,dismiss:async()=>{}};
+ if(restoredNoteCase)services.inputRecovery.pending=(key:string)=>{
+  if(!key.endsWith(':note:title'))return Promise.resolve(false);
+  if(titleRecoveryKey)return Promise.resolve(true);
+  titleRecoveryKey=key;
+  return new Promise<boolean>(resolve=>{resolveTitlePending=resolve;});
+ };
 }
+if(rssSaveCase)services.setSaveState=()=>new Promise<void>(resolve=>{resolveFavorite=resolve;});
 if(searchCase){
  const {textInput}=await import('@podjs/framework/services');
  services.openInlineInput=mode==='bluetooth-inline'?textInput.openInline:undefined;
@@ -80,7 +102,9 @@ if(searchCase){
  services.searchArticles=async(_channelId:string,keyword:string)=>{searchedFor=keyword;return [];};
 }
 activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
- ?[{page:'home'},{page:'notes'},{page:'note-detail'}]
+ ?[{page:'home'},{page:'notes'},{page:'note-detail',noteId:restoredNoteCase?'fixture-note':undefined}]
+ :noteActionsCase?[{page:'home'},{page:'notes'},{page:'note-actions',noteId:'fixture-note'}]
+ :rssSaveCase?[{page:'home'},{page:'articles',channelId:'feed'},{page:'rss-actions',articleId:article.id}]
  :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
@@ -94,7 +118,7 @@ const state=()=>{const data:any=activityStateHub.read().saved['watchrss.content-
 const visible=()=>connected().filter(n=>props.get(n.id)?.has(128)).map(n=>({offset:props.get(n.id)!.get(128)!,opacity:props.get(n.id)!.get(69)??1}));
 const {expect,test}=await import('bun:test');
 const removeEventProbe=watch.__onHostEvent(event=>{if(event.t==='back')backEventsDelivered++;});
-if(mode.startsWith('bluetooth'))test(`production warning route: ${mode}`,async()=>{
+if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}`,async()=>{
  const pump=async(count=30)=>{for(let i=0;i<count;i++)await tick();};
  const network=async(value:boolean,frames=30)=>{
   bluetooth=value;
@@ -104,6 +128,54 @@ if(mode.startsWith('bluetooth'))test(`production warning route: ${mode}`,async()
  const warning=()=>connected().find(node=>node.domAttrs?.accessibilityLabel==='继续');
  try{
   await pump(50);
+  if(noteActionsCase){
+   expect(state().at(-1)).toBe('note-actions');
+   expect(connected().some(node=>node.domAttrs?.accessibilityLabel==='置顶')).toBe(true);
+   return;
+  }
+  if(rssSaveCase){
+   expect(state().at(-1)).toBe('rss-actions');
+   let button=connected().find(node=>texts.get(node.id)==='收藏');
+   while(button&&!button.onPress)button=button.parent;
+   expect(button?.onPress).toBeDefined();
+   button.onPress();
+   await pump();
+   expect(resolveFavorite).toBeDefined();
+   await network(true);
+   const warningWhileSaving=Boolean(warning());
+   resolveFavorite!();
+   await pump();
+   expect(state()).toEqual(['home','articles']);
+   expect(warningWhileSaving).toBe(false);
+   expect(warning()).toBeDefined();
+   events.push({t:'back'});
+   await pump();
+   expect(warning()).toBeUndefined();
+   expect(state()).toEqual(['home','articles']);
+   return;
+  }
+  if(restoredNoteCase){
+   expect(state().at(-1)).toBe('note-detail');
+   expect(resolveTitlePending).toBeDefined();
+   await network(true);
+   const warningWhileChecking=Boolean(warning());
+   resolveTitlePending!(true);
+   await pump();
+   expect(modalCalls).toEqual(['备忘录标题']);
+   expect(openedModalKey).toBe(titleRecoveryKey);
+   expect(warningWhileChecking).toBe(false);
+   expect(warning()).toBeUndefined();
+   resolveModal('Restored title');
+   await pump();
+   expect(modalCalls).toEqual(['备忘录标题','备忘录正文']);
+   expect(warning()).toBeUndefined();
+   resolveModal('Restored body');
+   await pump();
+   expect(savedDraft).toEqual({title:'Restored title',markdown:'Restored body'});
+   expect(state().at(-1)).toBe('note-detail');
+   expect(warning()).toBeDefined();
+   return;
+  }
   if(noteCase){
    expect(state().at(-1)).toBe('note-detail');
    if(mode==='bluetooth-modal'){

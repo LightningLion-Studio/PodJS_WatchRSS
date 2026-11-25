@@ -1035,12 +1035,12 @@ export default function WatchRSS(props: {
   async function deleteArticle() {
     const selected = article();
     if (!selected || busy()) return;
+    const origin = current();
     setBusy(true);
     try {
       await props.services.deleteArticle(selected.id);
       setArticles((items) => items.filter((item) => item.id !== selected.id));
-      popPage(true);
-      setArticle(null);
+      if (current() === origin && popPage(true)) setArticle(null);
       await loadChannels();
     } catch (e) {
       setError(String(e));
@@ -1055,6 +1055,7 @@ export default function WatchRSS(props: {
   ) {
     const selected = article();
     if (!selected || busy()) return;
+    const origin = current();
     setBusy(true);
     try {
       await props.services.setSaveState(selected.id, type, saved);
@@ -1073,7 +1074,7 @@ export default function WatchRSS(props: {
               ),
           ),
       );
-      if (navigateBack) popPage();
+      if (navigateBack && current() === origin) popPage();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1083,6 +1084,7 @@ export default function WatchRSS(props: {
   async function markArticleUnread() {
     const selected = article();
     if (!selected?.read || busy()) return;
+    const origin = current();
     setBusy(true);
     try {
       await props.services.markRead(selected.id, false);
@@ -1097,7 +1099,7 @@ export default function WatchRSS(props: {
             : c,
         ),
       );
-      popPage();
+      if (current() === origin) popPage();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1399,7 +1401,7 @@ export default function WatchRSS(props: {
   bindBluetoothWarningRoute(warningNetwork,{
     shown:warningShown,
     canPush:()=>resumeReady()&&foreground()&&recoveryEnabled(current())&&!networkPageBlocksSwipe()&&!disclosurePending()
-      && openInputs===0&&!current().noteEditing?.()
+      && !busy()&&openInputs===0&&!current().noteInputBusy?.()
       && readerLeaving!==current()&&!sideSwipe&&motion.phase==='idle'
       && (page()!=='video'||current().player?.canShowBluetoothWarning?.()===true),
     push:()=>{cancelActiveTouches();setPage('bluetooth-warning');},

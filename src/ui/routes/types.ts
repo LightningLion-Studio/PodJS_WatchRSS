@@ -105,7 +105,7 @@ export type RouteEntry = {
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   noteEditorBack?: () => void;
-  noteEditing?: () => boolean;
+  noteInputBusy?: () => boolean;
   player?: {
     reloadAttempts?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["reloadAttempts"];
     shellState?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellState"];

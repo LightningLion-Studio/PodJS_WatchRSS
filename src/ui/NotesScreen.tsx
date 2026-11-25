@@ -100,7 +100,7 @@ export function NotesListScreen(props: NotesListScreenProps) {
 }
 
 export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean; editing:()=>boolean; editorClose?:()=>void }
-export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
+export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onInputBusy?:(busy:()=>boolean)=>void; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
 
 function NoteEditButton(props:{width:number;height:number;active:()=>boolean;visible:()=>boolean;backOffset?:()=>number;onEdit:()=>void;background:string;color:string}) {
   const metrics=getDisplayMetrics();
@@ -237,13 +237,30 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   },()=>editPending);
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
   onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
-  let modalRecoveryChecked=false;
+  let modalRecoveryChecked=false,modalRecoveryChecking=false;
+  // The lookup can start before the reader has a scroller to register via ref.
+  props.onInputBusy?.(()=>!disposed&&(editing()||(
+    !!inputKey&&!!props.inputRecovery&&!modalRecoveryChecked&&(!loaded()||!!note())
+  )));
   createEffect(()=>{
-    if(!loaded()||editing()||props.active===false||!note()||!inputKey||!props.inputRecovery||modalRecoveryChecked)return;
-    modalRecoveryChecked=true;
-    void Promise.all(['title','body'].map(part=>props.inputRecovery!.pending(`${inputKey}:${part}`))).then(pending=>{
-      if(!disposed&&props.active!==false&&!editing()&&note()&&pending.some(Boolean)){setEditorSeed(note());setEditing(true);}
-    }).catch(()=>{});
+    const recovery=props.inputRecovery;
+    if(!loaded()||editing()||props.active===false||!note()||!inputKey||!recovery||modalRecoveryChecked||modalRecoveryChecking)return;
+    modalRecoveryChecking=true;
+    void (async()=>{
+      try{
+        const pending=await Promise.all(['title','body'].map(part=>recovery.pending(`${inputKey}:${part}`)));
+        if(disposed||props.active===false)return;
+        modalRecoveryChecked=true;
+        if(!editing()&&note()&&pending.some(Boolean)){
+          setEditorSeed(note());
+          setEditing(true);
+        }
+      }catch{
+        modalRecoveryChecked=true;
+      }finally{
+        modalRecoveryChecking=false;
+      }
+    })();
   });
   createEffect(on(()=>props.refreshKey,()=>{if(!editing()&&props.noteId)void reload(props.noteId);},{defer:true}));
   const entries=createMemo<ScrollEntry[]>(()=>{ const n=note(); if(!n)return[]; const titleStyle=titleFont(),subtitleStyle=subtitleFont(),contentWidth=props.width-28,titleWidth=Math.min(190,contentWidth);const titleLines=watchTitleLines(n.title||"未命名笔记",contentWidth,value=>getOps().measureText(value,titleStyle.fontSlot)*titleStyle.scale);const measured=nativeHeader(),titleHeight=Math.max(32,measured?.title??titleLines.length*titleStyle.lineHeight),subtitleHeight=Math.max(22,measured?.subtitle??subtitleStyle.lineHeight),pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;return [
@@ -278,7 +295,7 @@ export function NoteActionsScreen(props: NoteActionsScreenProps) {
     return [{height:48,bounds:pill,render:()=>button(note()?.pinned?"取消置顶":"置顶",()=>void act(()=>props.repository.setPinned(props.noteId,!note()?.pinned)),false,!!note())},{height:48,bounds:pill,render:()=>button("移动到…",()=>setSelectingFolder(true),false,!!note())},{height:48,bounds:pill,render:()=>button("删除",()=>setConfirmDelete(true),true,!!note())},{height:48,bounds:pill,render:()=>button("取消",props.onDone)}];
   });
   const goBack=()=>{if(confirmDelete()){setConfirmDelete(false);return true;}if(selectingFolder()){setSelectingFolder(false);return true;}return false;};
-  return <View class="absolute inset-0 bg-black"><ScrollEntries height={props.height} entries={entries()} gap={8} padding={9} verticalPadding={22} inputActive={()=>!confirmDelete()&&!busy()} ref={value=>props.ref?.({...value,goBack,editing})}/><Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除备忘录" message="删除后会从本机和下次同步中移除此备忘录" busy={busy()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void act(()=>props.repository.delete(props.noteId))}/></Show></View>;
+  return <View class="absolute inset-0 bg-black"><ScrollEntries height={props.height} entries={entries()} gap={8} padding={9} verticalPadding={22} inputActive={()=>!confirmDelete()&&!busy()} ref={value=>props.ref?.({...value,goBack})}/><Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除备忘录" message="删除后会从本机和下次同步中移除此备忘录" busy={busy()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void act(()=>props.repository.delete(props.noteId))}/></Show></View>;
 }
 
 export const NotesScreen = NotesListScreen;
