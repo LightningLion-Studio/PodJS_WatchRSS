@@ -19,6 +19,7 @@ const readerTimeout=mode==='reader-timeout-warning'||mode==='reader-background-t
 const workDeadline=mode==='bluetooth-note-action-pin-leave-deadline';
 const rssAction=mode.startsWith('bluetooth-rss-action-');
 const rssProbe=mode.startsWith('bluetooth-feed-');
+const slowArticleOpen=mode.startsWith('bluetooth-feed-open-slow');
 const rssFromReader=mode==='bluetooth-feed-reload';
 const videoCase=mode==='bluetooth-video-pan';
 const shareSystem=mode==='bluetooth-rss-action-system';
@@ -163,7 +164,9 @@ if(rssAction){
  services.markRead=deferOperation;
  services.deleteArticle=deferOperation;
 }
-if(mode==='bluetooth-feed-open')services.markRead=deferOperation;
+if(mode==='bluetooth-feed-open'||mode==='bluetooth-feed-open-with-warning'||slowArticleOpen)services.markRead=()=>new Promise<void>((resolve,reject)=>{
+ releaseOperation=mode==='bluetooth-feed-open-slow-fail'?()=>reject(new Error('fixture markRead failed')):resolve;
+});
 if(mode==='bluetooth-feed-actions')services.getArticle=async()=>{await deferOperation();return article;};
 if(rssFromReader)services.listArticles=async()=>{
  await new Promise<void>(resolve=>{releaseFeed=resolve;});
@@ -201,13 +204,14 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
  };
  const warnings=()=>connected().filter(node=>node.domAttrs?.accessibilityLabel==='继续');
  const warning=()=>warnings()[0];
- const press=(label:string)=>{
+ const pressHandler=(label:string)=>{
   let node=connected().find(node=>node.domAttrs?.accessibilityLabel===label&&node.onPress)
     ?? connected().find(node=>texts.get(node.id)===label);
   while(node&&!node.onPress)node=node.parent;
   expect(node?.onPress,label).toBeDefined();
-  node.onPress();
+  return node.onPress as ()=>void;
  };
+ const press=(label:string)=>pressHandler(label)();
  const back=async()=>{events.push({t:'back'});await pump();};
  const displayed=(text:string)=>connected().some(node=>{
   if(texts.get(node.id)!==text&&node.domAttrs?.accessibilityLabel!==text)return false;
@@ -460,6 +464,57 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    expect(warning()).toBeUndefined();
    releaseVideoStop!();
    await assertOnce('articles');
+   return;
+  }
+  if(mode==='bluetooth-feed-open-with-warning'){
+   const open=pressHandler('Article');
+   await network(true);
+   expect(warnings()).toHaveLength(1);
+   // Deliver the article callback after the warning has reached the stack.
+   open();
+   await pump();
+   expect(releaseOperation).toBeDefined();
+   releaseOperation!();
+   await pump();
+   expect(state().at(-1)).toBe('reader');
+   expect(warnings()).toHaveLength(0);
+   await back();
+   expect(state().at(-1)).toBe('articles');
+   expect(warnings()).toHaveLength(0);
+   return;
+  }
+  if(slowArticleOpen){
+   press('Article');
+   await pump();
+   expect(releaseOperation).toBeDefined();
+   await network(true);
+   expect(warnings()).toHaveLength(0);
+   await tick(30_000);
+   await pump();
+   const warningBeforeReply=warnings().length;
+   if(mode==='bluetooth-feed-open-slow-cancel'){
+    await back();
+    expect(state()).toEqual(['home']);
+    // Back releases the navigation gate even if markRead is still pending.
+    expect(warnings()).toHaveLength(1);
+    releaseOperation!();
+    await pump();
+    expect(state()).toEqual(['home']);
+   }else{
+    releaseOperation!();
+    // Observe the result before the fallback warning can start a new idle interval.
+    await pump(20);
+    if(mode==='bluetooth-feed-open-slow-fail'){
+     expect(displayed('Error: fixture markRead failed')).toBe(true);
+     await assertOnce('articles');
+    }else{
+     if(warnings().length){press('继续');await pump();}
+     expect(state().at(-1)).toBe('reader');
+     await back();
+     await assertOnce('articles');
+    }
+   }
+   expect(warningBeforeReply).toBe(0);
    return;
   }
   if(rssProbe){

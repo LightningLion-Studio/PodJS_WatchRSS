@@ -32,7 +32,7 @@ import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('screen');
-const UI_WORK_MAX_MS=30_000;
+const BACKGROUND_WRITE_MAX_MS=30_000;
 import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
 import { supportsSystemShare, openSystemShare } from "../sharing/host.ts";
 import { routeShare, type ShareHandler } from "../sharing/policy.ts";
@@ -208,11 +208,11 @@ export default function WatchRSS(props: {
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
   const [pendingUiWork,setPendingUiWork]=createSignal(0);
   const uiWorkReleases=new Set<()=>void>();
-  const trackUiWork=()=>{
-    const deadline=delay(UI_WORK_MAX_MS);
+  const trackUiWork=(kind?:"background-write")=>{
+    const deadline=kind==="background-write"?delay(BACKGROUND_WRITE_MAX_MS):undefined;
     const done=()=>{
       if(!uiWorkReleases.delete(done))return;
-      try{deadline.cancel();}
+      try{deadline?.cancel();}
       catch(error){logConsole.warn("Failed to cancel UI work deadline",error);}
       finally{setPendingUiWork(count=>count-1);}
     };
@@ -223,18 +223,48 @@ export default function WatchRSS(props: {
       logConsole.warn(message);
       done();
     };
-    void deadline.result.then(
-      ()=>expire(`UI work exceeded ${UI_WORK_MAX_MS}ms; releasing Bluetooth warning gate`),
+    void deadline?.result.then(
+      ()=>expire(`UI work exceeded ${BACKGROUND_WRITE_MAX_MS}ms; releasing Bluetooth warning gate`),
       ()=>expire("UI work deadline failed; releasing Bluetooth warning gate"),
     );
     return done;
   };
   onCleanup(()=>{for(const done of uiWorkReleases)done();});
-  const withUiWork=async <T,>(operation:()=>Promise<T>):Promise<T>=>{
-    const done=trackUiWork();
+  const withUiWork=async <T,>(operation:()=>Promise<T>,kind?:"background-write"):Promise<T>=>{
+    const done=trackUiWork(kind);
     try{return await operation();}
     finally{done();}
   };
+  let pendingNavigation:{origin:Entry;done:()=>void}|undefined;
+  createEffect(()=>{
+    const route=contentRoute();
+    if(pendingNavigation&&pendingNavigation.origin!==route)pendingNavigation.done();
+  });
+  onCleanup(()=>pendingNavigation?.done());
+  function beginNavigation(showBusy=false) {
+    const origin=contentRoute();
+    const release=trackUiWork();
+    pendingNavigation?.done();
+    const active=()=>pendingNavigation===intent&&contentRoute()===origin&&foreground()&&
+      (warningShown()||motion.phase==="idle");
+    const revealOrigin=()=>{
+      if(!active())return false;
+      // A warning above the origin must not turn a completed navigation into a no-op.
+      if(warningShown())removeWarningRoute();
+      return true;
+    };
+    const done=()=>{
+      if(pendingNavigation===intent){
+        pendingNavigation=undefined;
+        if(showBusy)setBusy(false);
+      }
+      release();
+    };
+    const intent={origin,done};
+    pendingNavigation=intent;
+    if(showBusy)setBusy(true);
+    return {active,revealOrigin,done};
+  }
   const routeServices:AppServices=Object.assign(Object.create(props.services),{
     input:(...args:Parameters<AppServices['input']>)=>withUiWork(()=>props.services.input(...args)),
     openInlineInput:props.services.openInlineInput&&
@@ -276,7 +306,7 @@ export default function WatchRSS(props: {
     // The guard releases navigation at its deadline while the write may still run.
     let done:(()=>void)|undefined;
     guard.begin(entry,()=>{
-      done=trackUiWork();
+      done=trackUiWork(context==="background"?"background-write":undefined);
       return reader.flushProgress();
     },outcome=>{
       try{
@@ -507,7 +537,7 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
-    trackUiWork,
+    trackUiWork:()=>trackUiWork("background-write"),
     current,
     setArticles,
     setLoading,
@@ -982,15 +1012,20 @@ export default function WatchRSS(props: {
   async function go(next: Page) {
     if (motion.phase !== "idle") return;
     if (next === "notes") {
-      setBusy(true);
+      const navigation=beginNavigation(true);
       try {
         await memoRepository.initialize();
+        if(navigation.revealOrigin()){
+          setPage(next);
+          kv.set("page", next);
+          setLoading(false);
+        }
       } catch (e) {
-        setError(String(e));
-        return;
+        if(navigation.revealOrigin())setError(String(e));
       } finally {
-        setBusy(false);
+        navigation.done();
       }
+      return;
     }
     setPage(next);
     kv.set("page", next);
@@ -1002,7 +1037,6 @@ export default function WatchRSS(props: {
     }
     if (next === "saved" || next === "watch-later")
       await loadSaved(next === "saved" ? "favorite" : "watchLater");
-    if (next === "notes") setLoading(false);
     if (
       [
         "phone-connection",
@@ -1018,20 +1052,17 @@ export default function WatchRSS(props: {
     )
       setLoading(false);
   }
-  let articleOpenRevision=0;
-  onCleanup(()=>{articleOpenRevision++;});
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
-    const done=trackUiWork();
-    const origin=stack(),revision=++articleOpenRevision;
-    const active=()=>revision===articleOpenRevision&&stack()===origin&&foreground()&&motion.phase==="idle";
-    const previousReader=replaceReader&&current().page==="reader"?current():undefined;
+    const navigation=beginNavigation();
+    const origin=contentRoute();
+    const previousReader=replaceReader&&origin.page==="reader"?origin:undefined;
     try {
       const full = await props.services.getArticle(item.id,article());
-      if(!active())return;
+      if(!navigation.active())return;
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
       if(available)await props.services.markRead(item.id);
-      if(!active())return;
+      if(!navigation.revealOrigin())return;
       setArticle({ ...full, read });
       // Reopening an already-read article must not rebuild the retained feed
       // and synchronously remeasure every card for an unchanged read flag.
@@ -1049,13 +1080,13 @@ export default function WatchRSS(props: {
       }));
       if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
-      if(active())setError(String(e));
+      if(navigation.revealOrigin())setError(String(e));
     } finally {
-      done();
+      navigation.done();
     }
   }
   const beginRssAction = () => {
-    const done = trackUiWork();
+    const done = trackUiWork("background-write");
     setBusy(true);
     return () => {
       setBusy(false);
@@ -1064,18 +1095,17 @@ export default function WatchRSS(props: {
   };
   async function openArticleActions(item: Article) {
     if (busy()) return;
-    const origin = current();
-    const done = beginRssAction();
+    const navigation=beginNavigation(true);
     try {
       const full = await props.services.getArticle(item.id,article());
-      if (current() === origin) {
+      if (navigation.revealOrigin()) {
         setArticle(full ?? item);
         setPage("rss-actions");
       }
     } catch (e) {
-      setError(String(e));
+      if(navigation.revealOrigin())setError(String(e));
     } finally {
-      done();
+      navigation.done();
     }
   }
   async function deleteArticle() {
@@ -1179,20 +1209,21 @@ export default function WatchRSS(props: {
   }
   async function openChannelSettings(id: string) {
     if (busy()) return;
-    const origin = current();
-    const done = beginRssAction();
+    const navigation=beginNavigation(true);
     try {
       const [enabled, playback] = await Promise.all([
         props.services.getChannelOriginalMode(id),
         props.services.getChannelPlaybackSettings(id),
       ]);
-      setOriginalModes((m) => ({ ...m, [id]: enabled }));
-      setChannelPlayback((m) => ({ ...m, [id]: playback }));
-      if (current() === origin) setPage("channel-settings", { channelId: id });
+      if (navigation.revealOrigin()) {
+        setOriginalModes((m) => ({ ...m, [id]: enabled }));
+        setChannelPlayback((m) => ({ ...m, [id]: playback }));
+        setPage("channel-settings", { channelId: id });
+      }
     } catch (e) {
-      setError(String(e));
+      if(navigation.revealOrigin())setError(String(e));
     } finally {
-      done();
+      navigation.done();
     }
   }
   async function channelAction(
@@ -1442,7 +1473,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  const removeWarningRoute=()=>{cancelActiveTouches();finishPopPage(current());};
+  function removeWarningRoute(){cancelActiveTouches();finishPopPage(current());}
   createEffect(()=>{if(cloudOwnerChoice()&&warningShown())untrack(removeWarningRoute);});
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
@@ -1886,7 +1917,7 @@ export default function WatchRSS(props: {
             />
             <NotesRoutes
               onStateChange={saveActivity}
-              withUiWork={withUiWork}
+              withUiWork={operation=>withUiWork(operation,"background-write")}
               entry={entry}
               page={entryPage}
               active={active}
