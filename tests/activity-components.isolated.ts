@@ -176,11 +176,8 @@ test('production player exposes persistent loop controls, changes the running ho
  nativeVideoSample={completedLoops:3,positionMs:25};fireVideoPoll();await turn();
  nativeVideoSample={completedLoops:4,positionMs:10};fireVideoPoll();await turn();
  expect(checkpoints.filter(c=>c==='ready')).toHaveLength(1);expect(checkpoints.filter(c=>c==='ended')).toHaveLength(1);expect(progress).toEqual([0]);
- expect(handle.canShowBluetoothWarning()).toBe(false);
  await handle.shellPlaying(false);
- expect(handle.canShowBluetoothWarning()).toBe(true);
  await handle.shellPlaying(true);
- expect(handle.canShowBluetoothWarning()).toBe(false);
  f.dispose();nativeVideoSample={};
  const b=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source:{title:'Bili',url:'bili-again',platform:'bili'},width:233,height:233,active:true,offset:0,round:true,ref:v=>handle=v}));
  await turn();expect(handle.loopMode()).toBe('single');expect(prepareLoops.at(-1)).toBe(true);handle.cycleLoopMode();await turn();expect(loopCalls.at(-1)).toBe(false);b.dispose();loopKv.clear();

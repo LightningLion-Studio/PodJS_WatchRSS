@@ -135,6 +135,7 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
           onMoveNotesToTop={props.moveNotesToTop}
           onToggleNotesPinned={props.toggleNotesPinned}
           onBeian={() => props.openInformation("beian")}
+          onBrowseReady={ready=>{props.entry.browseReady=ready;}}
           ref={(value) => (props.entry.list = value)}
         />
       </Show>

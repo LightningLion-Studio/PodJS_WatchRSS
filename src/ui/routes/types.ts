@@ -105,7 +105,7 @@ export type RouteEntry = {
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   noteEditorBack?: () => void;
-  noteInputBusy?: () => boolean;
+  browseReady?: () => boolean;
   player?: {
     reloadAttempts?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["reloadAttempts"];
     shellState?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellState"];
@@ -114,7 +114,6 @@ export type RouteEntry = {
     previewKind?: ()=>"actual_frame"|"cover"|undefined;
     onCrown: (delta: number) => boolean;
     canSwipeBack?: () => boolean;
-    canShowBluetoothWarning?: () => boolean;
     gestureRotation?: () => number;
     /** Claims right-to-left drags only (the player's detail panel); left-to-right stays Back. */
     sideSwipe?: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel?(): void };

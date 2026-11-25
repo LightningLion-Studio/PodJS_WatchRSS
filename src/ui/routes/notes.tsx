@@ -46,6 +46,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
           height={props.height}
           repository={memoRepository}
           refreshKey={props.refreshKey()}
+          onBrowseReady={ready=>{props.entry.browseReady=ready;}}
           onOpenNote={(noteId) => props.setPage("note-detail", { noteId })}
           onCreateNote={() => props.setPage("note-detail")}
           onOpenActions={(noteId) => props.setPage("note-actions", { noteId })}
@@ -74,7 +75,6 @@ export function NotesRoutes(props: NotesRoutesProps) {
           }}
           input={(title, value, options) => props.services.input(title, value, options)}
           inputRecovery={props.services.inputRecovery}
-          onInputBusy={value => { props.entry.noteInputBusy = value; }}
           backOffset={props.backOffset}
           transitionIdle={props.transitionIdle}
           onCloseStart={() => { if (props.active()) props.cancelBack(); }}

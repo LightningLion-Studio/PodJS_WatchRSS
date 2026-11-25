@@ -47,17 +47,20 @@ function preview(note: MemoNote): string { const lines=note.plainText.split("\n"
 export interface NotesListScreenProps extends BaseProps {
   onOpenNote:(noteId:string)=>void; onCreateNote:()=>void; onOpenActions:(noteId:string)=>void;
   refreshKey?:number;
+  onBrowseReady?:(ready:()=>boolean)=>void;
   ref?:(value:{scroller:Scroller})=>void;
 }
 export function NotesListScreen(props: NotesListScreenProps) {
   const [notes,setNotes]=createSignal<MemoNote[]>([]), [loaded,setLoaded]=createSignal(false);
-  const [download,setDownload]=createSignal(false);
+  const [download,setDownload]=createSignal(false),[reading,setReading]=createSignal(true);
+  const [openingDownload,setOpeningDownload]=createSignal(false);
+  props.onBrowseReady?.(()=>!reading()&&!download()&&!openingDownload());
   let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
   const phonePrompt=()=>measuredLines("下载手机端app以在手机上编辑和同步内容",props.width-2*padding-20,text=>getOps().measureText(text,22),2).join("\n");
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
-  const load=async()=>{const version=++readVersion;try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion)setLoaded(true);}};
+  const load=async()=>{const version=++readVersion;setReading(true);try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion){setLoaded(true);setReading(false);}}};
   onMount(()=>void load());
   createEffect(on(()=>props.refreshKey,()=>void load(),{defer:true}));
   const cardLayouts=createMemo(()=>notes().map(note=>{
@@ -95,12 +98,12 @@ export function NotesListScreen(props: NotesListScreenProps) {
   };
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} gap={gap} padding={padding} verticalPadding={verticalPadding} inputActive={()=>!download()} onTap={contact=>onTap(contact.x,contact.y)} onLongPress={contact=>onLongPress(contact.x,contact.y)} ref={handle=>{scroller=handle.scroller;roundStart=()=>handle.roundInsets?.().start??0;props.ref?.(handle);}}/>
-    <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show>
+    <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onOpeningChange={setOpeningDownload} onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show>
   </View></Show>;
 }
 
 export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean; editing:()=>boolean; editorClose?:()=>void }
-export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onInputBusy?:(busy:()=>boolean)=>void; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
+export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
 
 function NoteEditButton(props:{width:number;height:number;active:()=>boolean;visible:()=>boolean;backOffset?:()=>number;onEdit:()=>void;background:string;color:string}) {
   const metrics=getDisplayMetrics();
@@ -238,10 +241,6 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
   onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
   let modalRecoveryChecked=false,modalRecoveryChecking=false;
-  // The lookup can start before the reader has a scroller to register via ref.
-  props.onInputBusy?.(()=>!disposed&&(editing()||(
-    !!inputKey&&!!props.inputRecovery&&!modalRecoveryChecked&&(!loaded()||!!note())
-  )));
   createEffect(()=>{
     const recovery=props.inputRecovery;
     if(!loaded()||editing()||props.active===false||!note()||!inputKey||!recovery||modalRecoveryChecked||modalRecoveryChecking)return;

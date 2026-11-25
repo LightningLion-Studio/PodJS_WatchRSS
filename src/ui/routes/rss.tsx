@@ -264,6 +264,7 @@ export function RssRoutes(props: RssRoutesProps) {
           }
           onRefresh={() => void props.refresh()}
           onNext={props.loadMoreFeedArticles}
+          onBrowseReady={ready=>{props.entry.browseReady=ready;}}
           ref={(value) => (props.entry.list = value)}
         />
       </Show>

@@ -1,5 +1,4 @@
 import {BluetoothWarningPage} from './NetworkUnavailableOverlay.tsx';
-import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {bindBluetoothWarningRoute,BluetoothWarningConnection,useBluetoothWarningConnection,createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer,observeNetworkRecovery} from './network-recovery.tsx';
 import {activityStateHub} from '../navigation/activity-host.ts';
@@ -137,7 +136,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  const clock=useMinuteClock(()=>active()&&presetState()?.selection.mode==='SYSTEM');
  onCleanup(onLifecycleChange(value=>setActive(value==='active')));
  const preset=createMemo(()=>{const state=presetState();return state?.records.length?activeReaderPreset(state,clock()):defaultReaderPreset(undefined,undefined,true,settings.load().fontSizeSp);});
- type LegalEntry={page:StartupLegalPage;network:ReturnType<typeof createHostNetworkRecovery>;scroller?:Scroller;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
+ type LegalEntry={page:StartupLegalPage;network:ReturnType<typeof createHostNetworkRecovery>;scroller?:Scroller;browseReady?:()=>boolean;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
  type LegalRoute=LegalEntry|{page:"bluetooth-warning"};
  const initialLegal=untrack(props.restoreLegal);
  const [legal,setLegal]=createSignal<LegalRoute[]>(initialLegal.pages.map((page,index)=>({page,network:createHostNetworkRecovery(),restoredState:initialLegal.snapshots[index]??undefined,restoreMode:initialLegal.restoreModes?.[index]??'recreated'})));
@@ -164,13 +163,11 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  };
  const cacheSnapshot=(entry:LegalEntry,snapshot:InformationSnapshot)=>{if(entry.page==='beian'||!legal().includes(entry))return;entry.restoredState=snapshot;saveLegal(legal());};
  const openLegal=(page:InformationPage)=>{if(warningShown()||motion.phase!=='idle')return;if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;legalContent()?.scroller?.stop();const entries=[...legal(),{page,network:createHostNetworkRecovery()}];saveLegal(entries);setLegal(entries);};
- const closeLegal=(dismissWarning=true)=>{
+ const closeLegal=()=>{
   const entries=legal().slice(0,-1);
   motion.reset();
   batch(()=>{
-   if(warningShown()){
-    if(dismissWarning)warningNetwork.dismissBluetooth();
-   }else{
+   if(!warningShown()){
     legalContent()?.scroller?.stop();
     saveLegal(entries);
    }
@@ -179,12 +176,6 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   });
  };
  const legalNetwork=observeNetworkRecovery(()=>legalContent()?.network??warningNetwork);
- bindBluetoothWarningRoute(warningNetwork,{
-  shown:warningShown,
-  canPush:()=>active()&&!!legalContent()&&!error()&&!legalNetwork().blocking&&offset()===0&&motion.phase==='idle',
-  push:()=>{cancelActiveTouches();legalContent()?.scroller?.stop();setLegal(entries=>[...entries,{page:'bluetooth-warning'}]);},
-  pop:()=>{cancelActiveTouches();closeLegal(false);},
- });
  const operate=(action:()=>void)=>{try{action();setError('');}catch(error){report(error);}};
  const finish=()=>{if(props.onExit){props.onExit();return;}void application.finishTask().catch(report);};
  createEffect(()=>{if(destination()==='intro'){let first=true;const restoredNetwork=untrack(()=>props.session.intro.internet!=='checking');onCleanup(observeHostInternet(status=>{const skip=first&&status==='checking'&&restoredNetwork;first=false;if(!skip)props.controller.dispatch({type:'internet',status});}));}});
@@ -203,16 +194,10 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   const scroller=top?top.scroller:(destination()==='intro'?introHandle?.scroller():privacyScroller);
   scroller?.scrollBy(delta*48/(12*RelativeAxisUnits.PerDegree),{durMs:120});
  }));
- createGesture({region:{rect:()=>!warningShown()&&legalContent()&&active()&&!legalContent()?.network.blocking&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
-  onPanStart:c=>{legalContent()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
+ createGesture({region:{rect:()=>currentRoute()&&active()&&!error()&&(warningShown()||!legalContent()?.network.blocking)&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
+  onPanStart:c=>{if(!warningShown())legalContent()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
   onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),
   onCancel:()=>{if(motion.phase==='dragging')motion.release(0,Date.now(),true);}});
- createGesture(rightSwipeBack({rect:()=>warningShown()&&active()&&!error()&&motion.phase==='idle'?{x:0,y:0,w:width,h:height}:null},{
-  start(dx){motion.begin(dx);setOffset(motion.offset);},
-  move(dx){motion.move(dx);setOffset(motion.offset);},
-  end(vx){motion.release(vx,Date.now());},
-  cancel(){motion.release(0,Date.now(),true);},
- }));
  onFrame(()=>{
   if(motion.phase==='settling'){const result=motion.tick(Date.now());setOffset(motion.offset);if(result==='commit')closeLegal();else if(result==='cancel'){motion.reset();setOffset(0);}}
  },()=>motion.phase==='settling');
@@ -222,6 +207,25 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   presets.ensureSeeded(true,settings.load().fontSizeSp);
   setPresetState(presets.setThemeMode(readerChrome(preset()).dark?'LIGHT':'DARK'));
   notifyReaderPresetsChanged();
+ });
+ let openingBrowser=false;
+ const openLegalUrl=async(url:string)=>{
+  openingBrowser=true;
+  try{await openBrowserUrl(url,'information',preset());}
+  catch(error){setError(browserOpenFailureMessage(error));}
+  finally{openingBrowser=false;}
+ };
+ bindBluetoothWarningRoute(warningNetwork,{
+  shown:warningShown,
+  idleRoute:()=>{
+   const entry=legalContent();
+   if(!entry||!active()||error()||legalNetwork().blocking||openingBrowser||motion.phase!=='idle')return;
+   if(entry.browseReady?.()!==true)return;
+   if(entry.scroller&&entry.scroller.state()!=='idle')return;
+   return entry;
+  },
+  push:()=>setLegal(entries=>[...entries,{page:'bluetooth-warning'}]),
+  pop:()=>{cancelActiveTouches();closeLegal();},
  });
  const errorLines=()=>watchUiLines(error(),{width:width-48,measure:text=>getOps().measureText(text,0)});
  return <View class="relative bg-black overflow-hidden" style={{width,height}}>
@@ -233,7 +237,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
    ? <View class="absolute inset-0 bg-black overflow-hidden" style={{translateX:offset()}}>
       <BluetoothWarningPage width={width} height={height} onBack={()=>{if(warningShown()&&motion.phase==='idle')closeLegal();}}/>
      </View>
-   : <NetworkRecoveryProvider network={entry.network} active={()=>legalContent()===entry&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={url=>{void openBrowserUrl(url,"information",preset()).catch(error=>setError(browserOpenFailureMessage(error)));}} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
+   : <NetworkRecoveryProvider network={entry.network} active={()=>legalContent()===entry&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={openLegalUrl} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;entry.browseReady=value.browseReady;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
  </View>;
 }

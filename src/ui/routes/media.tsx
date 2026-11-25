@@ -34,6 +34,7 @@ interface MediaRoutesProps {
   createBatteryTelemetry?:()=>import("@podjs/framework/telemetry").ActiveBatterySession;
   preset: () => ReaderPreset;
   readerKeepAwake?:()=>boolean;
+  trackPlaybackRelease?:(operation:Promise<unknown>)=>void;
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
@@ -193,6 +194,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
           initialPool={props.entry.initialVideoPool}
+          trackPlaybackRelease={props.trackPlaybackRelease}
           onAdjacentPoster={direction=>props.entry.queue?.itemAtOffset(direction==='next'?1:-1)?.coverUrl}
           onBluetoothAllowed={value=>douyinPreload.allowBluetooth(value,props.entry)}
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}

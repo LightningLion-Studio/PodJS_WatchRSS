@@ -30,6 +30,7 @@ export interface HomeScreenProps {
   onClearChannel: (channel: Channel) => Promise<void>;
   onMoveNotesToTop: () => void;
   onToggleNotesPinned: () => void;
+  onBrowseReady?: (ready: () => boolean) => void;
   ref?: (list: {scroller: Scroller}) => void;
 }
 
@@ -76,6 +77,7 @@ function ChannelActions(props:{width:number;height:number;target:HomeLongPressTa
 // Glyph origins include the measured difference between Compose and atlas baselines.
 export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
   const [selected,setSelected]=createSignal<HomeLongPressTarget>();
+  props.onBrowseReady?.(()=>!selected());
   let scroller:Scroller|undefined;let roundStart=()=>0;
   // Native HomeDefaultItem: 14dp start / 6dp end / 14.5dp vertical padding, title maxLines 1,
   // summary maxLines 2 (one Text, "\n"-separated), unread dot 6dp after a 4dp gap, offset -4dp.

@@ -32,10 +32,11 @@ export function feedPillEntry(label:string,width:number,onPress?:()=>void,promin
     </View></View>;
   }};
 }
-export function RssFeedScreen(props:{width:number;height:number;title:string;active?:boolean;originalEnabled?:boolean;onOriginalPaused?:(paused:boolean)=>void;onOriginalContents?:(ids:string[])=>void;onInfo?:()=>void;items:Article[];refreshing:boolean;loadingMore:boolean;canNext:boolean;onOpen:(article:Article)=>void;onActions:(article:Article)=>void;onFavorite:(article:Article)=>void;onWatchLater:(article:Article)=>void;onRefresh:()=>void;onNext:()=>void;leading?:ScrollEntry[];empty?:ScrollEntry[];ref?:(value:{scroller:Scroller})=>void}) {
+export function RssFeedScreen(props:{width:number;height:number;title:string;active?:boolean;originalEnabled?:boolean;onOriginalPaused?:(paused:boolean)=>void;onOriginalContents?:(ids:string[])=>void;onInfo?:()=>void;items:Article[];refreshing:boolean;loadingMore:boolean;canNext:boolean;onOpen:(article:Article)=>void;onActions:(article:Article)=>void;onFavorite:(article:Article)=>void;onWatchLater:(article:Article)=>void;onRefresh:()=>void;onNext:()=>void;leading?:ScrollEntry[];empty?:ScrollEntry[];onBrowseReady?:(ready:()=>boolean)=>void;ref?:(value:{scroller:Scroller})=>void}) {
   const requested=new Set<string>();
   const [openSwipeId,setOpenSwipeId]=createSignal<string|null>(null);
   const [scrolling,setScrolling]=createSignal(false);
+  props.onBrowseReady?.(()=>!openSwipeId());
   createEffect(()=>{const id=openSwipeId();if(id&&!props.items.some(item=>item.id===id))setOpenSwipeId(null);});
   let lastAutoLoadCount=-1;
   function requestVisible(first:number,last:number) {

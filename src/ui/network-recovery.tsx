@@ -1,6 +1,7 @@
 import {createContext,createEffect,createSignal,onCleanup,untrack,useContext,Show,type JSX} from 'solid-js';
+import {gestureResourceCounts} from '@pocketjs/framework/gesture';
 import {onFrame} from '@pocketjs/framework/lifecycle';
-import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
+import {__onHostEvent,lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
 import {internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
@@ -55,18 +56,42 @@ export function BluetoothWarningConnection(props:{children:JSX.Element}){
  return <BluetoothWarningContext.Provider value={network}>{props.children}</BluetoothWarningContext.Provider>;
 }
 
+const BLUETOOTH_WARNING_IDLE_MS=1000;
+
 export function bindBluetoothWarningRoute(network:NetworkRecovery,route:{
- shown:()=>boolean;canPush:()=>boolean;push:()=>void;pop:()=>void;
+ shown:()=>boolean;idleRoute:()=>object|undefined;push:()=>void;pop:()=>void;
 }){
  const connection=observeNetworkRecovery(()=>network);
  createEffect(()=>{
   const status=connection().status;
   if(route.shown()&&(status==='available'||status==='unavailable'))untrack(route.pop);
  });
- // Check at the frame boundary, after gesture handling and editor callbacks.
- // BackMotion can settle with zero translation, without changing any signal.
- const ready=()=>!route.shown()&&connection().bluetooth&&route.canPush();
- onFrame(()=>{if(ready())route.push();},ready);
+
+ const candidate=()=>connection().bluetooth&&!route.shown()?route.idleRoute():undefined;
+ let observedRoute:object|undefined,idleRoute:object|undefined,idleSince:number|undefined;
+ const resetIdle=()=>{idleSince=undefined;};
+ // Reset on reactive changes even if the host skips frames while the route is busy.
+ createEffect(()=>{
+  const entry=candidate();
+  if(entry!==observedRoute)resetIdle();
+  observedRoute=entry;
+ });
+ onCleanup(__onHostEvent(event=>{
+  if(event.t==='axis'||event.t==='input.scroll'||event.t==='back'||event.t==='accessibility.action'
+   ||event.t==='touchCancel'||event.t==='lifecycle')resetIdle();
+ }));
+ onFrame(buttons=>{
+  const entry=candidate();
+  if(entry!==idleRoute)resetIdle();
+  idleRoute=entry;
+  if(!entry||buttons||gestureResourceCounts().contacts>0){resetIdle();return;}
+  const now=Date.now();
+  if(idleSince===undefined||now<idleSince)idleSince=now;
+  if(now-idleSince<BLUETOOTH_WARNING_IDLE_MS)return;
+  route.push();
+  // Consume the advisory once it is on either stack.
+  if(route.shown())network.dismissBluetooth();
+ },()=>candidate()!==undefined&&gestureResourceCounts().contacts===0);
 }
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){

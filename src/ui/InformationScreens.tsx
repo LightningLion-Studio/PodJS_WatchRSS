@@ -38,7 +38,7 @@ export interface InformationSnapshot {
   scrollOffset:number;
 }
 export type InformationRestorationEvent = 'document-mounted'|'document-unmounted'|'candidate-consumed'|'loading-committed'|'response-applied';
-export type InformationRef = (value: { scroller: Scroller;snapshot?:()=>InformationSnapshot }) => void;
+export type InformationRef = (value: { scroller: Scroller;snapshot?:()=>InformationSnapshot;browseReady?:()=>boolean }) => void;
 export interface InformationScreenProps { height: number; width?: number; page: InformationPage; onNavigate: (page: InformationPage) => void; onOpenUrl?: (url: string) => Promise<void> | void; onUploadLogs?: () => void; onManageLogs?: () => void; onDeclineLogs?: () => void; legalBaseUrl?: string; active?:()=>boolean; ref?: InformationRef;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying';restoredBackground?:InformationSnapshot;accessibilityLabel?:string;onSnapshotChange?:(snapshot:InformationSnapshot)=>void;onRestorationEvent?:(event:InformationRestorationEvent)=>void }
 
 type LabelVisibility=(row?:()=>ScrollEntry)=>boolean;
@@ -179,7 +179,7 @@ export function InformationScreen(props: InformationScreenProps) {
   createEffect(() => {
     if (props.page === 'beian') return;
     const scroller = currentScroller();
-    untrack(() => props.ref?.({scroller, snapshot}));
+    untrack(() => props.ref?.({scroller, snapshot, browseReady:()=>!isLoading()&&document()?.ready()===true}));
   });
   createEffect(() => {
     const value = snapshot();

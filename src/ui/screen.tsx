@@ -205,29 +205,37 @@ export default function WatchRSS(props: {
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
-  let openInputs=0;
-  const holdInput=()=>{
-    openInputs++;
-    let held=true;
-    return ()=>{if(held){held=false;openInputs--;}};
+  const [pendingUiWork,setPendingUiWork]=createSignal(0);
+  const trackUiWork=()=>{
+    setPendingUiWork(count=>count+1);
+    let pending=true;
+    return ()=>{
+      if(!pending)return;
+      pending=false;
+      setPendingUiWork(count=>count-1);
+    };
+  };
+  const withUiWork=async <T,>(operation:()=>Promise<T>):Promise<T>=>{
+    const done=trackUiWork();
+    try{return await operation();}
+    finally{done();}
   };
   const routeServices:AppServices=Object.assign(Object.create(props.services),{
-    input:async (...args:Parameters<AppServices['input']>)=>{
-      const release=holdInput();
-      try{return await props.services.input(...args);}
-      finally{release();}
-    },
+    input:(...args:Parameters<AppServices['input']>)=>withUiWork(()=>props.services.input(...args)),
     openInlineInput:props.services.openInlineInput&&
       (async (...args:Parameters<NonNullable<AppServices['openInlineInput']>>)=>{
-        const release=holdInput();
+        const done=trackUiWork();
         try{
           const session=await props.services.openInlineInput!(...args);
-          return {...session,close:async()=>{try{await session.close();}finally{release();}}};
-        }catch(error){release();throw error;}
+          return {...session,close:async()=>{try{await session.close();}finally{done();}}};
+        }catch(error){done();throw error;}
       }),
+    listNovelChapters:props.services.listNovelChapters&&
+      ((...args:Parameters<NonNullable<AppServices['listNovelChapters']>>)=>withUiWork(()=>props.services.listNovelChapters!(...args))),
+    hasSummaryAccount:props.services.hasSummaryAccount&&
+      (()=>withUiWork(()=>props.services.hasSummaryAccount!())),
   });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
-  let readerLeaving:Entry|undefined;
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
   const logReaderProgressFlush = (
@@ -266,12 +274,11 @@ export default function WatchRSS(props: {
     traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
   }
-  function finishPopPage(leaving: Entry, dismissWarning=true) {
+  function finishPopPage(leaving: Entry) {
     if (current() !== leaving || stack().length <= 1) return false;
     if(leaving.page==='bluetooth-warning'){
       motion.reset();
       batch(()=>{
-        if(dismissWarning)warningNetwork.dismissBluetooth();
         setStack(entries=>entries.slice(0,-1));
         setBackOffset(0);
       });
@@ -332,14 +339,12 @@ export default function WatchRSS(props: {
     if (leaving.page !== "reader" || !leaving.reader)
       return finishPopPage(leaving);
     leaving.list?.scroller.stop();
-    readerLeaving=leaving;
     readerExit.begin(
       leaving,
       () => leaving.reader!.flushProgress(),
       (outcome) => {
         logReaderProgressFlush("exit", outcome);
         if (current() === leaving) finishPopPage(leaving);
-        if (readerLeaving===leaving)readerLeaving=undefined;
       },
     );
     return true;
@@ -363,7 +368,6 @@ export default function WatchRSS(props: {
       rect: () =>
         stack().length > 1 &&
         !disclosurePending() &&
-        !warningShown() &&
         !networkFor(current()).blocking &&
         !networkPageBlocksSwipe() &&
         motion.phase !== "settling" &&
@@ -398,7 +402,7 @@ export default function WatchRSS(props: {
     },
   },playerRotation,playerViewport));
   const backObserver = rightSwipeBack({rect:()=>
-    stack().length>1 && (warningShown()||usesImmersiveBackObserver(current())) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
+    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
     start:beginBack,
@@ -571,6 +575,7 @@ export default function WatchRSS(props: {
       source.page === "rss-actions" ||
       (source.page === "bili" && source.biliRoute?.name === "actions") ||
       (source.page === "douyin" && source.douyinRoute?.name === "actions");
+    const done=trackUiWork();
     void shareEnvironment
       .then(async (supported) => {
         if (!shareAlive || current() !== source || motion.phase !== "idle")
@@ -594,7 +599,7 @@ export default function WatchRSS(props: {
       })
       .catch((e) => {
         if (shareAlive) setError(String(e));
-      });
+      }).finally(done);
   };
   createEffect(() =>
     props.onSyncMediaKeepAliveChange?.(settings().syncMediaKeepAlive),
@@ -662,13 +667,14 @@ export default function WatchRSS(props: {
     idleHit(10);const services = props.announcements;
     if (!services || homeNoticesChecked || !foreground()) return;
     homeNoticesChecked = true;
+    const done=trackUiWork();
     void loadHomeNotices(services.repository).then(result => {
       if (!homeNoticesAlive) return;
       batch(() => {
         setPendingAnnouncement(result.announcement);
         setPendingPushMessages(result.messages);
       });
-    });
+    }).finally(done);
   });
   onCleanup(() => { homeNoticesAlive = false; });
   onCleanup(
@@ -801,7 +807,7 @@ export default function WatchRSS(props: {
       setError("");
     }
     try {
-      const list = await props.services.listChannels();
+      const list = await withUiWork(()=>props.services.listChannels());
       traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
@@ -812,6 +818,7 @@ export default function WatchRSS(props: {
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
+    const done=trackUiWork();
     setLoading(true);
     setError("");
     try {
@@ -827,6 +834,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
+      done();
       setLoading(false);
     }
   }
@@ -835,6 +843,7 @@ export default function WatchRSS(props: {
     limit = feedVisibleCount(),
     initial = false,
   ) {
+    const done=trackUiWork();
     const version = ++feedRequestVersion;
     if (initial) setLoading(true);
     try {
@@ -858,6 +867,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       if (version === feedRequestVersion) setError(String(e));
     } finally {
+      done();
       if (version === feedRequestVersion) {
         if (initial) setLoading(false);
         setFeedLoadingMore(false);
@@ -986,6 +996,7 @@ export default function WatchRSS(props: {
   let articleOpenRevision=0;
   onCleanup(()=>{articleOpenRevision++;});
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
+    const done=trackUiWork();
     const origin=stack(),revision=++articleOpenRevision;
     const active=()=>revision===articleOpenRevision&&stack()===origin&&foreground()&&motion.phase==="idle";
     const previousReader=replaceReader&&current().page==="reader"?current():undefined;
@@ -1014,6 +1025,8 @@ export default function WatchRSS(props: {
       if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
       if(active())setError(String(e));
+    } finally {
+      done();
     }
   }
   async function openArticleActions(item: Article) {
@@ -1396,17 +1409,8 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  const removeWarningRoute=()=>{cancelActiveTouches();finishPopPage(current(),false);};
+  const removeWarningRoute=()=>{cancelActiveTouches();finishPopPage(current());};
   createEffect(()=>{if(cloudOwnerChoice()&&warningShown())untrack(removeWarningRoute);});
-  bindBluetoothWarningRoute(warningNetwork,{
-    shown:warningShown,
-    canPush:()=>resumeReady()&&foreground()&&recoveryEnabled(current())&&!networkPageBlocksSwipe()&&!disclosurePending()
-      && !busy()&&openInputs===0&&!current().noteInputBusy?.()
-      && readerLeaving!==current()&&!sideSwipe&&motion.phase==='idle'
-      && (page()!=='video'||current().player?.canShowBluetoothWarning?.()===true),
-    push:()=>{cancelActiveTouches();setPage('bluetooth-warning');},
-    pop:removeWarningRoute,
-  });
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
@@ -1493,7 +1497,7 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
-    if (page() === "bluetooth-connection") return;
+    if (warningShown() || page() === "bluetooth-connection") return;
     const url = takeRemoteInput();
     if (url === undefined) return;
     if (page() === "remote-input") popPage(true);
@@ -1704,8 +1708,8 @@ export default function WatchRSS(props: {
               openSpeech={() => setPage("speech-playback")}
               openAdd={() => void doAdd()}
               refresh={refresh}
-              openBili={biliNavigate}
-              openDouyin={douyinNavigate}
+              openBili={route=>withUiWork(()=>biliNavigate(route))}
+              openDouyin={route=>withUiWork(()=>douyinNavigate(route))}
               openFeed={(channel) => {
                 setFeedVisibleCount(12);
                 setFeedHasMore(false);
@@ -1776,6 +1780,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
+              trackPlaybackRelease={operation=>{void withUiWork(()=>operation);}}
               onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
@@ -1942,6 +1947,29 @@ export default function WatchRSS(props: {
       </RouteActivityProvider></NetworkRecoveryProvider>
     );
   };
+
+  // Each entry here is a browsing surface. A new route must explicitly opt in.
+  const warningBrowseReady:Partial<Record<Page,(entry:Entry)=>boolean>>={
+    home:entry=>entry.browseReady?.()===true&&!homeNoticeVisible()&&!homeDisclosurePending(),
+    articles:entry=>!!entry.list&&entry.browseReady?.()===true,
+    notes:entry=>entry.browseReady?.()===true,
+    settings:entry=>!!entry.list,
+  };
+  bindBluetoothWarningRoute(warningNetwork,{
+    shown:warningShown,
+    idleRoute:()=>{
+      const entry=current();
+      if(!warningBrowseReady[entry.page]?.(entry))return;
+      if(!resumeReady()||!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe())return;
+      if(motion.phase!=='idle'||pendingUiWork()||busy()||loading()||homeRefreshing()||updatingFeed)return;
+      if(playingSource()||videoLoading())return;
+      const scroller=entry.list?.scroller;
+      if(scroller&&scroller.state()!=='idle')return;
+      return entry;
+    },
+    push:()=>setPage('bluetooth-warning'),
+    pop:removeWarningRoute,
+  });
 
   const noticeFrame=createMemo(()=>readerControlViewport(width,height,metrics.shape==="round",page()==="reader"&&settings().readerPageMode));
   return (
