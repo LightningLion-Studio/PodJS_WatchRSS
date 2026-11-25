@@ -2,6 +2,7 @@ import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription,emptyBo
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
 import {conflictTexts} from './note-conflict-set';
+import {newConflictId,noteEditDigest,type Conflict} from './notes-conflict';
 import {sameBusinessRevision} from './business-revision';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {phoneNotePlainText} from '../notes/phone-text';
@@ -251,7 +252,9 @@ export class WatchAccountControl {
   checkCapture(await this.o.store.readState(),capture);let localRows=await this.local(),cloudRows=await this.cloud(s),applyRows=cloudRows,capturedKeys:string[]|undefined,decision:Awaited<ReturnType<WatchProjectionStore['prepareLegacyDecision']>>|undefined;
   const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
-  const records=this.records(applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
+  const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
+  const records=this.records(retained??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
+  if(retained){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
   const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business),release=await this.reserveProjection(statements);
   try{
    const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;
@@ -265,6 +268,45 @@ export class WatchAccountControl {
    checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
   }finally{await release();}
   if(!intent.legacyKey)await this.flushApplied();await this.o.store.dropInactiveCloudRows(s.cloud.current.treeRoot);return {applied:!intent.legacyKey,commit:null,...(intent.legacyKey?{discarded:true}: {})};
+ }
+
+ /** Keep unpublished memo content when selecting the account snapshot. An
+  * overlapping memo gets its own identity so the selected cloud row survives. */
+ private async retainUnsentNotes(state:SyncState,local:RecordRow[],cloud:RecordRow[]){
+  if(!state.hasUnsentEdits)return null;
+  const bases=await this.o.store.editBases(state),rows=new Map(cloud.map(row=>[row.entityKey,row]));
+  const localById=new Map(local.map(row=>[row.entityKey,row]));
+  const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
+  let retained=false;
+  for(const row of local){
+   const c=row.candidate;
+   if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
+   const existing=rows.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
+   if((existing&&hash===noteEditDigest(existing.candidate))||(base&&hash===digest(base)))continue;
+   const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
+   if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
+   retained=true;
+   if(!existing)rows.set(row.entityKey,row);
+   else{
+    const value=fromWire('note',c.meta.payload,c.state.payload);
+    const id=digest(['watchrss/retain-unsent-note',row.entityKey,hash]);
+    const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
+    const entityKey=this.o.store.entityKeyFor('note',noteId);
+    if(value.noteConflicts)value.noteConflicts={...value.noteConflicts,records:value.noteConflicts.records.map((r:Conflict)=>({
+     ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
+    })).sort((a:Conflict,b:Conflict)=>a.conflictId<b.conflictId?-1:1)};
+    const candidate=candidates('note',noteId,entityKey,{...value,noteId},c.meta.addedAtSource==='original'?c.addedAtMillis:undefined,this.o.store.segmentOptions());
+    rows.set(entityKey,{entityKey,rowSequence:row.rowSequence,candidate});
+   }
+   const folder=c.meta.payload.folderId;
+   const p=c.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
+   const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
+   for(const key of dependencies){
+    const dependency=localById.get(key),selected=rows.get(key);
+    if(dependency&&(!selected||selected.candidate.state.payload.deleted))rows.set(key,dependency);
+   }
+  }
+  return retained?[...rows.values()]:null;
  }
 
  private applied(s:SyncState,commitOid:string,revision:string,generation:string,requestId:string){
@@ -326,11 +368,40 @@ export class WatchAccountControl {
  /** A clean device follows the authenticated current account. A dirty device
   * retains its native DB and pending choice, including after event expiry. */
  async follow(window?:any){
-  const pulled=await this.o.reader.pull(window??await this.o.http.negotiate([],[]));if(pulled.readOnly)return pulled;return this.followCurrent();
+  const observed=window??await this.o.http.negotiate([],[]);
+  return this.observeAndFollow(()=>this.o.reader.pull(observed));
  }
- async poll(){const pulled=await this.o.reader.poll();if(pulled.readOnly)return pulled;return this.followCurrent();}
+ async poll(){return this.observeAndFollow(()=>this.o.reader.poll());}
+ private async observeAndFollow(pull:()=>ReturnType<WatchCloudIndex['pull']>){
+  const run=async()=>{
+   const pulled=await pull();
+   return pulled.readOnly?pulled:this.followCurrent();
+  };
+  try{return await run();}catch(error){
+   if((error as Error).message!=='choice_stale')throw error;
+   const latest=await this.o.store.readState();
+   if(latest.activeGeneration!==null||!latest.hasUnsentEdits||latest.cloud?.pendingPublish)throw error;
+   // A memo saved during download or native apply invalidates the first plan.
+   const checkpoint=await this.o.store.checkpoint();
+   if(!sameBusinessRevision(checkpoint?.businessRevision,latest.businessRevision))await this.o.rebuildProjection?.();
+   return run();
+  }
+ }
  private async followCurrent():Promise<any>{
-  const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
+  let before=await this.o.store.readState();
+  // An older build may have initialized the scope but never applied its head.
+  if(before.account&&!before.activeGeneration&&!before.editBase.accountOid&&!before.hasUnsentEdits&&await this.o.store.hasLiveMemoNotes()){
+   await this.o.store.controlUpdate(before,{...before,hasUnsentEdits:true});
+   before=await this.o.store.readState();
+  }
+  if(before.pendingChoice||before.hasUnsentEdits){
+   if(!before.pendingChoice&&await this.firstFollowNoteCollision(before)){
+    const pendingChoice={generation:before.account!.generation,inboxKeys:[],accountOid:before.account!.oid,accountRevision:before.account!.revision,selectedLocalChangeRevision:before.localChangeRevision};
+    await this.o.store.controlUpdate(before,{...before,pendingChoice});
+    return {awaitingUser:true,localEditsRetained:true};
+   }
+   return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
+  }
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
@@ -340,6 +411,23 @@ export class WatchAccountControl {
  private async followStatements(before:SyncState){
   if(!this.o.business.prepareFeed){const records=this.records(await this.cloud(before));return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
   const feed=await this.cloudFeed(before);return this.o.store.prepareAccountProjection(before,feed,this.o.business.prepareFeed(feed,before));
+ }
+ /** Without a common base, overlapping first-sync edits need a choice. The
+  * normal publisher can carry non-overlapping notes onto the remote tree. */
+ private async firstFollowNoteCollision(before:SyncState){
+  const current=before.cloud?.current;
+  if(before.editBase.accountOid!==null||!current||current.commitOid!==before.account?.oid)return false;
+  let after='';
+  for(;;){
+   const page=await this.o.store.candidatePage(after,32,PAGE_BYTES);
+   if(!page.length)return false;
+   for(const {entityKey,candidate} of page){
+    if(candidate.meta.kind!=='note')continue;
+    const row=await this.o.store.cloudRow(current.treeRoot,entityKey);
+    if(row&&!row.unopenable&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
+   }
+   after=page.at(-1)!.entityKey;
+  }
  }
  private async cloudFeed(s:SyncState):Promise<RecordFeed>{
   if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const root=s.cloud.current.treeRoot,keys:string[]=[],facts:RecordFact[]=[],input=this.o.store.inputHasher();let after='';

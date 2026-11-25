@@ -125,7 +125,9 @@ export class WatchProjectionStore {
   if(!(await this.db.query('PRAGMA table_info(syncv2_write_gates)')).some(row=>row.name==='control_revision'))await this.db.transaction([{sql:"ALTER TABLE syncv2_write_gates ADD COLUMN control_revision TEXT NOT NULL DEFAULT '0'"}]);
   if(!(await this.db.query('SELECT 1 FROM syncv2_state WHERE scope=?',[this.scopeKey])).length){
    const initial=initialState();initial.businessRevision=await businessRevision(this.db);const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
-   const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
+   // This scope has never acknowledged a note. MemoRepository initializes a new
+   // note with base_content_hash=content_hash, so that pair cannot prove sync.
+   const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE deleted=0 OR content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
    for(const [table,query]of witnesses)if(tables.has(table!)&&(await this.db.query(query!)).length){initial.hasUnsentEdits=true;break;}
    const body=await this.cipher.seal(this.aad('state'),initial);
    await this.db.transaction([{sql:'INSERT OR IGNORE INTO syncv2_state VALUES(?,?,?,?,?,?,0)',params:[this.scopeKey,'0','0',body,'0','0']}]);
@@ -149,6 +151,10 @@ export class WatchProjectionStore {
   if(next.cloud||state.cloud?.p5Gates){next.cloud={...next.cloud};if(state.cloud?.p5Gates===undefined)delete next.cloud.p5Gates;else next.cloud.p5Gates=JSON.parse(canonical(state.cloud.p5Gates));}
  }
  async disable(){await this.gate.close();}
+ async hasLiveMemoNotes(){
+  if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memo_notes'")).length)return false;
+  return (await this.db.query('SELECT 1 FROM memo_notes WHERE deleted=0 LIMIT 1')).length!==0;
+ }
  private async persistedState(attempt=0):Promise<SyncState>{
   this.gate.require();await this.checkIdentity();const row=(await this.db.query('SELECT * FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('projection_not_initialized');
   let state:SyncState;try{state=await this.stateJournal.read(String(row.body),checkD64(row.state_version));}catch(error){const latest=(await this.db.query('SELECT state_version FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(attempt<3&&latest?.state_version!==row.state_version)return this.persistedState(attempt+1);throw error;}state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
@@ -456,7 +462,11 @@ export class WatchProjectionStore {
   for(let at=0;at<entries.length;at+=16){const statements:Statement[]=[];for(const entry of entries.slice(at,at+16)){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}statements.push({sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,await this.cipher.seal(this.aad('commit-header',entry.oid),envelope)]});}if(statements.length){const next={...state};await this.observationUpdate(state,next,statements);state=next;}}return state;
  }
  async dropInactiveCloudRows(root:string){
-  for(;;){const before=await this.readState();if(before.pendingChoice||before.cloud?.pendingPublish||before.cloud?.preparingPublication)return;const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},this.cloudCache.dropExcept(root));return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
+  for(;;){const before=await this.readState();if(before.pendingChoice||before.cloud?.pendingPublish||before.cloud?.preparingPublication)return;
+   // The publisher uses the acknowledged note rows to distinguish edits from
+   // native rows that lag behind an observed cloud head.
+   if(before.hasUnsentEdits&&before.editBase.accountOid&&before.editBase.accountOid!==before.account?.oid)return;
+   const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},this.cloudCache.dropExcept(root));return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */

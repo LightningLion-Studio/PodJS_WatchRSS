@@ -64,7 +64,7 @@ for(const kind of ['local'] as const)for(const entry of ['sync','choice'] as con
   expect(state.account.oid).toBe(a.server.account.commitOid);expect(state.cloud.pendingPublish).toBeNull();expect(state.hasUnsentEdits).toBe(true);
   expect((await a.db.query('SELECT title FROM memo_notes'))[0].title).toBe('local a');
   await opened.ui.chooseCloud(fresh);await opened.ui.syncNow();
-  expect((await a.db.query('SELECT title FROM memo_notes'))[0].title).toBe('winner');
+  expect(await a.db.query('SELECT note_id,title FROM memo_notes ORDER BY note_id')).toEqual([{note_id:'local-a',title:'local a'},{note_id:'remote-b',title:'winner'}]);
   expect((await opened.ui.o.projection.readState()).pendingChoice).toBeNull();
   expect(service.calls).toContain('/choices/cloud');
  }finally{await opened?.close();await other?.close();a.db.close();b.db.close();}

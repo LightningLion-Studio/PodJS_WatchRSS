@@ -160,7 +160,7 @@ test(`WRR2 cloud audit in flight ${toggle} preserves current gates and control o
    const intent=after.cloud.pendingCloudChoice;expect(intent.phase).toBe('accepted');expect(intent.requestId).toBe(captured.cloud.pendingCloudChoice.requestId);expect(intent.guardVersion).toBe(captured.cloud.pendingCloudChoice.guardVersion);
    const expected=JSON.parse(canonical(captured));expected.stateVersion=after.stateVersion;expected.cloud.pendingCloudChoice=intent;expect(canonical(after)).toBe(canonical(expected));
    await x.toggle(true);await x.opened.ui.syncNow();const finished=await x.store().readState();expect(finished.cloud.pendingCloudChoice).toBeNull();expect(finished.pendingChoice).toBeNull();expect(finished.hasUnsentEdits).toBe(false);expect(x.a.server.applied).toHaveLength(1);
-  }else{expect(error).toBeNull();expect(after.pendingChoice).toBeNull();expect(after.hasUnsentEdits).toBe(false);expect(x.a.server.applied).toHaveLength(1);}
+  }else{expect(error).toBeNull();expect(after.pendingChoice).toBeNull();expect(after.hasUnsentEdits).toBe(true);expect(x.a.server.applied).toHaveLength(1);}
 
  }finally{await x.close();}
 });
@@ -193,7 +193,7 @@ test(`WRR2 cloud accepted journal keeps current controls at final ${transition},
    if(cold)await x.reopen();const closed=await x.store().readState();await x.opened.ui.syncNow();expect(canonical(await x.store().readState())).toBe(canonical(closed));
    await x.toggle(true);await x.opened.ui.syncNow();
   }else{expect(error).toBeNull();if(cold)await x.reopen();}
-  const done=await x.store().readState();expect(done.cloud.pendingCloudChoice).toBeNull();expect(done.pendingChoice).toBeNull();expect(done.hasUnsentEdits).toBe(false);expect(x.a.server.applied).toHaveLength(1);expect(audits).toBe(1);expect((await x.a.db.query('SELECT note_id FROM memo_notes'))).toEqual([{note_id:'remote-b'}]);
+  const done=await x.store().readState();expect(done.cloud.pendingCloudChoice).toBeNull();expect(done.pendingChoice).toBeNull();expect(done.hasUnsentEdits).toBe(transition==='close-open'&&!cold);expect(x.a.server.applied).toHaveLength(1);expect(audits).toBe(1);expect(await x.a.db.query('SELECT note_id FROM memo_notes ORDER BY note_id')).toEqual([{note_id:'local-a'},{note_id:'remote-b'}]);
  }finally{await x.close();}
 },60000);
 
@@ -244,7 +244,7 @@ test('WRR2 a stale accepted cloud journal still permits a fresh product choice',
   await x.remoteEdit();await x.toggle(true);await expect(x.opened.ui.syncNow()).rejects.toThrow('choice_stale');
   const fresh=await x.opened.ui.openChoice();expect(fresh).toBeTruthy();expect((await x.a.db.query('SELECT note_id FROM memo_notes'))).toEqual([{note_id:'local-a'}]);
   const state=await x.store().readState();expect(state.cloud.pendingCloudChoice).toBeNull();expect(state.cloud.retiredCloudChoices[old.requestId].result).toEqual(old.result);expect(state.cloud.retiredCloudChoices[old.requestId].requestId).toBe(old.requestId);
-  await x.opened.ui.chooseCloud(fresh);expect((await x.store().readState()).pendingChoice).toBeNull();expect((await x.store().readState()).hasUnsentEdits).toBe(false);
+  await x.opened.ui.chooseCloud(fresh);expect((await x.store().readState()).pendingChoice).toBeNull();expect((await x.store().readState()).hasUnsentEdits).toBe(true);
  }finally{await x.close();}
 });
 

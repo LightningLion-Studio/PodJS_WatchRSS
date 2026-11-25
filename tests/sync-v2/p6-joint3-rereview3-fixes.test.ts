@@ -91,10 +91,10 @@ for(const transition of ['close','close-open'] as const)
 test(`WRR3 normal follow final transaction ${transition} preserves current controls and native rows`,async()=>{
  const x=await setup('none');let fired=false,atGate:any=null;
  try{
-  await x.opened.ui.chooseCloud(await x.opened.ui.openChoice());const native=await x.a.db.query('SELECT note_id,title FROM memo_notes');await x.remoteEdit();const acks=x.a.server.applied.length;
+  await x.opened.ui.chooseCloud(await x.opened.ui.openChoice());await x.opened.ui.syncNow();await x.opened.ui.syncNow();const native=await x.a.db.query('SELECT note_id,title FROM memo_notes');await x.remoteEdit();const acks=x.a.server.applied.length;
   x.hooks.sql=async(method,args,stage)=>{if(!fired&&method==='sql.transaction'&&stage==='before'&&args.statements.some((s:any)=>s.program&&!s.program.validateOnly)){fired=true;await x.toggle(false);if(transition==='close-open')await x.toggle(true);atGate=await x.store().readState();}};
   await expect(x.opened.ui.syncNow()).rejects.toThrow(transition==='close'?'feature_disabled':'choice_stale');expect(fired).toBe(true);const after=await x.store().readState();expect(after.cloud.p5Gates).toEqual(atGate.cloud.p5Gates);expect(after.choiceControlRevision).toBe(atGate.choiceControlRevision);expect(await x.a.db.query('SELECT note_id,title FROM memo_notes')).toEqual(native);expect(x.a.server.applied.length).toBe(acks);
-  if(transition==='close')await x.toggle(true);await x.opened.ui.syncNow();const done=await x.store().readState();expect((await x.a.db.query('SELECT title FROM memo_notes'))[0].title).toBe('new remote head');expect(done.cloud.pendingApplied).toBeNull();expect(done.hasUnsentEdits).toBe(false);expect(x.a.server.applied.length).toBe(acks+1);
+  if(transition==='close')await x.toggle(true);await x.opened.ui.syncNow();const done=await x.store().readState();expect((await x.a.db.query("SELECT title FROM memo_notes WHERE note_id='remote-b'"))[0].title).toBe('new remote head');expect(done.cloud.pendingApplied).toBeNull();expect(done.hasUnsentEdits).toBe(false);expect(x.a.server.applied.length).toBe(acks+1);
  }finally{await x.close();}
 });
 
