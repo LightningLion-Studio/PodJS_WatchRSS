@@ -200,7 +200,7 @@ export default function WatchRSS(props: {
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
-  const bluetoothNoticeVisible=createMemo(()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().bluetooth);
+  const bluetoothPageVisible=createMemo(()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().bluetooth);
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -1354,7 +1354,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !bluetoothNoticeVisible() });});
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !bluetoothPageVisible() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);
@@ -1368,7 +1368,7 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
-    if (disclosurePending()) return true;
+    if (bluetoothPageVisible() || disclosurePending()) return true;
     if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
     const closeEditor = current().noteEditorBack;
@@ -1383,6 +1383,7 @@ export default function WatchRSS(props: {
     return true;
   });
   const removeAxis = onAxisDelta(RelativeAxis.Primary, (delta: number) => {
+    if (bluetoothPageVisible()) return;
     if (disclosurePending()) {
       const list = page() === "home" ? homeDisclosureList : current().disclosureList;
       list?.scroller.scrollBy((delta * rowHeight) / (12 * RelativeAxisUnits.PerDegree), {durMs:120});

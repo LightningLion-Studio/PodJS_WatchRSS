@@ -135,9 +135,9 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  const clock=useMinuteClock(()=>active()&&presetState()?.selection.mode==='SYSTEM');
  onCleanup(onLifecycleChange(value=>setActive(value==='active')));
  const preset=createMemo(()=>{const state=presetState();return state?.records.length?activeReaderPreset(state,clock()):defaultReaderPreset(undefined,undefined,true,settings.load().fontSizeSp);});
- type LegalEntry={page:StartupLegalPage;scroller?:Scroller;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
+ type LegalEntry={page:StartupLegalPage;network:ReturnType<typeof createHostNetworkRecovery>;scroller?:Scroller;snapshot?:()=>InformationSnapshot;restoredState?:InformationSnapshot;restoreMode?:'recreated'|'retained-underlying'};
  const initialLegal=untrack(props.restoreLegal);
- const [legal,setLegal]=createSignal<LegalEntry[]>(initialLegal.pages.map((page,index)=>({page,restoredState:initialLegal.snapshots[index]??undefined,restoreMode:initialLegal.restoreModes?.[index]??'recreated'})));
+ const [legal,setLegal]=createSignal<LegalEntry[]>(initialLegal.pages.map((page,index)=>({page,network:createHostNetworkRecovery(),restoredState:initialLegal.snapshots[index]??undefined,restoreMode:initialLegal.restoreModes?.[index]??'recreated'})));
  const currentLegal=()=>legal().at(-1);
  let introHandle:{onBack:()=>boolean;scroller:()=>Scroller|undefined}|undefined,privacyScroller:Scroller|undefined;
  const motion=new BackMotion(width),[offset,setOffset]=createSignal(0);
@@ -154,7 +154,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  createEffect(()=>{if(!active()){motion.reset();setOffset(0);}});
  const saveLegal=(entries:LegalEntry[])=>props.saveLegal({pages:entries.map(entry=>entry.page),snapshots:entries.map(entry=>entry.page==='beian'?null:entry.snapshot?.()??entry.restoredState??null)});
  const cacheSnapshot=(entry:LegalEntry,snapshot:InformationSnapshot)=>{if(entry.page==='beian'||!legal().includes(entry))return;entry.restoredState=snapshot;saveLegal(legal());};
- const openLegal=(page:InformationPage)=>{if(motion.phase!=='idle')return;if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;currentLegal()?.scroller?.stop();const entries=[...legal(),{page}];saveLegal(entries);setLegal(entries);};
+ const openLegal=(page:InformationPage)=>{if(motion.phase!=='idle')return;if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;currentLegal()?.scroller?.stop();const entries=[...legal(),{page,network:createHostNetworkRecovery()}];saveLegal(entries);setLegal(entries);};
  const closeLegal=()=>{currentLegal()?.scroller?.stop();const entries=legal().slice(0,-1);saveLegal(entries);setLegal(entries);motion.reset();setOffset(0);};
  const operate=(action:()=>void)=>{try{action();setError('');}catch(error){report(error);}};
  const finish=()=>{if(props.onExit){props.onExit();return;}void application.finishTask().catch(report);};
@@ -170,6 +170,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  onCleanup(onAxisDelta(RelativeAxis.Primary,delta=>{
   if(!active()||error()||motion.phase!=='idle'||props.session.intro.offlineWarning)return;
   const top=currentLegal();
+  if(top?.network.bluetooth)return;
   const scroller=top?top.scroller:(destination()==='intro'?introHandle?.scroller():privacyScroller);
   scroller?.scrollBy(delta*48/(12*RelativeAxisUnits.PerDegree),{durMs:120});
  }));
@@ -193,7 +194,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
    <Show when={destination()==='intro'}><OnboardingScreen width={width} height={height} state={props.session.intro} readerDark={readerChrome(preset()).dark} onToggleReaderTheme={toggleTheme} onAction={action=>operate(()=>props.controller.dispatch(action))} onOpenLegal={openLegal} restoreCustomization={props.restoreCustomization} saveCustomization={props.saveCustomization} active={()=>active()&&!currentLegal()&&!error()} ref={value=>{introHandle=value;}}/></Show>
    <Show when={destination()==='privacy'}><PrivacyPolicyConsentScreen width={width} height={height} onOpenPrivacy={()=>openLegal('privacy')} onAgree={()=>operate(()=>props.controller.agreePrivacy())} onDisagree={()=>props.controller.declinePrivacy()} active={()=>active()&&!currentLegal()&&!error()} ref={value=>{privacyScroller=value.scroller;}}/></Show>
   </View>
-  <For each={legal()}>{entry=>{const network=createHostNetworkRecovery();return <NetworkRecoveryProvider network={network} active={()=>currentLegal()===entry&&active()&&!error()}><View accessibilityHidden={currentLegal()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentLegal()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={url=>{void openBrowserUrl(url,"information",preset()).catch(error=>setError(browserOpenFailureMessage(error)));}} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentLegal()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>;}}</For>
+  <For each={legal()}>{entry=><NetworkRecoveryProvider network={entry.network} active={()=>currentLegal()===entry&&active()&&!error()}><View accessibilityHidden={currentLegal()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentLegal()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={url=>{void openBrowserUrl(url,"information",preset()).catch(error=>setError(browserOpenFailureMessage(error)));}} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentLegal()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
  </View>;
 }

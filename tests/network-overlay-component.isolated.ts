@@ -13,7 +13,7 @@ const require=createRequire(import.meta.url),{transformSync}=require('@babel/cor
 plugin({name:'network-overlay',setup(builder){builder.onLoad({filter:/\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const element=(kind:string,props:any)=>{const children=createMemo(()=>props.children);return {kind,props:mergeProps(props,{get children(){return children();}})};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
-mock.module('@pocketjs/framework/components',()=>({View:(p:any)=>element('View',p),Text:(p:any)=>element('Text',p),Image:(p:any)=>element('Image',p)}));
+mock.module('@pocketjs/framework/components',()=>({View:(p:any)=>element('View',p),FocusScope:(p:any)=>element('FocusScope',p),Text:(p:any)=>element('Text',p),Image:(p:any)=>element('Image',p)}));
 // Keep the real arena. Bind its handles and frame ticks to the same Solid
 // runtime as the fixture renderer even when the framework has its own copy.
 mock.module('@pocketjs/framework/gesture',()=>({attachGesture,__runGestures,pushTouchBlock,createGesture:(options:GestureOptions)=>{
@@ -26,6 +26,14 @@ mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(tick:()=>void)=>{
  frameTicks.add(tick);
  onCleanup(()=>frameTicks.delete(tick));
 }}));
+import * as realInput from '@pocketjs/framework/input';
+const inputExports={...realInput};
+let hitTarget:any;
+mock.module('@pocketjs/framework/input',()=>({
+ ...inputExports,
+ hitFocusable:(x:number,y:number)=>x===116&&y===195?hitTarget:null,
+ pressNode:(node:any)=>node.props.onPress(),
+}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string,slot:number)=>t.length*(slot===19?9:12)})}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(p:any)=>element('Spinner',p)}));
 type Snapshot = {active:boolean;internet:boolean;validated:boolean;wifi:boolean;cellular:boolean;bluetooth:boolean;snapshotSequence?:number};
@@ -47,7 +55,7 @@ const text=(v:any)=>nodes(v).filter(n=>n.kind==='Text').map(n=>String(n.props.ch
 const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 test('actual overlay renders four shared messages and disables only Checking retry',()=>{
  for(const status of ['checking','unavailable','bluetooth','available'] as const){
-  let stop!:()=>void,calls=0;const root=createRoot(dispose=>{stop=dispose;return NetworkUnavailableOverlay({width:233,height:233,round:true,status,onRetry:()=>calls++});});
+  let stop!:()=>void,calls=0;const root=createRoot(dispose=>{stop=dispose;return NetworkUnavailableOverlay({width:233,height:233,round:true,status,onAction:()=>calls++});});
   expect(text(root)).toContain('互联网可用状态');expect(text(root)).toContain(networkMessages[status].guidance);expect(text(root)).toContain(networkMessages[status].status);
   expect(nodes(root).some(n=>n.kind==='Spinner')).toBe(status==='checking');
   const button=nodes(root).find(n=>n.props.accessibilityRole==='button');button.props.onPress();expect(calls).toBe(status==='checking'?0:1);
@@ -62,14 +70,6 @@ test('actual route layer appears after failure, shows Checking on retry, disappe
  expect(text(root)).toContain('未检测到可用互联网');delayCheck=true;const retry=network.retry();expect(text(root)).toContain('正在检测网络连接');checkResolve('unavailable');await retry;
  notify('available');expect(await result).toBe('loaded');await flush();expect(text(root)).toBe('');expect(calls).toBe(2);stop();
 });
-test('Bluetooth has no full-screen interceptor and page work still completes',async()=>{
- let stop!:()=>void;const network=new NetworkRecovery({observe:fn=>{fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
- const root=createRoot(dispose=>{stop=dispose;return createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){return createComponent(NetworkRecoveryLayer,{network,width:233,height:233,round:true});}});});
- await network.run(async()=>true);await flush();expect(text(root)).toContain(networkMessages.bluetooth.guidance);
- expect(nodes(root).some(n=>n.props.onPress&&n.props.class?.includes('inset-0'))).toBe(false);stop();
-});
-
-
 const viewport=()=>({x:0,y:0,w:233,h:233});
 const gestureRegion={rect:viewport};
 function touchFrame(x?:number,y=100){
@@ -81,20 +81,21 @@ function touchFrame(x?:number,y=100){
 function settleSwipe(){for(let i=0;i<14;i++)touchFrame();}
 async function bluetoothLayer(rotation=0){
  const network=new NetworkRecovery({observe:fn=>{fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
- let cardNode:any;
+ let tree:unknown;
  const dispose=createRoot(stop=>{
-  const tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
+  tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
    return createComponent(NetworkRecoveryLayer,{network,width:233,height:233,round:true,rotation});
   }});
-  createRenderEffect(()=>{
-   cardNode=nodes(tree).find(node=>node.props.accessibilityLabel===networkMessages.bluetooth.guidance);
-  });
   return stop;
  });
  await network.run(async()=>true);
  await flush();
- expect(cardNode).toBeDefined();
- return {network,dispose,card:()=>cardNode};
+ const page=()=>nodes(tree).find(node=>node.props.accessibilityLabel==='互联网');
+ expect(page().props.class).toBe('absolute inset-0 bg-[#000000]');
+ expect(text(tree)).toContain(networkMessages.bluetooth.guidance);
+ expect(text(tree)).toContain(networkMessages.bluetooth.status);
+ expect(nodes(tree).some(node=>node.props.style?.bgColor==='#ffa726')).toBe(true);
+ return {network,dispose,page};
 }
 for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right swipe owns ${mode} input and next swipe returns`,async()=>{
  const motion=new BackMotion(233);
@@ -111,16 +112,17 @@ for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right 
  const layer=await bluetoothLayer(rotation);
  const competing=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanStart(){competingPans++;}});
  try{
-  // Start outside the plate and above its text.
-  touchFrame(46,46);touchFrame(166,46);
-  expect(layer.card().props.style).toMatchObject({translateX:120,opacity:1-120/233,scale:1});
+  touchFrame(46,46);
+  touchFrame(rotation?46:166,rotation?166:46);
+  expect(layer.page().props.style).toEqual({translateX:rotation?-0:120,translateY:rotation?120:0});
+  for(let i=0;i<8;i++)touchFrame(rotation?46:166,rotation?166:46);
   expect(backStarts).toBe(0);
   expect(competingPans).toBe(0);
   expect(motion.offset).toBe(0);
   touchFrame();
   expect(layer.network.bluetooth).toBe(true);
   settleSwipe();
-  expect(layer.card()).toBeUndefined();
+  expect(layer.page()).toBeUndefined();
   expect(layer.network.bluetooth).toBe(false);
   expect(backStarts).toBe(0);
 
@@ -132,40 +134,71 @@ for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right 
   expect(motion.tick(1000)).toBe('commit');
  }finally{touchFrame();competing.dispose();layer.dispose();page.dispose();}
 });
-test('Slow short Bluetooth swipe returns to its origin and keeps the notice',async()=>{
+test('Slow short Bluetooth swipe returns to its origin and keeps the page',async()=>{
  const layer=await bluetoothLayer();
  try{
   touchFrame(55);touchFrame(75);
-  expect(layer.card().props.style.translateX).toBe(20);
+  expect(layer.page().props.style.translateX).toBe(20);
   for(let i=0;i<8;i++)touchFrame(75);
   touchFrame();
-  const first=layer.card().props.style.translateX;
+  const first=layer.page().props.style.translateX;
   expect(first).toBeGreaterThan(0);
   expect(first).toBeLessThan(20);
   settleSwipe();
-  expect(layer.card().props.style).toMatchObject({translateX:0,opacity:1,scale:1});
+  expect(layer.page().props.style).toEqual({translateX:0,translateY:0});
   expect(layer.network.bluetooth).toBe(true);
  }finally{touchFrame();layer.dispose();}
 });
-test('Bluetooth notice passes vertical pans, left pans and outside taps to the page',async()=>{
- const directions:string[]=[];
- const vertical=attachGesture({region:gestureRegion,axis:'y',panSlop:8,onPanEnd:c=>directions.push(c.dy<0?'up':'down')});
- const horizontal=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanEnd:c=>directions.push(c.dx<0?'left':'right')});
- const tap=attachGesture({region:gestureRegion,onTap:()=>directions.push('tap')});
+test('Bluetooth page blocks the lower route and Continue dismisses it',async()=>{
+ const inputs:string[]=[];
+ const vertical=attachGesture({region:gestureRegion,axis:'y',panSlop:8,onPanStart:()=>inputs.push('scroll')});
  const layer=await bluetoothLayer();
+ // Even recognizers registered after the overlay must be blocked.
+ const horizontal=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanStart:()=>inputs.push('horizontal')});
+ const tap=attachGesture({region:gestureRegion,onDown:()=>inputs.push('down'),onTap:()=>inputs.push('tap')});
  try{
-  expect(nodes(layer.card()).every(node=>node.props.style?.hitPass===1)).toBe(true);
   for(const [x,y] of [[100,55],[100,155],[55,100]]){
-   touchFrame(100,100);touchFrame(x,y);touchFrame();settleSwipe();
-   expect(layer.card().props.style.translateX).toBe(0);
+   touchFrame(100,100);touchFrame(x,y);touchFrame();
+   expect(layer.page().props.style).toEqual({translateX:0,translateY:0});
   }
   touchFrame(45,40);touchFrame();
-  expect(directions).toEqual(['up','down','left','tap']);
+  expect(inputs).toEqual([]);
   expect(layer.network.bluetooth).toBe(true);
-  touchFrame(100,100);touchFrame();
+
+  hitTarget=nodes(layer.page()).find(node=>node.props.accessibilityRole==='button');
+  expect(hitTarget.props.accessibilityLabel).toBe('继续');
+  touchFrame(116,195);touchFrame();
+  expect(layer.page()).toBeUndefined();
   expect(layer.network.bluetooth).toBe(false);
-  expect(directions).toEqual(['up','down','left','tap']);
- }finally{touchFrame();layer.dispose();tap.dispose();horizontal.dispose();vertical.dispose();}
+  expect(inputs).toEqual([]);
+
+  touchFrame(45,40);touchFrame();
+  expect(inputs).toEqual(['down','tap']);
+ }finally{hitTarget=undefined;touchFrame();layer.dispose();tap.dispose();horizontal.dispose();vertical.dispose();}
+});
+
+test('unavailable network stays on the blocking Retry overlay after a right swipe',async()=>{
+ const network=new NetworkRecovery({observe:fn=>{fn('unavailable');return()=>{};},check:async()=> 'unavailable'});
+ let tree:unknown;
+ const dispose=createRoot(stop=>{
+  tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
+   return createComponent(NetworkRecoveryLayer,{network,width:233,height:233,round:true});
+  }});
+  return stop;
+ });
+ try{
+  const pending=network.run(async()=>{throw {code:'network_error'};}).catch(error=>error);
+  await flush();
+  const overlay=()=>nodes(tree).find(node=>node.props.accessibilityLabel==='互联网');
+  expect(overlay().props.class).toBe('absolute inset-0 bg-[#000000f0]');
+  expect(overlay().props.onPress).toBeFunction();
+  touchFrame(46,46);touchFrame(166,46);touchFrame();settleSwipe();
+  expect(network.blocking).toBe(true);
+  expect(overlay().props.style).toBeUndefined();
+  expect(nodes(overlay()).find(node=>node.props.accessibilityRole==='button').props.accessibilityLabel).toBe('重试');
+  network.setActive(false);
+  await pending;
+ }finally{touchFrame();dispose();}
 });
 
 test('failed manual snapshot re-enables the overlay Retry button',async()=>{

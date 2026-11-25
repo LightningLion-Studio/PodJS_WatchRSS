@@ -3,7 +3,7 @@ import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
 import {internetAvailability,orderNetworkSnapshots,type NetworkSnapshot} from '../onboarding/network.ts';
 import {NetworkRecovery} from '../network/recovery.ts';
-import {NetworkUnavailableOverlay,NetworkBluetoothNotice} from './NetworkUnavailableOverlay.tsx';
+import {NetworkUnavailableOverlay,NetworkBluetoothPage} from './NetworkUnavailableOverlay.tsx';
 
 export function createHostNetworkRecovery(){
  const read=orderNetworkSnapshots(()=>hostServices.hostOperation<NetworkSnapshot>('discovery.networkSnapshot',{}));
@@ -35,6 +35,6 @@ export function observeNetworkRecovery(network:()=>NetworkRecovery){
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
  const network=observeNetworkRecovery(()=>props.network);
- return <><Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onRetry={()=>void props.network.retry()}/></Show>
-  <Show when={network().bluetooth&&network()} keyed>{scope=><NetworkBluetoothNotice width={props.width} height={props.height} onDismiss={()=>scope.dismissBluetooth()}/>}</Show></>;
+ return <><Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onAction={()=>void props.network.retry()}/></Show>
+  <Show when={network().bluetooth&&!network().blocking&&network()} keyed>{scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={()=>scope.dismissBluetooth()}/>}</Show></>;
 }
