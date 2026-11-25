@@ -1,7 +1,7 @@
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {preserveNetworkContent} from '../network/context.ts';
 import {isNetworkRecoveryCancellation} from '../network/recovery.ts';
-import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer} from './network-recovery.tsx';
+import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer,observeNetworkRecovery} from './network-recovery.tsx';
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from '../cloud/status.ts';
 import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
@@ -199,6 +199,8 @@ export default function WatchRSS(props: {
   const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && !cloudOwnerChoice();
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
+  const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
+  const bluetoothNoticeVisible=createMemo(()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().bluetooth);
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -1352,7 +1354,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1 });});
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !bluetoothNoticeVisible() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);

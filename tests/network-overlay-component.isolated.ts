@@ -1,13 +1,31 @@
 import {test,expect,mock} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
-import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps} from 'solid-js';
+import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps,onCleanup} from 'solid-js';
 import {NetworkRecovery} from '../src/network/recovery.ts';
+import {attachGesture,__runGestures,pushTouchBlock,type GestureOptions} from '@pocketjs/framework/gesture';
+import {__packTouch,__setTouches} from '../node_modules/@pocketjs/framework/framework/src/touch.ts';
+import {__advanceClock} from '../node_modules/@pocketjs/framework/framework/src/clock.ts';
+import {BackMotion} from '@podjs/framework/navigation';
+import {rightSwipeBack} from '../src/navigation/right-swipe-back.ts';
+import {playerGesture} from '../src/ui/player-gestures.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'network-overlay',setup(builder){builder.onLoad({filter:/\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const element=(kind:string,props:any)=>{const children=createMemo(()=>props.children);return {kind,props:mergeProps(props,{get children(){return children();}})};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:any)=>element('View',p),Text:(p:any)=>element('Text',p),Image:(p:any)=>element('Image',p)}));
+// Keep the real arena. Bind its handles and frame ticks to the same Solid
+// runtime as the fixture renderer even when the framework has its own copy.
+mock.module('@pocketjs/framework/gesture',()=>({attachGesture,__runGestures,pushTouchBlock,createGesture:(options:GestureOptions)=>{
+ const handle=attachGesture(options);
+ onCleanup(()=>handle.dispose());
+ return handle;
+}}));
+const frameTicks=new Set<()=>void>();
+mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(tick:()=>void)=>{
+ frameTicks.add(tick);
+ onCleanup(()=>frameTicks.delete(tick));
+}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string,slot:number)=>t.length*(slot===19?9:12)})}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(p:any)=>element('Spinner',p)}));
 type Snapshot = {active:boolean;internet:boolean;validated:boolean;wifi:boolean;cellular:boolean;bluetooth:boolean;snapshotSequence?:number};
@@ -51,6 +69,104 @@ test('Bluetooth has no full-screen interceptor and page work still completes',as
  expect(nodes(root).some(n=>n.props.onPress&&n.props.class?.includes('inset-0'))).toBe(false);stop();
 });
 
+
+const viewport=()=>({x:0,y:0,w:233,h:233});
+const gestureRegion={rect:viewport};
+function touchFrame(x?:number,y=100){
+ __advanceClock();
+ __setTouches(x===undefined?[]:[__packTouch(1,x,y)]);
+ __runGestures();
+ for(const tick of frameTicks)tick();
+}
+function settleSwipe(){for(let i=0;i<14;i++)touchFrame();}
+async function bluetoothLayer(rotation=0){
+ const network=new NetworkRecovery({observe:fn=>{fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
+ let cardNode:any;
+ const dispose=createRoot(stop=>{
+  const tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
+   return createComponent(NetworkRecoveryLayer,{network,width:233,height:233,round:true,rotation});
+  }});
+  createRenderEffect(()=>{
+   cardNode=nodes(tree).find(node=>node.props.accessibilityLabel===networkMessages.bluetooth.guidance);
+  });
+  return stop;
+ });
+ await network.run(async()=>true);
+ await flush();
+ expect(cardNode).toBeDefined();
+ return {network,dispose,card:()=>cardNode};
+}
+for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right swipe owns ${mode} input and next swipe returns`,async()=>{
+ const motion=new BackMotion(233);
+ let backStarts=0,competingPans=0;
+ const start=(dx:number)=>{backStarts++;motion.begin(dx);};
+ const end=(vx:number)=>motion.release(vx,0);
+ const move=(dx:number)=>motion.move(dx);
+ const cancel=()=>{if(motion.phase==='dragging')motion.release(0,0,true);};
+ const rotation=mode==='rotated'?90:0;
+ const page=attachGesture(playerGesture(mode==='immersive'
+  ? rightSwipeBack(gestureRegion,{start,move,end,cancel})
+  : {region:gestureRegion,axis:'x',panSlop:8,onPanStart:c=>start(c.dx),onPanMove:c=>move(c.dx),onPanEnd:c=>end(c.vx),onCancel:cancel},
+  ()=>rotation,viewport));
+ const layer=await bluetoothLayer(rotation);
+ const competing=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanStart(){competingPans++;}});
+ try{
+  // Start outside the plate and above its text.
+  touchFrame(46,46);touchFrame(166,46);
+  expect(layer.card().props.style).toMatchObject({translateX:120,opacity:1-120/233,scale:1});
+  expect(backStarts).toBe(0);
+  expect(competingPans).toBe(0);
+  expect(motion.offset).toBe(0);
+  touchFrame();
+  expect(layer.network.bluetooth).toBe(true);
+  settleSwipe();
+  expect(layer.card()).toBeUndefined();
+  expect(layer.network.bluetooth).toBe(false);
+  expect(backStarts).toBe(0);
+
+  competing.dispose();
+  if(rotation){touchFrame(46,46);touchFrame(46,176);}
+  else {touchFrame(46,46);touchFrame(176,46);}
+  touchFrame();
+  expect(backStarts).toBe(1);
+  expect(motion.tick(1000)).toBe('commit');
+ }finally{touchFrame();competing.dispose();layer.dispose();page.dispose();}
+});
+test('Slow short Bluetooth swipe returns to its origin and keeps the notice',async()=>{
+ const layer=await bluetoothLayer();
+ try{
+  touchFrame(55);touchFrame(75);
+  expect(layer.card().props.style.translateX).toBe(20);
+  for(let i=0;i<8;i++)touchFrame(75);
+  touchFrame();
+  const first=layer.card().props.style.translateX;
+  expect(first).toBeGreaterThan(0);
+  expect(first).toBeLessThan(20);
+  settleSwipe();
+  expect(layer.card().props.style).toMatchObject({translateX:0,opacity:1,scale:1});
+  expect(layer.network.bluetooth).toBe(true);
+ }finally{touchFrame();layer.dispose();}
+});
+test('Bluetooth notice passes vertical pans, left pans and outside taps to the page',async()=>{
+ const directions:string[]=[];
+ const vertical=attachGesture({region:gestureRegion,axis:'y',panSlop:8,onPanEnd:c=>directions.push(c.dy<0?'up':'down')});
+ const horizontal=attachGesture({region:gestureRegion,axis:'x',panSlop:8,onPanEnd:c=>directions.push(c.dx<0?'left':'right')});
+ const tap=attachGesture({region:gestureRegion,onTap:()=>directions.push('tap')});
+ const layer=await bluetoothLayer();
+ try{
+  expect(nodes(layer.card()).every(node=>node.props.style?.hitPass===1)).toBe(true);
+  for(const [x,y] of [[100,55],[100,155],[55,100]]){
+   touchFrame(100,100);touchFrame(x,y);touchFrame();settleSwipe();
+   expect(layer.card().props.style.translateX).toBe(0);
+  }
+  touchFrame(45,40);touchFrame();
+  expect(directions).toEqual(['up','down','left','tap']);
+  expect(layer.network.bluetooth).toBe(true);
+  touchFrame(100,100);touchFrame();
+  expect(layer.network.bluetooth).toBe(false);
+  expect(directions).toEqual(['up','down','left','tap']);
+ }finally{touchFrame();layer.dispose();tap.dispose();horizontal.dispose();vertical.dispose();}
+});
 
 test('failed manual snapshot re-enables the overlay Retry button',async()=>{
  let checks=0,requests=0,stop!:()=>void,rejectSnapshot!:(error:Error)=>void;

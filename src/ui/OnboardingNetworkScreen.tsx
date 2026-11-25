@@ -16,19 +16,19 @@ export function OnboardingPrimaryButton(props:{text:string;enabled:boolean;onPre
  return <View focusable={props.enabled} accessibilityLabel={props.text} accessibilityRole="button" accessibilityState={{disabled:!props.enabled}} onPress={()=>{if(props.enabled)props.onPress();}} class="rounded-[24] px-[22] py-[12] items-center justify-center active:scale-96" style={{bgColor:props.enabled?'#ff6026':'#23272a'}}><Text class="text-lg leading-[21]" style={{textColor:props.enabled?'#000000':'#b6b6b6'}}>{props.text}</Text></View>;
 }
 
-export function NetworkIndicator(props:{status:InternetStatus;active?:()=>boolean}){
- return <View class="relative w-[18] h-[18]">
-  <Show when={props.status==='checking'} fallback={<View class="absolute inset-0 rounded-[9999]" style={{bgColor:props.status==='available'?'#41c96b':props.status==='bluetooth'?'#ffa726':'#e54d4d'}}/>}>
+export function NetworkIndicator(props:{status:InternetStatus;active?:()=>boolean;hitPass?:1}){
+ return <View class="relative w-[18] h-[18]" style={{hitPass:props.hitPass??0}}>
+  <Show when={props.status==='checking'} fallback={<View class="absolute inset-0 rounded-[9999]" style={{hitPass:props.hitPass??0,bgColor:props.status==='available'?'#41c96b':props.status==='bluetooth'?'#ffa726':'#e54d4d'}}/>}>
    <WatchProgressIndicator size={18} strokeWidth={3} active={props.active} accessibilityLabel="正在检测互联网状态"/>
   </Show>
  </View>;
 }
 
 /** Shared Compose/onboarding status row; callers only place its safe rectangle. */
-export function NetworkAvailabilityStatusBar(props:{status:InternetStatus;active?:()=>boolean}){
- return <View class="absolute inset-0 h-[42] rounded-[22] bg-[#23272aeb]">
-  <Text class="absolute left-[16] top-[14] text-xs leading-[14] text-[#f5f5f5]">互联网可用状态</Text>
-  <View class="absolute right-[16] top-[12]"><NetworkIndicator status={props.status} active={props.active}/></View>
+export function NetworkAvailabilityStatusBar(props:{status:InternetStatus;active?:()=>boolean;hitPass?:1}){
+ return <View class="absolute inset-0 h-[42] rounded-[22] bg-[#23272aeb]" style={{hitPass:props.hitPass??0}}>
+  <Text class="absolute left-[16] top-[14] text-xs leading-[14] text-[#f5f5f5]" style={{hitPass:props.hitPass??0}}>互联网可用状态</Text>
+  <View class="absolute right-[16] top-[12]" style={{hitPass:props.hitPass??0}}><NetworkIndicator status={props.status} active={props.active} hitPass={props.hitPass}/></View>
  </View>;
 }
 

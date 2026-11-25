@@ -175,7 +175,8 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
  }));
  createGesture({region:{rect:()=>currentLegal()&&active()&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
   onPanStart:c=>{currentLegal()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
-  onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),onCancel:()=>motion.release(0,Date.now(),true)});
+  onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),
+  onCancel:()=>{if(motion.phase==='dragging')motion.release(0,Date.now(),true);}});
  onFrame(()=>{
   if(motion.phase==='settling'){const result=motion.tick(Date.now());setOffset(motion.offset);if(result==='commit')closeLegal();else if(result==='cancel'){motion.reset();setOffset(0);}}
  },()=>motion.phase==='settling');
