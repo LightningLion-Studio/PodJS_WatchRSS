@@ -30,7 +30,7 @@ const swipeFrameMs = 1000/60;
 
 /** Only this compact card handles its own tap. The viewport gesture claims
  * rightward pans and leaves every other direction in the gesture arena.
- * An opaque plate (8-unit padding, 196 wide) keeps the copy legible over lists;
+ * A fully opaque black plate (8-unit padding, 196 wide) keeps the copy legible over lists;
  * its corners stay inside the 233-unit safe circle for 1-2 line guidance. */
 export function NetworkBluetoothNotice(props:{width:number;height:number;onDismiss:()=>void}){
  const scale=()=>Math.min(props.width,props.height)/233;
@@ -93,7 +93,7 @@ export function NetworkBluetoothNotice(props:{width:number;height:number;onDismi
   region:{rect:()=>({x:left()+offset(),y:top(),w:196*scale(),h:height()*scale()})},
   onTap:()=>props.onDismiss(),
  });
- return <View class="absolute rounded-[24] bg-[#0b0c0df5]" style={{insetL:left(),insetT:top(),width:196,height:height(),scale:scale(),originX:-.5,originY:-.5,translateX:offset(),opacity:1-offset()/props.width,hitPass:1}} onPress={props.onDismiss} accessibilityLabel={networkMessages.bluetooth.guidance}>
+ return <View class="absolute rounded-[24] bg-[#000000]" style={{insetL:left(),insetT:top(),width:196,height:height(),scale:scale(),originX:-.5,originY:-.5,translateX:offset(),opacity:1-offset()/props.width,hitPass:1}} onPress={props.onDismiss} accessibilityLabel={networkMessages.bluetooth.guidance}>
   <View class="absolute left-[8] right-[8] top-[8] h-[42]" style={{hitPass:1}}><NetworkAvailabilityStatusBar status="bluetooth" hitPass={1}/></View>
   <Text class="absolute left-[8] right-[8] top-[58] text-xs leading-[14] text-[#f5f5f5] text-center" style={{height:guidance().length*14,hitPass:1}}>{guidance().join('\n')}</Text>
   <Text class="absolute left-[8] right-[8] text-[9px] leading-[11] text-[#b6b6b6] text-center" style={{insetT:66+guidance().length*14,height:status().length*11,hitPass:1}}>{status().join('\n')}</Text>
