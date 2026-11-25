@@ -80,7 +80,8 @@ function touchFrame(x?:number,y=100){
 }
 function settleSwipe(){for(let i=0;i<14;i++)touchFrame();}
 async function bluetoothLayer(rotation=0){
- const network=new NetworkRecovery({observe:fn=>{fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
+ let reportNetwork!:(status:'bluetooth'|'available')=>void;
+ const network=new NetworkRecovery({observe:fn=>{reportNetwork=fn;fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});
  let tree:unknown;
  const dispose=createRoot(stop=>{
   tree=createComponent(NetworkRecoveryProvider,{network,active:()=>true,get children(){
@@ -95,7 +96,7 @@ async function bluetoothLayer(rotation=0){
  expect(text(tree)).toContain(networkMessages.bluetooth.guidance);
  expect(text(tree)).toContain(networkMessages.bluetooth.status);
  expect(nodes(tree).some(node=>node.props.style?.bgColor==='#ffa726')).toBe(true);
- return {network,dispose,page};
+ return {network,dispose,page,reportNetwork};
 }
 for(const mode of ['page','immersive','rotated'] as const)test(`Bluetooth right swipe owns ${mode} input and next swipe returns`,async()=>{
  const motion=new BackMotion(233);
@@ -152,6 +153,23 @@ test('two active Bluetooth layers display and dismiss only the top page per swip
   touchFrame(46,46);touchFrame(166,46);touchFrame();settleSwipe();
   expect(bottom.network.bluetooth).toBe(false);
   expect(bottom.page()).toBeUndefined();
+ }finally{touchFrame();top.dispose();bottom.dispose();}
+});
+test('Bluetooth layer changes during a drag never transfer the active contact',async()=>{
+ const bottom=await bluetoothLayer();
+ const top=await bluetoothLayer();
+ try{
+  bottom.reportNetwork('available');
+  touchFrame(46,46);touchFrame(166,46);
+  bottom.reportNetwork('bluetooth');
+  expect(bottom.page()).toBeUndefined();
+  expect(top.page().props.style.translateX).toBe(120);
+
+  top.reportNetwork('available');
+  expect(top.page()).toBeUndefined();
+  touchFrame(200,46);touchFrame();settleSwipe();
+  expect(bottom.network.bluetooth).toBe(true);
+  expect(bottom.page().props.style.translateX).toBe(0);
  }finally{touchFrame();top.dispose();bottom.dispose();}
 });
 test('Slow short Bluetooth swipe returns to its origin and keeps the page',async()=>{

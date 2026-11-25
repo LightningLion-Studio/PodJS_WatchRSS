@@ -33,8 +33,16 @@ export function observeNetworkRecovery(network:()=>NetworkRecovery){
  return ()=>{revision();return network();};
 }
 
+// Layer mount order follows paint order. Keep that order when a lower route
+// reports Bluetooth later, so a network update never steals the top page.
+const [bluetoothLayers,setBluetoothLayers]=createSignal<readonly (()=>boolean)[]>([]);
+
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){
  const network=observeNetworkRecovery(()=>props.network);
+ const wantsBluetooth=()=>network().bluetooth&&!network().blocking;
+ setBluetoothLayers(layers=>[wantsBluetooth,...layers]);
+ onCleanup(()=>setBluetoothLayers(layers=>layers.filter(layer=>layer!==wantsBluetooth)));
+ const ownsBluetoothPage=()=>bluetoothLayers().find(wantsPage=>wantsPage())===wantsBluetooth;
  return <><Show when={network().blocking}><NetworkUnavailableOverlay rotation={props.rotation} width={props.width} height={props.height} round={props.round} status={network().overlayStatus} onAction={()=>void props.network.retry()}/></Show>
-  <Show when={network().bluetooth&&!network().blocking&&network()} keyed>{scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={()=>scope.dismissBluetooth()}/>}</Show></>;
+  <Show when={ownsBluetoothPage()&&network()} keyed>{scope=><NetworkBluetoothPage rotation={props.rotation} width={props.width} height={props.height} onDismiss={()=>scope.dismissBluetooth()}/>}</Show></>;
 }

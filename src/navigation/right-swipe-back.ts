@@ -1,7 +1,7 @@
 import type {GestureContact,GestureOptions,GestureRegion} from '@pocketjs/framework/gesture';
 
 export const rightSwipeSlop = 8;
-export function isRightSwipe(dx:number,dy:number):boolean {
+function isRightSwipe(dx:number,dy:number):boolean {
  return dx>rightSwipeSlop&&dx>=Math.abs(dy);
 }
 
