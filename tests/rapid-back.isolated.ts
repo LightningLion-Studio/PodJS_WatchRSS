@@ -20,11 +20,16 @@ const workDeadline=mode==='bluetooth-note-action-pin-leave-deadline';
 const rssAction=mode.startsWith('bluetooth-rss-action-');
 const rssProbe=mode.startsWith('bluetooth-feed-');
 const slowArticleOpen=mode.startsWith('bluetooth-feed-open-slow');
-const rssFromReader=mode==='bluetooth-feed-reload';
+const navigationBackground=mode==='bluetooth-feed-open-slow-background';
+const navigationAccount=mode==='bluetooth-feed-open-slow-account';
+const backgroundRead=mode==='bluetooth-safe-settings-background-read';
+const settingsQuery=mode==='bluetooth-safe-settings-account-query';
+const stalledFeedReload=mode==='bluetooth-feed-stalled-reload-leave';
+const rssFromReader=mode==='bluetooth-feed-reload'||stalledFeedReload;
 const videoCase=mode==='bluetooth-video-pan';
 const shareSystem=mode==='bluetooth-rss-action-system';
 const searchRestore=mode==='bluetooth-search-restore';
-const safeRoute=mode.startsWith('bluetooth-safe-') ? mode.slice('bluetooth-safe-'.length) : undefined;
+const safeRoute=backgroundRead||settingsQuery?'settings':mode.startsWith('bluetooth-safe-') ? mode.slice('bluetooth-safe-'.length) : undefined;
 let releaseOperation: (()=>void)|undefined;
 let releaseShare: (()=>void)|undefined;
 let releaseRecovery: ((pending:boolean)=>void)|undefined;
@@ -148,6 +153,11 @@ if(noteCase||noteActionsCase||noteAction||noteDownload||noteListLoad||safeRoute=
   return new Promise<boolean>(resolve=>{resolveTitlePending=resolve;});
  };
 }
+if(backgroundRead)services.listChannels=async()=>{
+ await deferOperation();
+ return [{id:'feed',title:'Test feed',url:'https://watchrss.local/import-content'}];
+};
+if(settingsQuery)services.hasSummaryAccount=async()=>{await deferOperation();return false;};
 if(rssSaveCase)services.setSaveState=()=>new Promise<void>(resolve=>{resolveFavorite=resolve;});
 if(searchCase){
  const {textInput}=await import('@podjs/framework/services');
@@ -165,7 +175,7 @@ if(rssAction){
  services.deleteArticle=deferOperation;
 }
 if(mode==='bluetooth-feed-open'||mode==='bluetooth-feed-open-with-warning'||slowArticleOpen)services.markRead=()=>new Promise<void>((resolve,reject)=>{
- releaseOperation=mode==='bluetooth-feed-open-slow-fail'?()=>reject(new Error('fixture markRead failed')):resolve;
+ releaseOperation=(mode==='bluetooth-feed-open-slow-fail'||navigationAccount)?()=>reject(new Error('fixture markRead failed')):resolve;
 });
 if(mode==='bluetooth-feed-actions')services.getArticle=async()=>{await deferOperation();return article;};
 if(rssFromReader)services.listArticles=async()=>{
@@ -184,6 +194,12 @@ activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  :mode.startsWith('bluetooth')&&!rssFromReader&&!videoCase
    ?[{page:'home'},{page:'articles',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
+const {connectCloudAccountStatus,notifyCloudAccountStatus}=await import('../src/cloud/status.ts');
+let accountRevision=1;
+const disconnectAccount=navigationAccount?connectCloudAccountStatus(()=>({
+ accountId:`fixture-${accountRevision}`,accountScope:`scope-${accountRevision}`,accountRevision,
+ message:'fixture',usedBytes:0,quotaBytes:0,
+})):undefined;
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
 const frame=(globalThis as any).frame;const watch=await import('@podjs/framework/watch');
@@ -313,6 +329,17 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    // The first available callback after resubscribing describes the current default.
    await network(true,80,'available');
    expect(warnings()).toHaveLength(0);
+   return;
+  }
+  if(backgroundRead||settingsQuery){
+   expect(state()).toEqual(['home','settings']);
+   expect(releaseOperation).toBeDefined();
+   await network(true,50);
+   expect(warnings()).toHaveLength(0);
+   await assertOnce('settings');
+   releaseOperation!();
+   await pump();
+   expect(warnings()).toHaveLength(1);
    return;
   }
   if(safeRoute){
@@ -489,6 +516,26 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    expect(releaseOperation).toBeDefined();
    await network(true);
    expect(warnings()).toHaveLength(0);
+   if(navigationBackground||navigationAccount){
+    if(navigationBackground){
+     events.push({t:'lifecycle',state:'background'});
+     await pump();
+     events.push({t:'lifecycle',state:'active'});
+     await pump(10);
+    }else{
+     accountRevision++;
+     notifyCloudAccountStatus();
+    }
+    await assertOnce('articles');
+    press('继续');
+    await pump();
+    releaseOperation!();
+    await pump();
+    expect(state()).toEqual(['home','articles']);
+    expect(displayed('Error: fixture markRead failed')).toBe(false);
+    expect(warnings()).toHaveLength(0);
+    return;
+   }
    await tick(30_000);
    await pump();
    const warningBeforeReply=warnings().length;
@@ -521,6 +568,12 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    if(rssFromReader){
     await back();
     expect(releaseFeed).toBeDefined();
+    if(stalledFeedReload){
+     await back();
+     await network(true);
+     await assertOnce('home');
+     return;
+    }
     await network(true);
     expect(warning()).toBeUndefined();
     releaseFeed!();
@@ -752,7 +805,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   await pump();
   expect(warning()).toBeUndefined();
   expect(state().at(-1)).toBe('articles');
- }finally{removeEventProbe();stop();}
+ }finally{disconnectAccount?.();removeEventProbe();stop();}
 });
 else test(`production WatchRSS routes and BackMotion survive ${mode}`,async()=>{
  for(let i=0;i<50;i++)await tick();

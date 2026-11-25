@@ -9,7 +9,7 @@ interface SavedControllerDependencies {
   trackUiWork: () => () => void;
   current: () => RouteEntry;
   setArticles: Setter<Article[]>;
-  setLoading: Setter<boolean>;
+  startPageLoading: () => () => void;
   setError: Setter<string>;
   setCurrentQuery: (query: ArticleQuery) => void;
 }
@@ -30,7 +30,7 @@ export function createSavedRouteController(
 
   async function loadSaved(type: "favorite" | "watchLater") {
     const version = ++savedLoadVersion;
-    dependencies.setLoading(true);
+    const loaded = dependencies.startPageLoading();
     dependencies.setError("");
     try {
       const rss: Article[] = [];
@@ -69,7 +69,7 @@ export function createSavedRouteController(
         dependencies.setError(String(error));
       }
     } finally {
-      if (version === savedLoadVersion) dependencies.setLoading(false);
+      loaded();
     }
   }
 
@@ -112,6 +112,7 @@ export function createSavedRouteController(
   async function undoSaved() {
     const undo = savedUndo();
     if (!undo) return;
+    const origin = dependencies.current();
     clearSavedUndo();
     const done = dependencies.trackUiWork();
     try {
@@ -120,7 +121,8 @@ export function createSavedRouteController(
         undo.type,
         true,
       );
-      await loadSaved(undo.type);
+      done();
+      if (dependencies.current() === origin) await loadSaved(undo.type);
     } catch (error) {
       dependencies.setError(String(error));
     } finally {
@@ -129,8 +131,8 @@ export function createSavedRouteController(
   }
 
   async function reorderSaved(items: SavedDisplayItem[]) {
-    const type =
-      dependencies.current().page === "saved" ? "favorite" : "watchLater";
+    const origin = dependencies.current();
+    const type = origin.page === "saved" ? "favorite" : "watchLater";
     const done = dependencies.trackUiWork();
     try {
       setSavedEntries(items);
@@ -140,7 +142,8 @@ export function createSavedRouteController(
       );
     } catch (error) {
       dependencies.setError(String(error));
-      await loadSaved(type);
+      done();
+      if (dependencies.current() === origin) await loadSaved(type);
     } finally {
       done();
     }

@@ -71,6 +71,7 @@ import {
   batch,
   createEffect,
   createMemo,
+  createRenderEffect,
   createSignal,
   onCleanup,
   onMount,
@@ -196,8 +197,8 @@ export default function WatchRSS(props: {
   const networkScopes=new WeakMap<Entry,ReturnType<typeof createHostNetworkRecovery>>();
   const networkFor=(entry:Entry)=>{let scope=networkScopes.get(entry);if(!scope){scope=createHostNetworkRecovery();networkScopes.set(entry,scope);}return scope;};
   const page = () => current().page;
-  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
-  onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
+  let accountStatus=readCloudAccountStatus();
+  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!accountStatus?.ownerChoiceRequired);
   const warningNetwork=useBluetoothWarningConnection();
   const warningShown=()=>page()==='bluetooth-warning';
   const contentRoute=()=>warningShown()?stack().at(-2)!:current();
@@ -208,8 +209,8 @@ export default function WatchRSS(props: {
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
   const [pendingUiWork,setPendingUiWork]=createSignal(0);
   const uiWorkReleases=new Set<()=>void>();
-  const trackUiWork=(kind?:"background-write")=>{
-    const deadline=kind==="background-write"?delay(BACKGROUND_WRITE_MAX_MS):undefined;
+  const trackUiWork=(kind:"navigation"|"local-write"|"modal"|"playback")=>{
+    const deadline=kind==="local-write"?delay(BACKGROUND_WRITE_MAX_MS):undefined;
     const done=()=>{
       if(!uiWorkReleases.delete(done))return;
       try{deadline?.cancel();}
@@ -230,22 +231,35 @@ export default function WatchRSS(props: {
     return done;
   };
   onCleanup(()=>{for(const done of uiWorkReleases)done();});
-  const withUiWork=async <T,>(operation:()=>Promise<T>,kind?:"background-write"):Promise<T>=>{
+  const withUiWork=async <T,>(operation:()=>Promise<T>,kind:"local-write"|"modal"|"playback"):Promise<T>=>{
     const done=trackUiWork(kind);
     try{return await operation();}
     finally{done();}
   };
   let pendingNavigation:{origin:Entry;done:()=>void}|undefined;
-  createEffect(()=>{
+  createRenderEffect(()=>{
     const route=contentRoute();
     if(pendingNavigation&&pendingNavigation.origin!==route)pendingNavigation.done();
   });
   onCleanup(()=>pendingNavigation?.done());
+  onCleanup(subscribeCloudAccountStatus(()=>{
+    const next=readCloudAccountStatus();
+    const ownerChoice=!!next?.ownerChoiceRequired;
+    if(next?.accountScope!==accountStatus?.accountScope||
+       next?.accountId!==accountStatus?.accountId||
+       next?.accountRevision!==accountStatus?.accountRevision||ownerChoice)
+      pendingNavigation?.done();
+    accountStatus=next;
+    setCloudOwnerChoice(ownerChoice);
+  }));
+  onCleanup(props.services.subscribeAccountStatus(change=>{
+    if(change?.kind==="account"&&change.account===null)pendingNavigation?.done();
+  }));
   function beginNavigation(showBusy=false) {
     const origin=contentRoute();
-    const release=trackUiWork();
+    const release=trackUiWork("navigation");
     pendingNavigation?.done();
-    const active=()=>pendingNavigation===intent&&contentRoute()===origin&&foreground()&&
+    const active=()=>pendingNavigation===intent&&contentRoute()===origin&&foreground()&&!cloudOwnerChoice()&&
       (warningShown()||motion.phase==="idle");
     const revealOrigin=()=>{
       if(!active())return false;
@@ -256,31 +270,28 @@ export default function WatchRSS(props: {
     const done=()=>{
       if(pendingNavigation===intent){
         pendingNavigation=undefined;
-        if(showBusy)setBusy(false);
+        if(showBusy)setNavigationBusy(false);
       }
       release();
     };
+    // The intent object is the generation token for all of its continuations.
     const intent={origin,done};
     pendingNavigation=intent;
-    if(showBusy)setBusy(true);
+    if(showBusy)setNavigationBusy(true);
     return {active,revealOrigin,done};
   }
   const routeServices:AppServices=Object.assign(Object.create(props.services),{
-    input:(...args:Parameters<AppServices['input']>)=>withUiWork(()=>props.services.input(...args)),
+    input:(...args:Parameters<AppServices['input']>)=>withUiWork(()=>props.services.input(...args),"modal"),
     openInlineInput:props.services.openInlineInput&&
       (async (...args:Parameters<NonNullable<AppServices['openInlineInput']>>)=>{
-        const done=trackUiWork();
+        const done=trackUiWork("modal");
         try{
           const session=await props.services.openInlineInput!(...args);
           return {...session,close:async()=>{try{await session.close();}finally{done();}}};
         }catch(error){done();throw error;}
       }),
-    listNovelChapters:props.services.listNovelChapters&&
-      ((...args:Parameters<NonNullable<AppServices['listNovelChapters']>>)=>withUiWork(()=>props.services.listNovelChapters!(...args))),
-    hasSummaryAccount:props.services.hasSummaryAccount&&
-      (()=>withUiWork(()=>props.services.hasSummaryAccount!())),
     confirmAddChannel:props.services.confirmAddChannel&&
-      ((token:string)=>withUiWork(()=>props.services.confirmAddChannel!(token))),
+      ((token:string)=>withUiWork(()=>props.services.confirmAddChannel!(token),"local-write")),
   });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -306,7 +317,7 @@ export default function WatchRSS(props: {
     // The guard releases navigation at its deadline while the write may still run.
     let done:(()=>void)|undefined;
     guard.begin(entry,()=>{
-      done=trackUiWork(context==="background"?"background-write":undefined);
+      done=trackUiWork("local-write");
       return reader.flushProgress();
     },outcome=>{
       try{
@@ -517,10 +528,19 @@ export default function WatchRSS(props: {
       articles().some(item => item.channelId === entry.channelId);
   };
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [loading, setLoading] = createSignal(startupNeedsChannels&&!homeSnapshot),
-    [busy, setBusy] = createSignal(false),
-    [homeRefreshing, setHomeRefreshing] = createSignal(false),
-    [errorMessage, setError] = createSignal("");
+  const [pageLoad,setPageLoad]=createSignal<{entry:Entry}|undefined>(startupNeedsChannels&&!homeSnapshot?{entry:current()}:undefined);
+  const loading=()=>pageLoad()?.entry===contentRoute();
+  const [actionBusy,setBusy]=createSignal(false);
+  const [navigationBusy,setNavigationBusy]=createSignal(false);
+  const busy=()=>navigationBusy()||actionBusy();
+  const [homeRefreshing,setHomeRefreshing]=createSignal(false);
+  const [errorMessage,setError]=createSignal("");
+  // Loading replaces the browsing surface only for the route that owns it.
+  const startPageLoading=()=>{
+    const load={entry:contentRoute()};
+    setPageLoad(load);
+    return ()=>setPageLoad(currentLoad=>currentLoad===load?undefined:currentLoad);
+  };
   const error = createMemo(() => {
     const message = errorMessage();
     // A rejected async handler can report a QuickJS allocation failure after
@@ -537,10 +557,10 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
-    trackUiWork:()=>trackUiWork("background-write"),
+    trackUiWork:()=>trackUiWork("local-write"),
     current,
     setArticles,
-    setLoading,
+    startPageLoading,
     setError,
     setCurrentQuery: (value) => {
       currentQuery = value;
@@ -634,7 +654,7 @@ export default function WatchRSS(props: {
       source.page === "rss-actions" ||
       (source.page === "bili" && source.biliRoute?.name === "actions") ||
       (source.page === "douyin" && source.douyinRoute?.name === "actions");
-    const done=trackUiWork();
+    const done=trackUiWork("modal");
     void shareEnvironment
       .then(async (supported) => {
         if (!shareAlive || current() !== source || motion.phase !== "idle")
@@ -726,18 +746,18 @@ export default function WatchRSS(props: {
     idleHit(10);const services = props.announcements;
     if (!services || homeNoticesChecked || !foreground()) return;
     homeNoticesChecked = true;
-    const done=trackUiWork();
     void loadHomeNotices(services.repository).then(result => {
       if (!homeNoticesAlive) return;
       batch(() => {
         setPendingAnnouncement(result.announcement);
         setPendingPushMessages(result.messages);
       });
-    }).finally(done);
+    });
   });
   onCleanup(() => { homeNoticesAlive = false; });
   onCleanup(
     onLifecycleChange((value) => {
+      if(value!=="active")pendingNavigation?.done();
       setForeground(value === "active");
       const entry = current();
       if (value !== "active") {
@@ -857,24 +877,21 @@ export default function WatchRSS(props: {
 
   async function loadChannels(foregroundLoad=true) {idleHit(5);
     // Keep the startup snapshot visible and leave a restored page's state alone.
-    if(foregroundLoad){
-      if(!channels().length)setLoading(true);
-      setError("");
-    }
+    const loaded=foregroundLoad&&!channels().length?startPageLoading():undefined;
+    if(foregroundLoad)setError("");
     try {
-      const list = await withUiWork(()=>props.services.listChannels());
+      const list = await props.services.listChannels();
       traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
     } catch (e) {
       if(foregroundLoad||page()==="home")setError(String(e));
     } finally {
-      if(foregroundLoad)setLoading(false);
+      loaded?.();
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
-    const done=trackUiWork();
-    setLoading(true);
+    const loaded=startPageLoading();
     setError("");
     try {
       const next = opts?.page ?? 0;
@@ -889,8 +906,7 @@ export default function WatchRSS(props: {
     } catch (e) {
       setError(String(e));
     } finally {
-      done();
-      setLoading(false);
+      loaded();
     }
   }
   async function loadFeedArticles(
@@ -898,9 +914,9 @@ export default function WatchRSS(props: {
     limit = feedVisibleCount(),
     initial = false,
   ) {
-    const done=trackUiWork();
+    const origin=contentRoute();
     const version = ++feedRequestVersion;
-    if (initial) setLoading(true);
+    const loaded=initial?startPageLoading():undefined;
     try {
       const window = await loadFeedWindow(
         props.services.listArticles,
@@ -909,8 +925,8 @@ export default function WatchRSS(props: {
       );
       if (
         version !== feedRequestVersion ||
-        page() !== "articles" ||
-        current().channelId !== channelId
+        contentRoute() !== origin ||
+        origin.channelId !== channelId
       )
         return;
       batch(() => {
@@ -922,9 +938,8 @@ export default function WatchRSS(props: {
     } catch (e) {
       if (version === feedRequestVersion) setError(String(e));
     } finally {
-      done();
+      loaded?.();
       if (version === feedRequestVersion) {
-        if (initial) setLoading(false);
         setFeedLoadingMore(false);
       }
     }
@@ -932,7 +947,10 @@ export default function WatchRSS(props: {
   async function restoreStartupNavigation() {
     const baseline=stack();let owned=baseline;
     try {
-      if(startupNeedsChannels)await loadChannels();
+      if(startupNeedsChannels){
+        if(homeSnapshot)void loadChannels(false);
+        else await loadChannels();
+      }
       if(startupDisposed||stack()!==baseline)return;
       if(activityEntries){
         const entries=await resolveActivityNavigation(activityEntries,{
@@ -1014,11 +1032,11 @@ export default function WatchRSS(props: {
     if (next === "notes") {
       const navigation=beginNavigation(true);
       try {
+        if(!navigation.active())return;
         await memoRepository.initialize();
         if(navigation.revealOrigin()){
           setPage(next);
           kv.set("page", next);
-          setLoading(false);
         }
       } catch (e) {
         if(navigation.revealOrigin())setError(String(e));
@@ -1037,26 +1055,13 @@ export default function WatchRSS(props: {
     }
     if (next === "saved" || next === "watch-later")
       await loadSaved(next === "saved" ? "favorite" : "watchLater");
-    if (
-      [
-        "phone-connection",
-        "settings",
-        "settings-advanced",
-        "search",
-        "profile",
-        "recommendations",
-        "information",
-        "note-detail",
-        "note-actions",
-      ].includes(next)
-    )
-      setLoading(false);
   }
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
     const navigation=beginNavigation();
     const origin=contentRoute();
     const previousReader=replaceReader&&origin.page==="reader"?origin:undefined;
     try {
+      if(!navigation.active())return;
       const full = await props.services.getArticle(item.id,article());
       if(!navigation.active())return;
       if(!full)throw new Error("文章不存在，请返回后重试");
@@ -1086,17 +1091,18 @@ export default function WatchRSS(props: {
     }
   }
   const beginRssAction = () => {
-    const done = trackUiWork("background-write");
+    const releaseWrite=trackUiWork("local-write");
     setBusy(true);
-    return () => {
+    return {releaseWrite,done:()=>{
       setBusy(false);
-      done();
-    };
+      releaseWrite();
+    }};
   };
   async function openArticleActions(item: Article) {
     if (busy()) return;
     const navigation=beginNavigation(true);
     try {
+      if(!navigation.active())return;
       const full = await props.services.getArticle(item.id,article());
       if (navigation.revealOrigin()) {
         setArticle(full ?? item);
@@ -1112,12 +1118,13 @@ export default function WatchRSS(props: {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    const done = beginRssAction();
+    const {done,releaseWrite} = beginRssAction();
     try {
       await props.services.deleteArticle(selected.id);
+      releaseWrite();
       setArticles((items) => items.filter((item) => item.id !== selected.id));
       if (current() === origin && popPage(true)) setArticle(null);
-      await loadChannels();
+      await loadChannels(false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1132,7 +1139,7 @@ export default function WatchRSS(props: {
     const selected = article();
     if (!selected || busy()) return;
     const origin = current();
-    const done = beginRssAction();
+    const {done} = beginRssAction();
     try {
       await props.services.setSaveState(selected.id, type, saved);
       const patch = type === "favorite" ? { saved } : { watchLater: saved };
@@ -1161,7 +1168,7 @@ export default function WatchRSS(props: {
     const selected = article();
     if (!selected?.read || busy()) return;
     const origin = current();
-    const done = beginRssAction();
+    const {done} = beginRssAction();
     try {
       await props.services.markRead(selected.id, false);
       setArticle({ ...selected, read: false });
@@ -1188,7 +1195,7 @@ export default function WatchRSS(props: {
   ) {
     if (busy()) return;
     const saved = type === "favorite" ? !item.saved : !item.watchLater;
-    const done = beginRssAction();
+    const {done} = beginRssAction();
     try {
       await props.services.setSaveState(item.id, type, saved);
       setArticles((items) =>
@@ -1211,6 +1218,7 @@ export default function WatchRSS(props: {
     if (busy()) return;
     const navigation=beginNavigation(true);
     try {
+      if(!navigation.active())return;
       const [enabled, playback] = await Promise.all([
         props.services.getChannelOriginalMode(id),
         props.services.getChannelPlaybackSettings(id),
@@ -1238,7 +1246,7 @@ export default function WatchRSS(props: {
       | "clear",
   ) {
     if (busy()) return;
-    const done = beginRssAction();
+    const {done,releaseWrite} = beginRssAction();
     setError("");
     try {
       if (action === "original") {
@@ -1261,11 +1269,13 @@ export default function WatchRSS(props: {
         }));
       } else if (action === "move") {
         await props.services.moveChannelToTop(id);
+        releaseWrite();
         setChannels(await props.services.listChannels());
       } else if (action === "pin") {
         const channel = channels().find((item) => item.id === id);
         if (!channel) return;
         await props.services.setChannelPinned(id, !channel.isPinned);
+        releaseWrite();
         setChannels(await props.services.listChannels());
       } else if (action === "read") {
         await props.services.markChannelRead(id);
@@ -1372,13 +1382,14 @@ export default function WatchRSS(props: {
         await networkFor(origin).run(() => props.services.refresh(origin.channelId));
       }
       finally { if (refreshAll) usageTelemetry.recordFeedRefreshed(); }
-      if (page() === "home") await loadChannels();
-      else if (page() === "articles" && current().channelId)
-        await loadFeedArticles(current().channelId!, feedVisibleCount());
-      else if (page() === "saved" || page() === "watch-later")
-        await loadSaved(page() === "saved" ? "favorite" : "watchLater");
-      else if (page() === "search" && current().channelId)
-        await searchChannelArticles(current().channelId!, query());
+      if(contentRoute()!==origin)return;
+      if(origin.page==="home")await loadChannels(false);
+      else if(origin.page==="articles"&&origin.channelId)
+        await loadFeedArticles(origin.channelId,feedVisibleCount());
+      else if(origin.page==="saved"||origin.page==="watch-later")
+        await loadSaved(origin.page==="saved"?"favorite":"watchLater");
+      else if(origin.page==="search"&&origin.channelId)
+        await searchChannelArticles(origin.channelId,query());
       else await loadArticles(currentQuery);
     } catch (e) {
       if(current()===origin&&!isNetworkRecoveryCancellation(e))setError(String(e));
@@ -1772,8 +1783,8 @@ export default function WatchRSS(props: {
               openSpeech={() => setPage("speech-playback")}
               openAdd={() => void doAdd()}
               refresh={refresh}
-              openBili={route=>withUiWork(()=>biliNavigate(route))}
-              openDouyin={route=>withUiWork(()=>douyinNavigate(route))}
+              openBili={biliNavigate}
+              openDouyin={douyinNavigate}
               openFeed={(channel) => {
                 setFeedVisibleCount(12);
                 setFeedHasMore(false);
@@ -1844,7 +1855,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
-              trackPlaybackRelease={operation=>{void withUiWork(()=>operation);}}
+              trackPlaybackRelease={operation=>{void withUiWork(()=>operation,"playback");}}
               onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
@@ -1872,7 +1883,7 @@ export default function WatchRSS(props: {
               saveMediaSetting={(platform, key, value) =>
                 kv.set(`watchrss.${platform}.${key}`, value)
               }
-              deleteBuiltin={deleteBuiltin}
+              deleteBuiltin={platform=>withUiWork(()=>deleteBuiltin(platform),"local-write")}
               share={share}
               openBili={biliNavigate}
               openDouyin={douyinNavigate}
@@ -1917,7 +1928,7 @@ export default function WatchRSS(props: {
             />
             <NotesRoutes
               onStateChange={saveActivity}
-              withUiWork={operation=>withUiWork(operation,"background-write")}
+              withUiWork={operation=>withUiWork(operation,"local-write")}
               entry={entry}
               page={entryPage}
               active={active}
@@ -2026,7 +2037,7 @@ export default function WatchRSS(props: {
       const entry=current();
       if(!warningBrowseReady[entry.page]?.(entry))return;
       if(!resumeReady()||!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe())return;
-      if(motion.phase!=='idle'||pendingUiWork()||busy()||loading()||homeRefreshing()||updatingFeed)return;
+      if(motion.phase!=='idle'||pendingUiWork()||loading())return;
       if(playingSource()||videoLoading())return;
       const scroller=entry.list?.scroller;
       if(scroller&&scroller.state()!=='idle')return;

@@ -52,15 +52,15 @@ export interface NotesListScreenProps extends BaseProps {
 }
 export function NotesListScreen(props: NotesListScreenProps) {
   const [notes,setNotes]=createSignal<MemoNote[]>([]), [loaded,setLoaded]=createSignal(false);
-  const [download,setDownload]=createSignal(false),[reading,setReading]=createSignal(true);
+  const [download,setDownload]=createSignal(false);
   const [openingDownload,setOpeningDownload]=createSignal(false);
-  props.onBrowseReady?.(()=>!reading()&&!download()&&!openingDownload());
+  props.onBrowseReady?.(()=>loaded()&&!download()&&!openingDownload());
   let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
   const phonePrompt=()=>measuredLines("下载手机端app以在手机上编辑和同步内容",props.width-2*padding-20,text=>getOps().measureText(text,22),2).join("\n");
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
-  const load=async()=>{const version=++readVersion;setReading(true);try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion){setLoaded(true);setReading(false);}}};
+  const load=async()=>{const version=++readVersion;try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion)setLoaded(true);}};
   onMount(()=>void load());
   createEffect(on(()=>props.refreshKey,()=>void load(),{defer:true}));
   const cardLayouts=createMemo(()=>notes().map(note=>{
