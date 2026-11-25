@@ -576,10 +576,12 @@ test('cloud progress shows only verified denominators and keeps count updates ou
  let at=0,reads=0;
  const progress=new SyncProgress(()=>at,()=>()=>{},()=>{});
  const progressUi={subscribe:()=>()=>{},snapshot:async()=>{reads++;return {} as SyncV2UiState;}} as unknown as SyncV2UiPort;
+ let cloud:NonNullable<ReturnType<typeof readCloudAccountStatus>>={phase:'downloading',message:'正在同步',usedBytes:0,quotaBytes:1e9};
+ let refresh=()=>{};
  const root=createRoot(stop=>{
   stops.push(stop);
   return CloudSyncScreen({width:233,height:233,active:()=>true,progress,syncV2:progressUi,
-   available:()=>true,load:async()=>syncSnapshot({phase:'idle',message:'',usedBytes:0,quotaBytes:1e9},'fixture'),
+   available:()=>true,load:async()=>syncSnapshot(cloud,'fixture'),subscribe:listener=>{refresh=listener;return ()=>{};},
    sync:{pending:false,start:async()=>{}},onPhone(){},onError(){},ref(){}});
  });
  await settle();
@@ -599,8 +601,17 @@ test('cloud progress shows only verified denominators and keeps count updates ou
  progress.advance(12);
  expect(values()).toContain('已下载 12 / 40 项');
  expect(values()).toContain('同步进度条');
+ expect(nodes(root).filter(node=>node.props.children==='正在同步')).toHaveLength(1);
+ expect(values().indexOf('同步进度条')).toBeLessThan(values().indexOf('同步中…'));
+ progress.finish('complete');
+ expect(values()).not.toContain('同步进度条');
+ expect(values()).not.toContain('正在下载变更');
  await settle();
  expect(reads).toBe(snapshotReads);
+ cloud={...cloud,phase:'complete',message:'云同步完成',lastCompletedAt:1};
+ refresh();
+ await settle();
+ expect(values()).toContain('手表与云端已一致');
 });
 
 test('cloud screen owns its display lease only while its route is visible and the app is foreground',async()=>{

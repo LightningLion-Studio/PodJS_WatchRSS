@@ -80,7 +80,7 @@ export function CloudSyncScreen(props: {
     setSyncProgress(source.snapshot);
     onCleanup(source.subscribe(setSyncProgress));
   });
-  const progressVisible=createMemo(()=>!!syncProgress());
+  const progressVisible=createMemo(()=>{const stage=syncProgress()?.stage;return !!stage&&stage!=='complete';});
   const routeNetwork=useContext(NetworkRecoveryContext);
   const network=routeNetwork??directNetworkWork;
   const [v2, setV2] = createSignal<SyncV2UiState>();
@@ -320,7 +320,7 @@ export function CloudSyncScreen(props: {
       const count=createMemo(()=>syncProgress()?.count);
       const fraction=()=>Math.min(1,(count()?.done??0)/(count()?.total??1));
       return <View class="absolute" style={{insetL:(inner()-FACTS_WIDTH)/2,insetT:0,height:36,width:FACTS_WIDTH}}>
-        <Text class="absolute text-center" style={{insetT:0,width:FACTS_WIDTH,fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.foreground}}>{SYNC_STAGE_LABEL[syncProgress()?.stage??'connecting']}</Text>
+        <Text class="absolute text-center" style={{insetT:0,width:FACTS_WIDTH,fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.secondary}}>{SYNC_STAGE_LABEL[syncProgress()?.stage??'connecting']}</Text>
         <Text class="absolute text-center" style={{insetT:17,width:FACTS_WIDTH,fontSlot:0,lineHeight:14,textColor:PHONE_PAGE.secondary}}>{count()?countLabel(count()!):''}</Text>
         <Show when={count()?.total!==undefined}>
           <View class="absolute rounded-[2]" accessibilityLabel="同步进度条" style={{insetL:(FACTS_WIDTH-PROGRESS_BAR_WIDTH)/2,insetT:32,width:PROGRESS_BAR_WIDTH,height:4,bgColor:'#2a2a2a'}}>
@@ -344,7 +344,8 @@ export function CloudSyncScreen(props: {
         <View class="absolute left-[0] top-[6.5] w-[8] h-[8] rounded-full" style={{bgColor: TONE[view.tone]}}/>
         <Text class="absolute left-[16] top-[0]" style={{fontSlot: 22, lineHeight: 21, textColor: PHONE_PAGE.foreground}}>{view.title}</Text>
       </View>});
-    if (view.detail) rows.push(gap(4), centred(view.detail, 1, 17, PHONE_PAGE.secondary, Math.min(inner(), DETAIL_WIDTH)));
+    if (view.title === '正在同步' && bound() && progressVisible()) rows.push(gap(4), progressRow());
+    else if (view.detail) rows.push(gap(4), centred(view.detail, 1, 17, PHONE_PAGE.secondary, Math.min(inner(), DETAIL_WIDTH)));
     // A request from another device replaces the sync action so it lands near the top of the round screen.
     const grant=approver(),grantActive=!!props.approver&&!!grant&&approval().phase==='idle'&&!['idle','unsupported'].includes(grant.phase);
     if(grantActive&&grant){
@@ -407,8 +408,7 @@ export function CloudSyncScreen(props: {
     }
     if(actions&&fix.needsReregistration)rows.push(gap(12),pill(armed()==='reregister'?'再按一次确认':'重新登记本机',armed()!=='reregister',()=>arm('reregister',()=>act(actions.reregister(true))),!busy,armed()==='reregister'));
     if(actions?.message)rows.push(gap(8),centred(actions.message,1,17,'#ff7777'));
-    if (!fix.needsOwnerChoice && bound() && progressVisible()) rows.push(gap(14),progressRow());
-    else if (!fix.needsOwnerChoice && view.progress) rows.push(gap(14), bar(view.progress.fraction), gap(6), centred(view.progress.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
+    if (!fix.needsOwnerChoice && view.title !== '正在同步' && view.progress) rows.push(gap(14), bar(view.progress.fraction), gap(6), centred(view.progress.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     if (!fix.needsOwnerChoice && (view.space || view.lastSynced)) rows.push(gap(14));
     if (!fix.needsOwnerChoice && view.space) {
       rows.push(bar(view.space.fraction), gap(6), centred(view.space.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
