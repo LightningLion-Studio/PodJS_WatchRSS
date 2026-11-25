@@ -33,6 +33,7 @@ interface NotesRoutesProps {
 
 export function NotesRoutes(props: NotesRoutesProps) {
   const finishEditing = () => {
+    if (!props.active()) return;
     props.bumpRefreshKey();
     props.popPage(true);
   };
@@ -84,6 +85,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
               : undefined;
             props.entry.internalBack = value.goBack;
             props.entry.noteEditorBack = value.editorClose;
+            props.entry.noteEditing = value.editing;
           }}
         />
       </Show>

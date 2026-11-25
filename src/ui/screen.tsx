@@ -205,7 +205,29 @@ export default function WatchRSS(props: {
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
   const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
+  let openInputs=0;
+  const holdInput=()=>{
+    openInputs++;
+    let held=true;
+    return ()=>{if(held){held=false;openInputs--;}};
+  };
+  const routeServices:AppServices=Object.assign(Object.create(props.services),{
+    input:async (...args:Parameters<AppServices['input']>)=>{
+      const release=holdInput();
+      try{return await props.services.input(...args);}
+      finally{release();}
+    },
+    openInlineInput:props.services.openInlineInput&&
+      (async (...args:Parameters<NonNullable<AppServices['openInlineInput']>>)=>{
+        const release=holdInput();
+        try{
+          const session=await props.services.openInlineInput!(...args);
+          return {...session,close:async()=>{try{await session.close();}finally{release();}}};
+        }catch(error){release();throw error;}
+      }),
+  });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
+  let readerLeaving:Entry|undefined;
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
   const logReaderProgressFlush = (
@@ -310,12 +332,14 @@ export default function WatchRSS(props: {
     if (leaving.page !== "reader" || !leaving.reader)
       return finishPopPage(leaving);
     leaving.list?.scroller.stop();
+    readerLeaving=leaving;
     readerExit.begin(
       leaving,
       () => leaving.reader!.flushProgress(),
       (outcome) => {
         logReaderProgressFlush("exit", outcome);
         if (current() === leaving) finishPopPage(leaving);
+        if (readerLeaving===leaving)readerLeaving=undefined;
       },
     );
     return true;
@@ -1375,7 +1399,9 @@ export default function WatchRSS(props: {
   bindBluetoothWarningRoute(warningNetwork,{
     shown:warningShown,
     canPush:()=>resumeReady()&&foreground()&&recoveryEnabled(current())&&!networkPageBlocksSwipe()&&!disclosurePending()
-      && backOffset()===0&&motion.phase==='idle',
+      && openInputs===0&&!current().noteEditing?.()
+      && readerLeaving!==current()&&!sideSwipe&&motion.phase==='idle'
+      && (page()!=='video'||current().player?.canShowBluetoothWarning?.()===true),
     push:()=>{cancelActiveTouches();setPage('bluetooth-warning');},
     pop:removeWarningRoute,
   });
@@ -1671,7 +1697,7 @@ export default function WatchRSS(props: {
               platformLoginState={platformLoginState}
               speechState={speechState}
               speechSpectrum={speechSpectrum}
-              services={props.services}
+              services={routeServices}
               go={go}
               openSpeech={() => setPage("speech-playback")}
               openAdd={() => void doAdd()}
@@ -1694,7 +1720,7 @@ export default function WatchRSS(props: {
               active={active}
               width={width}
               height={height}
-              services={props.services}
+              services={routeServices}
               channels={channels}
               articles={articles}
               article={article}
@@ -1761,7 +1787,7 @@ export default function WatchRSS(props: {
               round={metrics.shape === "round"}
               backOffset={backOffset}
               backTranslation={backTranslation}
-              services={props.services}
+              services={routeServices}
               channels={channels}
               playingSource={playingSource}
               biliOriginal={biliOriginal}
@@ -1806,7 +1832,7 @@ export default function WatchRSS(props: {
               active={active}
               width={width}
               height={height}
-              services={props.services}
+              services={routeServices}
               settings={settings}
               presetState={presetState}
               presetActions={presetStore}
@@ -1825,7 +1851,7 @@ export default function WatchRSS(props: {
               active={active}
               width={width}
               height={height}
-              services={props.services}
+              services={routeServices}
               backOffset={() => backTranslation().x}
               transitionIdle={() => motion.phase === "idle"}
               cancelBack={() => { editorBack = undefined; motion.reset(); setBackOffset(0); }}
@@ -1873,7 +1899,7 @@ export default function WatchRSS(props: {
             stack={stack}
             motion={motion}
             setBackOffset={setBackOffset}
-            services={props.services}
+            services={routeServices}
             settings={settings}
             busy={busy}
             speechState={speechState}

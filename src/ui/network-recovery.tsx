@@ -1,4 +1,5 @@
 import {createContext,createEffect,createSignal,onCleanup,untrack,useContext,Show,type JSX} from 'solid-js';
+import {onFrame} from '@pocketjs/framework/lifecycle';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import * as hostServices from '@podjs/framework/services';
 import {observeHostInternet} from '../onboarding/network-host.ts';
@@ -60,12 +61,12 @@ export function bindBluetoothWarningRoute(network:NetworkRecovery,route:{
  const connection=observeNetworkRecovery(()=>network);
  createEffect(()=>{
   const status=connection().status;
-  if(route.shown()){
-   if(status==='available'||status==='unavailable')untrack(route.pop);
-  }else if(connection().bluetooth&&route.canPush()){
-   untrack(route.push);
-  }
+  if(route.shown()&&(status==='available'||status==='unavailable'))untrack(route.pop);
  });
+ // Check at the frame boundary, after gesture handling and editor callbacks.
+ // BackMotion can settle with zero translation, without changing any signal.
+ const ready=()=>!route.shown()&&connection().bluetooth&&route.canPush();
+ onFrame(()=>{if(ready())route.push();},ready);
 }
 
 export function NetworkRecoveryLayer(props:{network:NetworkRecovery;width:number;height:number;round:boolean;rotation?:number}){

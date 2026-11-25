@@ -8,9 +8,11 @@ const require=createRequire(import.meta.url),{transformSync}=require('@babel/cor
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const mode=process.env.RAPID_BACK_CASE??'4';
 const noteCase=mode==='bluetooth-modal'||mode==='bluetooth-note-close';
+const searchCase=mode==='bluetooth-inline'||mode==='bluetooth-search-modal';
 let resolveModal!:(value:string)=>void,resolveInlineClose!:()=>void;
 const modalCalls:string[]=[];
-let inlineCloses=0;
+let inlineCloses=0,inlineOpens=0,inlineSession=0;
+let searchedFor:string|undefined;
 let savedDraft:{title:string;markdown:string}|undefined;
 let bluetooth=false;const networkSubscriptions=new Set<number>();
 let clockMs=0,next=1;Date.now=()=>clockMs;
@@ -29,10 +31,11 @@ ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:nu
  if(method==='runtime.delay'){if(args.milliseconds===2500)exitTimerStarted=true;timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
  else if(method==='input.inline.open'){
+  inlineOpens++;
   if(mode==='bluetooth-modal'){events.push({t:'service.result',id,ok:false,error:{code:'fixture',message:'inline unavailable'}});return;}
-  value=id;
+  inlineSession=id;value=id;
  }
- else if(method==='input.inline.close'&&++inlineCloses===1&&mode==='bluetooth-note-close'){
+ else if(method==='input.inline.close'&&++inlineCloses===1&&(mode==='bluetooth-note-close'||mode==='bluetooth-inline')){
   resolveInlineClose=()=>events.push({t:'service.result',id,ok:true,value:null});
   return;
  }
@@ -55,7 +58,7 @@ const {setStyleResolver,rootMirror}=await import('@pocketjs/framework/renderer')
 const {activityStateHub}=await import('../src/navigation/activity-host.ts');
 const {captureActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const article={id:'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
-let pendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://example.com/rss'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>(r=>{pendingSave=r;});}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
+let pendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://example.com/rss'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>(r=>{pendingSave=r;});}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='openInlineInput'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
 if(noteCase){
  const {memoRepository}=await import('../src/services.ts');
  memoRepository.initialize=async()=>{};
@@ -70,8 +73,15 @@ if(noteCase){
  };
  services.inputRecovery={pending:async()=>false,dismiss:async()=>{}};
 }
+if(searchCase){
+ const {textInput}=await import('@podjs/framework/services');
+ services.openInlineInput=mode==='bluetooth-inline'?textInput.openInline:undefined;
+ services.input=()=>new Promise<string>(resolve=>{resolveModal=resolve;});
+ services.searchArticles=async(_channelId:string,keyword:string)=>{searchedFor=keyword;return [];};
+}
 activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  ?[{page:'home'},{page:'notes'},{page:'note-detail'}]
+ :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
@@ -122,6 +132,29 @@ if(mode.startsWith('bluetooth'))test(`production warning route: ${mode}`,async()
    await pump();
    expect(warning()).toBeUndefined();
    expect(state()).toEqual(['home','notes']);
+   return;
+  }
+  if(searchCase){
+   const trigger=connected().find(node=>node.domAttrs?.accessibilityLabel==='输入关键词开始搜索');
+   expect(trigger).toBeDefined();
+   events.push({t:'accessibility.action',nodeId:trigger!.id,action:'activate'});
+   await pump();
+   await network(true);
+   expect(warning()).toBeUndefined();
+   if(mode==='bluetooth-inline'){
+    expect(inlineOpens).toBe(1);
+    expect(inlineCloses).toBe(0);
+    events.push({t:'input.inline.submit',session:inlineSession,value:'Fixture keyword'});
+    await pump();
+    expect(inlineCloses).toBe(1);
+    expect(warning()).toBeUndefined();
+    resolveInlineClose();
+   }else{
+    resolveModal('Fixture keyword');
+   }
+   await pump();
+   expect(warning()).toBeDefined();
+   expect(searchedFor).toBe('Fixture keyword');
    return;
   }
   if(mode==='bluetooth-transition'||mode==='bluetooth-cancel'){
