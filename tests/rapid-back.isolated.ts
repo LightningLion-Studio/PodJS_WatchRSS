@@ -6,6 +6,12 @@ for(const base of [Bun.resolveSync('@podjs/framework/watch',import.meta.dir),Bun
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+const mode=process.env.RAPID_BACK_CASE??'4';
+const noteCase=mode==='bluetooth-modal'||mode==='bluetooth-note-close';
+let resolveModal!:(value:string)=>void,resolveInlineClose!:()=>void;
+const modalCalls:string[]=[];
+let inlineCloses=0;
+let savedDraft:{title:string;markdown:string}|undefined;
 let bluetooth=false;const networkSubscriptions=new Set<number>();
 let clockMs=0,next=1;Date.now=()=>clockMs;
 const kv=new Map<string,string>(),events:any[]=[],timers=new Map<number,number>();
@@ -19,9 +25,17 @@ ops.destroyNode=(id:number)=>texts.delete(id);
 ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=()=>next++;ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
-(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
+(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','runtime.timer','text.layout','net.discovery','input.text']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
  if(method==='runtime.delay'){if(args.milliseconds===2500)exitTimerStarted=true;timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
+ else if(method==='input.inline.open'){
+  if(mode==='bluetooth-modal'){events.push({t:'service.result',id,ok:false,error:{code:'fixture',message:'inline unavailable'}});return;}
+  value=id;
+ }
+ else if(method==='input.inline.close'&&++inlineCloses===1&&mode==='bluetooth-note-close'){
+  resolveInlineClose=()=>events.push({t:'service.result',id,ok:true,value:null});
+  return;
+ }
  else if(method==='media.video.stop'){}
  else if(method==='discovery.networkSnapshot')value={active:true,internet:true,validated:true,wifi:!bluetooth,cellular:false,bluetooth};
  else if(method==='discovery.networkSubscribe'){networkSubscriptions.add(args.subscriptionId);value={subscriptionId:args.subscriptionId};}
@@ -42,7 +56,23 @@ const {activityStateHub}=await import('../src/navigation/activity-host.ts');
 const {captureActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const article={id:'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
 let pendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://example.com/rss'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>(r=>{pendingSave=r;});}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
-activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
+if(noteCase){
+ const {memoRepository}=await import('../src/services.ts');
+ memoRepository.initialize=async()=>{};
+ memoRepository.list=async()=>[];
+ memoRepository.save=async draft=>{
+  savedDraft={title:draft.title,markdown:draft.markdown};
+  return {noteId:'fixture-note',title:draft.title,markdown:draft.markdown,plainText:draft.markdown,createdAt:1,updatedAt:1,pinned:false} as any;
+ };
+ services.input=(title:string)=>{
+  modalCalls.push(title);
+  return new Promise<string>(resolve=>{resolveModal=resolve;});
+ };
+ services.inputRecovery={pending:async()=>false,dismiss:async()=>{}};
+}
+activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
+ ?[{page:'home'},{page:'notes'},{page:'note-detail'}]
+ :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
 const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
 const frame=(globalThis as any).frame;const watch=await import('@podjs/framework/watch');
@@ -54,17 +84,63 @@ const state=()=>{const data:any=activityStateHub.read().saved['watchrss.content-
 const visible=()=>connected().filter(n=>props.get(n.id)?.has(128)).map(n=>({offset:props.get(n.id)!.get(128)!,opacity:props.get(n.id)!.get(69)??1}));
 const {expect,test}=await import('bun:test');
 const removeEventProbe=watch.__onHostEvent(event=>{if(event.t==='back')backEventsDelivered++;});
-const mode=process.env.RAPID_BACK_CASE??'4';
-if(mode==='bluetooth')test('production warning route uses the page stack and resets on reconnect',async()=>{
+if(mode.startsWith('bluetooth'))test(`production warning route: ${mode}`,async()=>{
  const pump=async(count=30)=>{for(let i=0;i<count;i++)await tick();};
- const network=async(value:boolean)=>{
+ const network=async(value:boolean,frames=30)=>{
   bluetooth=value;
   for(const subscriptionId of networkSubscriptions)events.push({t:'network.changed',subscriptionId,value:{source:'default',reason:'capabilities'}});
-  await pump();
+  await pump(frames);
  };
  const warning=()=>connected().find(node=>node.domAttrs?.accessibilityLabel==='继续');
  try{
   await pump(50);
+  if(noteCase){
+   expect(state().at(-1)).toBe('note-detail');
+   if(mode==='bluetooth-modal'){
+    expect(modalCalls).toEqual(['备忘录标题']);
+    await network(true);
+    expect(warning()).toBeUndefined();
+    resolveModal('Typed title');
+    await pump();
+    expect(modalCalls).toEqual(['备忘录标题','备忘录正文']);
+    expect(warning()).toBeUndefined();
+    resolveModal('Typed body');
+    await pump();
+   }else{
+    events.push({t:'back'});
+    await pump(5);
+    expect(inlineCloses).toBe(1);
+    await network(true);
+    expect(warning()).toBeUndefined();
+    resolveInlineClose();
+    await pump();
+   }
+   expect(warning()).toBeDefined();
+   if(mode==='bluetooth-modal')expect(savedDraft).toEqual({title:'Typed title',markdown:'Typed body'});
+   expect(state().at(-1)).toBe('notes');
+   events.push({t:'back'});
+   await pump();
+   expect(warning()).toBeUndefined();
+   expect(state()).toEqual(['home','notes']);
+   return;
+  }
+  if(mode==='bluetooth-transition'||mode==='bluetooth-cancel'){
+   // Leftward pan keeps BackMotion at zero offset throughout drag and settle.
+   await tick(17,[__packTouch(1,150,80)]);
+   await tick(17,[__packTouch(1,100,80)]);
+   await network(true,0);
+   for(let i=0;i<10;i++)await tick(17,[__packTouch(1,100,80)]);
+   expect(warning()).toBeUndefined();
+   if(mode==='bluetooth-cancel'){
+    await network(false,0);
+    for(let i=0;i<10;i++)await tick(17,[__packTouch(1,100,80)]);
+   }
+   await tick();
+   await pump();
+   expect(!!warning()).toBe(mode==='bluetooth-transition');
+   expect(state().at(-1)).toBe('reader');
+   return;
+  }
   expect(state()).toEqual(['home','articles','reader']);
   expect(warning()).toBeUndefined();
   await network(true);
