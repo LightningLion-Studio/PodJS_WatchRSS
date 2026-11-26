@@ -7,7 +7,7 @@ import {MemoRepository} from '../../src/notes/index.ts';
 import type {SqlDatabase} from '../../src/core/types.ts';
 import {NoteAssetReceiver} from '../../src/sync/note-assets.ts';
 import {NoteDetailScreen} from '../../src/ui/NotesScreen.tsx';
-import {RemoteImage,remoteImageResourceCounts} from '../../src/ui/RemoteImage.tsx';
+import {RemoteImage,releaseRetainedRemoteImages,remoteImageResourceCounts} from '../../src/ui/RemoteImage.tsx';
 import {TiledImage} from '../../src/ui/TiledImage.tsx';
 import {prepareNotePreview,noteBlockSourceOffsets} from '../../src/notes/preview.ts';
 import {notePreviewCases} from '../fixtures/note-preview-cases.ts';
@@ -26,7 +26,10 @@ async function run(){
   setPhase('thumbnail');await until(()=>thumbnail);setPhase('starting');await delay(150).result;check((await fileChunks.hash(path)).sha256===fixture.sha256,'Thumbnail cleanup removed asset');
   setPhase('tiled');await until(()=>tiled);setPhase('starting');await delay(200).result;check((await fileChunks.hash(path)).sha256===fixture.sha256,'Preview cleanup removed asset');
   await repo.save({title:'备忘录预览验证',markdown:'# 标题\n正文与 **粗体**\n![资源图片](assets/note-preview-owned.png)\n| A | B |\n| --- | ---: |\n| 数据 | 22 |\n```html\n<p>literal</p>\n```'});
-  setPhase('detail');await delay(1200).result;check(!error,error);setPhase('starting');await delay(200).result;check((await fileChunks.hash(path)).sha256===fixture.sha256,'Detail cleanup removed asset');check(remoteImageResourceCounts().cached===0,'Thumbnail cache retained');
+  setPhase('detail');await delay(1200).result;check(!error,error);setPhase('starting');await delay(200).result;
+  releaseRetainedRemoteImages();
+  check((await fileChunks.hash(path)).sha256===fixture.sha256,'Detail cleanup removed asset');
+  check(remoteImageResourceCounts().cached===0,'Thumbnail still in use after unmount');
  }finally{setPhase('starting');await sqlite.execute('DELETE FROM memo_notes WHERE note_id=?',['note-preview-owned']);await fileChunks.remove(path);await fileChunks.remove('notes/assets/.note-preview-owned.png.part');}
  kv.set(key,{state:'passed',nativeCases:notePreviewCases.length,thumbnailDecodedAndUploaded:thumbnail,tiledOverviewDecodedAndUploaded:tiled,sourceRetainedAcrossUnmounts:true,detailMounted:true,ownedRowsAndFilesRemoved:true,visualAcceptance:false});
 }
