@@ -25,6 +25,11 @@ export interface RecoveryPort {
  source:(refs:string[],changes:RecoveryDelta['changes'])=>Promise<{oid:string;size:number;read:(offset:number,length:number)=>Promise<Uint8Array>}[]>;
  /** Reserves worst-case persistent quota, released after commit or failure. */
  reserve:(bytes:number)=>Promise<()=>Promise<void>>;
+ /** Both phases of a journaled cloud choice use the same quota owner. */
+ choiceQuota?:{
+  reserve:(bytes:number,requestId:string)=>Promise<()=>Promise<void>>;
+  clear:(requestId:string)=>Statement;
+ };
  /** Authenticated CURRENT business rows + fresh SignedAvailability for every
   * necessary recipe/blob closure. No upload/lease/custody receipt can substitute. */
  acknowledge?:(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,check?:()=>Promise<void>)=>Promise<{expiresAtMillis:number}>;
@@ -48,15 +53,30 @@ export function recoveryDelta(local:Record<string,RecoveryValue>,cloud:Record<st
 }
 export class WatchRecovery {
  constructor(readonly projection:WatchProjectionStore,readonly cache:WatchSpaceStore,readonly ports:RecoveryPort){}
+ async reclaimChoiceQuota(requestId:string){
+  const quota=this.ports.choiceQuota;
+  if(quota)await this.cache.journal.db.transaction([quota.clear(requestId)]);
+ }
  async setKeep(enabled:boolean){const state=await this.projection.readState();await this.projection.controlUpdate(state,{...state,keepDiscardedLocalChanges7Days:enabled});}
  /** N1: a delta above one AEAD block (a long note) is stored as chunk rows
   * owned by its copyId; the copy in state keeps only a sealed small ref. */
  private chunks(){return chunkedValues(this.cache.journal.db,this.ports.cipher,this.cache.binding+'#recovery');}
  private async seal(header:any,value:any,statements:Statement[]=[]):Promise<RecoveryCopy>{const raw=jsonBytes(value);let sealedValue=value;
-  if(raw.length>INLINE_VALUE_BYTES){const store=this.chunks(),ref=await store.write(header.copyId,'',canonical(header),raw);statements.push(...store.guard(ref));sealedValue={[CHUNKED_REF_KEY]:ref};}
+  if(raw.length>INLINE_VALUE_BYTES){
+   const store=this.chunks();
+   // A retry may have a different trusted clock or optional recovery setting.
+   // Do not reuse chunks sealed for the previous header or delta.
+   const version=header.retainedUnsentNotes?digest([header,value]):'';
+   const ref=await store.write(header.copyId,version,canonical(header),raw);
+   statements.push(...store.guard(ref));
+   if(version)statements.push(store.keepOnly(header.copyId,version));
+   sealedValue={[CHUNKED_REF_KEY]:ref};
+  }
   const sealed=JSON.parse(await this.ports.cipher.seal(canonical(header),sealedValue));if(typeof sealed.nonceBase64!=='string'||typeof sealed.ciphertextBase64!=='string')throw Error('invalid_local_cipher');return {copyId:header.copyId,header,nonce:sealed.nonceBase64,ciphertext:sealed.ciphertextBase64};}
  async read(copy:RecoveryCopy):Promise<RecoveryDelta>{hexId(copy.copyId,32);if(copy.header.copyId!==copy.copyId||copy.header.domain!=='wrss.sync.v2/local-recovery'||copy.header.binding!==this.cache.binding)throw Error('authentication_required');const value=await this.ports.cipher.open(canonical(copy.header),canonical({nonceBase64:copy.nonce,ciphertextBase64:copy.ciphertext})),ref=chunkedRef(value);
-  if(!ref)return value;if(ref.owner!==copy.copyId||ref.version!=='')throw Error('authentication_required');return parseCanonicalJson(await this.chunks().read(ref,canonical(copy.header)));}
+  if(!ref)return value;
+  if(ref.owner!==copy.copyId||(copy.header.retainedUnsentNotes?!/^[0-9a-f]{64}$/.test(ref.version):ref.version!==''))throw Error('authentication_required');
+  return parseCanonicalJson(await this.chunks().read(ref,canonical(copy.header)));}
  /** Chunk rows of copies no longer named by a copy or an edit pin of `state`. */
  private sweep(state:SyncState):Statement{const keep=[...new Set([...(state.recoveryCopies??[]).map(c=>c.copyId),...(state.recoveryEditPins??[]).map(p=>p.copy.copyId)])];
   return {sql:'DELETE FROM podjs_sql_value_chunks WHERE binding=?'+(keep.length?' AND owner NOT IN ('+keep.map(()=>'?').join(',')+')':''),params:[this.cache.binding+'#recovery',...keep]};}
@@ -69,29 +89,44 @@ export class WatchRecovery {
   * changes, recovery reference and pins commit at the prepared SQL snapshot.
   * Journal validity uses only the authenticated head and local business edits.
   * This entry must be invoked only after explicit choices/cloud confirmation. */
- async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];explicitCloudChoice:true;next:SyncState;statements:Statement[];incomingBody?:LegacyBodyRef;incomingMetadata?:true}){
+ async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];requiredRecovery?:{keys:string[];copyId:string};explicitCloudChoice:true;next:SyncState;statements:Statement[];incomingBody?:LegacyBodyRef;incomingMetadata?:true;releaseProjection?:()=>Promise<void>}){
   if(input.explicitCloudChoice!==true)throw Error('choice_pending');const before=await this.projection.readState();checkCapture(before,input.capture);await this.checkRecords(before);
   const next={...input.next,recoveryCopies:[...before.recoveryCopies??[]],recoveryPins:[...before.recoveryPins??[]],recoveryClock:before.recoveryClock??0,recoveryEditPins:[...before.recoveryEditPins??[]]};
   // The caller cannot alter recovery references through next state.
-  const delta=recoveryDelta(input.local,input.cloud,before.editBase,input.capturedKeys);
+  // Unencodable retained notes are pending in local recovery even when the
+  // user has disabled the optional archive of discarded changes.
+  const required=input.requiredRecovery;
+  const requestId=before.cloud?.pendingCloudChoice?.requestId;
+  const quota=this.ports.choiceQuota;
+  const quotaCleanup=quota&&requestId?[quota.clear(requestId)]:[];
+  const keep=before.keepDiscardedLocalChanges7Days;
+  const delta=recoveryDelta(input.local,input.cloud,before.editBase,keep?input.capturedKeys:required?.keys??input.capturedKeys);
   const incomingBody=input.incomingBody;
   if(incomingBody){
    const id=input.capturedKeys?.[0],record=id?input.local[id]:undefined;
    if(input.capturedKeys?.length!==1||!id||!record||!['book','article','asset'].includes(record.kind)||delta.bodyRefs.length)throw Error('closure_incomplete');
    if(!delta.changes.length)delta.changes.push({id,kind:'set',value:recoveryBusiness(record.kind,record.value)});
   }
-  if(!before.keepDiscardedLocalChanges7Days||!delta.changes.length&&!incomingBody){
+  if((!keep&&!required)||(!delta.changes.length&&!incomingBody)){
    const statements=incomingBody?[...input.statements,this.projection.legacyBodies.drop(incomingBody)]:input.statements;
-   await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);return null;
+   await this.projection.choiceUpdate(before,next,[...statements,...quotaCleanup],'choice_apply',input.next.stateVersion);return null;
   }
   const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0)||now>Number.MAX_SAFE_INTEGER-SEVEN_DAYS)throw Error('clock_unknown');
-  const copyId=await this.ports.randomId();hexId(copyId,32);if(next.recoveryCopies.some(c=>c.copyId===copyId)||next.recoveryPins.some(p=>p.copyId===copyId))throw Error('idempotency_conflict');
+  const copyId=required?.copyId??await this.ports.randomId();hexId(copyId,32);if(next.recoveryCopies.some(c=>c.copyId===copyId)||next.recoveryPins.some(p=>p.copyId===copyId))throw Error('idempotency_conflict');
   if(incomingBody)await this.projection.legacyBodies.verify(incomingBody);
   // The separately authenticated transport bytes have no cloud recipe. Every
   // ordinary recipe named by the recovery delta still requires its closure.
   const sources=(incomingBody||input.incomingMetadata)&&!delta.bodyRefs.length?[]:await this.ports.source(delta.bodyRefs,delta.changes);if(canonical(sources.map(s=>s.oid).sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
   let worst=jsonBytes(delta).length*3+16384;for(const source of sources){uint(source.size);if(source.size>266264)throw Error('object_too_large');worst+=source.size*3+16384;}
-  const release=await this.ports.reserve(worst),resources:Resource[]=[],files:RecoveryFile[]=[];let committed=false;
+  // The projection was prepared and budgeted before recovery. Release its
+  // reservation before staging recovery, while keeping their final CAS atomic.
+  await input.releaseProjection?.();
+  let release:Awaited<ReturnType<RecoveryPort['reserve']>>;
+  try{release=await (quota&&requestId?quota.reserve(worst,requestId):this.ports.reserve(worst));}catch(error){
+   if(!input.releaseProjection)throw error;
+   throw Object.assign(Error('storage_pressure'),{cause:error});
+  }
+  const resources:Resource[]=[],files:RecoveryFile[]=[];let committed=false;
   try{
    for(const source of sources){const hash=new ContentSha256();for(let at=0;at<source.size;at+=65536){const length=Math.min(65536,source.size-at),part=await source.read(at,length);if(part.length!==length)throw Error('closure_incomplete');hash.update(part);
      const id=digest({copyId,oid:source.oid,offset:at}),path=this.cache.binding+'/'+id+'.recovery',aad=canonical({domain:'wrss.sync.v2/local-recovery-body',binding:this.cache.binding,copyId,oid:source.oid,offset:at,length}),sealed=await this.ports.cipher.seal(aad,{dataBase64:encodeBase64(part)}),data=bytes(sealed);
@@ -100,13 +135,16 @@ export class WatchRecovery {
      files.push({oid:source.oid,path,offset:at,length,storedBytes:data.length});
     }if(source.oid.split(':sha256:')[1]!==hash.finish())throw Error('hash_mismatch');
    }
-   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid,...(incomingBody?{incomingBody}:{})},chunkGuards:Statement[]=[],copy=await this.seal(header,delta,chunkGuards);
+   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid,...(required?{retainedUnsentNotes:true}:{}),...(incomingBody?{incomingBody}:{})},chunkGuards:Statement[]=[],copy=await this.seal(header,delta,chunkGuards);
    if(canonical(await this.read(copy))!==canonical(delta))throw Error('storage_error');
    // Body files are durable before state CAS. Uncommitted files carry no pin.
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
    const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,...(incomingBody?this.projection.legacyBodies.guard(incomingBody):[]),this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
-   await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);committed=true;return copy;
-  }finally{await this.cache.unstage(resources);await release();if(!committed)try{await this.cache.collect();}catch{}}
+   await this.projection.choiceUpdate(before,next,[...statements,...quotaCleanup],'choice_apply',input.next.stateVersion);committed=true;return copy;
+  }finally{
+   try{await this.cache.unstage(resources);}finally{await release();}
+   if(!committed)try{await this.cache.collect();}catch{}
+  }
  }
  /** Trusted time watermark is durable. Expiry removes ciphertext references and
   * pins at one CAS. Physical release follows the committed reference deletion. */

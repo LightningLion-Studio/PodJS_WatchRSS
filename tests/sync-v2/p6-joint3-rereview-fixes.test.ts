@@ -172,7 +172,7 @@ for(const kind of ['cloud','local','cloud-journal'] as const)test(`P6J3WRR-02 ga
   const after=await opened.ui.o.projection.readState();expect(after.stateVersion).not.toBe(before.stateVersion);expect(after.cloud.pendingCloudChoice?.guardVersion).toBe(guard);
   if(kind==='cloud-journal'){await opened.ui.o.control.resumeCloudChoice();expect(requests).toHaveLength(2);expect(requests[1]).toBe(requests[0]);}
   else if(kind==='cloud')await opened.ui.chooseCloud(view);else await opened.ui.chooseLocal(view);
-  expect((await opened.ui.o.projection.readState()).pendingChoice).toBeNull();expect((await opened.ui.o.projection.readState()).hasUnsentEdits).toBe(false);
+  expect((await opened.ui.o.projection.readState()).pendingChoice).toBeNull();expect((await opened.ui.o.projection.readState()).hasUnsentEdits).toBe(kind!=='local');
  }finally{await opened?.close();await other?.close();a.db.close();b.db.close();}
 });
 

@@ -163,6 +163,8 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const flush=async()=>{
    try{return await flushPublication();}catch(error){
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish;
+    // An accepted choice already journals the retry and its original request.
+    if(state.cloud?.pendingCloudChoice?.phase==='accepted'&&(error as Error).message==='storage_pressure')return true;
     if((pending?.explicit||state.cloud?.pendingCloudChoice)&&(error instanceof PublicationLookupUnavailable||(error as Error).message==='feature_disabled'))return true;
     throw error;
    }
@@ -178,15 +180,16 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    }
    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);const pulled=await runtime.pull();if(pulled?.readOnly)return pulled;
    const state=await local.store.readState();
-   if(state.cloud?.pendingPublish){await flush();return {...pulled,refreshBodies:true};}
-   if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
+   if(state.cloud?.pendingPublish)await flush();
+   else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
     try{await runtime.publish(true);}catch(error){
      if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
      await recoverConflict();
     }
-    return {...pulled,refreshBodies:true};
-   }
-   return pulled;
+   }else return pulled;
+   // First-follow publication leaves the merged head unapplied locally.
+   const followed=state.account&&state.activeGeneration===null?await runtime.pull():pulled;
+   return {...followed,refreshBodies:true};
   };
   const bodyPorts=createCloudHostPorts(guardedHost,{require(){lifetime.require();}});
   const bluetoothBodies=new LocalBodyClaims(projectionSql(guardedHost));

@@ -6,7 +6,32 @@ import {idKey,scope} from './fixture';
 import {captureChoice} from '../../src/sync-v2/state';
 const id=()=>randomBytes(16).toString('hex');
 test('P5 default closed actions preserve queue edits and pending choice',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const pending=await f.control.pendingChoice(),before=canonical(await f.projection.readState());await expect(f.make(false).chooseCloud(pending!.proof,id())).rejects.toThrow('feature_disabled');expect(canonical(await f.projection.readState())).toBe(before);expect(f.server.choiceCalls).toBe(0);}finally{f.close();}});
-test('P5 cloud choice uses fixed audit window and commits native note recovery active and ACK',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const pending=await f.control.pendingChoice();expect(pending?.canMerge).toBe(false);f.server.onAck=async()=>{expect((await f.projection.readState()).pendingChoice).toBeNull();expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('title n');};const count=f.server.events;await f.control.chooseCloud(pending!.proof,id());const s=await f.projection.readStableState();expect(s.hasUnsentEdits).toBe(false);expect(s.recoveryCopies).toHaveLength(1);expect(((await f.recovery.read(s.recoveryCopies![0]!)).changes[0] as any).value.title).toBe('offline edit');expect(f.server.events).toBe(count);expect(f.server.acks).toHaveLength(1);expect(s.activeGeneration).toBe(s.account!.oid);}finally{f.close();}});
+test('P5 cloud choice commits the selected note, unpublished local edit, recovery and ACK',async()=>{
+ const f=await p5Fixture();
+ try{
+  await dirtyRollback(f);
+  const pending=await f.control.pendingChoice();
+  expect(pending?.canMerge).toBe(false);
+  f.server.onAck=async()=>{
+   expect((await f.projection.readState()).pendingChoice).toBeNull();
+   expect(await f.db.query("SELECT title FROM memo_notes WHERE note_id='n'")).toEqual([{title:'title n'}]);
+   expect(await f.db.query("SELECT title FROM memo_notes WHERE note_id!='n' AND deleted=0")).toEqual([{title:'offline edit'}]);
+  };
+  const count=f.server.events;
+  await f.control.chooseCloud(pending!.proof,id());
+  const s=await f.projection.readStableState();
+  expect(s.hasUnsentEdits).toBe(true);
+  expect(s.recoveryCopies).toHaveLength(1);
+  expect(((await f.recovery.read(s.recoveryCopies![0]!)).changes[0] as any).value.title).toBe('offline edit');
+  expect(f.server.events).toBe(count);
+  expect(f.server.acks).toHaveLength(1);
+  expect(s.activeGeneration).toBe(s.account!.oid);
+  const published=await f.publish();
+  const signed=parseCanonicalJson(f.server.objects.get(published.account.commitOid)!);
+  const rows=await f.projection.cloudRows(signed.body.treeRoot);
+  expect(rows.map(r=>r.meta.payload.title).sort()).toEqual(['offline edit','title n']);
+ }finally{f.close();}
+});
 test('P5 local choice publishes resolve-local and preserves original native editing state',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const pending=await f.control.pendingChoice();await f.control.chooseLocal(pending!.proof,id());const s=await f.projection.readStableState(),commit=parseCanonicalJson(f.server.objects.get(s.account!.oid)!);expect(commit.body.operation).toEqual({kind:'resolve-local',rollbackTarget:null,resolvesGeneration:'1'});expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('offline edit');expect(s.pendingChoice).toBeNull();expect(s.hasUnsentEdits).toBe(false);}finally{f.close();}});
 test('P5 history restore creates a new rollback commit and applies target to native note',async()=>{const f=await p5Fixture();try{const first=await f.publish();await f.edit('second');const second=await f.publish();const capture=await f.control.captureAccount();await f.control.rollback(first.account.commitOid,capture,id());const s=await f.projection.readStableState(),body=parseCanonicalJson(f.server.objects.get(s.account!.oid)!).body;expect(body.accountParent).toBe(second.account.commitOid);expect(body.operation.rollbackTarget).toBe(first.account.commitOid);expect(body.rollbackGeneration).toBe('1');expect(body.treeRoot).toBe(parseCanonicalJson(f.server.objects.get(first.account.commitOid)!).body.treeRoot);expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('title n');}finally{f.close();}});
 for(const mode of ['local-edit','remote-observe','quota','response-loss'] as const)test('P5 cloud '+mode+' retains complete edits and retries safely',async()=>{const f=await p5Fixture();try{await dirtyRollback(f);const pending=await f.control.pendingChoice();if(mode==='local-edit')f.server.onChoice=async()=>{await f.edit('new edit');};if(mode==='remote-observe')f.server.onChoice=async()=>{const s=await f.projection.readState();await f.projection.controlUpdate(s,{...s});};if(mode==='quota')f.reserveFails=true;if(mode==='response-loss')f.server.loseChoice=true;const requestId=id();if(mode==='remote-observe'){await f.control.chooseCloud(pending!.proof,requestId);expect((await f.projection.readStableState()).pendingChoice).toBeNull();expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('title n');expect(f.server.choiceCalls).toBe(1);expect(f.server.requests.has(requestId)).toBe(true);expect(f.server.acks).toHaveLength(1);}else{await expect(f.control.chooseCloud(pending!.proof,requestId)).rejects.toThrow();expect((await f.projection.readState()).pendingChoice).not.toBeNull();expect((await f.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe(mode==='local-edit'?'new edit':'offline edit');expect(f.server.acks).toHaveLength(0);}}finally{f.close();}});

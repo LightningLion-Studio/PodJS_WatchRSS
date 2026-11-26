@@ -1,7 +1,8 @@
 import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription,emptyBodyDescription,businessBodyWitness} from './body-binding';
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
-import {conflictTexts} from './note-conflict-set';
+import {conflictSet,conflictTexts,mergeConflicts,type ConflictSet} from './note-conflict-set';
+import {newConflictId,noteEditDigest,sameLiveNoteContent} from './notes-conflict';
 import {sameBusinessRevision} from './business-revision';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {phoneNotePlainText} from '../notes/phone-text';
@@ -9,7 +10,7 @@ import {phoneNotePlainText} from '../notes/phone-text';
 import type {Statement} from '@podjs/framework/sql-projection';
 import {canonical,digest,hexId,oid,exact,uint,nextD64,compareD64,bytes,type Kind} from './protocol';
 import {choiceCurrent,publicationCurrent,captureChoice,checkChoiceWindow,checkCapture,currentAccount,observeAccount,type Capture,type SyncState} from './state';
-import {fromWire,candidates,toWire} from './business';
+import {fromWire,candidates,toWire,sameFolderContent} from './business';
 import {canMerge} from './merge-planner';
 import {verifyCommit,type SigningPort} from './signing';
 import type {EnvelopeCrypto} from './sealed';
@@ -54,6 +55,7 @@ export interface AccountControlOptions {
 export class WatchAccountControl {
  private plans=new WeakMap<object,{capture:Capture;local:RecordRow[];cloud:RecordRow[];merge:any;mergedRows?:RecordRow[];release?:()=>Promise<void>;legacyKey?:string;legacyHash?:string;legacyMerge?:any;applyPlan?:import('@podjs/framework/sql-program').SqlProgramRef}>();
  private activePreview?:object;
+ private cloudChoiceResume?:ReturnType<WatchAccountControl['resumeCloudChoiceOnce']>;
  constructor(private readonly o:AccountControlOptions){}
  private now(){const n=this.o.trustedNow();if(n===null)throw Error('clock_unknown');uint(n);return n;}
  private async gate(kind:'history'|'choice'){if(kind==='history'?(!this.o.historyRestore||!this.o.http.historyRestoreOpen()):!this.o.choiceApply)throw Error('feature_disabled');const s=await this.o.store.readStableState(),flag=kind==='history'?'history_restore':'choice_apply';if(s.cloud?.p5Gates?.[flag]===false)throw Error('feature_disabled');}
@@ -166,7 +168,29 @@ export class WatchAccountControl {
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
  }
  private async reserveBytes(bytes:number){try{return await this.o.business.reserve(bytes);}catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}}
- private async reserveProjection(statements:import('@podjs/framework/sql-projection').Statement[]){const plan=(statements as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef|undefined;if(!plan)return this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements)),reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let ref=plan;try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}catch(e){if(!await this.o.store.planOwned(plan.id))await release();throw e;}return async()=>{if(!await this.o.store.planOwned(plan.id)){if(reservation)await this.o.store.releasePlanReservation(ref);else await release();}};}
+ private async reserveProjection(statements:Statement[],requestId?:string){
+  const plan=(statements as Statement[]&{preparedPlan?:import('@podjs/framework/sql-program').SqlProgramRef}).preparedPlan;
+  const quota=this.o.recovery.ports.choiceQuota;
+  const options={allowPendingCloudChoice:requestId!==undefined};
+  const reserve=async()=>{
+   const bytes=this.o.store.accountProjectionReservationBytes(statements);
+   if(!quota||!requestId)return this.reserveBytes(bytes);
+   try{return await quota.reserve(bytes,requestId);}
+   catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}
+  };
+  if(!plan)return reserve();
+  // Migrate reservations attached to a plan by older candidates.
+  if(quota&&requestId)await this.o.store.releasePlanReservation(plan,options);
+  const release=await this.o.store.existingPlanReservation(plan)??await reserve();
+  const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;
+  let ref=plan;
+  try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}
+  catch(error){if(options.allowPendingCloudChoice||!await this.o.store.planOwned(plan.id))await release();throw error;}
+  return async()=>{
+   if(reservation)await this.o.store.releasePlanReservation(ref,options);
+   else if(options.allowPendingCloudChoice||!await this.o.store.planOwned(plan.id))await release();
+  };
+ }
  private async checked(proof:object){const p=this.plans.get(proof);if(!p)throw Error('choice_stale');const s=await this.o.store.readState();checkCapture(s,p.capture);if(p.legacyKey&&digest(await this.o.store.legacyChoiceEntry(p.legacyKey))!==p.legacyHash)throw Error('choice_stale');return {p,s};}
  async pendingLegacyChoice(key:string){
   const view=await this.pendingChoice();if(!view)throw Error('choice_stale');const p=this.plans.get(view.proof)!;checkCapture(await this.o.store.readState(),p.capture,key);
@@ -218,7 +242,8 @@ export class WatchAccountControl {
   const before=await this.o.store.readState(),intent=before.cloud?.pendingCloudChoice;if(!intent||!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return false;
   try{checkCapture(before,this.cloudChoiceCapture(intent));return false;}catch(error){if((error as Error).message!=='choice_stale')throw error;}
   const next=clone(before);next.cloud.pendingCloudChoice=null;next.cloud.retiredCloudChoices={...next.cloud.retiredCloudChoices,[intent.requestId]:intent};
-  await this.o.store.choiceUpdate(before,next);return true;
+  const quota=this.o.recovery.ports.choiceQuota;
+  await this.o.store.choiceUpdate(before,next,quota?[quota.clear(intent.requestId)]:[]);return true;
  }
  private cloudChoiceCapture(intent:any):Capture{return Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision});}
  /** Accepted audit results survive a closed apply gate. This transaction only
@@ -232,6 +257,12 @@ export class WatchAccountControl {
   }
  }
  async resumeCloudChoice(){
+  // Foreground sync and explicit actions can resume the same journal.
+  const attempt=this.cloudChoiceResume??=this.resumeCloudChoiceOnce();
+  try{return await attempt;}
+  finally{if(this.cloudChoiceResume===attempt)this.cloudChoiceResume=undefined;}
+ }
+ private async resumeCloudChoiceOnce(){
   await this.gate('choice');const s=await this.o.store.readState(),intent=s.cloud?.pendingCloudChoice;if(!intent){await this.flushApplied();return {applied:false,commit:null};}
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
   const window=await this.o.http.negotiate([],[]),current=await this.o.store.readState();if(!choiceCurrent({...current,account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},capture)){await this.o.reader.pull(window);throw Error('choice_stale');}
@@ -241,6 +272,7 @@ export class WatchAccountControl {
   for(let attempt=0;;attempt++){
    const before=await this.o.store.readState();
    try{return await this.applyAcceptedCloudChoice();}catch(error){
+    if((error as {code?:string})?.code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(String(error)))throw Object.assign(Error('storage_pressure'),{cause:error});
     const after=await this.o.store.readState();if((error as Error).message!=='choice_stale'||attempt>=3||canonical(before)===canonical(after)||!choiceCurrent(after,capture))throw error;
    }
   }
@@ -248,11 +280,18 @@ export class WatchAccountControl {
  private async applyAcceptedCloudChoice(){
   await this.gate('choice');const s=await this.o.store.readStableState(),intent=s.cloud?.pendingCloudChoice;if(intent?.phase!=='accepted')throw Error('choice_stale');
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
+  // A restarted writer may have stopped in either quota phase. The journal
+  // and writer lease identify the one operation whose reservation we can clear.
+  await this.o.recovery.reclaimChoiceQuota(intent.requestId);
   checkCapture(await this.o.store.readState(),capture);let localRows=await this.local(),cloudRows=await this.cloud(s),applyRows=cloudRows,capturedKeys:string[]|undefined,decision:Awaited<ReturnType<WatchProjectionStore['prepareLegacyDecision']>>|undefined;
   const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
-  const records=this.records(applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
-  const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business),release=await this.reserveProjection(statements);
+  const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
+  const records=this.records(retained?.rows??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
+  if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
+  const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business);
+  let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,intent.requestId);
+  const releaseProjection=async()=>{await release?.();release=undefined;};
   try{
    const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;
    for(const r of localRows){
@@ -262,9 +301,101 @@ export class WatchAccountControl {
    }
    for(const r of cloudRows)if(!selected||selected.has(r.entityKey))cloud[r.entityKey]={kind:r.candidate.meta.kind,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),bodyRefs:[]};
    const incomingBody=legacy?.entry.transferBody as LegacyBodyRef|undefined;
-   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
-  }finally{await release();}
+   const requiredRecovery=retained?.localOnly.length?{keys:retained.localOnly,copyId:digest(['retain-unsent-notes',capture.accountOid,intent.requestId]).slice(0,32)}:undefined;
+   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,requiredRecovery,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements,releaseProjection});
+  }finally{await releaseProjection();}
   if(!intent.legacyKey)await this.flushApplied();await this.o.store.dropInactiveCloudRows(s.cloud.current.treeRoot);return {applied:!intent.legacyKey,commit:null,...(intent.legacyKey?{discarded:true}: {})};
+ }
+
+ /** Keep unpublished memo content when selecting the account snapshot. An
+  * overlapping memo gets its own identity so the selected cloud row survives. */
+ private async retainUnsentNotes(state:SyncState,local:RecordRow[],cloud:RecordRow[]){
+  if(!state.hasUnsentEdits)return null;
+  const bases=await this.o.store.editBases(state),cloudById=new Map(cloud.map(row=>[row.entityKey,row]));
+  const rows=new Map(cloudById);
+  const localById=new Map(local.map(row=>[row.entityKey,row]));
+  const unopenable=state.cloud?.unopenableNotes??{};
+  const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
+  const localOnly:string[]=[];
+  let changed=false;
+  for(const row of local){
+   const c=row.candidate;
+   if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
+   const existing=cloudById.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
+   if((existing&&hash===noteEditDigest(existing.candidate))||(base&&hash===digest(base)))continue;
+   let selected:RecordRow|null=rows.get(row.entityKey)??row;
+   if(state.editBase.accountOid===null&&existing&&sameLiveNoteContent(c,existing.candidate)){
+    const updatedAt=Math.max(c.state.payload.updatedAt,selected.candidate.state.payload.updatedAt);
+    selected=this.retainNote(row,c.meta.logicalId,row.entityKey,selected,updatedAt)
+     ?? this.retainNoteCopy(row,hash,rows,localById,unopenable);
+   }else{
+    const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
+    if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
+    if(existing||Object.hasOwn(unopenable,c.meta.logicalId)){
+     selected=this.retainNoteCopy(row,hash,rows,localById,unopenable);
+    }
+   }
+   if(!selected){localOnly.push(row.entityKey);continue;}
+   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);changed=true;}
+   const folder=selected.candidate.meta.payload.folderId;
+   const p=selected.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
+   const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
+   for(const key of dependencies){
+    const dependency=localById.get(key),selected=rows.get(key);
+    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);changed=true;}
+   }
+  }
+  return {rows:[...rows.values()],changed,localOnly};
+ }
+
+ /** Reusing text must still retain conflicts from each local memo. */
+ private retainNote(row:RecordRow,noteId:string,entityKey:string,matching?:RecordRow,updatedAt?:number){
+  // This block only builds and validates the replacement. A rejected union
+  // leaves both inputs intact, including when a validator rejects it before
+  // encoding. Failure of an independent copy leaves the original for recovery.
+  try{
+   const source=row.candidate,selected=(matching??row).candidate,p=selected.state.payload;
+   const sourceConflicts:ConflictSet|undefined=source.state.payload.noteConflicts;
+   let conflicts:ConflictSet|undefined=sourceConflicts;
+   if(sourceConflicts&&source.meta.logicalId!==noteId){
+    const records=conflictSet(source.meta.logicalId,sourceConflicts.records).records;
+    conflicts=conflictSet(noteId,records.map(r=>({
+     ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
+    })));
+   }
+   if(matching){
+    const existing:ConflictSet|undefined=p.noteConflicts;
+    conflicts=conflicts?.records.length?mergeConflicts(noteId,existing??{version:1,records:[]},conflicts):existing;
+    if((updatedAt===undefined||updatedAt===p.updatedAt)&&canonical(conflicts??null)===canonical(existing??null))return matching;
+   }
+   const value=fromWire('note',selected.meta.payload,p);
+   value.noteId=noteId;
+   if(updatedAt!==undefined)value.updatedAt=updatedAt;
+   if(conflicts)value.noteConflicts=conflicts;
+   const candidate=candidates('note',noteId,entityKey,value,selected.meta.addedAtSource==='original'?selected.addedAtMillis:undefined,this.o.store.segmentOptions());
+   return {entityKey,rowSequence:(matching??row).rowSequence,candidate};
+  }catch{
+   return null;
+  }
+ }
+
+ /** Preserve existing cloud copies, including those created by older builds.
+  * New IDs depend on memo content, so re-saving without edits keeps the ID. */
+ private retainNoteCopy(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>):RecordRow|null{
+  const c=row.candidate,domain='watchrss/retain-unsent-note';
+  const contentHash=digest([c.meta.payload.title,c.state.payload.markdown]);
+  for(let attempt=0;;attempt++){
+   const id=digest(attempt===0?[domain,row.entityKey,editHash]:[domain,row.entityKey,contentHash,attempt]);
+   const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
+   const entityKey=this.o.store.entityKeyFor('note',noteId),existing=rows.get(entityKey);
+   if(Object.hasOwn(unopenable,noteId))continue;
+   const matching=existing??local.get(entityKey);
+   if(matching?!sameLiveNoteContent(c,matching.candidate):attempt===0)continue;
+   const retained=this.retainNote(row,noteId,entityKey,matching);
+   // A rejected union may fit at another stable ID. An independent copy
+   // already uses the same fixed-width ID as every subsequent attempt.
+   if(retained||!matching)return retained;
+  }
  }
 
  private applied(s:SyncState,commitOid:string,revision:string,generation:string,requestId:string){
@@ -326,12 +457,43 @@ export class WatchAccountControl {
  /** A clean device follows the authenticated current account. A dirty device
   * retains its native DB and pending choice, including after event expiry. */
  async follow(window?:any){
-  const pulled=await this.o.reader.pull(window??await this.o.http.negotiate([],[]));if(pulled.readOnly)return pulled;return this.followCurrent();
+  const observed=window??await this.o.http.negotiate([],[]);
+  return this.observeAndFollow(()=>this.o.reader.pull(observed));
  }
- async poll(){const pulled=await this.o.reader.poll();if(pulled.readOnly)return pulled;return this.followCurrent();}
+ async poll(){return this.observeAndFollow(()=>this.o.reader.poll());}
+ private async observeAndFollow(pull:()=>ReturnType<WatchCloudIndex['pull']>){
+  const run=async()=>{
+   const pulled=await pull();
+   return pulled.readOnly?pulled:this.followCurrent();
+  };
+  try{return await run();}catch(error){
+   if((error as Error).message!=='choice_stale')throw error;
+   const latest=await this.o.store.readState();
+   if(latest.activeGeneration!==null||!latest.hasUnsentEdits||latest.cloud?.pendingPublish)throw error;
+   // A memo saved during download or native apply invalidates the first plan.
+   const checkpoint=await this.o.store.checkpoint();
+   if(!sameBusinessRevision(checkpoint?.businessRevision,latest.businessRevision))await this.o.rebuildProjection?.();
+   return run();
+  }
+ }
  private async followCurrent():Promise<any>{
-  const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
+  let before=await this.o.store.readState();
+  // An older build may have initialized the scope but never applied its head.
+  if(before.account&&!before.activeGeneration&&!before.editBase.accountOid&&!before.hasUnsentEdits&&await this.o.store.hasLiveMemoNotes()){
+   await this.o.store.controlUpdate(before,{...before,hasUnsentEdits:true});
+   before=await this.o.store.readState();
+  }
+  if(before.pendingChoice||before.hasUnsentEdits){
+   if(!before.pendingChoice&&await this.firstFollowMemoCollision(before)){
+    const pendingChoice={generation:before.account!.generation,inboxKeys:[],accountOid:before.account!.oid,accountRevision:before.account!.revision,selectedLocalChangeRevision:before.localChangeRevision};
+    await this.o.store.controlUpdate(before,{...before,pendingChoice});
+    return {awaitingUser:true,localEditsRetained:true};
+   }
+   return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
+  }
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
+  const published=before.cloud?.lastPublication?.result?.account;
+  if(before.activeGeneration===null&&published&&(!before.account||compareD64(before.account.revision,published.revision)<0))throw Error('first_follow_pending');
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
  }
@@ -340,6 +502,25 @@ export class WatchAccountControl {
  private async followStatements(before:SyncState){
   if(!this.o.business.prepareFeed){const records=this.records(await this.cloud(before));return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
   const feed=await this.cloudFeed(before);return this.o.store.prepareAccountProjection(before,feed,this.o.business.prepareFeed(feed,before));
+ }
+ /** Without a common base, overlapping first-sync edits need a choice. The
+  * normal publisher can carry non-overlapping notes onto the remote tree. */
+ private async firstFollowMemoCollision(before:SyncState){
+  const current=before.cloud?.current;
+  if(before.editBase.accountOid!==null||!current||current.commitOid!==before.account?.oid)return false;
+  let after='';
+  for(;;){
+   const page=await this.o.store.candidatePage(after,32,PAGE_BYTES);
+   if(!page.length)return false;
+   for(const {entityKey,candidate} of page){
+    const kind=candidate.meta.kind;
+    if(kind!=='note'&&kind!=='folder')continue;
+    const row=await this.o.store.cloudRow(current.treeRoot,entityKey);
+    if(!row||row.unopenable)continue;
+    if(kind==='folder'?!sameFolderContent(row,candidate):!sameLiveNoteContent(row,candidate)&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
+   }
+   after=page.at(-1)!.entityKey;
+  }
  }
  private async cloudFeed(s:SyncState):Promise<RecordFeed>{
   if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const root=s.cloud.current.treeRoot,keys:string[]=[],facts:RecordFact[]=[],input=this.o.store.inputHasher();let after='';

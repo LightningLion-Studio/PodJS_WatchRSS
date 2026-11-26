@@ -41,7 +41,7 @@ for(const kind of ['asset','book'] as const)for(const explicit of [false,true])t
   expect(await actual({entityKey:dead.e,candidate},prior)).toEqual(known);
   expect(await actual({entityKey:dead.e,candidate},{candidate:live.candidate,manifest:known})).toEqual(known);
   if(explicit){
-   const control=new WatchAccountControl({store,http,publisher:pub,reader,crypto:signer,approved,resolveBody:resolver,choiceApply:true,author:async()=>({deviceId:author,alias:'key',own:{commitOid:server.device.commitOid,revision:server.device.revision}}),business:{prepare:async()=>[],reserve:async()=>async()=>{},verifyBody:async()=>{proofs++;throw Error('tombstone must not require body proof');}},trustedNow:()=>100} as any);
+   const control=new WatchAccountControl({store,http,publisher:pub,reader,crypto:signer,approved,resolveBody:resolver,choiceApply:true,author:async()=>({deviceId:author,alias:'key',own:{commitOid:server.device.commitOid,revision:server.device.revision}}),business:{prepare:async()=>[],reserve:async()=>async()=>{},verifyBody:async()=>{proofs++;throw Error('tombstone must not require body proof');}},trustedNow:()=>100,recovery:{ports:{}}} as any);
    const preflight=pub.preflightRecords.bind(pub);pub.preflightRecords=rows=>{expect(fields(rows.find(r=>r.entityKey===dead.e).manifest)).toEqual(known);preflights++;return preflight(rows);};
    // Preflight must replace a supplied stale/local descriptor using current tree.
    const stale={...known,bodyRevision:'0'.repeat(32),promiseId:'1'.repeat(32)},plan=await (control as any).prepareApply(await store.readStableState(),[{entityKey:dead.e,rowSequence:'2',candidate,manifest:stale}]);await plan.release();
