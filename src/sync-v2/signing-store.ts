@@ -9,6 +9,8 @@ import {SyncV2Http} from './http';
 export class SigningStateUnavailable extends Error {constructor(){super('signing_state_unavailable');}}
 export class WatchSigningIdentity {
  private slot:string;
+ private registrations=0;
+ get registrationRevision(){return this.registrations;}
  constructor(private readonly secure:IdentityStorage,private readonly crypto:SigningPort&EnvelopeCrypto,private readonly accountId:string,private readonly scope:Scope,private readonly idKey:Uint8Array){this.slot='watchrss.syncv2.signer.'+digest({accountId,scope});}
  private async load():Promise<{deviceId:string;keyId:string;registration:any;registered:boolean}|null>{
   try{
@@ -37,7 +39,7 @@ export class WatchSigningIdentity {
   const alias=signingAlias(this.accountId,this.scope,record.deviceId,record.keyId);
   if(!record.registration){const registration=await signingRegistration(this.crypto,this.idKey,this.accountId,this.scope,record.deviceId,record.keyId,now,revocationRevision,true),next={...record,registration};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
   // Retry exactly the persisted randomized signature, never generate a replacement proof.
-  if(!record.registered){const result=await http.json('POST','/devices/signing-key',record.registration);if(result.deviceId!==record.deviceId||result.keyId!==record.keyId||result.registered!==true)throw Error('signature_invalid');const next={...record,registered:true};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
+  if(!record.registered){this.registrations++;const result=await http.json('POST','/devices/signing-key',record.registration);if(result.deviceId!==record.deviceId||result.keyId!==record.keyId||result.registered!==true)throw Error('signature_invalid');const next={...record,registered:true};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
   const publicKey=await this.crypto.signingKey(alias,false);if(b64(publicKey)!==record.registration.body.publicKey)throw Error('signature_invalid');return {...record,alias};
   }catch(error){if((error as Error).message==='signing_key_missing')throw new SigningStateUnavailable();throw error;}
  }

@@ -25,7 +25,7 @@ import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
 import {traceServiceWork} from "@podjs/framework/service-trace";
-import {subscribeLibraryMutations,notifyLibrarySqlCommit} from './core/library-mutations';
+import {subscribeLibraryMutations,notifyLibrarySqlCommit,type LibraryMutationKind} from './core/library-mutations';
 import {startupMark,startupStep} from "./core/startup-trace.ts";
 import {appLogger} from './logs/app-logger.ts';
 import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
@@ -68,7 +68,7 @@ import {normalizeAddChannelUrl,validAddChannelUrl} from "./rss/add-channel.ts";
 import { MemoRepository } from "./notes/index.ts";
 import { uri, sqlite, textInput, http, hostOperation, type DownloadResult, fileChunks, base64ToBytes, utf8ToString, delay } from "@podjs/framework/services";
 import { initializeSchema, WatchRssRepository, htmlToText, parseFeed, resolveUrl } from "./core/index.ts";
-import type { SqlCancellationCheck, SqlDatabase } from "./core/types.ts";
+import type { SqlCancellationCheck, SqlDatabase, SqlParams } from "./core/types.ts";
 import type { AppServices, Article, ArticleQuery, Note, AddChannelPreview } from "./ui/service.ts";
 
 export async function getTokenUsagePageForSync(options:Parameters<typeof readTokenUsagePage>[1]){await init();return readTokenUsagePage(db,options);}
@@ -80,9 +80,13 @@ export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]>
 
 let libraryWriteBlocked=false;
 const assertLibraryWritable=()=>{if(libraryWriteBlocked)throw new LibraryClearError('clear_library_busy');};
+async function executeLibraryMutation(sql:string,params?:SqlParams,traceLabel?:string,kind?:LibraryMutationKind){
+ const count=await sqlite.executeChanges(sql,params as (string|number|null)[],traceLabel);
+ notifyLibrarySqlCommit([{sql}],[count],kind);
+}
 const clearDatabase: SqlDatabase = {
   query: (sql, params, traceLabel) => sqlite.query(sql, params as (string | number | null)[],traceLabel),
-  execute: async (sql, params, traceLabel) => {const count=await sqlite.executeChanges(sql, params as (string | number | null)[],traceLabel);notifyLibrarySqlCommit([{sql}],[count]);},
+  execute: (sql,params,traceLabel)=>executeLibraryMutation(sql,params,traceLabel),
   transaction: async statements => {const counts=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,counts);},
   transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,changes);return changes;},
 };
@@ -121,7 +125,11 @@ const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)?
 export function warmServices():void{void init().catch(()=>{});}
 export async function getExternalSavedStore(){await init();return externalSavedStore;}
 export async function getDouyinSavedStore(){await init();return douyinSavedStore;}
-export const memoRepository = new MemoRepository(db, "podjs-watch");
+export const memoRepository = new MemoRepository({...db,async execute(sql,params,traceLabel){
+  assertLibraryWritable();
+  // The repository uses execute for local edits and transactions for incoming data.
+  await executeLibraryMutation(sql,params,traceLabel,'local-memo');
+}}, "podjs-watch");
 let ready: Promise<void> | undefined;
 function init(): Promise<void> { idleHit(20);return ready ??= (async()=>{idleHit(21);
   const fresh=await startupStep('init.probe',async()=>!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length);
