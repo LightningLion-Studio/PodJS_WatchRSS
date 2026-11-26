@@ -1,3 +1,4 @@
+import type {NoteSyncTimes,SyncProgress} from './sync-progress';
 import {isTransportFailure} from '../network/recovery';
 import type {SyncV2RoundResult} from '../sync-v2/product-start';
 import {isBookCompanion} from './book-companion';
@@ -45,6 +46,7 @@ export interface CloudSession {
  records(bootstrap:import('./types').CloudBootstrap,current:()=>Promise<void>):Promise<WatchCloudRecords>;
 }
 export interface CloudSyncPorts {
+ progress?:SyncProgress;
  snapshotDiagnostic?:(value:string)=>void;
  /** 26.4 P6-10: v1 account and keys verified ready. Only set when the Sync v2 product switch is on. */
  primaryV2?:boolean;
@@ -52,7 +54,7 @@ export interface CloudSyncPorts {
  keysReady?:(event:{userId:string;deviceId:string;keys:{currentKeyVersion(userId:string):Promise<number>;accountKey(userId:string,version?:number):Promise<Uint8Array|undefined>};syncV2:unknown;bootstrap:import('./types').CloudBootstrap})=>void|Promise<void>;
  recordDiagnostic?:(value:string)=>void;
  formatDiagnostic?:(value:string)=>void;
- open(check?:()=>void,expectedScope?:string):Promise<CloudSession|undefined>;
+ open(check?:()=>void,expectedScope?:string,progress?:SyncProgress):Promise<CloudSession|undefined>;
  network():Promise<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>;
  hash(bytes:Uint8Array):Promise<string>;uuid():Promise<string>;
  /** Host lease shared by foreground and background guests; release on close. */
@@ -77,7 +79,7 @@ export class WatchCloudSyncService {
  constructor(private ports:CloudSyncPorts,private guard:CloudGuard=cloudDisabled){}
  get status(){return {...this.value,...(this.value.restoreProgress?{restoreProgress:JSON.parse(JSON.stringify(this.value.restoreProgress)) as RestoreProgress}:{})};}
  subscribe(fn:()=>void){this.listeners.add(fn);return ()=>{this.listeners.delete(fn);};}
- reset(){this.statusEpoch++;this.currentStatus={phase:'idle',message:'尚未同步',usedBytes:0,reservedBytes:0,quotaBytes:0,lastCompletedAt:0};this.emit();}
+ reset(){this.statusEpoch++;this.ports.progress?.reset();this.currentStatus={phase:'idle',message:'尚未同步',usedBytes:0,reservedBytes:0,quotaBytes:0,lastCompletedAt:0};this.emit();}
  /** Explicit display state. No user IDs, owner IDs or credentials. */
  requireOwnerChoice(){this.currentStatus={...this.value,phase:'error',errorCode:'library_owner_mismatch',ownerChoiceRequired:true,retryable:false,retryAtMillis:undefined,message:'本机资料属于其他账号，请先选择清空或合并'};this.emit();}
  ownerResolved(){if(!this.value.ownerChoiceRequired)return;this.currentStatus={...this.value,phase:'idle',errorCode:undefined,ownerChoiceRequired:false,retryable:undefined,retryAtMillis:undefined,message:'资料归属已确认，等待继续同步'};this.emit();}
@@ -90,6 +92,9 @@ export class WatchCloudSyncService {
  }
  private set(phase:WatchCloudPhase,message:string,member?:CloudMemberState){
   if(this.runEpoch!==this.statusEpoch)return;
+  if(phase==='downloading')this.ports.progress?.stage('download');
+  if(phase==='merging')this.ports.progress?.stage('write');
+  if(phase==='uploading')this.ports.progress?.stage('upload');
   if(member)this.value={...this.value,member,usedBytes:member.usedBytes,reservedBytes:member.reservedBytes,quotaBytes:member.quotaBytes};
   if(phase==='complete'){this.completion={message,at:(this.ports.now??Date.now)()};return;}
   this.value={...this.value,phase,message};this.emit();
@@ -138,9 +143,10 @@ export class WatchCloudSyncService {
   this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,retryable:true,retryAtMillis};
   this.set(attention?'idle':'error',message,member);
  }
- syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string):Promise<CloudSyncResult>{
+ syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string,note?:NoteSyncTimes):Promise<CloudSyncResult>{
   try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(async()=>{
    if(epoch!==this.statusEpoch)return false;
+   this.ports.progress?.start(note);
    this.runEpoch=epoch;this.completion=undefined;this.networkFailure=false;this.durableProgress=false;this.continuationExpected=false;this.transportFailed=false;this.failureStage='lease_acquire';
    this.value={...this.value,restoreProgress:undefined,continuationReady:false,yieldedToWriter:false};
    this.budget=new CloudSyncBudget(this.ports.now);this.recordFailure=undefined;
@@ -151,6 +157,7 @@ export class WatchCloudSyncService {
    });
    if(!this.ports.primaryV2)return prepared;
    if(!prepared||epoch!==this.statusEpoch)return false;
+   this.ports.progress?.stage('compare');
    this.failureStage='sync_v2';
    this.budget.check();
    const result=await this.ports.syncV2?.(expectedScope);
@@ -174,6 +181,7 @@ export class WatchCloudSyncService {
   const completed=result?this.completion:undefined;
   this.value={...this.value,resultSequence:outcome.resultSequence,
    ...(completed?{phase:'complete',message:completed.message,lastCompletedAt:completed.at}:{})};
+  this.ports.progress?.finish(result?'complete':'incomplete',completed?.at);
   this.emit();
   return outcome;
   });this.tail=run;return run;
@@ -189,6 +197,7 @@ export class WatchCloudSyncService {
   }finally{key.fill(0);}
  }
  private async run(manual:boolean,mode:'all'|'recent128',freshPlan=false,forceContentReset=false,expectedScope?:string){
+  this.ports.progress?.stage('connecting');
   this.value={...this.value,v2Failure:undefined,v2Attention:undefined,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined,errorCode:this.value.ownerChoiceRequired?'library_owner_mismatch':undefined,formatCompatibility:undefined};this.failureStage='network';this.guard.require();const network=await this.ports.network();
   if(!network.active||!network.validated){
    if(this.ports.primaryV2)this.failV2(Error('cloud_v2_offline'));
@@ -197,9 +206,10 @@ export class WatchCloudSyncService {
   }
   // Unknown/cellular/ethernet transports do not silently authorize private bodies.
   const full=manual||(network.wifi&&!network.metered);
-  this.failureStage='session_open';this.budget?.check();const s=await this.ports.open(()=>{this.budget?.check();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');},expectedScope);if(!s){if(this.runEpoch===this.statusEpoch)this.reset();return false;}
+  this.failureStage='session_open';this.budget?.check();const s=await this.ports.open(()=>{this.budget?.check();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');},expectedScope,this.ports.progress);if(!s){if(this.runEpoch===this.statusEpoch)this.reset();return false;}
   const current=async()=>{this.budget?.check();this.guard.require();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');await s.assertCurrent();this.budget?.check();};await current();
   this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();await current();this.ownerResolved();}await current();this.set('registering',this.ports.primaryV2?'正在准备账号和密钥':'正在核对云空间');
+  this.ports.progress?.stage('keys');
   this.failureStage='bootstrap';let bootstrap=await s.client.bootstrap();await current();
   const continueWithAnnouncement=async(boot:typeof bootstrap)=>{
    if(boot.syncV2)return true;

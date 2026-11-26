@@ -25,7 +25,7 @@ export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 /** Authenticated segment objects retained with a decoded cloud row (25.7). */
 export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
 const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
-export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
+export interface PublisherOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
 /** A failed original-result lookup preserves the immutable pending request. */
 export class PublicationLookupUnavailable extends Error {constructor(readonly cause:unknown){super((cause as Error).message);}}
 export class WatchIndexPublisher {
@@ -202,6 +202,7 @@ export class WatchIndexPublisher {
  }
  private async resumeResult(requestId:string){try{return await this.http.requestResult(requestId);}catch(error){throw new PublicationLookupUnavailable(error);}}
  private async flushOnce(){
+  const timing=this.options.progress?.();timing?.stage('upload');
   await this.http.capabilities();const state=await this.store.readState(),queued=state.cloud?.pendingPublish;
   if(!queued)throw Error('publication_missing');
   if(queued.explicit&&queued.phase==='confirmed')return queued.result;
@@ -246,7 +247,7 @@ export class WatchIndexPublisher {
   let reservation:any;if(wanted.length){reservation=await reserve(digest([plan.requestId,'reserve-batch',reservationObjects]).slice(0,32));uint(reservation.expiresAtMillis);if(reservation.expiresAtMillis<=this.now())reservation=await reserve(hex(await this.crypto.random(16)));uint(reservation.expiresAtMillis);if(reservation.expiresAtMillis<=this.now())throw Error('reservation_expired');hexId(reservation.reservationId,32);if(!Array.isArray(reservation.objects)||reservation.objects.length!==wanted.length||reservation.objects.some((r:any,i:number)=>r.oid!==wanted[i]!.oid||r.totalBytes!==wanted[i]!.bytes.length))throw Error('offset_conflict');}
   for(let index=0;index<upload.length;index++){const object=upload[index]!,status=have.objects[index],savedReceipt=progress[index]!.savedReceipt;let offset=progress[index]!.offset;if(status.status==='present')continue;
    for(;offset<object.bytes.length;){await this.pending();const part=object.bytes.subarray(offset,offset+65536);this.http.requestGuard?.();await this.store.consumeUploadReplay(object.oid,object.bytes.length,savedReceipt?.durableOffset??0,offset,part.length);const r=await this.http.putPart(object.oid,offset,reservation.reservationId,digest([plan.requestId,object.oid,offset]).slice(0,32),part);await this.http.servicePin!.receipt(this.crypto,r.receipt,this.http.scope,object.oid,object.bytes.length,this.now());if(r.durableOffset!==offset+part.length||r.receipt.body.durableOffset!==r.durableOffset)throw Error('offset_conflict');offset=r.durableOffset;await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,r.receipt);}
-   const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,complete.receipt);
+   const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,complete.receipt);timing?.advance(1);
   }after=page.at(-1)!.oid;}
   // 25.9: every segment table is registered before any parent that lists it.
   for(const parents of [false,true]){let refsAfter='';for(;;){const page=await this.store.uploadPage(plan.requestId,refsAfter,1);if(!page.length)break;for(const item of page)if(item.oid.startsWith('state-refs:')){const refs=parseCanonicalJson(item.bytes);if((refs?.body?.segmentOids?.length>0)!==parents)continue;await this.pending();await this.http.json('POST','/state-refs',refs);}refsAfter=page.at(-1)!.oid;}}

@@ -37,7 +37,6 @@ interface MediaRoutesProps {
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
-  coveredByActions?: () => boolean;
   width: number;
   height: number;
   round: boolean;
@@ -50,6 +49,9 @@ interface MediaRoutesProps {
   douyinOriginal: () => boolean;
   biliBackground: () => boolean;
   douyinBackground: () => boolean;
+  douyinPauseOnDetail: () => boolean;
+  setDouyinPauseOnDetail: (value: boolean) => void;
+  coveredByDouyinControls?: () => boolean;
   setBiliOriginal: (value: boolean) => Promise<void>;
   setDouyinOriginal: (value: boolean) => Promise<void>;
   setBiliBackground: (value: boolean) => void;
@@ -175,6 +177,10 @@ export function MediaRoutes(props: MediaRoutesProps) {
             continuePlaybackInBackgroundEnabled: props.douyinBackground(),
             onContinuePlaybackInBackgroundChange: (value) =>
               updateBackground("douyin", value),
+            pauseOnDetail: {
+              enabled: props.douyinPauseOnDetail(),
+              setEnabled: props.setDouyinPauseOnDetail,
+            },
             onDeleteChannel: () => props.deleteBuiltin("douyin"),
           }}
           onNavigate={props.openDouyin}
@@ -204,7 +210,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               : props.entry.playback!
           }
           active={props.active()}
-          coveredByActions={props.coveredByActions?.()}
+          coveredByDouyinControls={props.coveredByDouyinControls?.()}
+          pauseOnDetail={props.entry.playback?.platform === "douyin" ? props.douyinPauseOnDetail() : undefined}
           onDouyinExit={props.entry.onDouyinExit}
           offset={props.active() ? props.backOffset() : 0}
           offsetVector={props.active() ? props.backTranslation?.() : undefined}
@@ -226,7 +233,14 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onRejectAdjacent={(target,mirrorIndex)=>props.rejectDouyinAdjacent(props.entry,target.key,target.source.url,target.attemptedUrl,mirrorIndex)}
           onPlaybackFailure={
             props.entry.queue
-              ? (position,error) => props.recoverDouyinVideo(props.entry,false,position,error)
+              ? (position,error,stage) => {
+                  if (stage === "pause") {
+                    // A pause command can fail while the existing source is still healthy.
+                    props.setError("暂停视频失败");
+                    return;
+                  }
+                  return props.recoverDouyinVideo(props.entry,false,position,error);
+                }
               : props.entry.rssDouyinRecovery
                 ? (position,error) => void props.recoverRssDouyinVideo(props.entry,false,position,error)
                 : props.entry.playback?.platform === "bili" && props.entry.retryPlayback

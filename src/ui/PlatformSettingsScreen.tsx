@@ -29,6 +29,7 @@ export interface PlatformSettingsProps {
   width: number; height: number; loggedIn: () => boolean | undefined;
   showOriginalContent?: boolean; originalContentEnabled: boolean; onToggleOriginal: () => void;
   showContinuePlaybackInBackground?: boolean; continuePlaybackInBackgroundEnabled: boolean; onToggleContinuePlaybackInBackground?: () => void;
+  pauseOnDetail?: { enabled: boolean; setEnabled: (enabled: boolean) => void };
   deleteEnabled?: boolean; onDelete?: () => unknown; onLogin?: () => void; onLogout: () => Promise<void>; onError: (error: unknown) => void;
   ref?: (value: { scroller: Scroller; onRootBack: () => boolean }) => void;
 }
@@ -38,6 +39,7 @@ export function PlatformSettingsScreen(props: PlatformSettingsProps) {
   const entries = createMemo<ScrollEntry[]>(() => {
     const width = props.width, loggedIn = props.loggedIn();
     const prompt = measuredLines("下载手机端app以在手机上编辑和同步内容", width - 36 - 20, measure17, 2).join("\n");
+    const pauseOnDetail = props.pauseOnDetail;
     return [
       { height: 32, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[26] text-center text-[#f5f5f5]">设置</Text> },
       { height: 14, bounds: { x: 0, y: -1.5, width: props.width - 36, height: 14 }, render: () => <Text class="absolute left-[0] right-[0] top-[-1.5] text-xs leading-[14] text-center text-[#b6b6b6]">{loggedIn === undefined ? "" : loggedIn ? "已登录" : "未登录"}</Text> },
@@ -46,6 +48,7 @@ export function PlatformSettingsScreen(props: PlatformSettingsProps) {
            { height: 18, render: () => <Text class="absolute left-[10] right-[0] top-[4] text-xs leading-[14] text-[#b6b6b6]">刷新时抓取原文正文与图片</Text> }, spacerEntry(8)]
         : [spacerEntry(4)]),
       ...(props.showContinuePlaybackInBackground ? [switchRow("在后台继续播放", props.continuePlaybackInBackgroundEnabled, props.onToggleContinuePlaybackInBackground), spacerEntry(8)] : []),
+      ...(pauseOnDetail ? [switchRow("查看详情时暂停", pauseOnDetail.enabled, () => pauseOnDetail.setEnabled(!pauseOnDetail.enabled)), spacerEntry(8)] : []),
       { height: 65, render: () => <View onPress={() => setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[0] h-[57] rounded-[16] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[8.5] text-[17px] leading-[20] text-[#f5f5f5]">{prompt}</Text></View> },
       dangerEntry(loggedIn === undefined ? "读取登录状态…" : loggedIn ? "退出登录" : props.onLogin ? "登录" : "退出登录", "../assets/icons/exit-to-app.svg",
         loggedIn === undefined ? undefined : loggedIn ? () => { if(props.loggedIn()===true)void props.onLogout().catch(props.onError); } : props.onLogin ? () => { if(props.loggedIn()===false)props.onLogin?.(); } : undefined),

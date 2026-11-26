@@ -10,15 +10,15 @@ type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>{const p=Object.create(props);Object.defineProperty(p,'children',{value:props.children,enumerable:true});return {kind,props:p};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p)}));
-mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(s:string)=>Array.from(s).length*10})}));
+mock.module('@pocketjs/framework/host',()=>({getHost:()=>({}),hostViewport:()=>null,getOps:()=>({measureText:(s:string)=>Array.from(s).length*10})}));
 mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(p:Node['props'])=>element('ScrollEntries',{...p,children:createMemo(()=>p.entries.map((e:ScrollEntry)=>e.render()))})}));
-mock.module('@podjs/framework/services',()=>({delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({displayPower:{keepAwake:async()=>{}},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 for(const [name,key]of [['HomeScreen','default'],['ProfileScreen','ProfileScreen'],['AccountStatusScreen','AccountStatusScreen'],['PhoneConnectionScreen','PhoneConnectionScreen']]as const)mock.module('../src/ui/'+name+'.tsx',()=>({[key]:(p:Node['props'])=>element('underlying-route',p)}));
 const observers=new Set<()=>void>(),actions:string[]=[];let conflict=false,failClear=false,syncs=0;
 const publish=(v:boolean)=>{conflict=v;for(const fn of observers)fn();};
 mock.module('../src/cloud/status.ts',()=>({readCloudAccountStatus:()=>({ownerChoiceRequired:conflict}),subscribeCloudAccountStatus:(fn:()=>void)=>{observers.add(fn);return()=>observers.delete(fn);}}));
 mock.module('../src/services.ts',()=>({clearLocalPrivateLibrary:async()=>{actions.push('clearLocal');if(failClear)throw Error('private path must never leak');}}));
-mock.module('../src/cloud/application.ts',()=>({manualCloudSync:async()=>{syncs++;},applicationCloudApproval:{},applicationCloudApprover:{state:{phase:'idle',requests:[],message:''},subscribe:()=>()=>{}},applicationCloudHandoff:{},applicationSyncV2Ui:()=>undefined,applicationSyncV2OwnDeviceId:()=>null,installApplicationSyncV2Ui:()=>{},applicationCloudActions:{logout:async()=>{throw Error('no logout');},reregister:async()=>{},resolveOwner:async(choice:string,confirmed:boolean,clear?:()=>Promise<void>)=>{expect(confirmed).toBe(true);actions.push(choice);if(choice==='clear')await clear!();publish(false);}}}));
+mock.module('../src/cloud/application.ts',()=>({manualCloudSync:async()=>{syncs++;},applicationCloudProgress:{subscribe:()=>()=>{}},applicationCloudApproval:{},applicationCloudApprover:{state:{phase:'idle',requests:[],message:''},subscribe:()=>()=>{}},applicationCloudHandoff:{},applicationSyncV2Ui:()=>undefined,applicationSyncV2OwnDeviceId:()=>null,installApplicationSyncV2Ui:()=>{},applicationCloudActions:{logout:async()=>{throw Error('no logout');},reregister:async()=>{},resolveOwner:async(choice:string,confirmed:boolean,clear?:()=>Promise<void>)=>{expect(confirmed).toBe(true);actions.push(choice);if(choice==='clear')await clear!();publish(false);}}}));
 // The owner-choice route does not invoke platform media clients.
 mock.module('../src/media-services.ts',()=>({douyinClient:{}}));
 const {HomeRoutes}=await import('../src/ui/routes/home');

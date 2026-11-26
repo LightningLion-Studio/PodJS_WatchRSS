@@ -1305,6 +1305,67 @@ test('PERFVIDEO reports the real frame for its native generation after cached pi
  }finally{globals.pod=saved;}
 });
 
+for(const enabled of [true,false])for(const route of ['detail','actions'] as const)for(const manualPause of [false,true]){
+ test(`Douyin pause on ${route}: setting ${enabled}, manual pause ${manualPause}`,async()=>{
+  initial='available';prepares=[];plays=0;pauses=0;legacyStops=0;retires=0;
+  boundsCalls.length=0;current=state('idle');
+  const [overlay,setOverlay]=createSignal(false);
+  let player!:import('../src/ui/VideoPlayerScreen.tsx').VideoPlayerHandle;
+  const source={platform:'douyin' as const,url:'file:///cache/fixture.mp4',title:'mock'};
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+   source,width:233,height:233,round:true,offset:0,pauseOnDetail:enabled,
+   get active(){return !overlay();},get coveredByDouyinControls(){return overlay();},
+   ref:value=>{player=value;},
+  });});
+  await flush();
+  if(manualPause)await player.shellPlaying!(false);
+  const originalPlay=video.play,originalPause=video.pause;
+  current={...current,sourceGeneration:71,hasRenderedFirstFrame:true,bufferedMs:800};
+  video.play=async()=>{plays++;return current={...current,state:'playing'};};
+  video.pause=async()=>{pauses++;return current={...current,state:'paused'};};
+  try {
+   const pauseCount=pauses,playCount=plays,initial=await player.shellState!();
+   setOverlay(true);await flush();
+   expect(current.state).toBe(enabled||manualPause?'paused':'playing');
+   expect(pauses-pauseCount).toBe(enabled&&!manualPause?1:0);
+   expect(boundsCalls.at(-1).visible).toBe(false);
+   setOverlay(false);await flush();
+   const returned=await player.shellState!();
+   expect(returned.state).toBe(manualPause?'paused':'playing');
+   expect(returned.sourceGeneration).toBe(initial.sourceGeneration);
+   expect(returned.hasRenderedFirstFrame).toBe(true);
+   expect(returned.bufferedMs).toBe(initial.bufferedMs);
+   expect(plays-playCount).toBe(enabled&&!manualPause?1:0);
+   expect(boundsCalls.at(-1).visible).toBe(true);
+   expect(prepares).toHaveLength(1);
+   expect(legacyStops).toBe(0);
+   expect(retires).toBe(0);
+  } finally { video.play=originalPlay; video.pause=originalPause; }
+ });
+}
+
+test('Douyin route opened during prepare delays autoplay without replacing the source',async()=>{
+ initial='available';prepares=[];plays=0;pauses=0;legacyStops=0;current=state('idle');
+ let finish!:()=>void;
+ heldPrepare=new Promise(resolve=>{finish=()=>resolve(current=state('ready'));});
+ const [overlay,setOverlay]=createSignal(false);
+ const source={platform:'douyin' as const,url:'file:///cache/fixture.mp4',title:'mock'};
+ createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({
+  source,width:233,height:233,round:true,offset:0,
+  get active(){return !overlay();},get coveredByDouyinControls(){return overlay();},
+ });});
+ await flush();
+ expect(prepares).toHaveLength(1);
+ setOverlay(true);finish();await flush();
+ expect(current.state).toBe('paused');
+ expect(plays).toBe(0);
+ setOverlay(false);await flush();
+ expect(current.state).toBe('playing');
+ expect(plays).toBe(1);
+ expect(prepares).toHaveLength(1);
+ expect(legacyStops).toBe(0);
+});
+
 for (const playing of [true, false]) test(`DYFAV local actions retain the selected decoder and ${playing ? 'playing' : 'paused'} state`, async () => {
   const { DouyinActionsController } = await import('../src/douyin/actions.ts');
   initial = 'available'; prepares = []; plays = 0; legacyStops = 0; gestures.length = 0; boundsCalls.length = 0;
@@ -1327,7 +1388,7 @@ for (const playing of [true, false]) test(`DYFAV local actions retain the select
     return VideoPlayerScreen({
       source, width: 233, height: 233, round: true, offset: 0,
       get active() { return !covered(); },
-      get coveredByActions() { return covered(); },
+      get coveredByDouyinControls() { return covered(); },
       onActions: () => setCovered(true),
       ref: value => { handle = value; },
     });
@@ -1336,18 +1397,27 @@ for (const playing of [true, false]) test(`DYFAV local actions retain the select
   if (!playing) await handle.shellPlaying(false);
   current = { ...current, positionMs: 4567 };
   jankStateChanged(current);
-  gestures[0].onLongPress();
-  await flush();
-  expect(boundsCalls.at(-1)?.visible).toBe(false);
-  await actions.load();
-  await actions.toggle('favorite');
-  await flush();
-  expect(saved).toBe(true);
-  expect(prepares).toHaveLength(1);
-  expect(legacyStops).toBe(0);
-  expect(detailRequests).toBe(0);
-  expect(boundsCalls.at(-1)?.visible).toBe(true);
-  expect(await handle.shellState()).toMatchObject({ state: playing ? 'playing' : 'paused', positionMs: 4567 });
+  const play = video.play, pause = video.pause;
+  video.play = async () => { plays++; return current = { ...current, state: 'playing' }; };
+  video.pause = async () => { pauses++; return current = { ...current, state: 'paused' }; };
+  try {
+    gestures[0].onLongPress();
+    await flush();
+    expect(boundsCalls.at(-1)?.visible).toBe(false);
+    expect(current).toMatchObject({ state: 'paused', positionMs: 4567 });
+    await actions.load();
+    await actions.toggle('favorite');
+    await flush();
+    expect(saved).toBe(true);
+    expect(prepares).toHaveLength(1);
+    expect(legacyStops).toBe(0);
+    expect(detailRequests).toBe(0);
+    expect(boundsCalls.at(-1)?.visible).toBe(true);
+    expect(await handle.shellState()).toMatchObject({ state: playing ? 'playing' : 'paused', positionMs: 4567 });
+  } finally {
+    video.play = play;
+    video.pause = pause;
+  }
 });
 
 test('DYFAV decoder release restores a paused position with a cover until a frame arrives', async () => {
@@ -1413,7 +1483,7 @@ test('DYFAV session player keeps the active decoder under actions and evicts its
       return VideoPlayerScreen({
         source, width: 233, height: 233, round: true, offset: 0,
         get active() { return !covered(); },
-        get coveredByActions() { return covered(); },
+        get coveredByDouyinControls() { return covered(); },
         onAdjacentKey: direction => direction === 'next' ? next.awemeId : undefined,
         onPrepareAdjacent: async () => ({ key: next.awemeId, source: next }),
         ref: value => { handle = value; },
@@ -1451,7 +1521,7 @@ test('DYFAV pressure under actions can release and seek without starting a pause
     return VideoPlayerScreen({
       source, width: 233, height: 233, round: true, offset: 0,
       get active() { return !covered(); },
-      get coveredByActions() { return covered(); },
+      get coveredByDouyinControls() { return covered(); },
       ref: value => { handle = value; },
     });
   });
@@ -1515,6 +1585,7 @@ async function productionRoutes() {
   mock.module('../src/cache/host.ts', () => ({ managedCache: {} }));
   mock.module('../src/services.ts', () => ({ clearLocalPrivateLibrary: async () => {} }));
   mock.module('../src/cloud/application.ts', () => ({
+    applicationCloudProgress: { subscribe: () => () => {} },
     applicationCloudActions: {}, manualCloudSync: async () => {},
     applicationCloudApproval: {}, applicationCloudApprover: {}, applicationCloudHandoff: {},
     applicationSyncV2Ui: {}, applicationSyncV2OwnDeviceId: () => undefined,
@@ -1544,12 +1615,14 @@ async function productionRoutes() {
   const { HomeRoutes } = await import('../src/ui/routes/home.tsx');
   const { MediaRoutes } = await import('../src/ui/routes/media.tsx');
   const { createMediaRouteController } = await import('../src/ui/routes/media-controller.ts');
-  const { backStackSize } = await import('../src/navigation/back-target.ts');
+  const { backStackSize, douyinControlsCoverPlayer } = await import('../src/navigation/back-target.ts');
   const channel: Channel = { id: 'douyin', title: '抖音', url: 'builtin:douyin' };
 
   initial = 'available'; prepares = []; plays = 0; legacyStops = 0; ticks = []; gestures.length = 0; current = state('idle');
   const [stack, setStack] = createSignal<RouteEntry[]>([{ page: 'home' }]);
   const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
+  const [error, setError] = createSignal('');
+  const telemetry: boolean[] = [];
   const activeRoute = () => stack().at(-1)!;
   const back = () => {
     const size = backStackSize(stack());
@@ -1561,11 +1634,12 @@ async function productionRoutes() {
     return true;
   };
 
+  let controller!: ReturnType<typeof createMediaRouteController>;
   const root = createRoot(stop => {
     stops.push(stop);
-    const [busy, setBusy] = createSignal(false), [, setError] = createSignal('');
+    const [busy, setBusy] = createSignal(false);
     const [channels, setChannels] = createSignal([channel]), [, setOriginalModes] = createSignal<Record<string, boolean>>({});
-    const controller = createMediaRouteController({
+    controller = createMediaRouteController({
       services: {} as never, current: activeRoute, motion: { phase: 'idle' } as never,
       busy, setBusy, setError,
       settings: () => ({ mediaVolumeControl: true, mediaVolumeGuard: false, playbackStartVolumeLimit: null }) as never,
@@ -1584,7 +1658,12 @@ async function productionRoutes() {
         : createComponent(MediaRoutes, {
           ...controller, entry, page: () => entry.page, active: () => activeRoute() === entry, width: 233, height: 233,
           round: true, backOffset: () => 0, services: {}, channels: () => [channel],
-          coveredByActions: () => activeRoute().douyinActionsOwner === entry,
+          setError,
+          createBatteryTelemetry: () => ({
+            update: async (_source: string | undefined, active: boolean) => { telemetry.push(active); },
+            stop: async () => {},
+          }),
+          coveredByDouyinControls: () => douyinControlsCoverPlayer(stack(), entry, controller.douyinPauseOnDetail()),
           playingSource, openDouyin: controller.douyinNavigate, playDouyin: controller.douyinPlay,
           douyinOriginal: () => true, popPage: back,
         } as unknown as Parameters<typeof MediaRoutes>[0]),
@@ -1610,7 +1689,12 @@ async function productionRoutes() {
     await settle(() => activeRoute().page === 'video');
     expect(activeRoute().page).toBe('video');
   };
-  return { a, b, client, requests, activeRoute, enter, press, settle, back, setHeaders: (handler: typeof headers) => { headers = handler; }, changeAuth: () => { auth++; } };
+  return {
+    a, b, client, requests, activeRoute, enter, press, settle, back, controller, stack, error, telemetry,
+    finishActions: (actions: RouteEntry) => setStack(entries => entries.filter(entry => entry !== actions)),
+    setHeaders: (handler: typeof headers) => { headers = handler; },
+    changeAuth: () => { auth++; },
+  };
 }
 
 test('DYFAV FIX1 Home click enters through the real cover and restores playback after route disposal', async () => {
@@ -1681,4 +1765,179 @@ test('DYFAV FIX1 actions resume the same item without preparing its rejected sou
   expect((await f.activeRoute().player!.shellState!()).state).toBe('playing');
   expect(f.requests).toEqual([f.a.awemeId, f.a.awemeId]);
   expect(prepares.map(value => value.url)).toEqual([f.a.playUrl, 'https://mock.invalid/recovered']);
+});
+
+for (const route of ['actions', 'detail', 'actions-removed'] as const) {
+  test(`FIX1 QR share from ${route} retains the decoder with pause enabled`, async () => {
+    const f = await productionRoutes();
+    f.controller.setDouyinPauseOnDetail(true);
+    await f.enter();
+    const player = f.activeRoute();
+    const initial = { ...current, positionMs: 456, sourceGeneration: 71, bufferedMs: 800 };
+    const playCount = plays, pauseCount = pauses;
+    const play = video.play, pause = video.pause;
+    video.play = async () => { plays++; return current = { ...current, state: 'playing' }; };
+    video.pause = async () => { pauses++; return current = { ...current, state: 'paused' }; };
+    try {
+      current = initial;
+      await f.settle();
+      if (route === 'detail') {
+        await f.controller.douyinNavigate({ name: 'detail', awemeId: f.a.awemeId });
+      } else {
+        f.controller.douyinActions(player);
+      }
+      await f.settle();
+      const overlay = f.activeRoute();
+      expect(overlay.douyinRoute?.name).toBe(route === 'detail' ? 'detail' : 'actions');
+      expect(current.state).toBe('paused');
+
+      await f.controller.douyinNavigate({ name: 'share', awemeId: f.a.awemeId });
+      if (route === 'actions-removed') f.finishActions(overlay);
+      await f.settle();
+      expect(f.activeRoute().douyinRoute?.name).toBe('share');
+      expect(f.stack().at(-2)).toBe(route === 'actions-removed' ? player : overlay);
+      expect(legacyStops).toBe(0);
+      expect(pauses - pauseCount).toBe(1);
+      expect(plays).toBe(playCount);
+      expect(current).toMatchObject({ ...initial, state: 'paused' });
+      expect(prepares).toHaveLength(1);
+
+      f.back();
+      await f.settle();
+      if (f.activeRoute() !== player) {
+        expect(f.activeRoute()).toBe(overlay);
+        expect(current.state).toBe('paused');
+        f.back();
+        await f.settle();
+      }
+      expect(f.activeRoute()).toBe(player);
+      expect(await player.player!.shellState!()).toMatchObject({ ...initial, state: 'playing' });
+      expect(plays - playCount).toBe(1);
+      expect(legacyStops).toBe(0);
+      expect(prepares).toHaveLength(1);
+    } finally {
+      video.play = play;
+      video.pause = pause;
+    }
+  });
+}
+
+for (const route of ['actions', 'actions-share', 'detail-share'] as const) {
+  test(`FIX2 disabled pause matches master for ${route}`, async () => {
+    const f = await productionRoutes();
+    f.controller.setDouyinPauseOnDetail(false);
+    await f.enter();
+    const player = f.activeRoute();
+    current = { ...current, sourceGeneration: 71, bufferedMs: 800 };
+    await f.settle();
+    expect(f.telemetry.at(-1)).toBe(true);
+    const pauseCount = pauses;
+
+    if (route === 'detail-share') {
+      await f.controller.douyinNavigate({ name: 'detail', awemeId: f.a.awemeId });
+    } else {
+      f.controller.douyinActions(player);
+    }
+    await f.settle();
+    const overlay = f.activeRoute();
+    expect(overlay.douyinRoute?.name).toBe(route === 'detail-share' ? 'detail' : 'actions');
+    expect(current.state).toBe(route === 'detail-share' ? 'stopped' : 'playing');
+    expect(legacyStops).toBe(route === 'detail-share' ? 1 : 0);
+    const overlayTelemetry = f.telemetry.at(-1);
+
+    if (route !== 'actions') {
+      await f.controller.douyinNavigate({ name: 'share', awemeId: f.a.awemeId });
+      await f.settle();
+      expect(f.activeRoute().douyinRoute?.name).toBe('share');
+      expect(current.state).toBe('stopped');
+      expect(legacyStops).toBe(1);
+      expect(prepares).toHaveLength(1);
+      if (route === 'actions-share') {
+        f.finishActions(overlay);
+        await f.settle();
+        expect(f.stack().at(-2)).toBe(player);
+        expect(current.state).toBe('stopped');
+        expect(legacyStops).toBe(1);
+      }
+    }
+    expect(overlayTelemetry).toBe(false);
+
+    f.back();
+    await f.settle();
+    if (route === 'detail-share') {
+      expect(f.activeRoute()).toBe(overlay);
+      expect(current.state).toBe('stopped');
+      f.back();
+      await f.settle();
+    }
+    expect(f.activeRoute()).toBe(player);
+    const returned = await player.player!.shellState!();
+    expect(returned.state).toBe('playing');
+    expect(f.telemetry.at(-1)).toBe(true);
+    expect(pauses).toBe(pauseCount);
+    expect(prepares).toHaveLength(route === 'actions' ? 1 : 2);
+    if (route === 'actions') expect(returned.sourceGeneration).toBe(71);
+  });
+}
+
+test('FIX2 covered pause failure reaches the route notice without replacing the current source', async () => {
+  const f = await productionRoutes();
+  f.controller.setDouyinPauseOnDetail(true);
+  await f.enter();
+  const player = f.activeRoute(), source = player.playback;
+  const pause = video.pause;
+  let resolutions = 0;
+  f.client.resolvePlayback = async () => {
+    resolutions++;
+    return { ok: true, data: { ...f.a, playUrl: 'https://mock.invalid/recovered' } };
+  };
+  video.pause = async () => { throw Object.assign(new Error('pause-fail'), { code: 'pause-fail' }); };
+  try {
+    f.controller.douyinActions(player);
+    await f.settle();
+    expect(f.activeRoute().douyinRoute?.name).toBe('actions');
+    expect(f.error()).toBe('暂停视频失败');
+    expect(player.playback).toBe(source);
+    expect(current.state).toBe('playing');
+    expect(legacyStops).toBe(0);
+    expect(prepares).toHaveLength(1);
+    expect(resolutions).toBe(0);
+    f.back();
+    await f.settle();
+    expect(f.activeRoute()).toBe(player);
+    expect((await player.player!.shellState!()).state).toBe('playing');
+    expect(prepares).toHaveLength(1);
+    expect(resolutions).toBe(0);
+  } finally {
+    video.pause = pause;
+  }
+});
+
+test('FIX1 reports a rejected pause while the route covers the player', async () => {
+  initial = 'available'; prepares = []; legacyStops = 0; current = state('idle');
+  const [covered, setCovered] = createSignal(false);
+  const reports: [number, unknown][] = [];
+  const error = Object.assign(new Error('pause-fail'), { code: 'pause-fail' });
+  const source: PlaybackSource = { platform: 'douyin', url: 'file:///cache/fixture.mp4', title: 'mock' };
+  createRoot(stop => {
+    stops.push(stop);
+    return VideoPlayerScreen({
+      source, width: 233, height: 233, round: true, offset: 0,
+      get active() { return !covered(); },
+      get coveredByDouyinControls() { return covered(); },
+      onPlaybackFailure: (position, failure) => { reports.push([position, failure]); },
+    });
+  });
+  await flush();
+  const pause = video.pause;
+  video.pause = async () => { throw error; };
+  try {
+    setCovered(true);
+    await flush();
+    expect(reports).toEqual([[321, error]]);
+    expect(current.state).toBe('playing');
+    expect(legacyStops).toBe(0);
+  } finally {
+    video.pause = pause;
+  }
 });

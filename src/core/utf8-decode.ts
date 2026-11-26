@@ -18,8 +18,8 @@ function legacyPiece(bytes:Uint8Array,start:number,dialect:Utf8Dialect) {
   }
   return {text:String.fromCharCode(...units),next:i};
 }
-export function decodeUtf8Piece(bytes:Uint8Array,start:number,dialect:Utf8Dialect) {
-  return decodeUtf8Chunk(bytes,start,{fallback:(value,offset)=>legacyPiece(value,offset,dialect)});
+export function decodeUtf8Piece(bytes:Uint8Array,start:number,dialect:Utf8Dialect,onFallback?:()=>void) {
+  return decodeUtf8Chunk(bytes,start,{fallback:(value,offset)=>{onFallback?.();return legacyPiece(value,offset,dialect);}});
 }
 export function decodeUtf8(bytes:Uint8Array,dialect:Utf8Dialect):string {
   const parts:string[]=[];

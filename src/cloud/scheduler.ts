@@ -1,4 +1,5 @@
 import {sameManualIntent,type ManualIntent} from './manual-handoff';
+import type {NoteSyncTimes} from './sync-progress';
 import type {CloudSyncResult} from './service';
 import {idleHit} from '../diagnostics/idle-counters';
 import type {WatchHeadPoll} from './head-poll';
@@ -10,6 +11,7 @@ export interface CloudScheduledRun {
  readonly current:boolean;
  readonly intent:ManualIntent|undefined;
  readonly afterApproval:boolean;
+ readonly note:NoteSyncTimes|undefined;
  bindIntent(intent:ManualIntent|undefined):void;
  publish(result:CloudSyncResult):void;
 }
@@ -18,7 +20,9 @@ export interface CloudSchedulerPorts {headPoll?:WatchHeadPoll;prepare?():boolean
  * hot sync loop. Foreground ownership is independent of the 6-hour OS worker. */
 export class WatchCloudScheduler {
  private accountRevision=0;private scheduleRevision=0;private held=false;private pendingManual:'all'|'recent128'|undefined;private runState:{held:boolean;accountRevision:number;intent?:ManualIntent;result?:CloudSyncResult}|undefined;
+ private pendingNote?:NoteSyncTimes;
  private noteDue?:number;
+ private lastNoteStart=-Infinity;
  private upgradeRequired=false;private approvalPending?:{immediate:boolean};
  private wakeRequested=false;private retryOnWake?:{mode?:'all'|'recent128'};
  private retryAt?:number;private last=-Infinity;private active=false;private disposed=false;private dirty=false;private running:Promise<boolean>|undefined;private cancelTimer?:()=>void;
@@ -31,6 +35,7 @@ export class WatchCloudScheduler {
  noteSaved(){
   this.guard.require();
   if(this.disposed||this.upgradeRequired)return;
+  this.pendingNote??={savedAt:this.ports.now()};
   if(this.ports.headPoll?.expediteMemos&&this.noteDue===undefined){
    this.noteDue=this.ports.now()+NOTE_INTERVAL;
    this.cancelTimer?.();this.cancelTimer=undefined;
@@ -60,11 +65,14 @@ export class WatchCloudScheduler {
   const approval=this.approvalPending;
   const retry=wake?this.retryOnWake:undefined;
   const manual=this.pendingManual??retry?.mode;
-  const checkIntent=wake&&!this.dirty&&!retry&&!manual&&this.ports.mayHavePendingIntent?.();
-  if(!approval?.immediate&&!(wake&&approval)&&!this.dirty&&!manual&&!retry&&!checkIntent)return;
+  const checkIntent=wake&&this.noteDue===undefined&&!this.dirty&&!retry&&!manual&&this.ports.mayHavePendingIntent?.();
+  if(!approval?.immediate&&!(wake&&(approval||this.noteDue!==undefined))&&!this.dirty&&!manual&&!retry&&!checkIntent)return;
   // Finding a durable grant or a parked retry does not make it eligible early.
   const bypassInterval=approval?.immediate||this.pendingManual!==undefined;
-  const eligibleAt=this.retryAt??(bypassInterval?-Infinity:this.noteDue??this.last+CLOUD_INTERVAL);
+  // Memo saves can shorten the normal interval. A service retry is still a lower bound.
+  const noteEligible=this.noteDue===undefined?undefined:Math.max(this.noteDue,this.lastNoteStart+NOTE_INTERVAL);
+  const eligibleAt=this.retryAt===undefined?(bypassInterval?-Infinity:noteEligible??this.last+CLOUD_INTERVAL):
+   Math.max(this.retryAt,bypassInterval?-Infinity:noteEligible??-Infinity);
   const remaining=eligibleAt-this.ports.now();
   if(remaining>0){this.cancelTimer=this.ports.delay(remaining,()=>{this.cancelTimer=undefined;this.wakePending();});return;}
   this.pendingManual=undefined;
@@ -95,16 +103,22 @@ export class WatchCloudScheduler {
   this.ports.headPoll?.update();
   const current=()=>!this.disposed&&state.accountRevision===this.accountRevision;
   let approvalAtStart:typeof this.approvalPending,started=false;
+  let note:NoteSyncTimes|undefined;
   const context:CloudScheduledRun={
    get current(){return current();},
    get intent(){return state.intent;},
    afterApproval,
+   get note(){return note;},
    bindIntent:grant=>{
     state.intent=grant;
     started=true;
     if(!current())return;
     this.noteDue=undefined;
     attemptedAt=this.last=this.ports.now();
+    if(this.pendingNote){
+     note=this.pendingNote;this.pendingNote=undefined;
+     this.lastNoteStart=attemptedAt;
+    }
     if(!afterApproval&&!grant)return;
     // The app binds the verified grant immediately before calling the service.
     // Either grant mode covers recent128. An automatic metadata sync may not.
@@ -132,6 +146,7 @@ export class WatchCloudScheduler {
    // Honor the service result's deadline, including one due at the start time.
    // A wake alone cannot reuse an old deadline to bypass the interval.
    if(current()&&!state.held&&this.retryAt!==undefined&&this.retryAt<=attemptedAt&&this.retryAt!==state.result?.retryAtMillis)this.retryAt=attemptedAt+CLOUD_INTERVAL;
+   if(note&&current())this.pendingNote=note;
    if((!dispatched||rejected&&!started)&&!afterApproval&&current())this.retryOnWake={mode:manual?mode:undefined};
    resume();
   };
@@ -186,7 +201,7 @@ export class WatchCloudScheduler {
   return deliver(task,state);
  }
  /** Fence old results immediately, while keeping wakeups from the existing schedule. */
- fenceAccount(){this.guard.require();this.accountRevision++;this.ports.headPoll?.resetAccount();this.approvalPending=undefined;this.noteDue=undefined;this.retryOnWake=undefined;}
+ fenceAccount(){this.guard.require();this.accountRevision++;this.ports.headPoll?.resetAccount();this.approvalPending=undefined;this.pendingNote=undefined;this.noteDue=undefined;this.lastNoteStart=-Infinity;this.retryOnWake=undefined;}
  accountChanged(){this.fenceAccount();this.scheduleAccount();}
  scheduleAccount(){this.guard.require();this.scheduleRevision++;this.pendingManual=undefined;void this.setUpgradeRequired(false).catch(()=>{});this.cancelTimer?.();this.cancelTimer=undefined;this.last=-Infinity;this.retryAt=undefined;this.trigger("account");}
  dispose(){this.disposed=true;this.ports.headPoll?.update();this.cancelTimer?.();this.cancelTimer=undefined;}

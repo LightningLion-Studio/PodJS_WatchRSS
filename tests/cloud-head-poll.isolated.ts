@@ -159,7 +159,7 @@ mock.module('../src/cloud/runtime',()=>({createCloudRuntime:(
  },guard);
  return {service,inspectOwner:async()=>{},approvals:{state:{phase:'idle'},active:false,subscribe:()=>()=>{},setForeground(){},reset(){}}};
 }}));
-const {startApplicationCloudSync,stopApplicationCloudSync}=await import('../src/cloud/application');
+const {applicationCloudProgress,startApplicationCloudSync,stopApplicationCloudSync}=await import('../src/cloud/application');
 let offStatus:()=>void;
 beforeEach(async()=>{
  clock=new Clock();clock.now=1000;sql=stateSqlFixture();
@@ -620,16 +620,24 @@ test('the server config can switch polling off and back on without a writer run'
 
 test('memo publication interrupts a slow head request at the original three-second deadline',async()=>{
  await start();
- headResponse=deferred<void>();
- await clock.advance(20_000);
- expect(heads()).toHaveLength(1);
- expect(writer).toBe(true);
- notifyLocalMemoSave();
- await clock.advance(2999);
- expect(syncTimes).toEqual([1000]);
- await clock.advance(1);
- expect(writer).toBe(false);
- expect(syncTimes).toEqual([1000,24_000]);
+ const stages:(string|undefined)[]=[];
+ const stopProgress=applicationCloudProgress.subscribe(value=>{stages.push(value?.stage);});
+ try{
+  headResponse=deferred<void>();
+  await clock.advance(20_000);
+  expect(heads()).toHaveLength(1);
+  expect(writer).toBe(true);
+  expect(stages).toEqual([]);
+  notifyLocalMemoSave();
+  await clock.advance(2999);
+  expect(syncTimes).toEqual([1000]);
+  await clock.advance(1);
+  expect(writer).toBe(false);
+  expect(syncTimes).toEqual([1000,24_000]);
+  expect(stages).toEqual(['connecting','keys','compare','complete']);
+  expect(heads()).toHaveLength(1);
+  expect(configRequests()).toHaveLength(1);
+ }finally{stopProgress();}
 });
 
 test('an in-progress normal sync cancels the poll timer until the writer settles',async()=>{

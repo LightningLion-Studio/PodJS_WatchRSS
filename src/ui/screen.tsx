@@ -10,7 +10,7 @@ import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playerGesture,rotateVector} from "./player-gestures.ts";
 import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
-import {backStackSize,usesImmersiveBackObserver} from '../navigation/back-target.ts';
+import {backStackSize,douyinControlsCoverPlayer,usesImmersiveBackObserver} from '../navigation/back-target.ts';
 import {idleHit} from '../diagnostics/idle-counters';
 import {douyinBench} from '../douyin/bench.ts';
 import {startExternalDebug} from '../debug/external-host.ts';
@@ -1500,6 +1500,8 @@ export default function WatchRSS(props: {
     setBiliBackground,
     douyinBackground,
     setDouyinBackground,
+    douyinPauseOnDetail,
+    setDouyinPauseOnDetail,
     openRssVideo,
     biliNavigate,
     restoreDouyinVideo,
@@ -1599,6 +1601,7 @@ export default function WatchRSS(props: {
     const entryPage = () => entry.page;
     const active = () => effectiveCurrent() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
+    const coveredByDouyinControls = () => douyinControlsCoverPlayer(effectiveStack(), entry, douyinPauseOnDetail());
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
@@ -1752,7 +1755,6 @@ export default function WatchRSS(props: {
               entry={entry}
               page={entryPage}
               active={active}
-              coveredByActions={() => effectiveCurrent().douyinActionsOwner === entry}
               width={width}
               height={height}
               round={metrics.shape === "round"}
@@ -1765,6 +1767,9 @@ export default function WatchRSS(props: {
               douyinOriginal={douyinOriginal}
               biliBackground={biliBackground}
               douyinBackground={douyinBackground}
+              douyinPauseOnDetail={douyinPauseOnDetail}
+              setDouyinPauseOnDetail={setDouyinPauseOnDetail}
+              coveredByDouyinControls={coveredByDouyinControls}
               setBiliOriginal={setBiliOriginal}
               setDouyinOriginal={setDouyinOriginal}
               setBiliBackground={setBiliBackground}

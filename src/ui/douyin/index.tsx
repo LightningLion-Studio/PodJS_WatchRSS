@@ -75,6 +75,7 @@ export interface DouyinSettingsBindings {
   onOriginalContentChange: (enabled: boolean) => void;
   continuePlaybackInBackgroundEnabled: boolean;
   onContinuePlaybackInBackgroundChange: (enabled: boolean) => void;
+  pauseOnDetail?: { enabled: boolean; setEnabled: (enabled: boolean) => void };
   onDeleteChannel: () => void | Promise<void>;
 }
 export interface DouyinScreenProps {
@@ -487,6 +488,7 @@ function SettingsScreen(props: DouyinScreenProps) {
   return <PlatformSettingsScreen width={props.width} height={props.height} loggedIn={loggedIn}
     showOriginalContent originalContentEnabled={props.settings.originalContentEnabled} onToggleOriginal={() => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)}
     showContinuePlaybackInBackground continuePlaybackInBackgroundEnabled={props.settings.continuePlaybackInBackgroundEnabled} onToggleContinuePlaybackInBackground={() => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)}
+    pauseOnDetail={props.settings.pauseOnDetail}
     deleteEnabled onDelete={async () => { await props.settings.onDeleteChannel(); discardFeed(props.client); }}
     onLogin={()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:'login'}))}
     onLogout={() => {

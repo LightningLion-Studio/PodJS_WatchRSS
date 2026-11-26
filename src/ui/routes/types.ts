@@ -78,6 +78,7 @@ export type RouteEntry = {
   channelId?: string;
   biliRoute?: BiliRoute;
   douyinRoute?: DouyinRoute;
+  /** Player that opened actions. A QR share inherits it before actions is removed. */
   douyinActionsOwner?: RouteEntry;
   resumeDouyinPlayback?: (current: () => boolean) => Promise<boolean>;
   onDouyinExit?: (source: PlaybackSource, positionMs: number, playing: boolean) => void;

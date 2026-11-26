@@ -36,12 +36,14 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{
 }}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{registerProducer(){}}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(run:()=>void,needsFrame:()=>boolean){frameObservers.push({run,needsFrame});}}));
-mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
+const mediaSettings = new Map<string, boolean>();
+mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:mediaSettings.get(key),set(key:string,value:boolean){mediaSettings.set(key,value);}},lifecycle:()=> 'active'}));
 mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{restoreFrame:async()=>({available:false}),captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
 const entryTimers:Array<{ms:number;fire:()=>void}>=[];
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
+const {douyinControlsCoverPlayer}=await import('../src/navigation/back-target.ts');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateStorage;publish?:(source:PlaybackSource|undefined)=>void}){
@@ -58,7 +60,7 @@ function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateSto
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
  return {controller,stack,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
- createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
+ createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget,coveredByDouyinControls:()=>douyinControlsCoverPlayer(stack(),entry,controller.douyinPauseOnDetail()),douyinPauseOnDetail:controller.douyinPauseOnDetail,setDouyinPauseOnDetail:controller.setDouyinPauseOnDetail} as any);});return playerProps;
  }};
 }
 test('DYFIRST explicit CDN expiry reaches same-video recovery before registering a source',async()=>{
@@ -1260,6 +1262,40 @@ test('PERFVIDEO reverse paging uses a verified bundle while the redundant previe
  expect(f.source()).toMatchObject(expected);
  expect(f.source().audioUrl).toBeUndefined();
  expect(f.requests()).toBe(0);
+});
+
+test('Douyin controls cover only the immediately underlying Douyin video', () => {
+ const player:RouteEntry={page:'video',playback:{title:'mock',platform:'douyin'}};
+ const bili:RouteEntry={page:'video',playback:{title:'mock',platform:'bili'}};
+ for(const name of ['detail','actions','share'] as const){
+  const overlay:RouteEntry={page:'douyin',douyinRoute:{name,awemeId:'mock'}};
+  expect(douyinControlsCoverPlayer([player,overlay],player,true)).toBe(name!=='share');
+  expect(douyinControlsCoverPlayer([bili,overlay],bili,true)).toBe(false);
+  expect(douyinControlsCoverPlayer([player,bili,overlay],player,true)).toBe(false);
+ }
+});
+
+test('Douyin pause setting defaults on and persists both values across controller recreation', () => {
+ mediaSettings.clear();
+ try {
+  const first=fixture().controller;
+  expect(first.douyinPauseOnDetail()).toBe(true);
+  first.setDouyinPauseOnDetail(false);
+  expect(first.douyinPauseOnDetail()).toBe(false);
+  const second=fixture().controller;
+  expect(second.douyinPauseOnDetail()).toBe(false);
+  second.setDouyinPauseOnDetail(true);
+  expect(fixture().controller.douyinPauseOnDetail()).toBe(true);
+ } finally { mediaSettings.clear(); }
+});
+
+test('FIX1 standalone Douyin share does not cover the player', async () => {
+ const f = fixture(), selected = item('direct-share');
+ f.controller.douyinPlay({item:selected,playback:selected,playlist:[selected],hasMore:false});
+ await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ const player = f.stack().at(-1)!;
+ await f.controller.douyinNavigate({name:'share',awemeId:selected.awemeId});
+ expect(douyinControlsCoverPlayer(f.stack(),player,true)).toBe(false);
 });
 
 test('DYFAV reopens the last exact item at the recorded position and paused state', async () => {

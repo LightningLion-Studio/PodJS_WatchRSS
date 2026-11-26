@@ -1,6 +1,7 @@
 import {test,expect} from 'bun:test';
 import {WatchCloudScheduler,CLOUD_INTERVAL} from '../../src/cloud/scheduler';
 import {enabled} from './k2-crypto';
+import {WatchHeadPoll} from '../../src/cloud/head-poll';
 import {PlaybackWork} from '../../src/core/playback-work';
 import {LocalTransferActivity} from '../../src/sync/local-transfer';
 import {Clock,deferred,flush} from '../helpers/ip-fixture';
@@ -327,3 +328,71 @@ for(const wake of retryBoundaryWakes)for(const offset of [-1,0,1]){
   }
  });
 }
+
+function memoHeadPoll(clock:Clock) {
+ return new WatchHeadPoll({
+  eligible:()=>true,now:()=>clock.now,
+  delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  read:async()=>({enabled:true,ttlMs:CLOUD_INTERVAL}),
+  sync:async()=>false,
+ });
+}
+
+test('memo commits coalesce within three seconds and bypass the five-minute automatic interval',async()=>{
+ const clock=new Clock(),calls:{at:number;savedAt?:number;manual:boolean}[]=[];
+ const headPoll=memoHeadPoll(clock);
+ headPoll.update();
+ await clock.advance(0);
+ expect(headPoll.expediteMemos).toBe(true);
+ const scheduler=new WatchCloudScheduler({
+  headPoll,
+  now:()=>clock.now,delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(manual,_mode,run){run.bindIntent(undefined);calls.push({at:clock.now,savedAt:run.note?.savedAt,manual});return true;},
+ },enabled);
+ scheduler.foreground(true);
+ await clock.advance(100);
+ scheduler.trigger('library');
+ scheduler.noteSaved();
+ await clock.advance(1200);
+ scheduler.noteSaved();
+ await clock.advance(1799);
+ expect(calls).toHaveLength(1);
+ await clock.advance(1);
+ expect(calls[1]).toEqual({at:3100,savedAt:100,manual:false});
+ scheduler.noteSaved();
+ await clock.advance(2999);
+ expect(calls).toHaveLength(2);
+ await clock.advance(1);
+ expect(calls[2]).toEqual({at:6100,savedAt:3100,manual:false});
+ scheduler.dispose();
+});
+
+test('memo dispatch respects the fault retry deadline and keeps the original save across failure',async()=>{
+ const clock=new Clock(),calls:(number|undefined)[]=[];
+ const headPoll=memoHeadPoll(clock);
+ headPoll.update();
+ await clock.advance(0);
+ expect(headPoll.expediteMemos).toBe(true);
+ const scheduler=new WatchCloudScheduler({
+  headPoll,
+  now:()=>clock.now,delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(_manual,_mode,run){
+   run.bindIntent(undefined);calls.push(run.note?.savedAt);
+   if(calls.length===2){scheduler.deferUntil(40000);return false;}
+   return true;
+  },
+ },enabled);
+ scheduler.foreground(true);
+ await clock.advance(40);
+ scheduler.noteSaved();
+ await clock.advance(3000);
+ expect(calls).toEqual([undefined,40]);
+ scheduler.noteSaved();
+ await clock.advance(40000-clock.now-1);
+ expect(calls).toHaveLength(2);
+ await clock.advance(1);
+ expect(calls).toEqual([undefined,40,40]);
+ scheduler.dispose();
+});

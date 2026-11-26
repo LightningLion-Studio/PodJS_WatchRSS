@@ -1,17 +1,18 @@
 export interface AutoScrollAwakeState { enabled:boolean; scrolling:boolean; active:boolean; foreground:boolean }
 let nextOwner=0;
 
-/** One reader owns one display lease. Serialize asynchronous host operations so
- * a late acquire cannot overtake pause/background/disposal's release. */
-export class AutoScrollAwakeLease {
-  readonly owner=`watchrss.reader.autoscroll.${++nextOwner}`;
+/** Serialize the host lease so an acquire cannot overtake a release. */
+export class DisplayAwakeLease {
+  readonly owner:string;
   private desired=false;
   private applied:boolean|undefined=false;
   private disposed=false;
   private pending:Promise<void>|undefined;
-  constructor(private readonly keepAwake:(owner:string,active:boolean)=>Promise<unknown>,private readonly onError:(error:unknown)=>void=()=>{}){}
-  update(state:AutoScrollAwakeState):Promise<void> {
-    this.desired=!this.disposed&&state.enabled&&state.scrolling&&state.active&&state.foreground;
+  constructor(owner:string,private readonly keepAwake:(owner:string,active:boolean)=>Promise<unknown>,private readonly onError:(error:unknown)=>void=()=>{}){
+    this.owner=`${owner}.${++nextOwner}`;
+  }
+  setActive(active:boolean):Promise<void> {
+    this.desired=!this.disposed&&active;
     return this.reconcile();
   }
   close():Promise<void>{this.disposed=true;this.desired=false;return this.reconcile();}
@@ -40,5 +41,14 @@ export class AutoScrollAwakeLease {
       if(this.applied!==this.desired&&failedIntent!==this.desired)return this.reconcile();
     });
     return this.pending;
+  }
+}
+
+export class AutoScrollAwakeLease extends DisplayAwakeLease {
+  constructor(keepAwake:(owner:string,active:boolean)=>Promise<unknown>,onError?:(error:unknown)=>void){
+    super('watchrss.reader.autoscroll',keepAwake,onError);
+  }
+  update(state:AutoScrollAwakeState):Promise<void>{
+    return this.setActive(state.enabled&&state.scrolling&&state.active&&state.foreground);
   }
 }

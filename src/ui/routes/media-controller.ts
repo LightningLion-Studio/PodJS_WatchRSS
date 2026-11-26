@@ -98,6 +98,15 @@ export function createMediaRouteController(
     kv.get<boolean>("watchrss.douyin.background-playback") ?? false,
   );
 
+  const pauseOnDetailKey = "watchrss.douyin.pause-on-detail";
+  const [douyinPauseOnDetail, setPauseOnDetail] = createSignal(
+    kv.get<boolean>(pauseOnDetailKey) ?? true,
+  );
+  const setDouyinPauseOnDetail = (enabled: boolean) => {
+    kv.set(pauseOnDetailKey, enabled);
+    setPauseOnDetail(enabled);
+  };
+
   if(videoOptEnabled('recovery')||videoOptEnabled('adaptive'))onCleanup(hostServices.onNetworkChange(invalidateVideoNetwork));
 
   bindDouyinStockIdle(douyinStock,()=>dependencies.current().page==='home'&&!dependencies.busy()&&dependencies.motion.phase==='idle'&&dependencies.channels().some(c=>c.url==='builtin:douyin'));
@@ -572,12 +581,16 @@ export function createMediaRouteController(
         if(pendingDouyinPlayback===pending){pendingDouyinPlayback = undefined;pendingDouyinQueue = undefined;pendingDouyinRequest=undefined;}
       }
     } else {
+      const origin = dependencies.current();
+      const actionsOwner = douyinPauseOnDetail() && route.name === 'share' && origin.douyinRoute?.name === 'actions'
+        && origin.douyinRoute.awemeId === route.awemeId ? origin.douyinActionsOwner : undefined;
       const exit = lastDouyinExit;
       const offerResume = route.name === 'entry' && !route.resumeAwemeId && !route.debugAutoEnterFlow
-        && dependencies.current().page === 'home' && exit?.immersive
+        && origin.page === 'home' && exit?.immersive
         && exit.auth === douyinClient.playbackAuthorizationVersion?.();
       dependencies.setPage("douyin", {
         douyinRoute: route,
+        ...(actionsOwner ? { douyinActionsOwner: actionsOwner } : {}),
         ...(offerResume ? {
           resumeDouyinPlayback: async current => {
             const authorized = () => exit.auth === douyinClient.playbackAuthorizationVersion?.();
@@ -1316,6 +1329,8 @@ export function createMediaRouteController(
     setBiliBackground,
     douyinBackground,
     setDouyinBackground,
+    douyinPauseOnDetail,
+    setDouyinPauseOnDetail,
     videoLoading,
     openRssVideo,
     biliNavigate,

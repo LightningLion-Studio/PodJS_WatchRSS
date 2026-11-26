@@ -8,7 +8,7 @@ import {BODY_PURPOSE,validateCarrier,type Carrier} from './body-channel-codec';
 /** Separate namespace, no legacy snapshots/records calls and no v2 ACK writes. */
 export class BodyChannelHttp {
  readonly prefix:string;
- constructor(private readonly options:{enabled:boolean;origin:string;policy:OriginPolicy;scope:Scope;transport:HttpTransport;session:()=>Promise<{accessToken:string;legacyDeviceId:string;legacyEpoch:string;legacyGeneration:string}>;check:()=>Promise<void>}){
+ constructor(private readonly options:{enabled:boolean;origin:string;policy:OriginPolicy;scope:Scope;transport:HttpTransport;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;session:()=>Promise<{accessToken:string;legacyDeviceId:string;legacyEpoch:string;legacyGeneration:string}>;check:()=>Promise<void>}){
   this.prefix=syncV2Origin(options.origin,options.policy)+'/functions/v1/cloud/bodies/v1';
  }
  private async request(method:string,path:string,body?:unknown,raw?:Uint8Array){
@@ -41,6 +41,7 @@ export class BodyChannelHttp {
    for(let at=o.offset;at<data.length;){const part=data.subarray(at,Math.min(data.length,at+65536));await this.request('PUT','/carriers/'+id+'/objects/'+o.sha256+'/parts/'+at,undefined,part);at+=part.length;}
   }
   const completed=await this.json('POST','/carriers/'+id+'/complete',{scope:this.options.scope});exact(completed,['version','purpose','scope','carrierId','state']);if(completed.carrierId!==id||completed.state!=='ready')throw Error('closure_incomplete');
+  this.options.progress?.()?.advance(expected.size);
  }
  /** Checkpoint only ciphertext. Final size/hash verification precedes decode. */
  async download(id:string,hash:string,size:number,files:CloudBlobStore,path:string,check?:()=>Promise<void>){
@@ -50,6 +51,6 @@ export class BodyChannelHttp {
    if(header('x-watchrss-body-total-bytes')!==String(size)||header('x-watchrss-body-offset')!==String(at)||r.body.length!==Math.min(65536,size-at))throw Error('invalid_range');
    if(files.append){await files.append(partial,r.body,at);}else{const next=new Uint8Array(at+r.body.length);next.set(data);next.set(r.body,at);data=next;await files.writeAtomic(partial,data);}at+=r.body.length;
   }
-  const result=await files.read(partial);if(!result||result.length!==size||sha256Hex(result)!==hash){await files.writeAtomic(partial,new Uint8Array());throw Error('hash_mismatch');}await files.writeAtomic(path,result);await files.writeAtomic(partial,new Uint8Array());return result;
+  const result=await files.read(partial);if(!result||result.length!==size||sha256Hex(result)!==hash){await files.writeAtomic(partial,new Uint8Array());throw Error('hash_mismatch');}await files.writeAtomic(path,result);await files.writeAtomic(partial,new Uint8Array());this.options.progress?.()?.advance(1);return result;
  }
 }

@@ -41,6 +41,7 @@ export interface AccountBusinessPort {
  reserve(bytes:number):Promise<()=>Promise<void>>;
 }
 export interface AccountControlOptions {
+ progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;
  store:WatchProjectionStore;http:SyncV2Http;reader:WatchCloudIndex;publisher:WatchIndexPublisher;
  crypto:EnvelopeCrypto&SigningPort;approved:(id:string)=>Promise<ApprovedKey>;
  author:()=>Promise<{deviceId:string;alias:string;own:{commitOid:string|null;revision:string}}>;
@@ -494,7 +495,7 @@ export class WatchAccountControl {
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
   const published=before.cloud?.lastPublication?.result?.account;
   if(before.activeGeneration===null&&published&&(!before.account||compareD64(before.account.revision,published.revision)<0))throw Error('first_follow_pending');
-  if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
+  if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};this.o.progress?.()?.stage('write');const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
  }
  /** R4: follow reads the current tree one entity (or one bounded page) at a

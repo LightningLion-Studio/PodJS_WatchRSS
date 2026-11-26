@@ -1,7 +1,8 @@
 import {validatedDouyinPlaybackItem} from './playback-source.ts';
+import type {HttpResponse} from '../cloud/types.ts';
 import {isTransportFailure} from '../network/recovery.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
-import {douyinRequestDiagnostic,douyinRetryAfter} from './request-diagnostics.ts';
+import {decodeDiagnostic,douyinRequestDiagnostic,douyinRetryAfter} from './request-diagnostics.ts';
 import {douyinBench} from './bench.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
 import {rememberRecommendationIds} from '../media/recommendation-history.ts';
@@ -19,7 +20,7 @@ import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './errors.ts';
 import { DouyinFeedStore, emptyRecentFeed, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItemsInTurns, type RecentFeed } from "./feed-store.ts";
-import {decodeMediaText} from '../media/text.ts';
+import {decodeMediaText,type MediaDecodeProgress} from '../media/text.ts';
 import {withoutDouyinSource} from "./playback-ingress.ts";
 import { douyinFeedSelection, douyinDetailSelection, mapDouyinDetail, mapProjectedDouyinFeed, parseDouyinDetail, parseDouyinFeedAsync, parseDouyinItem, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
@@ -212,6 +213,7 @@ export class DouyinClient {
     const attempt=async():Promise<DouyinResult<DouyinWireBody>|{forbidden:true}>=>{
       if(background&&!background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));
       const observed:Parameters<typeof douyinRequestDiagnostic>[0]={request_queue_ms:elapsed(requestStarted),request_sign_ms:0,request_transport_ms:0,request_text_ms:0,request_status_ms:0,response_bytes:0,category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:0,error_code:'cancelled'};
+      let decode:ReturnType<typeof decodeDiagnostic>|undefined;
       try {
       if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
       let signed:string;const signStarted=Date.now();
@@ -226,26 +228,30 @@ export class DouyinClient {
       }
       const url=`https://www.douyin.com${path}?${query({...params,a_bogus:signed})}`;
       let decodingResponse=false;
+      let decodeBytes:Uint8Array|undefined;
+      const progress:MediaDecodeProgress={step:'piece',offset:0,portable:false};
       try{
         if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
         const transportStarted=Date.now();
         stage?.('request_io');
-        const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
+        let status:number,headers:Record<string,string>,fileProjection:HttpResponse['fileProjection'];
+        ({status,headers,body:decodeBytes,fileProjection}=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
           background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{}),
-          ...(api==='feed'?{fileProjection:{selection:douyinFeedSelection,tokens:['blocked'],rows:{field:'aweme_list',map:(row:unknown)=>parseDouyinItem(row,'feed')}}}:api==='detail'?{fileProjection:{selection:douyinDetailSelection,tokens:['blocked']}}:{})});
-        observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,r.fileProjection?.size??r.body.length);
-        observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
+          ...(api==='feed'?{fileProjection:{selection:douyinFeedSelection,tokens:['blocked'],rows:{field:'aweme_list',map:(row:unknown)=>parseDouyinItem(row,'feed')}}}:api==='detail'?{fileProjection:{selection:douyinDetailSelection,tokens:['blocked']}}:{})}));
+        observed.request_transport_ms=elapsed(transportStarted);observed.response_bytes=Math.min(67108864,fileProjection?.size??decodeBytes.length);
+        observed.http_status=status;observed.retry_after_ms=douyinRetryAfter(headers);
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(r.status===429){
+        if(status===429){
           observed.error_code='http';
           return rateLimited(observed.retry_after_ms);
         }
-        appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
+        appLogger.d('DouyinClient',`response path=${path} status=${status}`);
         decodingResponse=true;
         let body:DouyinWireBody;
-        const projection=r.fileProjection?.value;
+        const projection=fileProjection?.value;
         const textStarted=Date.now();
         if(projection){
+          decodeBytes=undefined;
           stage?.('request_file_projection');
           switch(projection.kind){
             case 'object': body={fields:JSON.parse(projection.json),items:projection.mappedRows as readonly DouyinItem[]|undefined};break;
@@ -253,13 +259,16 @@ export class DouyinClient {
             case 'empty': body='';break;
             case 'token': body=projection.index===0?'blocked':'';break;
             default:
-              if(r.status===200){observed.error_code='decode';return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
+              if(status===200){observed.error_code='decode';return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
               body='';
           }
         }else{
           stage?.('request_decode');
-          body=await decodeMediaText(r.body);
-          if(api==='detail'&&r.status===200&&body.trim()&&body!=='blocked'&&!isDouyinHtmlChallenge(body)){
+          body=await decodeMediaText(decodeBytes,'douyin',undefined,progress);
+          if(progress.recovered)decode=decodeDiagnostic(decodeBytes,progress,'join',undefined);
+          // Release the downloaded buffer before staging the decoded text for JSON projection.
+          decodeBytes=undefined;
+          if(api==='detail'&&status===200&&body.trim()&&body!=='blocked'&&!isDouyinHtmlChallenge(body)){
             try{
               const {projectJsonAsync}=await import('@podjs/framework/json');
               const fields=await projectJsonAsync(body,douyinDetailSelection);
@@ -283,8 +292,8 @@ export class DouyinClient {
           if(!this.currentAuth(generation)||decision?.kind==='cancelled')return fail('CANCELLED',formatDouyinError('CANCELLED'));
           observed.retry_after_ms=decision?.kind==='limited'?decision.retryAfterMs:30000;return {...fail('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:observed.retry_after_ms};
         }
-        if(r.status===403){observed.error_code='forbidden';appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
-        if(r.status!==200){observed.error_code='http';appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
+        if(status===403){observed.error_code='forbidden';appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
+        if(status!==200){observed.error_code='http';appLogger.e('DouyinClient',`request failed path=${path} category=http status=${status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${status}（仅支持200）`);}
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(typeof body==='string'&&(!body.trim()||body==='blocked')){observed.error_code=body==='blocked'?'blocked':'empty';
           appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=${body==='blocked'?'blocked':'empty'}`);
@@ -298,6 +307,7 @@ export class DouyinClient {
         return this.currentAuth(generation)?{ok:true,data:body}:fail('CANCELLED',formatDouyinError('CANCELLED'));
       }catch(error){
         if(!this.currentAuth(generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        if(decodingResponse&&decodeBytes)decode=decodeDiagnostic(decodeBytes,progress,progress.step,error);
         const failure=mediaRequestFailure(error);observed.error_code=decodingResponse?'decode':failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
         if(failure.response){observed.http_status=failure.response.httpStatus;observed.response_bytes=failure.response.responseBytes;}
         if(failure.status===429)return rateLimited();
@@ -305,7 +315,7 @@ export class DouyinClient {
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
         return {...fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`),...(failure.category!=='decode'&&isTransportFailure(error)?{networkFailure:true}:{})};
       }
-      } finally {douyinRequestDiagnostic(observed);}
+      } finally {douyinRequestDiagnostic(observed,decode);}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
     if(background&&this.strictMediaTraffic){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
