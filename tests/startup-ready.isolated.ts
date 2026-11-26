@@ -107,7 +107,7 @@ const services=new Proxy({
  readAccountStatus:async()=>null,
 },{get:(target,key)=>Reflect.get(target,key)??(key==='inputRecovery'?undefined:()=>Promise.resolve(null))}) as unknown as AppServices;
 
-async function tick(touches:number[]=[]){
+async function tick(touches:number[]=[],hits?:number[]){
  clockMs+=10;
  for(const [id,at] of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}
  for(const id of paint.splice(0)){
@@ -115,7 +115,7 @@ async function tick(touches:number[]=[]){
   events.push({t:'service.result',id,ok:true,value:{committed:true}});
  }
  for(let i=pending.length-1;i>=0;i--)if(pending[i]!.at<=clockMs)pending.splice(i,1)[0]!.run();
- (globalThis as unknown as {frame:(delta:number,analog:undefined,touches:number[])=>void}).frame(0,undefined,touches);
+ (globalThis as unknown as {frame:(delta:number,analog:undefined,touches:number[],hits?:number[])=>void}).frame(0,undefined,touches,hits);
  for(let step=0;step<40;step++)await Promise.resolve();
 }
 if(legalCase)test(`startup Bluetooth advisory: ${scenario}`,async()=>{
@@ -182,13 +182,22 @@ if(legalCase)test(`startup Bluetooth advisory: ${scenario}`,async()=>{
   expect(labels('继续')).toHaveLength(control?1:2);
   expect(restoreLegalNavigation(activityStateHub.read()).pages).toEqual([legalPage]);
   expect(consentWrites).toBe(0);
+  const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
   if(legalResponse){
-   if(!control)await activate(labels('继续').at(-1));
+   if(!control){
+    const [underlying,button]=labels('继续');
+    for(const id of [underlying!,button!]){
+     await tick([__packTouch(1,116,195)],[id]);
+     await tick();
+     if(id===underlying)expect(labels('继续')).toHaveLength(2);
+    }
+    await pump();
+   }
    expect(labels('协议正文')).toHaveLength(1);
    expect(labels('继续')).toHaveLength(1);
+   expect(consentWrites).toBe(0);
    return;
   }
-  const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
   for(const contacts of [[__packTouch(1,166,80)],[__packTouch(1,166,80),__packTouch(2,90,130)]]){
    await tick([__packTouch(1,46,80)]);
    await tick(contacts);

@@ -12,11 +12,13 @@ test("warning presentation preserves the exact effective stack", () => createRoo
     expect(stack.warningShown()).toBe(true);
     expect(stack.effectiveStack()).toBe(initial);
     stack.commitStack(entries => entries, () => { throw Error("no-op dismissed warning"); });
-    stack.hideWarning();
-    expect(stack.effectiveStack()).toBe(initial);
     expect(observed).toEqual([initial]);
     const replacement = [...initial];
-    stack.commitStack(replacement, () => { throw Error("no warning to dismiss"); });
+    stack.commitStack(replacement, () => { throw Error("same entries dismissed warning"); });
+    expect(stack.warningShown()).toBe(true);
+    expect(stack.effectiveStack()).toBe(replacement);
+    stack.hideWarning();
+    expect(stack.effectiveStack()).toBe(replacement);
     expect(observed).toHaveLength(2);
     expect(observed[1]).toBe(replacement);
   } finally { dispose(); }
@@ -32,7 +34,7 @@ test("push, replace and pop dismiss the warning at commit", () => createRoot(dis
       expect(stack.warningShown()).toBe(true);
       stack.hideWarning();
     };
-    for (const entries of [[home, articles], [home, notes], [home]]) {
+    for (const entries of [[home, articles], [home, notes], [notes, home], [home]]) {
       stack.showWarning();
       stack.commitStack(() => entries, dismiss);
       expect(stack.warningShown()).toBe(false);

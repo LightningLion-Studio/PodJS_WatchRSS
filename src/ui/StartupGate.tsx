@@ -186,7 +186,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   const scroller=top?top.scroller:(destination()==='intro'?introHandle?.scroller():privacyScroller);
   scroller?.scrollBy(delta*48/(12*RelativeAxisUnits.PerDegree),{durMs:120});
  }));
- createGesture({region:{rect:()=>effectiveCurrentLegal()&&active()&&!error()&&!legalNetwork().blocking&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
+ createGesture({region:{rect:()=>effectiveCurrentLegal()&&active()&&motion.phase!=='settling'?{x:0,y:0,w:width,h:height}:null},axis:'x',panSlop:8,
   onPanStart:c=>{effectiveCurrentLegal()?.scroller?.stop();motion.begin(c.dx);setOffset(motion.offset);},
   onPanMove:c=>{motion.move(c.dx);setOffset(motion.offset);},onPanEnd:c=>motion.release(c.vx,Date.now()),onCancel:()=>motion.release(0,Date.now(),true)});
  onFrame(()=>{
@@ -221,7 +221,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
   <Show when={warningShown()}>
    <View class="absolute inset-0 overflow-hidden" style={{translateX:warningNavigation.offset()}}>
-    <BluetoothWarningPage width={width} height={height} onBack={warningNavigation.onContinue}/>
+    <BluetoothWarningPage width={width} height={height} onBack={warningNavigation.dismiss}/>
    </View>
   </Show>
  </View>;

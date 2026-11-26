@@ -286,6 +286,7 @@ const WatchRSS=(await import('../src/ui/screen.tsx')).default;
 const stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services});},{ops});
 const frame=(globalThis as any).frame;const watch=await import('@podjs/framework/watch');
 const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
+const {gestureResourceCounts}=await import('@pocketjs/framework/gesture');
 async function tick(dt=17,touches:number[]=[],hits?:number[],buttons=0){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}frame(buttons,undefined,touches,hits);for(let n=0;n<25;n++)await Promise.resolve();}
 
 const connected=()=>{const nodes:any[]=[];const walk=(n:any)=>{nodes.push(n);n.children.forEach(walk);};walk(rootMirror);return nodes;};
@@ -325,7 +326,10 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   expect(warnings()).toHaveLength(1);
   await pump();
   expect(warnings()).toHaveLength(1);
-  press('继续');
+  const button=warning()!;
+  await tick(17,[__packTouch(1,116,195)],[button.id]);
+  await tick();
+  expect(gestureResourceCounts().contacts).toBe(0);
   await network(true);
   expect(warning()).toBeUndefined();
   expect(state().at(-1)).toBe(page);
@@ -655,6 +659,14 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     expect(warning()).toBeUndefined();
    }
    await network(true);
+   if(safeRoute==='home'){
+    const underlying=connected().find(node=>texts.get(node.id)==='我');
+    expect(underlying).toBeDefined();
+    await tick(17,[__packTouch(1,116,195)],[underlying!.id]);
+    await tick();
+    expect(warnings()).toHaveLength(1);
+    expect(state()).toEqual(['home']);
+   }
    await assertOnce(safeRoute);
    return;
   }

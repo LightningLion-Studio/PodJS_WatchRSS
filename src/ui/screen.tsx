@@ -210,7 +210,7 @@ export default function WatchRSS(props: {
   onCleanup(()=>ownerChoiceNetwork.dispose());
   const warningNetwork = useBluetoothWarningConnection();
   const visibleNetwork = observeNetworkRecovery(() => cloudOwnerChoice() ? ownerChoiceNetwork : networkFor(effectiveCurrent()));
-  const networkPageBlocksSwipe = () =>
+  const networkPageBlocking = () =>
     (cloudOwnerChoice() || recoveryEnabled(effectiveCurrent())) && visibleNetwork().blocking;
   const [nativeInputCount, setNativeInputCount] = createSignal(0);
   const [systemShareCount, setSystemShareCount] = createSignal(0);
@@ -346,7 +346,6 @@ export default function WatchRSS(props: {
         effectiveStack().length > 1 &&
         !disclosurePending() &&
         !networkFor(effectiveCurrent()).blocking &&
-        !networkPageBlocksSwipe() &&
         motion.phase !== "settling" &&
         (effectiveCurrent().player?.canSwipeBack?.() ?? true) &&
         effectiveCurrent().page !== "reader-image" &&
@@ -379,7 +378,7 @@ export default function WatchRSS(props: {
     },
   },playerRotation,playerViewport));
   const backObserver = rightSwipeBack({rect:()=>
-    effectiveStack().length>1 && usesImmersiveBackObserver(effectiveCurrent()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
+    effectiveStack().length>1 && usesImmersiveBackObserver(effectiveCurrent()) && !disclosurePending() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
     start:beginBack,
@@ -1379,7 +1378,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) startupMark("channels.snapshot");
     void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current:effectiveCurrent,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: warningShown() || effectiveStack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: warningShown() || effectiveStack().length > 1 });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);
@@ -1919,7 +1918,7 @@ export default function WatchRSS(props: {
     notes: entry => entry.browseReady?.() !== false,
     settings: () => true,
   };
-  const warningMustYield = () => cloudOwnerChoice() || networkPageBlocksSwipe() ||
+  const warningMustYield = () => cloudOwnerChoice() || networkPageBlocking() ||
     nativeInputCount() > 0 || systemShareCount() > 0 || playingSource() ||
     !warningBrowseReady[effectivePage()]?.(effectiveCurrent());
   createEffect(() => {
@@ -1971,7 +1970,7 @@ export default function WatchRSS(props: {
       </View>
       <Show when={warningShown()}>
         <View class="absolute inset-0 overflow-hidden" style={{ translateX: warningNavigation.offset() }}>
-          <BluetoothWarningPage width={width} height={height} onBack={warningNavigation.onContinue}/>
+          <BluetoothWarningPage width={width} height={height} onBack={warningNavigation.dismiss}/>
         </View>
       </Show>
     </View>

@@ -15,9 +15,11 @@ export function createEffectiveRouteStack<Entry>(initial: Entry[]) {
     const previous = effectiveStack();
     const entries = typeof next === "function" ? next(previous) : next;
     if (entries === previous) return previous;
+    const changed = entries.length !== previous.length ||
+      entries.some((entry, index) => !Object.is(entry, previous[index]));
     batch(() => {
-      if (warningShown()) dismissWarning();
-      setActualStack({ routes: entries, warning: false });
+      if (changed && warningShown()) dismissWarning();
+      setActualStack(state => ({ routes: entries, warning: changed ? false : state.warning }));
     });
     return entries;
   }

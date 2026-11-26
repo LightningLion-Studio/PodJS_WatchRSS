@@ -1,6 +1,8 @@
-import {Image,Text,View} from '@pocketjs/framework/components';
+import {Image,Text,View,type NodeMirror} from '@pocketjs/framework/components';
+import {createGesture} from '@pocketjs/framework/gesture';
 import {getOps} from '@pocketjs/framework/host';
-import {createMemo,Show} from 'solid-js';
+import {pressNode,setActiveNode} from '@pocketjs/framework/input';
+import {createMemo,onCleanup,Show} from 'solid-js';
 import type {InternetStatus} from '../onboarding/state.ts';
 import {watchUiLines} from './text-layout.ts';
 import {WatchProgressIndicator} from './WatchProgressIndicator.tsx';
@@ -12,8 +14,23 @@ export const networkMessages:Record<InternetStatus,{guidance:string;status:strin
  available:{guidance:'网络连接可用',status:'已检测到互联网，可以继续'}
 };
 
-export function OnboardingPrimaryButton(props:{text:string;enabled:boolean;onPress:()=>void}){
- return <View focusable={props.enabled} accessibilityLabel={props.text} accessibilityRole="button" accessibilityState={{disabled:!props.enabled}} onPress={()=>{if(props.enabled)props.onPress();}} class="rounded-[24] px-[22] py-[12] items-center justify-center active:scale-96" style={{bgColor:props.enabled?'#ff6026':'#23272a'}}><Text class="text-lg leading-[21]" style={{textColor:props.enabled?'#000000':'#b6b6b6'}}>{props.text}</Text></View>;
+export function OnboardingPrimaryButton(props:{text:string;enabled:boolean;onPress:()=>void;allowTouchWhenBlocked?:boolean}){
+ let button:NodeMirror|undefined;
+ if(props.allowTouchWhenBlocked){
+  // The modal mutes default tap activation. Only hits inside this button
+  // subtree may use the exempt tap recognizer.
+  createGesture({
+   region:{node:()=>props.enabled?button:undefined},
+   allowWhenBlocked:true,
+   onDown:()=>setActiveNode(button??null),
+   onUp:()=>setActiveNode(null),
+   onCancel:()=>setActiveNode(null),
+   // Press can cancel touches. Let the gesture pump release this tap first.
+   onTap:()=>queueMicrotask(()=>{if(button&&props.enabled)pressNode(button);}),
+  });
+  onCleanup(()=>{button=undefined;});
+ }
+ return <View ref={node=>{button=node;}} focusable={props.enabled} accessibilityLabel={props.text} accessibilityRole="button" accessibilityState={{disabled:!props.enabled}} onPress={()=>{if(props.enabled)props.onPress();}} class="rounded-[24] px-[22] py-[12] items-center justify-center active:scale-96" style={{bgColor:props.enabled?'#ff6026':'#23272a'}}><Text class="text-lg leading-[21]" style={{textColor:props.enabled?'#000000':'#b6b6b6'}}>{props.text}</Text></View>;
 }
 
 export function NetworkIndicator(props:{status:InternetStatus;active?:()=>boolean}){

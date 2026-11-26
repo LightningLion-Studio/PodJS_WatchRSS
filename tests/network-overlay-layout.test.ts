@@ -15,5 +15,5 @@ test('overlay visible rectangles stay within a round display at every supported 
 test('copy and controls come from onboarding; overlay intercepts background taps',()=>{
  const overlay=readFileSync(new URL('../src/ui/NetworkUnavailableOverlay.tsx',import.meta.url),'utf8');
  expect(overlay).toContain('networkMessages,NetworkAvailabilityStatusBar,OnboardingPrimaryButton');
- expect(overlay).toContain('bg-[#000000f0]');expect(overlay).toContain('onPress={()=>{}}');expect(overlay).toContain('props.actionText??"重试"');
+ expect(overlay).toContain('bg-[#000000f0]');expect(overlay).toContain('onPress={()=>{}}');expect(overlay).toContain('text="重试"');
 });

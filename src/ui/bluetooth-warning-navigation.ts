@@ -47,7 +47,6 @@ export function createBluetoothWarningNavigation(options: {
   return {
     dismiss,
     offset,
-    onContinue: () => { if (motion.phase === "idle") dismiss(); },
     onBack: () => {
       if (!shown()) return false;
       if (motion.phase === "idle") {
