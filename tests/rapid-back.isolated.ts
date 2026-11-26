@@ -712,7 +712,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    return;
   }
   if(noteDownload){
-   press('下载手机端app以在手机上编辑和同步内容');
+   press('下载手机端可在手机编辑和同步');
    await network(true);
    expect(displayed('下载手机端App')).toBe(true);
    expect(warning()).toBeUndefined();
