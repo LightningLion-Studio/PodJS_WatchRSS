@@ -74,7 +74,7 @@ public final class NoteUxInstrumentationTest {
         openReader();
         tap(233, 410);
         await(() -> field(BODY) != null, "Edit button did not enter");
-        AccessibilityNodeInfo close = node("关闭编辑，已保存");
+        AccessibilityNodeInfo close = node("保存并退出");
         assertNotNull(close);
         // The guest settles for 100–220 ms after releasing the back swipe.
         // Invoke the accessible close action while that commit is pending.

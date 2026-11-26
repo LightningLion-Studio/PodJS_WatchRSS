@@ -1126,7 +1126,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
      if(writeFailure){
       expect(state().at(-1)).toBe('note-detail');
       expect(warning()).toBeUndefined();
-      press('关闭编辑，保存失败，请重试');
+      press('保存并退出');
       await pump();
      }
     }

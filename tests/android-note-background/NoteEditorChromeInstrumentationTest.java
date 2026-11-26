@@ -43,7 +43,7 @@ public final class NoteEditorChromeInstrumentationTest {
    AccessibilityNodeInfo close=null;
    long closeDeadline=SystemClock.uptimeMillis()+6000;
    while(SystemClock.uptimeMillis()<closeDeadline){
-    close=findDescriptionPrefix(i.getUiAutomation().getRootInActiveWindow(),"关闭编辑，");
+    close=findDescriptionPrefix(i.getUiAutomation().getRootInActiveWindow(),"保存并退出");
     if(close!=null)break;
     Thread.sleep(100);
    }

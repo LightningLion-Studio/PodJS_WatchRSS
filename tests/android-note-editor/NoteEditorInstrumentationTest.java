@@ -43,7 +43,7 @@ public final class NoteEditorInstrumentationTest {
    instrumentation.runOnMainSync(()->title.setText("关闭前的新标题"));
    instrumentation.runOnMainSync(()->{InputMethodManager imm=(InputMethodManager)context.getSystemService(Context.INPUT_METHOD_SERVICE);imm.hideSoftInputFromWindow(body.getWindowToken(),0);body.clearFocus();});
    Thread.sleep(300);
-   AccessibilityNodeInfo done=findDescription(instrumentation.getUiAutomation().getRootInActiveWindow(),"关闭编辑，");
+   AccessibilityNodeInfo done=findDescription(instrumentation.getUiAutomation().getRootInActiveWindow(),"保存并退出");
    assertNotNull("finish button missing",done);
    assertTrue("finish button refused click",done.performAction(AccessibilityNodeInfo.ACTION_CLICK));
    assertRow(context,"关闭前的新标题","第一行\n第二行\n第三行",6000);

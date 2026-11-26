@@ -87,7 +87,7 @@ public final class NoteDocumentFormalGestureTest {
     assertEquals("title crown must move one code point",1,title.getSelectionStart());
     android.util.Log.i("NoteDocumentFormal","crownTitle=0->"+title.getSelectionStart());
    });
-   click(instrumentation,"关闭编辑，");
+   click(instrumentation,"保存并退出");
   }finally{instrumentation.runOnMainSync(activity::finish);}
  }
  private static void click(Instrumentation instrumentation,String prefix)throws Exception {
