@@ -187,7 +187,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     let completeLayouts:NativeBlockLayouts|undefined;
     const steps=(function*(){
       const prepared=previewCache.peek<{blocks:NotePreviewBlock[]}>('parse',[current.markdown])!;
-      yield* noteBodyLayoutSteps(current.markdown,prepared.blocks,(block,index)=>previewCache.get('text:'+index,[block],()=>noteTextRows(block.markup,block.html)));
+      yield* noteBodyLayoutSteps(current.markdown,prepared.blocks,(block,index)=>previewCache.get('text:'+index,[block],()=>noteTextRows(block.markup,block.html,block.htmlContext)));
     })();
     const bodyPrepare=prepareTextLayout(steps,{key:block=>block.text,entry:block=>block,publish:({entries:bodyBlocks})=>{
       if(!bodyBlocks.length)return;
