@@ -131,8 +131,8 @@ export class WatchHeadPoll {
 
  private retry(minimum=0){
   this.failures=Math.min(5,this.failures+1);
-  const delay=minimum>0?minimum:this.jitter(DEFAULT_INTERVAL*2**(this.failures-1));
-  this.headDue=this.ports.now()+Math.min(MAX_BACKOFF,delay);
+  const delay=minimum>0?minimum:Math.min(MAX_BACKOFF,this.jitter(DEFAULT_INTERVAL*2**(this.failures-1)));
+  this.headDue=this.ports.now()+delay;
  }
 
  private async tick(){
@@ -153,7 +153,7 @@ export class WatchHeadPoll {
     const value=result&&'enabled' in result?result:undefined;
     this.configDue=this.ports.now()+(value?.ttlMs??DEFAULT_CONFIG_TTL);
     if(value)this.enabled=value.enabled;
-    if(!this.enabled)this.headDue=undefined;
+    if(!this.enabled&&!this.failures)this.headDue=undefined;
     return;
    }
    if(!result||!('status' in result)){
@@ -177,7 +177,7 @@ export class WatchHeadPoll {
     const minimum=retryAfter&&/^\d+$/.test(retryAfter)?Number(retryAfter)*1000:retryAfter?Date.parse(retryAfter)-this.ports.now():0;
     let pollAfter=0;
     try{pollAfter=positiveMillis(json(result).pollAfterMs)??0;}catch{}
-    this.retry(Math.max(Number.isNaN(minimum)?0:minimum,pollAfter));
+    this.retry(Math.max(Number.isSafeInteger(minimum)?minimum:0,pollAfter));
     return;
    }
    if(result.status!==304){

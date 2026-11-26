@@ -1,5 +1,7 @@
 import {createSignal} from 'solid-js';
 import {withAccountLease} from '../account/lease';
+import {WatchTokenManager} from '../account/token';
+import {watchAppVersion} from '../core/app-version';
 import {playbackWork} from '../core/playback-work';
 import {cloudStatePort} from './state-sql';
 import {appLogger} from '../logs/app-logger';
@@ -101,7 +103,7 @@ function start(){
    const ready=syncV2Ready,account=await summaryAccountStore.read();
    if(!ready||!account||account.userId!==ready.userId)throw Error('cloud_v2_start_unavailable');
    const {accountBoundCasHost}=await import('../sync-v2/product'),accountHost=accountBoundCasHost(v2Host,account,()=>summaryAccountStore.read());
-   const transport=createCloudTransport(accountHost,v2Guard),tokens=new (await import('../account/token')).WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
+   const transport=createCloudTransport(accountHost,v2Guard),tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
    const session=async()=>{const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);return current;};
    const {openApplicationSyncV2}=await import('../sync-v2/application-open');
    const opened=await v2Exclusive(async()=>openApplicationSyncV2({lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedAsset:(key,archive)=>prepareArchivedNoteAsset(new NoteAssetFileIndex(projectionSql(accountHost)),fileChunks,key,archive,()=>v2Guard.require()),prepareArchivedBook:async(book,archive)=>{
@@ -151,7 +153,6 @@ function start(){
     const account=await summaryAccountStore.read();
     check();
     if(!account||cloudAccountIdentity(account)!==scope)return;
-    if(kind==='head'&&account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())return;
     const base=account.backendBaseUrl.replace(/\/+$/,'');
     const origin=syncV2Origin(base,{accountBaseUrl:base,allowLoopback:false});
     const transport=createCloudTransport(async<T>(method:string,args:Record<string,unknown>)=>{
@@ -164,7 +165,26 @@ function start(){
     // The writer lease keeps the head GET out of a WorkManager writer's round.
     // A foreground writer cancels this request and drains its cleanup first.
     if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return;
-    try{return await requestAccountHead(transport,origin,account.watchDeviceToken,ready!.deviceId);}
+    const head=(token:string)=>requestAccountHead(transport,origin,token,ready!.deviceId);
+    try{
+     if(!(account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())){
+      const result=await head(account.watchDeviceToken);
+      if(result.status!==401)return result;
+     }
+     // Once dispatched, rotation must settle under the account lease even if
+     // the foreground ends. The next head GET still obeys the poll lifetime.
+     const authTransport=createCloudTransport(
+      <T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,
+      cloudGate,{callTimeoutMs:10_000,maxResponseBytes:16_384});
+     const tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:origin,appVersion:watchAppVersion,
+      transport:{request(request){check();return authTransport.request(request);}}});
+     check();
+     const refreshed=await tokens.refreshAccount(account);
+     check();
+     const result=await head(refreshed.watchDeviceToken);
+     if(result.status===401){check();await summaryAccountStore.expire(refreshed);}
+     return result;
+    }
     finally{await host('cloud.release',{});}
    },
   });

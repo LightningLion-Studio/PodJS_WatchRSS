@@ -25,7 +25,7 @@ export class WatchTokenManager {
     if(rejectedAccessToken&&rejectedAccessToken!==state.watchDeviceToken)forceRefresh=false;
     if(!forceRefresh&&state.tokenExpiresAtMillis>this.now()+60000)return state;
     if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now()))throw new WatchLoginExpiredError();
-    return this.refresh(state);
+    return this.refreshAccount(state);
   }
   async refreshProfile():Promise<WatchAccountSafetyProfile>{
     const state=await this.freshAccount();
@@ -44,12 +44,13 @@ export class WatchTokenManager {
     const current=await this.store.read();if(!current||current.userId!==state.userId||current.backendBaseUrl!==state.backendBaseUrl)throw Error('账号已变更，请重试');return this.refreshProfile();
   }
   async logout():Promise<void>{await this.store.clear();}
-  private async refresh(state:WatchAccountState):Promise<WatchAccountState>{
-    try{return await this.store.refresh(state,current=>refreshWatchAccount(current,this.options,this.now),error=>error instanceof WatchTokenRefreshError&&error.status===401);}
+  /** Rotate a captured token pair or reuse the newer pair committed under the account lease. */
+  async refreshAccount(state:WatchAccountState):Promise<WatchAccountState>{
+    try{return await this.store.refresh(state,current=>refreshWatchAccount(current,this.options,this.now),error=>error instanceof WatchLoginExpiredError||error instanceof WatchTokenRefreshError&&error.status===401);}
     catch(error){
       const current=await this.store.read();
       // A newer committed pair wins over an old request's rejection.
-      if(current?.userId===state.userId&&current.backendBaseUrl===state.backendBaseUrl&&current.watchRefreshToken!==state.watchRefreshToken)return current;
+      if(current?.userId===state.userId&&current.backendBaseUrl===state.backendBaseUrl&&current.installId===state.installId&&current.watchRefreshToken!==state.watchRefreshToken)return current;
       throw error;
     }
   }

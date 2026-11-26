@@ -29,6 +29,8 @@ let forced:'on'|'off'|null=null;
 let approved=true,readable=true,configEnabled=true,configStatus=200,configTtl=600,headStatus=200,etag='head-1',interval=20_000;
 let headCode:string|undefined;
 let headHeaders:Record<string,string>,headError:Error|undefined,headResponse:ReturnType<typeof deferred<void>>|undefined;
+let headRetryMillis:number|undefined,rejectToken:string|undefined,refreshStatus:number;
+let refreshResponse:ReturnType<typeof deferred<void>>|undefined;
 let v2Result:string|null=null,holdSync:ReturnType<typeof deferred<void>>|undefined,writer=false,worker=false;
 const files=new Map<string,Uint8Array>();
 const secure=new Map<string,string>();
@@ -40,6 +42,7 @@ const setScreen=(interactive:boolean)=>{screen={interactive,resumed:true};for(co
 const requests=()=>calls.filter(call=>call.method==='http.download');
 const notifyLocalMemoSave=()=>notifyLibrarySqlCommit([{sql:'UPDATE memo_notes SET title=?'}],[1],'local-memo');
 const heads=()=>requests().filter(call=>call.args.url.endsWith('/account/head'));
+const tokenRefreshes=()=>requests().filter(call=>call.args.url.endsWith('/watch-token/refresh'));
 const configRequests=()=>requests().filter(call=>call.args.url.includes('/client-config?'));
 const subscribe=<T>(set:Set<(value:T)=>void>,fn:(value:T)=>void)=>{set.add(fn);return ()=>{set.delete(fn);};};
 
@@ -65,24 +68,38 @@ mock.module('@podjs/framework/services',()=>({
    if(method==='secure.set'){secure.set(args.key,args.value);return;}
    if(method==='file.createTemp')return {path:'temp-'+calls.length};
    if(method==='file.delete'){files.delete(args.path);return;}
+   if(method==='file.write'){
+    const bytes=Buffer.from(args.dataBase64,'base64');
+    files.set(args.path,bytes);
+    return {size:bytes.length};
+   }
    if(method==='file.read'){
     const body=files.get(args.path)!;
     return {offset:args.offset,size:body.length,dataBase64:Buffer.from(body.subarray(args.offset,args.offset+args.maxBytes)).toString('base64')};
    }
    if(method==='http.download'){
     const config=args.url.includes('/client-config?');
-    const status=config?configStatus:headStatus;
-    if(!config&&headError)throw headError;
-    if(!config&&headResponse)await Promise.race([headResponse.result,cancelled.result]);
-    const body= status===304?new Uint8Array():utf8Encode(JSON.stringify(config?
+    const refresh=args.url.endsWith('/watch-token/refresh');
+    const status=config?configStatus:refresh?refreshStatus:args.headers.Authorization==='Bearer '+rejectToken?401:headStatus;
+    if(refresh){
+     expect(writer).toBe(true);
+     if(refreshResponse)await Promise.race([refreshResponse.result,cancelled.result]);
+    }else if(!config){
+     if(headError)throw headError;
+     if(headResponse)await Promise.race([headResponse.result,cancelled.result]);
+    }
+    const body= status===304?new Uint8Array():utf8Encode(JSON.stringify(refresh?
+     status===200?{watchAccessToken:'rotated-token',watchRefreshToken:'rotated-refresh',accessTokenExpiresAt:clock.now+900_000,refreshTokenExpiresAt:clock.now+1_800_000}:{}:
+     config?
      {ttlSeconds:configTtl,features:{sync_head_poll_v1:{percent:configEnabled?100:0,salt:'fixture',minAppVersionCode:0,maxAppVersionCode:null,forced}}}:
-     status===200?{etag,head:'2',epoch:'epoch',signingKeysRev:'1',pollAfterMs:interval}:headCode?{error:{code:headCode}}:{}));
+     status===200?{etag,head:'2',epoch:'epoch',signingKeysRev:'1',pollAfterMs:interval}:
+     status===429?{pollAfterMs:headRetryMillis}:headCode?{error:{code:headCode}}:{}));
     files.set(args.path,body);
     return {path:args.path,size:body.length,status,headers:config?{}:{ETag:'"'+etag+'"',...headHeaders}};
    }
    throw Error('Unexpected host method '+method);
   })();
-  return {result,cancel(){if(method==='http.download'&&headResponse)cancelled.reject(Error('cancelled'));}};
+  return {result,cancel(){if(method==='http.download'&&(headResponse||refreshResponse))cancelled.reject(Error('cancelled'));}};
  },
 }));
 mock.module('../src/cloud/host',()=>({initializeCloudHost:async()=>true}));
@@ -134,6 +151,7 @@ beforeEach(async()=>{
  writer=worker=false;values.clear();secure.clear();files.clear();life='active';screen={interactive:true,resumed:true};
  forced=null;configEnabled=approved=readable=true;headStatus=configStatus=200;interval=20_000;configTtl=600;etag='head-1';
  headHeaders={};headCode=undefined;headError=headResponse=holdSync=undefined;v2Result=null;
+ headRetryMillis=rejectToken=refreshResponse=undefined;refreshStatus=200;
  await store.save(account);
  offStatus=subscribeCloudAccountStatus(()=>messages.push(readCloudAccountStatus()?.message));
 });
@@ -252,6 +270,117 @@ test('429 honors Retry-After then exponentially backs off to five minutes on net
  }
  expect(syncTimes).toEqual([1000]);
  expect(messages).toHaveLength(initialMessages);
+});
+
+for(const source of ['header','body'] as const){
+ test('429 honors a 420 second '+source+' delay above the local cap',async()=>{
+  headStatus=429;
+  headHeaders={'Retry-After':source==='header'?'420':'60'};
+  headRetryMillis=source==='body'?420_000:60_000;
+  await start();
+  await clock.advance(20_000);
+  expect(heads()).toHaveLength(1);
+  await clock.advance(419_999);
+  expect(heads()).toHaveLength(1);
+  await clock.advance(1);
+  expect(heads()).toHaveLength(2);
+ });
+}
+
+async function startWithRefresh(expiry=900_000,refreshExpiry=1_800_000){
+ await store.save({...account,watchRefreshToken:'fixture-refresh',
+  tokenExpiresAtMillis:clock.now+expiry,refreshTokenExpiresAtMillis:clock.now+refreshExpiry});
+ await start();
+}
+
+test('a config disable and re-enable preserve the outstanding server deadline',async()=>{
+ configTtl=30;
+ headStatus=429;
+ headHeaders={'Retry-After':'420'};
+ await start();
+ await clock.advance(20_000);
+ expect(heads()).toHaveLength(1);
+ configEnabled=false;
+ await clock.advance(10_000);
+ configEnabled=true;
+ await clock.advance(409_999);
+ expect(heads()).toHaveLength(1);
+ await clock.advance(1);
+ expect(heads()).toHaveLength(2);
+});
+
+for(const cause of ['expiry','401'] as const){
+ test('idle foreground polling refreshes access after '+cause+' and applies the head in the same tick',async()=>{
+  if(cause==='401')rejectToken=account.watchDeviceToken;
+  await startWithRefresh(cause==='expiry'?10_000:900_000);
+  await clock.advance(20_000);
+  expect(tokenRefreshes()).toHaveLength(1);
+  expect(heads().map(call=>call.args.headers.Authorization)).toEqual([
+   ...(cause==='401'?['Bearer fixture-token']:[]),'Bearer rotated-token',
+  ]);
+  expect(syncTimes).toEqual([1000,21_000]);
+  expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+ });
+}
+
+test('a rejected refresh expires the login and stops head polling',async()=>{
+ refreshStatus=401;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ expect(tokenRefreshes()).toHaveLength(1);
+ expect(await store.read()).toBeNull();
+ await clock.advance(CLOUD_INTERVAL*2);
+ expect(tokenRefreshes()).toHaveLength(1);
+ expect(heads()).toHaveLength(0);
+});
+
+test('a second 401 expires the refreshed login without another rotation',async()=>{
+ headStatus=401;
+ await startWithRefresh();
+ await clock.advance(20_000);
+ expect(heads()).toHaveLength(2);
+ expect(tokenRefreshes()).toHaveLength(1);
+ expect(await store.read()).toBeNull();
+ await clock.advance(CLOUD_INTERVAL);
+ expect(heads()).toHaveLength(2);
+ expect(tokenRefreshes()).toHaveLength(1);
+});
+
+test('an expired refresh token expires the login without hitting the network',async()=>{
+ await startWithRefresh(10_000,10_000);
+ await clock.advance(20_000);
+ expect(await store.read()).toBeNull();
+ expect(tokenRefreshes()).toHaveLength(0);
+ expect(heads()).toHaveLength(0);
+});
+
+test('a transient refresh failure backs off and keeps the login',async()=>{
+ refreshStatus=503;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ expect(tokenRefreshes()).toHaveLength(1);
+ expect(await store.read()).not.toBeNull();
+ await clock.advance(19_999);
+ expect(tokenRefreshes()).toHaveLength(1);
+ refreshStatus=200;
+ await clock.advance(1);
+ expect(tokenRefreshes()).toHaveLength(2);
+ expect(syncTimes).toEqual([1000,41_000]);
+});
+
+test('foreground suspension lets a dispatched refresh persist before releasing the lease',async()=>{
+ refreshResponse=deferred<void>();
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ expect(tokenRefreshes()).toHaveLength(1);
+ expect(writer).toBe(true);
+ setLife('background');
+ refreshResponse.resolve();
+ refreshResponse=undefined;
+ await flush();
+ expect(writer).toBe(false);
+ expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+ expect(heads()).toHaveLength(0);
 });
 
 for(const gate of ['screen','background','transfer','playback'] as const){

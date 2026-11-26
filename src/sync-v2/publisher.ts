@@ -222,6 +222,13 @@ export class WatchIndexPublisher {
    }
   }
   const {plan}=await this.pending();
+  if(plan.explicit){
+   // A previously delivered choice can commit after the first unknown reply.
+   // Recover that result before the head check can classify the choice as stale.
+   const latest=await this.resumeResult(plan.requestId);
+   if(latest.status==='succeeded')return this.accept(plan,latest.response);
+   if(latest.status!=='unknown'||latest.response!==null)throw Error('invalid_schema');
+  }
   if(plan.phase==='conflicted')throw new SyncV2Error('ref_conflict',true);
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
   const window=await this.http.negotiate([],[]);if(plan.explicit&&!publicationCurrent({...await this.store.readState(),account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},plan))throw Error('choice_stale');let after='';for(;;){const page=await this.store.uploadBatch(plan.requestId,after);if(!page.length)break;const upload=page.filter(o=>!o.oid.startsWith('state-refs:'));
