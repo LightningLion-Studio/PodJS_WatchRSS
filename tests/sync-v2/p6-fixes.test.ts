@@ -112,32 +112,43 @@ test('P6 W05 release browser artifact rejects runtime loopback booleans and the 
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
+function trackReceiverAcks(seed:Awaited<ReturnType<typeof fixture>>,receiver:Awaited<ReturnType<typeof fixture>>){
+ let received=0;
+ receiver.options.transport={async request(request){
+  const response=await seed.server.request(request);
+  if(new URL(request.url).pathname.endsWith('/acks/applied')&&response.status===200)received++;
+  return response;
+ }};
+ return {receiver:()=>received,sender:()=>seed.server.applied.length-received};
+}
+
 for(const mode of ['DELETE','WAL'])test('P6 W01 '+mode+' native replacement rolls back both notes and activeGeneration together',async()=>{
  const root=mkdtempSync(join(tmpdir(),'p6-atomic-')),seed=await fixture(),receiver=await fixture({path:join(root,'receiver.sqlite'),mode});let a:any,b:any;
  try{
   await seed.db.execute("INSERT INTO memo_notes SELECT 'm',folder_id,'old m',markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at FROM memo_notes WHERE note_id='n'");
-  a=await openApplicationSyncV2(seed.options);await receiver.db.execute('DELETE FROM memo_notes');receiver.options.transport=seed.server;b=await openApplicationSyncV2(receiver.options);
-  const projection=b.ui.o.projection,old=await receiver.db.query('SELECT * FROM memo_notes ORDER BY note_id'),active=(await projection.readState()).activeGeneration,acks=seed.server.applied.length;
+  a=await openApplicationSyncV2(seed.options);await receiver.db.execute('DELETE FROM memo_notes');const acks=trackReceiverAcks(seed,receiver);b=await openApplicationSyncV2(receiver.options);
+  const projection=b.ui.o.projection,old=await receiver.db.query('SELECT * FROM memo_notes ORDER BY note_id'),active=(await projection.readState()).activeGeneration,receiverAcks=acks.receiver(),senderAcks=acks.sender();
   await seed.db.execute("UPDATE memo_notes SET title='new '||note_id,updated_at=4");await a.sync();
+  expect(acks.sender()).toBe(senderAcks+1);
   // Abort the second native update, after one update has executed in SQLite.
   await receiver.db.execute("CREATE TEMP TABLE p6_apply_count(n INTEGER)");await receiver.db.execute('INSERT INTO p6_apply_count VALUES(0)');
   await receiver.db.execute("CREATE TEMP TRIGGER fail_second BEFORE UPDATE ON memo_notes BEGIN UPDATE p6_apply_count SET n=n+1; SELECT CASE WHEN (SELECT n FROM p6_apply_count)=2 THEN RAISE(ABORT,'second_native_write') END;END");
   await expect(b.ui.syncNow()).rejects.toThrow('second_native_write');
   expect(await receiver.db.query('SELECT * FROM memo_notes ORDER BY note_id')).toEqual(old);
-  expect((await projection.readState()).activeGeneration).toBe(active);expect(seed.server.applied.length).toBe(acks);
+  expect((await projection.readState()).activeGeneration).toBe(active);expect(acks.receiver()).toBe(receiverAcks);
   await receiver.db.execute('DROP TRIGGER fail_second');await b.ui.syncNow();
   expect((await receiver.db.query('SELECT title FROM memo_notes ORDER BY note_id')).map(r=>r.title)).toEqual(['new m','new n']);
-  const current=await projection.readState();expect(current.activeGeneration).toBe(current.account.oid);expect(current.activeGeneration).not.toBe(active);expect(seed.server.applied.length).toBe(acks+1);
+  const current=await projection.readState();expect(current.activeGeneration).toBe(current.account.oid);expect(current.activeGeneration).not.toBe(active);expect(acks.receiver()).toBe(receiverAcks+1);
  }finally{await a?.close();await b?.close();seed.db.close();receiver.db.close();rmSync(root,{recursive:true,force:true});}
 });
 
 test('P6 W01 the persisted choice_apply gate still fences product business application',async()=>{
  const seed=await fixture(),receiver=await fixture();let a:any,b:any;
  try{
-  a=await openApplicationSyncV2(seed.options);await receiver.db.execute('DELETE FROM memo_notes');receiver.options.transport=seed.server;b=await openApplicationSyncV2(receiver.options);
-  const projection=b.ui.o.projection,active=(await projection.readState()).activeGeneration,acks=seed.server.applied.length;
+  a=await openApplicationSyncV2(seed.options);await receiver.db.execute('DELETE FROM memo_notes');const acks=trackReceiverAcks(seed,receiver);b=await openApplicationSyncV2(receiver.options);
+  const projection=b.ui.o.projection,active=(await projection.readState()).activeGeneration,receiverAcks=acks.receiver(),senderAcks=acks.sender();
   await b.ui.o.control.setWriteGates({history_restore:false,choice_apply:false});
-  await seed.db.execute("UPDATE memo_notes SET title='remote edit',updated_at=5");await a.sync();await b.ui.syncNow();
-  expect((await receiver.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('title n');expect((await projection.readState()).activeGeneration).toBe(active);expect(seed.server.applied.length).toBe(acks);expect((await b.ui.snapshot()).gates.choiceApply).toBe(false);
+  await seed.db.execute("UPDATE memo_notes SET title='remote edit',updated_at=5");await a.sync();expect(acks.sender()).toBe(senderAcks+1);await b.ui.syncNow();
+  expect((await receiver.db.query('SELECT title FROM memo_notes'))[0]!.title).toBe('title n');expect((await projection.readState()).activeGeneration).toBe(active);expect(acks.receiver()).toBe(receiverAcks);expect((await b.ui.snapshot()).gates.choiceApply).toBe(false);
  }finally{await a?.close();await b?.close();seed.db.close();receiver.db.close();}
 });

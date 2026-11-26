@@ -288,13 +288,13 @@ export class WatchAccountControl {
    let selected=rows.get(row.entityKey)??row;
    if(state.editBase.accountOid===null&&existing&&sameLiveNoteContent(c,existing.candidate)){
     const updatedAt=Math.max(c.state.payload.updatedAt,selected.candidate.state.payload.updatedAt);
-    selected=this.retainNote(row,c.meta.logicalId,row.entityKey,selected,updatedAt);
+    selected=this.retainNote(row,c.meta.logicalId,row.entityKey,selected,updatedAt)
+     ?? this.retainNoteCopy(row,hash,rows,localById,unopenable);
    }else{
     const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
     if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
     if(existing||Object.hasOwn(unopenable,c.meta.logicalId)){
-     const {noteId,entityKey,matching}=this.retainedNoteIdentity(row,hash,rows,localById,unopenable);
-     selected=this.retainNote(row,noteId,entityKey,matching);
+     selected=this.retainNoteCopy(row,hash,rows,localById,unopenable);
     }
    }
    if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);retained=true;}
@@ -329,23 +329,31 @@ export class WatchAccountControl {
   value.noteId=noteId;
   if(updatedAt!==undefined)value.updatedAt=updatedAt;
   if(conflicts)value.noteConflicts=conflicts;
-  const candidate=candidates('note',noteId,entityKey,value,selected.meta.addedAtSource==='original'?selected.addedAtMillis:undefined,this.o.store.segmentOptions());
-  return {entityKey,rowSequence:(matching??row).rowSequence,candidate};
+  try{
+   // Check the encoded record before replacing the selected row.
+   const candidate=candidates('note',noteId,entityKey,value,selected.meta.addedAtSource==='original'?selected.addedAtMillis:undefined,this.o.store.segmentOptions());
+   return {entityKey,rowSequence:(matching??row).rowSequence,candidate};
+  }catch(error){
+   if(matching&&(error as Error).message==='object_too_large')return null;
+   throw error;
+  }
  }
 
  /** Preserve existing cloud copies, including those created by older builds.
   * New IDs depend on memo content, so re-saving without edits keeps the ID. */
- private retainedNoteIdentity(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>){
+ private retainNoteCopy(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>):RecordRow{
   const c=row.candidate,domain='watchrss/retain-unsent-note';
   const contentHash=digest([c.meta.payload.title,c.state.payload.markdown]);
   for(let attempt=0;;attempt++){
    const id=digest(attempt===0?[domain,row.entityKey,editHash]:[domain,row.entityKey,contentHash,attempt]);
    const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
    const entityKey=this.o.store.entityKeyFor('note',noteId),existing=rows.get(entityKey);
-   if(existing&&sameLiveNoteContent(c,existing.candidate))return {noteId,entityKey,matching:existing};
-   if(existing||Object.hasOwn(unopenable,noteId))continue;
-   const localCopy=local.get(entityKey);
-   if(localCopy?sameLiveNoteContent(c,localCopy.candidate):attempt>0)return {noteId,entityKey,matching:localCopy};
+   if(Object.hasOwn(unopenable,noteId))continue;
+   const matching=existing??local.get(entityKey);
+   if(matching?!sameLiveNoteContent(c,matching.candidate):attempt===0)continue;
+   const retained=this.retainNote(row,noteId,entityKey,matching);
+   // An oversized union leaves this row intact. Probe the next stable ID.
+   if(retained)return retained;
   }
  }
 

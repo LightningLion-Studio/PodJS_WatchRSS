@@ -255,6 +255,84 @@ test('cloud choice reuses one retained memo and preserves each offline conflict'
  }
 },30000);
 
+test('oversized conflict union keeps two copies and resumes an accepted cloud choice',async()=>{
+ const phone=await fixture(),first=await fixture(),restored=await fixture(),repeated=await fixture();
+ const opened:NonNullable<Awaited<ReturnType<typeof openApplicationSyncV2>>>[]=[];
+ const firstText='A'.repeat(140000),secondText='B'.repeat(140000);
+ const conflicts=(side:typeof first)=>side.db.query('SELECT note_id,remote_markdown FROM note_merge_conflicts ORDER BY remote_markdown');
+ const liveNotes=(side:typeof first)=>side.db.query('SELECT note_id,title,markdown FROM memo_notes WHERE deleted=0 ORDER BY note_id');
+ let choiceRequests=0;
+ const baseTransport=cloudChoiceTransport(phone);
+ const transport={async request(request:Parameters<typeof baseTransport.request>[0]){
+  if(new URL(request.url).pathname.endsWith('/choices/cloud'))choiceRequests++;
+  return baseTransport.request(request);
+ }};
+ try{
+  const remote=(await openApplicationSyncV2(phone.options))!;
+  opened.push(remote);
+  const open=async(side:typeof first)=>{
+   const client=(await openApplicationSyncV2({...side.options,transport}))!;
+   opened.push(client);
+   return client;
+  };
+  const prepareChoice=async(side:typeof first,text:string)=>{
+   const notes=new MemoRepository(side.db,side.options.legacyDeviceId,undefined,()=>200);
+   await notes.save({noteId:'n',title:'Offline memo',markdown:'Unpublished text'});
+   await notes.applyRemote({...(await notes.get('n'))!,markdown:text,modifiedBy:'offline-peer',updatedAt:250});
+   expect(await conflicts(side)).toEqual([{note_id:'n',remote_markdown:text}]);
+   const client=await open(side);
+   expect(client.initialResult.completionError).toBe('choice_pending');
+   await client.ui.setKeepDiscarded(false);
+   return client;
+  };
+  const publish=async(client:typeof remote)=>{
+   expect((await client.sync()).completionError).toBeNull();
+   expect((await remote.sync()).completionError).toBeNull();
+  };
+  const a=await prepareChoice(first,firstText);
+  await a.ui.chooseCloud(await a.ui.openChoice());
+  await publish(a);
+  const [cloudConflict]=await conflicts(phone);
+  expect(cloudConflict).toMatchObject({remote_markdown:firstText});
+
+  const b=await prepareChoice(restored,secondText);
+  await restored.db.execute("CREATE TRIGGER fail_retained_copy BEFORE INSERT ON memo_notes WHEN NEW.note_id<>'n' BEGIN SELECT RAISE(ABORT,'retained_copy_abort');END");
+  await expect(b.ui.chooseCloud(await b.ui.openChoice())).rejects.toThrow('retained_copy_abort');
+  const choice=(await (b.ui as any).o.projection.readState()).cloud.pendingCloudChoice;
+  expect(choice.phase).toBe('accepted');
+  expect(await conflicts(restored)).toEqual([{note_id:'n',remote_markdown:secondText}]);
+  expect(choiceRequests).toBe(2);
+  await b.close();
+  await restored.db.execute('DROP TRIGGER fail_retained_copy');
+  const resumed=await open(restored);
+  expect(resumed.initialResult.completionError).toBeNull();
+  expect(choiceRequests).toBe(2);
+  const afterResume=await conflicts(restored);
+  expect(afterResume).toEqual([cloudConflict,{note_id:expect.any(String),remote_markdown:secondText}]);
+  expect(afterResume[1]!.note_id).not.toBe(cloudConflict!.note_id);
+  expect(afterResume[1]!.note_id).not.toBe('n');
+  const notes=await liveNotes(restored);
+  expect(notes).toHaveLength(3);
+  for(const row of notes.filter(row=>row.note_id!=='n'))expect(row).toMatchObject({title:'Offline memo',markdown:'Unpublished text'});
+  await publish(resumed);
+  expect(await conflicts(phone)).toEqual(afterResume);
+  expect(await liveNotes(phone)).toEqual(notes);
+
+  const events=phone.server.events;
+  const c=await prepareChoice(repeated,secondText);
+  await c.ui.chooseCloud(await c.ui.openChoice());
+  await publish(c);
+  expect(await liveNotes(repeated)).toEqual(notes);
+  expect(await conflicts(repeated)).toEqual(afterResume);
+  expect(await liveNotes(phone)).toEqual(notes);
+  expect(await conflicts(phone)).toEqual(afterResume);
+  expect(phone.server.events).toBe(events);
+ }finally{
+  for(const client of opened.reverse())await client.close();
+  for(const side of [repeated,restored,first,phone])side.db.close();
+ }
+},30000);
+
 test.each([
  ['Shared folder',200,201],
  ['Shared folder',201,200],
