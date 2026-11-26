@@ -167,7 +167,7 @@ function start(){
     if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return;
     const head=(token:string)=>requestAccountHead(transport,origin,token,ready!.deviceId);
     try{
-     if(!(account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())){
+     if(!account.needsRelogin&&!(account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())){
       const result=await head(account.watchDeviceToken);
       if(result.status!==401)return result;
      }
@@ -180,9 +180,7 @@ function start(){
       transport:authTransport});
      const refreshed=await tokens.refreshAccount(account,{beforeDispatch:check});
      check();
-     const result=await head(refreshed.watchDeviceToken);
-     if(result.status===401){check();await summaryAccountStore.expire(refreshed);}
-     return result;
+     return await head(refreshed.watchDeviceToken);
     }
     finally{await host('cloud.release',{});}
    },

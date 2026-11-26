@@ -67,7 +67,7 @@ export function AccountStatusScreen(props: {
         line(`状态：${value.active ? '有效' : '未生效'}`),
         line(`诊断：${value.diagnosticsEnabled ? '已开启' : '未开启'}`),
         line(`Access Token：${value.accessTokenExpired ? '待刷新' : '有效'}`),
-        line(`Refresh Token：${value.refreshTokenStatus === 'legacy' ? '旧版，需重新同步' : value.refreshTokenStatus === 'expired' ? '已过期' : '有效'}`),
+        value.refreshTokenStatus === 'needs-relogin' ? line('需要重新登录，请用手机重新同步账号', 12, true, 34) : line(`Refresh Token：${value.refreshTokenStatus === 'legacy' ? '旧版，需重新同步' : value.refreshTokenStatus === 'expired' ? '已过期' : '有效'}`),
       );
       const cloudLines = accountCloudLines(value);
       cloudLines.forEach((text, index) => rows.push(line(text, index === cloudLines.length - 1 ? 12 : 17, index === cloudLines.length - 1, index === cloudLines.length - 1 ? 34 : 21)));

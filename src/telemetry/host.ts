@@ -15,7 +15,7 @@ export const telemetryTransport:HttpTransport={async request(request){
     request.beforeDispatch?.();
     const response=await hostOperation<DownloadResult>('http.download',{url:request.url,path,temporary:true,
       method:request.method,headers:request.headers,bodyBase64:request.body?bytesToBase64(request.body):undefined,
-      acceptHttpErrors:true,timeoutMs:refreshing?15000:8000,readTimeoutMs:refreshing?30000:12000,maxBytes:1024*1024}).result;
+      acceptHttpErrors:true,callTimeoutMs:request.callTimeoutMs,timeoutMs:request.timeoutMs??(refreshing?15000:8000),readTimeoutMs:request.callTimeoutMs??(refreshing?30000:12000),maxBytes:1024*1024}).result;
     const body=new Uint8Array(response.size);let offset=0;
     while(offset<body.length){const chunk=await fileChunks.read(path,offset),bytes=base64ToBytes(chunk.dataBase64);
       if(!bytes.length||offset+bytes.length>body.length||chunk.size!==body.length)throw new Error('Incomplete telemetry response');

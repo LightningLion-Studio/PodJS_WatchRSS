@@ -52,7 +52,7 @@ export interface AccountStatusSnapshot {
   active: boolean;
   diagnosticsEnabled: boolean;
   accessTokenExpired: boolean;
-  refreshTokenStatus: 'legacy' | 'expired' | 'valid';
+  refreshTokenStatus: 'legacy' | 'expired' | 'valid' | 'needs-relogin';
   /** Absent when no real watch cloud-sync service is connected. */
   cloud?: AccountCloudStatus;
 }
@@ -72,7 +72,7 @@ export function accountStatusSnapshot(state: WatchAccountState | null, now = Dat
     active: state.entitlement.active,
     diagnosticsEnabled: state.telemetryConfig.diagnosticsEnabled,
     accessTokenExpired: state.tokenExpiresAtMillis > 0 && state.tokenExpiresAtMillis <= now,
-    refreshTokenStatus: !state.watchRefreshToken ? 'legacy'
+    refreshTokenStatus: state.needsRelogin ? 'needs-relogin' : !state.watchRefreshToken ? 'legacy'
       : state.refreshTokenExpiresAtMillis > 0 && state.refreshTokenExpiresAtMillis <= now ? 'expired' : 'valid',
     ...(cloud ? {cloud: ownCloudStatus(state.userId, cloud,state.backendBaseUrl)} : {}),
   };

@@ -1,4 +1,6 @@
 import {afterEach,beforeEach,expect,mock,test} from 'bun:test';
+import {accountStatusSnapshot} from '../src/account/status';
+import {cloudSyncView} from '../src/ui/cloud-sync-view';
 import {WatchAccountStore} from '../src/account/store';
 import {WatchTokenManager} from '../src/account/token';
 import type {WatchAccountState} from '../src/account/types';
@@ -33,6 +35,7 @@ let headCode:string|undefined;
 let headHeaders:Record<string,string>,headError:Error|undefined,headResponse:ReturnType<typeof deferred<void>>|undefined;
 let headRetryMillis:number|undefined,rejectToken:string|undefined,refreshStatus:number;
 let refreshResponse:ReturnType<typeof deferred<void>>|undefined;
+let refreshNetworkError:Error|undefined,replaceRefreshReplyWith504=false;
 let refreshWrite:ReturnType<typeof deferred<void>>|undefined,loseRefreshReply=false;
 const refreshTimes:number[]=[];
 let serverRevocations=0;
@@ -90,9 +93,11 @@ mock.module('@podjs/framework/services',()=>({
     if(refresh){
      expect(writer).toBe(true);
      refreshTimes.push(clock.now);
+     if(refreshNetworkError)throw refreshNetworkError;
      if(loseRefreshReply&&refreshTimes.length===1){
       await clock.delay(args.callTimeoutMs).result;
-      throw Error('refresh reply timed out after commit');
+      if(replaceRefreshReplyWith504)status=504;
+      else throw Error('refresh reply timed out after commit');
      }
      if(loseRefreshReply&&clock.now-refreshTimes[0]!>=30_000){serverRevocations++;status=401;}
      if(refreshResponse)await Promise.race([refreshResponse.result,cancelled.result]);
@@ -164,7 +169,7 @@ beforeEach(async()=>{
  forced=null;configEnabled=approved=readable=true;headStatus=configStatus=200;interval=20_000;configTtl=600;etag='head-1';
  headHeaders={};headCode=undefined;headError=headResponse=holdSync=undefined;v2Result=null;
  headRetryMillis=rejectToken=refreshResponse=refreshWrite=undefined;refreshStatus=200;
- refreshTimes.length=serverRevocations=0;loseRefreshReply=false;
+ refreshTimes.length=serverRevocations=0;loseRefreshReply=replaceRefreshReplyWith504=false;refreshNetworkError=undefined;
  await store.save(account);
  offStatus=subscribeCloudAccountStatus(()=>messages.push(readCloudAccountStatus()?.message));
 });
@@ -347,22 +352,25 @@ test('a rejected refresh expires the login and stops head polling',async()=>{
  expect(heads()).toHaveLength(0);
 });
 
-test('a second 401 expires the refreshed login without another rotation',async()=>{
+test('an access 401 after rotation preserves the login until an explicit refresh denial',async()=>{
  headStatus=401;
  await startWithRefresh();
  await clock.advance(20_000);
  expect(heads()).toHaveLength(2);
  expect(tokenRefreshes()).toHaveLength(1);
+ expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+ refreshStatus=401;
+ await clock.advance(20_000);
+ expect(heads()).toHaveLength(3);
+ expect(tokenRefreshes()).toHaveLength(2);
  expect(await store.read()).toBeNull();
- await clock.advance(CLOUD_INTERVAL);
- expect(heads()).toHaveLength(2);
- expect(tokenRefreshes()).toHaveLength(1);
 });
 
-test('an expired refresh token expires the login without hitting the network',async()=>{
+test('local refresh expiry keeps the account without hitting the network',async()=>{
  await startWithRefresh(10_000,10_000);
  await clock.advance(20_000);
- expect(await store.read()).toBeNull();
+ const snapshot=accountStatusSnapshot(await store.read(),clock.now);
+ expect(snapshot?.refreshTokenStatus).toBe('expired');
  expect(tokenRefreshes()).toHaveLength(0);
  expect(heads()).toHaveLength(0);
 });
@@ -379,6 +387,41 @@ test('a transient refresh failure backs off and keeps the login',async()=>{
  await clock.advance(1);
  expect(tokenRefreshes()).toHaveLength(2);
  expect(syncTimes).toEqual([1000,41_000]);
+});
+
+for(const message of ['Unable to resolve host "backend.invalid": No address associated with hostname',
+ 'Failed to connect to backend.invalid/192.0.2.1:443',
+ 'failed to connect to backend.invalid/192.0.2.1 (port 443) after 8000ms'] as const){
+ test('undelivered refresh backs off, then recovers: '+message,async()=>{
+  refreshNetworkError=Object.assign(Error(message),{code:'host_error',nativeTransportFailure:true});
+  await startWithRefresh(10_000);
+  await clock.advance(20_000);
+  await clock.advance(20_000);
+  await clock.advance(40_000);
+  expect(refreshTimes).toEqual([21_000,41_000,81_000]);
+  expect((await store.read())?.watchRefreshToken).toBe('fixture-refresh');
+  refreshNetworkError=undefined;
+  await clock.advance(80_000);
+  expect(refreshTimes).toEqual([21_000,41_000,81_000,161_000]);
+  expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+  expect(heads()).toHaveLength(1);
+ });
+}
+
+test('preparation timeout does not start a recovery window or require login',async()=>{
+ refreshWrite=deferred<void>();
+ await startWithRefresh(10_000);
+ await clock.advance(45_000);
+ expect(refreshTimes).toEqual([]);
+ refreshWrite.resolve();
+ refreshWrite=undefined;
+ await flush();
+ expect(refreshTimes).toEqual([]);
+ expect((await store.read())?.needsRelogin).toBeUndefined();
+ expect(values.has('state_json.refresh-attempt')).toBe(false);
+ await clock.advance(20_000);
+ expect(refreshTimes).toEqual([66_000]);
+ expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
 });
 
 test('foreground suspension lets a dispatched refresh persist before releasing the lease',async()=>{
@@ -424,20 +467,23 @@ for(const gate of ['screen','background','transfer','playback'] as const){
  });
 }
 
-test('a lost refresh reply recovers before 20 seconds at maximum poll jitter',async()=>{
- Math.random=()=>0.999_999;
- loseRefreshReply=true;
- await startWithRefresh(10_000);
- await clock.advance(22_000);
- expect(refreshTimes).toEqual([23_000]);
- await clock.advance(20_000);
- expect(refreshTimes).toHaveLength(2);
- expect(refreshTimes).toEqual([23_000,33_000]);
- expect(serverRevocations).toBe(0);
- expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
- expect(heads()).toHaveLength(1);
- expect(writer).toBe(false);
-});
+for(const failure of ['no response','gateway 504'] as const){
+ test(failure+' recovers before 20 seconds at maximum poll jitter',async()=>{
+  Math.random=()=>0.999_999;
+  loseRefreshReply=true;
+  replaceRefreshReplyWith504=failure==='gateway 504';
+  await startWithRefresh(10_000);
+  await clock.advance(22_000);
+  expect(refreshTimes).toEqual([23_000]);
+  await clock.advance(20_000);
+  expect(refreshTimes).toHaveLength(2);
+  expect(refreshTimes).toEqual([23_000,33_000]);
+  expect(serverRevocations).toBe(0);
+  expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+  expect(heads()).toHaveLength(1);
+  expect(writer).toBe(false);
+ });
+}
 
 test('poll recovery and a queued ordinary sync refresh use the same token rotation',async()=>{
  loseRefreshReply=true;
@@ -465,14 +511,18 @@ test('an ordinary sync guest does not replay an expired poll recovery marker',as
  const tokens=new WatchTokenManager(otherStore,{backendBaseUrl:account.backendBaseUrl,transport:{
   async request(){throw Error('ordinary sync replayed the old refresh token');},
  }});
- await expect(tokens.freshAccount()).rejects.toThrow('登录已过期');
- expect(await otherStore.read()).toBeNull();
+ await expect(tokens.freshAccount()).rejects.toThrow('需要重新登录');
+ expect(await otherStore.read()).toMatchObject({userId:account.userId,watchRefreshToken:'fixture-refresh',needsRelogin:true});
+ const view=cloudSyncView(accountStatusSnapshot(await otherStore.read(),clock.now),true,false);
+ expect(view).toMatchObject({title:'需要重新登录',button:{action:'phone'}});
+ expect(values.has('watchrss.library.owner')).toBe(true);
+
  expect(refreshTimes).toEqual([21_000]);
  expect(serverRevocations).toBe(0);
  expect(writer).toBe(false);
 });
 
-test('a recovery request that reaches dispatch at 20 seconds expires locally without replay',async()=>{
+test('a recovery request that reaches dispatch at 20 seconds asks to sign in without replay',async()=>{
  loseRefreshReply=true;
  await startWithRefresh(10_000);
  await clock.advance(20_000);
@@ -484,7 +534,7 @@ test('a recovery request that reaches dispatch at 20 seconds expires locally wit
  refreshWrite=undefined;
  await flush();
  expect(refreshTimes).toEqual([21_000]);
- expect(await store.read()).toBeNull();
+ expect(await store.read()).toMatchObject({userId:account.userId,watchRefreshToken:'fixture-refresh',needsRelogin:true});
  expect(serverRevocations).toBe(0);
  expect(writer).toBe(false);
 });
@@ -505,7 +555,7 @@ test('repeated HTTP 503 refreshes back off to the five-minute cap',async()=>{
  expect(heads()).toHaveLength(0);
 });
 
-test('foreground return after the refresh recovery window expires the local login without replay',async()=>{
+test('foreground return after the refresh recovery window keeps the local account without replay',async()=>{
  loseRefreshReply=true;
  await startWithRefresh(10_000);
  await clock.advance(20_000);
@@ -516,7 +566,7 @@ test('foreground return after the refresh recovery window expires the local logi
  setLife('active');
  await clock.advance(20_000);
  expect(refreshTimes).toEqual([21_000]);
- expect(await store.read()).toBeNull();
+ expect(await store.read()).toMatchObject({userId:account.userId,watchRefreshToken:'fixture-refresh',needsRelogin:true});
  expect(serverRevocations).toBe(0);
  expect(heads()).toHaveLength(0);
  expect(writer).toBe(false);
