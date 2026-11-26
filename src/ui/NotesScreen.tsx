@@ -56,7 +56,7 @@ export function NotesListScreen(props: NotesListScreenProps) {
   props.onBrowseReady?.(()=>!download());
   let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
-  const phonePrompt=()=>measuredLines("下载手机端app以在手机上编辑和同步内容",props.width-2*padding-20,text=>getOps().measureText(text,22),2).join("\n");
+  const addSize=promptHeight-1, promptWidth=()=>props.width-2*padding-addSize-gap;
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
   const load=async()=>{const version=++readVersion;try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion)setLoaded(true);}};
@@ -74,10 +74,12 @@ export function NotesListScreen(props: NotesListScreenProps) {
   </View>});
   const entries=createMemo<ScrollEntry[]>(()=>[
     {height:headerHeight,bounds:centredBounds(props.width-2*padding,Math.max(textWidthBound("备忘录",21),textWidthBound(`${notes().length} 条备忘录`,9)),9,45),render:()=> <View class="absolute inset-0"><Text class="absolute top-[9] text-[21px] leading-[26] text-center text-[#f5f5f5]" style={{width:props.width-2*padding}}>备忘录</Text><Text class="absolute top-[37] text-[9px] leading-[17] text-center text-[#b6b6b6]" style={{width:props.width-2*padding}}>{notes().length} 条备忘录</Text></View>},
-    ...(notes().length?[{height:promptHeight,render:()=> <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" style={{insetT:-0.5,height:57}} class="absolute left-[0] right-[0] rounded-[16] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[10] text-[17px] leading-[20] text-[#f5f5f5]">{phonePrompt()}</Text></View>}]:[]),
+    {height:promptHeight,render:()=> <View class="absolute inset-0">
+      <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" style={{insetT:-0.5,width:promptWidth(),height:addSize}} class="absolute left-[0] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class="text-[17px] leading-[20] text-center text-[#f5f5f5]">{"下载手机端\n编辑和同步"}</Text></View>
+      <View onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetT:-0.5,width:addSize,height:addSize}} class="absolute right-[0] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View>
+    </View>},
     ...(!notes().length?[{height:30,render:()=> <Text class="absolute left-[0] right-[0] top-[20] text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
-    ...cardLayouts().map(card),
-    {height:56,bounds:centredBounds(props.width-2*padding,44,4.5,44),render:()=> <View class="absolute inset-0 items-center"><View onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetL:(props.width-36-44)/2-0.5,insetT:4.5}} class="absolute w-[44] h-[44] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View></View>}
+    ...cardLayouts().map(card)
   ]);
   const onLongPress=(screenX:number,screenY:number)=>{
     const note=noteAtLongPress(notes(),screenX,screenY-roundStart(),props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
@@ -87,7 +89,8 @@ export function NotesListScreen(props: NotesListScreenProps) {
     const contentY=screenY-roundStart()+(scroller?.offset()??0);
     const promptTop=verticalPadding+headerHeight+gap;
     if(screenX>=padding&&screenX<props.width-padding&&contentY>=promptTop&&contentY<promptTop+promptHeight-gap){
-      queueMicrotask(()=>setDownload(true));
+      if(screenX>=props.width-padding-addSize)queueMicrotask(props.onCreateNote);
+      else if(screenX<padding+promptWidth())queueMicrotask(()=>setDownload(true));
       return true;
     }
     const note=noteAtLongPress(notes(),screenX,screenY-roundStart(),props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
