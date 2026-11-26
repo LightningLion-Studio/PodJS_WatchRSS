@@ -2,7 +2,6 @@ import type { Page } from "./types.ts";
 import type { ProfileEntryKey } from "../profile-entries.ts";
 
 const routeTitles: Record<Page, string> = {
-  "bluetooth-warning": "互联网",
   "debug-summary": "AI 总结",
   "debug-tools": "调试工具",
   "add-rss": "添加 RSS",
@@ -50,7 +49,6 @@ const routeTitles: Record<Page, string> = {
 };
 
 const titledByScreen = new Set<Page>([
-  "bluetooth-warning",
   "add-rss",
   "remote-input",
   "log-upload",

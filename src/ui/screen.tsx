@@ -1,5 +1,6 @@
-import { createRouteOwnership } from "./route-ownership.ts";
-import {BluetoothWarningPage} from './NetworkUnavailableOverlay.tsx';
+import { createEffectiveRouteStack } from "./effective-route-stack.ts";
+import { createBluetoothWarningNavigation } from "./bluetooth-warning-navigation.ts";
+import { BluetoothWarningPage } from "./NetworkUnavailableOverlay.tsx";
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {preserveNetworkContent} from '../network/context.ts';
 import {isNetworkRecoveryCancellation} from '../network/recovery.ts';
@@ -104,12 +105,13 @@ import {
 } from "@podjs/framework/services";
 import { layoutText } from "../reader/index.ts";
 import type { AppServices, Article, Channel, ArticleQuery } from "./service.ts";
-import { cancelActiveTouches, createGesture } from "@pocketjs/framework/gesture";
+import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { BackMotion } from "@podjs/framework/navigation";
 import { HomeEntryPlacementStore } from "./home-placement.ts";
 import type { SettingsRoute } from "./SettingsScreen.tsx";
 import { SettingsStore, type SettingsState } from "../settings/index.ts";
+import type { InformationPage } from "./InformationScreens.tsx";
 import { checkpointInformationSnapshot } from "./information-route-state.ts";
 import type { RecommendedChannel } from "../rss/recommendations.ts";
 import { memoRepository } from "../services.ts";
@@ -174,52 +176,49 @@ export default function WatchRSS(props: {
   const activityEntries=startupActivityNavigation(activityStateHub.read(),debugGate.allowed);
   const startupNeedsChannels=(activityEntries?.length??0)<=1||!!activityEntries?.some(entry=>entry.channelId);
   const [resumeReady, setResumeReady] = createSignal(false);
-  const [activityReady, setActivityReady] = createSignal(false);
   let startupDisposed=false;
   onCleanup(()=>{startupDisposed=true;});
-  const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
+  const { effectiveStack, warningShown, showWarning, hideWarning, commitStack } =
+    createEffectiveRouteStack<Entry>([{ page: "home" }]);
+  const warningNavigation = createBluetoothWarningNavigation({
+    width, height, active: () => foreground(), shown: warningShown, hide: hideWarning,
+  });
+  const setStack = (next: Parameters<typeof commitStack>[0]) =>
+    commitStack(next, warningNavigation.dismiss);
   const checkpoints=new Map<Entry,Set<()=>void>>();
   const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
-    if(!activityReady())return;
+    if(!resumeReady())return;
     traceServiceWork("navigation.checkpoints",()=>{for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();});
-    const next=captureActivityNavigation(activityStateHub.read(),stack());
+    const next=captureActivityNavigation(activityStateHub.read(),effectiveStack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
   }));
   onCleanup(onLifecycleCheckpoint(()=>{
-    if(!activityReady())return;
+    if(!resumeReady())return;
     saveActivity();
   }));
   const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
   onCleanup(()=>informationActivity.close());
   const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
-  const current = () => stack()[stack().length - 1];
+  const effectiveCurrent = () => effectiveStack()[effectiveStack().length - 1];
   const networkScopes=new WeakMap<Entry,ReturnType<typeof createHostNetworkRecovery>>();
   const networkFor=(entry:Entry)=>{let scope=networkScopes.get(entry);if(!scope){scope=createHostNetworkRecovery();networkScopes.set(entry,scope);}return scope;};
-  const page = () => current().page;
+  const effectivePage = () => effectiveCurrent().page;
   const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
   onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
-  const warningNetwork=useBluetoothWarningConnection();
-  const warningShown=()=>page()==='bluetooth-warning';
-  // A warning covers the content stack without changing its navigation ownership.
-  const contentStack = createMemo(
-    () => warningShown() ? stack().slice(0, -1) : stack(),
-    undefined,
-    { equals: (previous, next) =>
-      previous.length === next.length && previous.every((entry, index) => entry === next[index]) },
-  );
-  const contentRoute = () => contentStack().at(-1)!;
-  const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && entry.page !== 'bluetooth-warning' && !cloudOwnerChoice();
+  const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && !cloudOwnerChoice();
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
-  const visibleNetwork=observeNetworkRecovery(()=>cloudOwnerChoice()?ownerChoiceNetwork:networkFor(current()));
-  const networkPageBlocksSwipe=()=>(cloudOwnerChoice()||recoveryEnabled(current()))&&visibleNetwork().blocking;
-  const [nativeInputOpen,setNativeInputOpen]=createSignal(false);
-  const [systemShareOpen,setSystemShareOpen]=createSignal(false);
-  const routeServices:AppServices=Object.assign(Object.create(props.services),{
-    input:async (...args:Parameters<AppServices['input']>)=>{
-      setNativeInputOpen(true);
-      try{return await props.services.input(...args);}
-      finally{setNativeInputOpen(false);}
+  const warningNetwork = useBluetoothWarningConnection();
+  const visibleNetwork = observeNetworkRecovery(() => cloudOwnerChoice() ? ownerChoiceNetwork : networkFor(effectiveCurrent()));
+  const networkPageBlocksSwipe = () =>
+    (cloudOwnerChoice() || recoveryEnabled(effectiveCurrent())) && visibleNetwork().blocking;
+  const [nativeInputCount, setNativeInputCount] = createSignal(0);
+  const [systemShareCount, setSystemShareCount] = createSignal(0);
+  const routeServices: AppServices = Object.assign(Object.create(props.services), {
+    input: async (...args: Parameters<AppServices["input"]>) => {
+      setNativeInputCount(count => count + 1);
+      try { return await props.services.input(...args); }
+      finally { setNativeInputCount(count => count - 1); }
     },
   });
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
@@ -239,60 +238,36 @@ export default function WatchRSS(props: {
         `Reader progress ${context} flush timed out after ${outcome.timeoutMs}ms; continuing`,
       );
   };
-  function flushReaderProgress(entry:Entry,context:"exit"|"background",complete?:()=>void) {
-    const reader=entry.reader;
-    if(!reader)return;
-    const guard=context==="exit"?readerExit:backgroundReaderFlush;
-    guard.begin(entry,()=>reader.flushProgress(),outcome=>{
-      logReaderProgressFlush(context,outcome);
-      complete?.();
-    });
-  }
   let motion = new BackMotion(width);
   let editorBack: (() => void) | undefined;
   const [backOffset, setBackOffset] = createSignal(0);
   // Keep the previous route mounted for restoration. Paint it when a back swipe reveals it.
   const backUnderlay = createMemo(() =>
-    backOffset() > 0 && page() !== "video" ? stack().at(-2) : undefined
+    backOffset() > 0 && effectivePage() !== "video" ? effectiveStack().at(-2) : undefined
   );
   const [backRotation, setBackRotation] = createSignal(0);
   const backTranslation = createMemo(() => backOffset() === 0 ? { x: 0, y: 0 } : rotateVector(backOffset(), 0, backRotation()));
-  const { canReceiveData, canCommitNavigation, commitNavigation } = createRouteOwnership({
-    content: contentRoute,
-    backPhase: () => motion.phase,
-    warningShown,
-    dismissWarning: removeWarningRoute,
-    disposed: () => startupDisposed,
-  });
-  function setPage(next: Page,data: Partial<Entry> = {}, source = contentRoute()) {
-    if (next === "bluetooth-warning" && warningShown()) return;
-    if (next === source.page && Object.keys(data).length === 0) return;
-    commitNavigation(source, () =>
-      traceServiceWork("navigation.setPage", () => kv.batch(() => setPageImpl(next, data))));
-  }
-  function setPageImpl(next: Page, data: Partial<Entry>) {
+  function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
+  function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
-    traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(current()));
-    traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
+    if (
+      (next === effectivePage() && Object.keys(data).length === 0) ||
+      motion.phase !== "idle"
+    )
+      return;
+    traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(effectiveCurrent()));
+    traceServiceWork("navigation.stopList",()=>effectiveCurrent().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
   }
   function finishPopPage(leaving: Entry) {
-    if (current() !== leaving || stack().length <= 1) return false;
-    if(leaving.page==='bluetooth-warning'){
-      motion.reset();
-      batch(()=>{
-        setStack(entries=>entries.slice(0,-1));
-        setBackOffset(0);
-      });
-      return true;
-    }
+    if (effectiveCurrent() !== leaving || effectiveStack().length <= 1) return false;
     const latestArticle =
       article()?.id === leaving.readerArticle?.id
         ? article()
         : leaving.readerArticle;
     const autoRemoveItem =
       leaving.page === "reader" &&
-      stack().at(-2)?.page === "watch-later" &&
+      effectiveStack().at(-2)?.page === "watch-later" &&
       shouldAutoRemoveWatchLater(
         !!leaving.readerFromWatchLater,
         leaving.reader?.reachedBottom() ?? false,
@@ -307,52 +282,57 @@ export default function WatchRSS(props: {
     if (leaving.page === "reader" && telemetryReaders.has(leaving)) {
       telemetryReaders.delete(leaving); usageTelemetry.recordArticleReadFinished();
     }
-    for(const entry of stack().slice(backStackSize(stack()))) entry.queue?.cancel();
+    for(const entry of effectiveStack().slice(backStackSize(effectiveStack()))) entry.queue?.cancel();
     if (leaving.page === "saved" || leaving.page === "watch-later")
       clearSavedUndo();
-    if (current().page === "note-detail" || current().page === "note-actions")
+    if (effectiveCurrent().page === "note-detail" || effectiveCurrent().page === "note-actions")
       setNotesRefreshKey((value) => value + 1);
     batch(() => {
       setStack((entries) => entries.slice(0, backStackSize(entries)));
-      setPlayingSource(current().playback);
+      setPlayingSource(effectiveCurrent().playback);
       setError("");
       setBackOffset(0);
     });
     motion.reset();
-    const destination=current();
+    const destination=effectiveCurrent();
     if (destination.page==="articles"&&destination.channelId&&
         (leaving.page==="search"||currentQuery.channelId!==destination.channelId)) {
       const limit=Number(routeMemory(destination).retained.feedCount)||12;
       void loadFeedArticles(destination.channelId,limit,true);
     }
     if (autoRemoveItem) void removeSaved(autoRemoveItem);
-    else if (page() === "saved" || page() === "watch-later")
-      void loadSaved(page() === "saved" ? "favorite" : "watchLater");
+    else if (effectivePage() === "saved" || effectivePage() === "watch-later")
+      void loadSaved(effectivePage() === "saved" ? "favorite" : "watchLater");
     return true;
   }
   function popPage(skipInternal = false) {
-    if (stack().length <= 1) return false;
-    if (!skipInternal && current().internalBack?.()) {
+    if (effectiveStack().length <= 1) return false;
+    if (!skipInternal && effectiveCurrent().internalBack?.()) {
       setBackOffset(0);
       motion.reset();
       return true;
     }
-    const leaving = current();
+    const leaving = effectiveCurrent();
     if (leaving.page !== "reader" || !leaving.reader)
       return finishPopPage(leaving);
     leaving.list?.scroller.stop();
-    flushReaderProgress(leaving,"exit",()=>{
-      commitNavigation(leaving, () => finishPopPage(leaving), false);
-    });
+    readerExit.begin(
+      leaving,
+      () => leaving.reader!.flushProgress(),
+      (outcome) => {
+        logReaderProgressFlush("exit", outcome);
+        if (effectiveCurrent() === leaving) finishPopPage(leaving);
+      },
+    );
     return true;
   }
   let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
-  const playerRotation=()=>contentRoute().player?.gestureRotation?.()??0;
+  const playerRotation=()=>effectiveCurrent().player?.gestureRotation?.()??0;
   const playerViewport=()=>({x:0,y:0,w:width,h:height});
   let backPointerRotation = 0;
   const rememberBackRotation = () => { if (motion.phase === "idle") backPointerRotation = playerRotation(); };
   const beginBack = (dx: number) => {
-    editorBack = current().noteEditorBack;
+    editorBack = effectiveCurrent().noteEditorBack;
     const axis = rotateVector(1, 0, backPointerRotation);
     const extent = Math.min(width / Math.abs(axis.x), height / Math.abs(axis.y));
     motion = new BackMotion(extent);
@@ -363,14 +343,14 @@ export default function WatchRSS(props: {
     onDown: rememberBackRotation,
     region: {
       rect: () =>
-        stack().length > 1 &&
+        effectiveStack().length > 1 &&
         !disclosurePending() &&
-        !networkFor(current()).blocking &&
+        !networkFor(effectiveCurrent()).blocking &&
         !networkPageBlocksSwipe() &&
         motion.phase !== "settling" &&
-        (current().player?.canSwipeBack?.() ?? true) &&
-        current().page !== "reader-image" &&
-        !usesImmersiveBackObserver(current())
+        (effectiveCurrent().player?.canSwipeBack?.() ?? true) &&
+        effectiveCurrent().page !== "reader-image" &&
+        !usesImmersiveBackObserver(effectiveCurrent())
           ? { x: 0, y: 0, w: width, h: height }
           : null,
     },
@@ -379,9 +359,9 @@ export default function WatchRSS(props: {
     onPanStart: (c) => {
       // A right-to-left drag can belong to the page (the player's detail panel);
       // left-to-right is always Back and never reaches sideSwipe.
-      const side = c.dx < 0 ? current().player?.sideSwipe : undefined;
+      const side = c.dx < 0 ? effectiveCurrent().player?.sideSwipe : undefined;
       if (side?.begin()) { sideSwipe = side; side.move(c.dx); return; }
-      current().list?.scroller.stop();
+      effectiveCurrent().list?.scroller.stop();
       beginBack(c.dx);
     },
     onPanMove: (c) => {
@@ -399,7 +379,7 @@ export default function WatchRSS(props: {
     },
   },playerRotation,playerViewport));
   const backObserver = rightSwipeBack({rect:()=>
-    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
+    effectiveStack().length>1 && usesImmersiveBackObserver(effectiveCurrent()) && !disclosurePending() && !networkPageBlocksSwipe() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
     start:beginBack,
@@ -456,17 +436,10 @@ export default function WatchRSS(props: {
       articles().some(item => item.channelId === entry.channelId);
   };
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [pageLoad,setPageLoad]=createSignal<{entry:Entry}|undefined>(startupNeedsChannels&&!homeSnapshot?{entry:current()}:undefined);
-  const loading=()=>pageLoad()?.entry===contentRoute();
-  const [busy,setBusy]=createSignal(false);
-  const [homeRefreshing,setHomeRefreshing]=createSignal(false);
-  const [errorMessage,setError]=createSignal("");
-  // Loading replaces the browsing surface only for the route that owns it.
-  const startPageLoading=()=>{
-    const load={entry:contentRoute()};
-    setPageLoad(load);
-    return ()=>setPageLoad(currentLoad=>currentLoad===load?undefined:currentLoad);
-  };
+  const [loading, setLoading] = createSignal(startupNeedsChannels&&!homeSnapshot),
+    [busy, setBusy] = createSignal(false),
+    [homeRefreshing, setHomeRefreshing] = createSignal(false),
+    [errorMessage, setError] = createSignal("");
   const error = createMemo(() => {
     const message = errorMessage();
     // A rejected async handler can report a QuickJS allocation failure after
@@ -483,10 +456,9 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
-    current: contentRoute,
-    canReceiveData,
+    current: effectiveCurrent,
     setArticles,
-    startPageLoading,
+    setLoading,
     setError,
     setCurrentQuery: (value) => {
       currentQuery = value;
@@ -498,7 +470,7 @@ export default function WatchRSS(props: {
   let searchRequestVersion = 0;
   let searchDebounce: ReturnType<typeof delay> | undefined;
   createEffect(() => {
-    if (contentRoute().page !== "search" && searchDebounce) {
+    if (effectivePage() !== "search" && searchDebounce) {
       searchDebounce.cancel();
       searchDebounce = undefined;
       searchRequestVersion++;
@@ -526,17 +498,17 @@ export default function WatchRSS(props: {
       getArticle:id=>props.services.getArticle(id),
       getOriginalArticle:id=>props.services.getOriginalArticle(id),
       getSpeechSource:props.services.getSpeechSource?(article,anchor)=>props.services.getSpeechSource!(article,anchor):undefined,
-      speak:(...args)=>networkFor(current()).run(()=>props.services.speak(...args)),
+      speak:(...args)=>networkFor(effectiveCurrent()).run(()=>props.services.speak(...args)),
       stopSpeech:()=>props.services.stopSpeech(),
     },
     (state) => {
       const previous = speechState();
       setSpeechState(state);
-      spectrum.update(foreground() && page() === "home", state);
+      spectrum.update(foreground() && effectivePage() === "home", state);
       if (
         state.phase === "error" &&
         state.error !== previous?.error &&
-        page() !== "speech-playback"
+        effectivePage() !== "speech-playback"
       )
         void hostOperation("ui.toast", {
           message: state.error ?? "朗读失败",
@@ -575,36 +547,39 @@ export default function WatchRSS(props: {
     if (shareAlive) setSystemShareAvailable(value);
   });
   const share: ShareHandler = (input, qr, onDone) => {
-    const source = contentRoute();
+    const source = effectiveCurrent();
     const finishSource =
       source.page === "rss-actions" ||
       (source.page === "bili" && source.biliRoute?.name === "actions") ||
       (source.page === "douyin" && source.douyinRoute?.name === "actions");
-    void shareEnvironment.then(supported => {
-      if (!shareAlive) return;
-      commitNavigation(source, () => {
-        void routeShare(input, settings().shareUseSystem && supported, {
+    void shareEnvironment
+      .then(async (supported) => {
+        if (!shareAlive || effectiveCurrent() !== source || motion.phase !== "idle")
+          return;
+        const outcome = await routeShare(input, settings().shareUseSystem && supported, {
           text: async text => {
-            setSystemShareOpen(true);
+            setSystemShareCount(count => count + 1);
             try { await openSystemShare(text); }
-            finally { setSystemShareOpen(false); }
+            finally { setSystemShareCount(count => count - 1); }
           },
           qr,
-          unavailable: () => { void hostToast("暂无可分享链接"); },
-        }).then(outcome => {
-          if (!shareAlive) return;
-          if (onDone && outcome !== "none") commitNavigation(source, onDone, false);
-          else if (finishSource) {
-            source.list?.scroller.stop();
-            setStack(entries => entries.length > 1
-              ? entries.filter(entry => entry !== source)
-              : entries);
-          }
-        }).catch(error => {
-          if (shareAlive && canReceiveData(source)) setError(String(error));
+          unavailable: () => {
+            void hostToast("暂无可分享链接");
+          },
         });
+        if (shareAlive && onDone && outcome !== "none") onDone();
+        else if (shareAlive && finishSource) {
+          source.list?.scroller.stop();
+          setStack((entries) =>
+            entries.length > 1
+              ? entries.filter((entry) => entry !== source)
+              : entries,
+          );
+        }
+      })
+      .catch((e) => {
+        if (shareAlive) setError(String(e));
       });
-    });
   };
   createEffect(() =>
     props.onSyncMediaKeepAliveChange?.(settings().syncMediaKeepAlive),
@@ -624,7 +599,7 @@ export default function WatchRSS(props: {
   const telemetryReaders = new WeakSet<Entry>();
   const telemetryPlayers = new WeakSet<Entry>();
   createEffect(() => {
-    idleHit(9);const entries = stack();
+    idleHit(9);const entries = effectiveStack();
     const owner = telemetryScreenOwner(entries);
     activityLog.update(entries,foreground());
     telemetrySession.update(owner, owner && telemetryScreen(owner), foreground());
@@ -638,8 +613,8 @@ export default function WatchRSS(props: {
     }
   });
   onCleanup(() => telemetrySession.pause());
-  createEffect(() => {idleHit(12);spectrum.update(foreground() && page() === "home", speechState());});
-  onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()),()=>foreground()&&page()==="home"&&!!speechState()?.playing);
+  createEffect(() => {idleHit(12);spectrum.update(foreground() && effectivePage() === "home", speechState());});
+  onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()),()=>foreground()&&effectivePage()==="home"&&!!speechState()?.playing);
   onCleanup(() => spectrum.dispose());
   const [pendingAnnouncement, setPendingAnnouncement] = createSignal<Announcement | null>(null);
   const [pendingPushMessages, setPendingPushMessages] = createSignal<PushMessage[]>([]);
@@ -649,7 +624,7 @@ export default function WatchRSS(props: {
   const homeDisclosurePending = () => homeDisclosure.pending(homeNoticeVisible());
   let homeDisclosureList: Entry["disclosureList"];
   const disclosurePending = () => {
-    const entry = current();
+    const entry = effectiveCurrent();
     if (entry.page === "home") return !!homeDisclosurePending();
     if (entry.page !== "bili" && entry.page !== "douyin") return false;
     const route = entry.page === "bili" ? entry.biliRoute : entry.douyinRoute;
@@ -684,19 +659,23 @@ export default function WatchRSS(props: {
   onCleanup(
     onLifecycleChange((value) => {
       setForeground(value === "active");
-      const entry = current();
+      const entry = effectiveCurrent();
       if (value !== "active") {
-        for(const item of stack()){
+        for(const item of effectiveStack()){
           const snapshot=checkpointInformationSnapshot(item);if(snapshot)informationActivity.save(item,snapshot);
         }
         saveActivity();
       }
-      if (value !== "active" && entry.page === "reader")
-        flushReaderProgress(entry,"background");
+      if (value !== "active" && entry.page === "reader" && entry.reader)
+        backgroundReaderFlush.begin(
+          entry,
+          () => entry.reader!.flushProgress(),
+          (outcome) => logReaderProgressFlush("background", outcome),
+        );
     }),
   );
   let platformLoginRefresh = 0;
-  const refreshPlatformLoginState = async (origin: Entry) => {idleHit(6);
+  const refreshPlatformLoginState = async () => {idleHit(6);
     const revision = ++platformLoginRefresh;
     const [bili, douyin] = await Promise.all([
       biliClient
@@ -705,20 +684,18 @@ export default function WatchRSS(props: {
         .catch(() => false),
       douyinClient.isLoggedIn().catch(() => false),
     ]);
-    if (canReceiveData(origin) && revision === platformLoginRefresh)
+    if (revision === platformLoginRefresh)
       setPlatformLoginState({ bili, douyin });
   };
   createEffect(() => {
-    idleHit(7);
-    const origin = contentRoute();
-    if (origin.page === "home" && foreground()) void refreshPlatformLoginState(origin);
+    idleHit(7);if (effectivePage() === "home" && foreground()) void refreshPlatformLoginState();
   });
   onCleanup(() => {
     platformLoginRefresh++;
   });
   createEffect(() => {
-    idleHit(11);const entries = stack();
-    if (activityReady()) {
+    idleHit(11);const entries = effectiveStack();
+    if (resumeReady()) {
       informationActivity.prune(entries);saveActivity();
     }
   });
@@ -754,8 +731,8 @@ export default function WatchRSS(props: {
       setPreviewState(state);
       if (!state) {
         previewOpenPending = false;
-        const wasCurrent = current().page === "reader-preview";
-        for (const entry of stack())
+        const wasCurrent = effectiveCurrent().page === "reader-preview";
+        for (const entry of effectiveStack())
           if (entry.page === "reader-preview") entry.list?.scroller.stop();
         setStack((entries) =>
           entries.filter((entry) => entry.page !== "reader-preview"),
@@ -771,14 +748,14 @@ export default function WatchRSS(props: {
     if (!previewOpenPending || motion.phase !== "idle" || !previewState())
       return;
     previewOpenPending = false;
-    if (page() === "reader-preview") return;
-    const existing = stack().findIndex(
+    if (effectivePage() === "reader-preview") return;
+    const existing = effectiveStack().findIndex(
       (entry) => entry.page === "reader-preview",
     );
     if (existing >= 0) setStack((entries) => entries.slice(0, existing + 1));
     else setPage("reader-preview");
   },()=>previewOpenPending&&motion.phase==="idle"&&!!previewState());
-  createEffect(() => setReaderPreviewVisible(page() === "reader-preview"));
+  createEffect(() => setReaderPreviewVisible(effectivePage() === "reader-preview"));
   onCleanup(() => setReaderPreviewVisible(false));
   const presetClock = useMinuteClock(() => foreground() && presetState()?.selection.mode === "SYSTEM");
   const readerPreset = createMemo(() =>
@@ -803,34 +780,39 @@ export default function WatchRSS(props: {
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
   async function loadChannels(foregroundLoad=true) {idleHit(5);
-    const origin = contentRoute();
     // Keep the startup snapshot visible and leave a restored page's state alone.
-    const loaded=foregroundLoad&&!channels().length?startPageLoading():undefined;
-    if(foregroundLoad)setError("");
+    if(foregroundLoad){
+      if(!channels().length)setLoading(true);
+      setError("");
+    }
     try {
       const list = await props.services.listChannels();
       traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
     } catch (e) {
-      if (canReceiveData(origin) && (foregroundLoad || origin.page === "home")) setError(String(e));
+      if(foregroundLoad||effectivePage()==="home")setError(String(e));
     } finally {
-      loaded?.();
+      if(foregroundLoad)setLoading(false);
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
-    const origin = contentRoute();
-    const loaded = startPageLoading();
-    const snapshot = currentQuery = { ...opts, page: opts?.page ?? 0 };
-    const active = () => canReceiveData(origin) && currentQuery === snapshot;
+    setLoading(true);
     setError("");
     try {
-      const items = await props.services.listArticles({ ...snapshot, pageSize: 30 });
-      if (active()) setArticles(items);
+      const next = opts?.page ?? 0;
+      currentQuery = { ...opts, page: next };
+      setArticles(
+        await props.services.listArticles({
+          ...opts,
+          page: next,
+          pageSize: 30,
+        }),
+      );
     } catch (e) {
-      if (active()) setError(String(e));
+      setError(String(e));
     } finally {
-      loaded();
+      setLoading(false);
     }
   }
   async function loadFeedArticles(
@@ -838,17 +820,20 @@ export default function WatchRSS(props: {
     limit = feedVisibleCount(),
     initial = false,
   ) {
-    const origin=contentRoute();
     const version = ++feedRequestVersion;
-    const active = () => canReceiveData(origin) && version === feedRequestVersion && origin.channelId === channelId;
-    const loaded=initial?startPageLoading():undefined;
+    if (initial) setLoading(true);
     try {
       const window = await loadFeedWindow(
         props.services.listArticles,
         channelId,
         limit,
       );
-      if (!active()) return;
+      if (
+        version !== feedRequestVersion ||
+        effectivePage() !== "articles" ||
+        effectiveCurrent().channelId !== channelId
+      )
+        return;
       batch(() => {
         setArticles(window.items);
         setFeedVisibleCount(limit);
@@ -856,23 +841,19 @@ export default function WatchRSS(props: {
         currentQuery = { channelId, page: 0 };
       });
     } catch (e) {
-      if (active()) setError(String(e));
+      if (version === feedRequestVersion) setError(String(e));
     } finally {
-      loaded?.();
       if (version === feedRequestVersion) {
+        if (initial) setLoading(false);
         setFeedLoadingMore(false);
       }
     }
   }
   async function restoreStartupNavigation() {
-    const baseline=contentStack();let owned=baseline;
-    const ownsStack=(entries:Entry[])=>contentStack()===entries;
+    const baseline=effectiveStack();let owned=baseline;
     try {
-      if(startupNeedsChannels){
-        if(homeSnapshot)void loadChannels(false);
-        else await loadChannels();
-      }
-      if(startupDisposed||!ownsStack(baseline))return;
+      if(startupNeedsChannels)await loadChannels();
+      if(startupDisposed||effectiveStack()!==baseline)return;
       if(activityEntries){
         const entries=await resolveActivityNavigation(activityEntries,{
           hasChannel:id=>channels().some(channel=>channel.id===id),article:id=>props.services.getArticle(id),
@@ -880,14 +861,9 @@ export default function WatchRSS(props: {
         });
         for(const entry of entries)await informationActivity.restore(entry);
         if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
-        if(startupDisposed||!ownsStack(baseline))return;
-        if (!commitNavigation(baseline.at(-1)!, () => {
-          owned=entries;
-          setStack(entries);
-          const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);
-          if(lastReader)setArticle(lastReader.readerArticle!);
-          setActivityReady(true);
-        }, false)) return;
+        if(startupDisposed||effectiveStack()!==baseline)return;
+        owned=entries;
+        batch(()=>{setStack(entries);const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);if(lastReader)setArticle(lastReader.readerArticle!);});
         const destination=entries.at(-1);
         if(destination?.page==='articles'&&destination.channelId)
           await loadFeedArticles(destination.channelId,Number(routeMemory(destination).retained.feedCount)||12,true);
@@ -899,17 +875,17 @@ export default function WatchRSS(props: {
         }
       }
     } catch (error) {
-      if(!startupDisposed&&ownsStack(owned))setError(`无法恢复上次内容：${String(error)}`);
+      if(!startupDisposed&&effectiveStack()===owned)setError(`无法恢复上次内容：${String(error)}`);
     } finally {
       if(!startupDisposed){
-        batch(()=>{setActivityReady(true);setResumeReady(true);});
+        setResumeReady(true);
         if(!startupNeedsChannels)void loadChannels(false);
       }
     }
   }
   let firstScreenSignaled=false;
   createEffect(()=>{
-    const route=contentRoute();
+    const route=effectiveCurrent();
     if(firstScreenSignaled||(!resumeReady()&&!(homeSnapshot&&route.page==="home")))return;
     const ready=()=>{
       firstScreenSignaled=true;
@@ -923,9 +899,9 @@ export default function WatchRSS(props: {
     void paint.result.catch(()=>{}).then(()=>{if(active)ready();});
   });
   function loadMoreFeedArticles() {
-    const channelId = current().channelId;
+    const channelId = effectiveCurrent().channelId;
     if (
-      page() !== "articles" ||
+      effectivePage() !== "articles" ||
       !channelId ||
       feedLoadingMore() ||
       loading() ||
@@ -934,7 +910,7 @@ export default function WatchRSS(props: {
     )
       return;
     const limit = Math.min(200, feedVisibleCount() + 8);
-    routeMemory(current()).retained.feedCount=limit;
+    routeMemory(effectiveCurrent()).retained.feedCount=limit;
     if (limit === feedVisibleCount()) return;
     setFeedLoadingMore(true);
     void loadFeedArticles(channelId, limit);
@@ -942,92 +918,101 @@ export default function WatchRSS(props: {
   // A phone starting scan binding asks the watch to open its pairing code; only when idle and in front.
   onCleanup(bindPairingRequestRoute({
     active: () => foreground() && motion.phase === "idle" && !busy(),
-    page,
+    page: effectivePage,
     go: () => go("phone-connection"),
   }));
   // Finishing a flow (for example watch pairing) returns to the home page instead of the page it started from.
-  function goHome(source = contentRoute()) {
-    commitNavigation(source, () => {
-      if (stack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
-      else setStack([{ page: "home" }]);
-      kv.set("page", "home");
-      void loadChannels();
-    });
+  function goHome() {
+    if (motion.phase !== "idle") return;
+    if (effectiveStack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
+    else setStack([{ page: "home" }]);
+    kv.set("page", "home");
+    void loadChannels();
   }
-  async function go(next: Page, source = contentRoute()) {
-    if (!canCommitNavigation(source)) return;
+  async function go(next: Page) {
+    if (motion.phase !== "idle") return;
     if (next === "notes") {
-      if (busy()) return;
       setBusy(true);
       try {
         await memoRepository.initialize();
-      } catch (error) {
-        if(canReceiveData(source))setError(String(error));
+      } catch (e) {
+        setError(String(e));
         return;
       } finally {
         setBusy(false);
       }
     }
-    if (!canCommitNavigation(source)) return;
-    setPage(next, {}, source);
+    setPage(next);
     kv.set("page", next);
     if (next === "home") await loadChannels();
     if (next === "articles") {
-      if (current().channelId)
-        await loadFeedArticles(current().channelId!, 12, true);
+      if (effectiveCurrent().channelId)
+        await loadFeedArticles(effectiveCurrent().channelId!, 12, true);
       else await loadArticles();
     }
     if (next === "saved" || next === "watch-later")
       await loadSaved(next === "saved" ? "favorite" : "watchLater");
+    if (next === "notes") setLoading(false);
+    if (
+      [
+        "phone-connection",
+        "settings",
+        "settings-advanced",
+        "search",
+        "profile",
+        "recommendations",
+        "information",
+        "note-detail",
+        "note-actions",
+      ].includes(next)
+    )
+      setLoading(false);
   }
-  let articleOpenRevision = 0;
+  let articleOpenRevision=0;
+  onCleanup(()=>{articleOpenRevision++;});
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
-    const origin = contentStack(), revision = ++articleOpenRevision;
-    const source = origin.at(-1)!;
-    const active = () => revision === articleOpenRevision && contentStack() === origin &&
-      foreground() && canCommitNavigation(source);
-    const previousReader = replaceReader && source.page === "reader" ? source : undefined;
+    const origin=effectiveStack(),revision=++articleOpenRevision;
+    const active=()=>revision===articleOpenRevision&&effectiveStack()===origin&&foreground()&&motion.phase==="idle";
+    const previousReader=replaceReader&&effectiveCurrent().page==="reader"?effectiveCurrent():undefined;
     try {
       const full = await props.services.getArticle(item.id,article());
-      if (!active()) return;
+      if(!active())return;
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
       if(available)await props.services.markRead(item.id);
-      if (!active()) return;
-      commitNavigation(source, () => {
-        setArticle({ ...full, read });
-        // Reopening an already-read article must not rebuild the retained feed
-        // and synchronously remeasure every card for an unchanged read flag.
-        if(available)setArticles((items) => markFeedArticleRead(items,item.id));
-        setChannels((items) => !available||item.read ? items :
-          items.map((c) =>
-            c.id === item.channelId && !item.read
-              ? { ...c, unreadCount: Math.max(0, (c.unreadCount ?? 0) - 1) }
-              : c,
-          ),
-        );
-        traceServiceWork("reader.setPage",()=>setPage("reader", {
-          readerArticle: { ...full, read },
-          readerFromWatchLater: fromWatchLater,
-        }));
-        if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
-      });
+      if(!active())return;
+      setArticle({ ...full, read });
+      // Reopening an already-read article must not rebuild the retained feed
+      // and synchronously remeasure every card for an unchanged read flag.
+      if(available)setArticles((items) => markFeedArticleRead(items,item.id));
+      setChannels((items) => !available||item.read ? items :
+        items.map((c) =>
+          c.id === item.channelId && !item.read
+            ? { ...c, unreadCount: Math.max(0, (c.unreadCount ?? 0) - 1) }
+            : c,
+        ),
+      );
+      traceServiceWork("reader.setPage",()=>setPage("reader", {
+        readerArticle: { ...full, read },
+        readerFromWatchLater: fromWatchLater,
+      }));
+      if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
-      if (active()) setError(String(e));
+      if(active())setError(String(e));
     }
   }
   async function openArticleActions(item: Article) {
     if (busy()) return;
-    const origin = contentRoute();
+    const origin = effectiveCurrent();
     setBusy(true);
     try {
       const full = await props.services.getArticle(item.id,article());
-      if (canReceiveData(origin)) setArticle(full ?? item);
-      commitNavigation(origin, () => {
+      if (effectiveCurrent() === origin) {
+        setArticle(full ?? item);
         setPage("rss-actions");
-      });
+      }
     } catch (e) {
-      if(canReceiveData(origin))setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1035,15 +1020,15 @@ export default function WatchRSS(props: {
   async function deleteArticle() {
     const selected = article();
     if (!selected || busy()) return;
-    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.deleteArticle(selected.id);
       setArticles((items) => items.filter((item) => item.id !== selected.id));
-      commitNavigation(origin, () => { if (popPage(true)) setArticle(null); }, false);
-      await loadChannels(false);
+      popPage(true);
+      setArticle(null);
+      await loadChannels();
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1055,12 +1040,11 @@ export default function WatchRSS(props: {
   ) {
     const selected = article();
     if (!selected || busy()) return;
-    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.setSaveState(selected.id, type, saved);
       const patch = type === "favorite" ? { saved } : { watchLater: saved };
-      setArticle((latest) => latest?.id === selected.id ? { ...latest, ...patch } : latest);
+      setArticle({ ...selected, ...patch });
       setArticles((items) =>
         items
           .map((a) => (a.id === selected.id ? { ...a, ...patch } : a))
@@ -1074,9 +1058,9 @@ export default function WatchRSS(props: {
               ),
           ),
       );
-      if (navigateBack) commitNavigation(origin, () => popPage(), false);
+      if (navigateBack) popPage();
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1084,11 +1068,10 @@ export default function WatchRSS(props: {
   async function markArticleUnread() {
     const selected = article();
     if (!selected?.read || busy()) return;
-    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.markRead(selected.id, false);
-      setArticle((latest) => latest?.id === selected.id ? { ...latest, read: false } : latest);
+      setArticle({ ...selected, read: false });
       setArticles((items) =>
         items.map((a) => (a.id === selected.id ? { ...a, read: false } : a)),
       );
@@ -1099,9 +1082,9 @@ export default function WatchRSS(props: {
             : c,
         ),
       );
-      commitNavigation(origin, () => popPage(), false);
+      popPage();
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1111,7 +1094,6 @@ export default function WatchRSS(props: {
     type: "favorite" | "watchLater",
   ) {
     if (busy()) return;
-    const origin = contentRoute();
     const saved = type === "favorite" ? !item.saved : !item.watchLater;
     setBusy(true);
     try {
@@ -1127,14 +1109,14 @@ export default function WatchRSS(props: {
         ),
       );
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
   }
   async function openChannelSettings(id: string) {
     if (busy()) return;
-    const origin = contentRoute();
+    const origin = effectiveCurrent();
     setBusy(true);
     try {
       const [enabled, playback] = await Promise.all([
@@ -1143,9 +1125,9 @@ export default function WatchRSS(props: {
       ]);
       setOriginalModes((m) => ({ ...m, [id]: enabled }));
       setChannelPlayback((m) => ({ ...m, [id]: playback }));
-      setPage("channel-settings", { channelId: id }, origin);
+      if (effectiveCurrent() === origin) setPage("channel-settings", { channelId: id });
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1162,7 +1144,6 @@ export default function WatchRSS(props: {
       | "clear",
   ) {
     if (busy()) return;
-    const origin = contentRoute();
     setBusy(true);
     setError("");
     try {
@@ -1214,10 +1195,10 @@ export default function WatchRSS(props: {
         await props.services.deleteChannel(id);
         setChannels((items) => items.filter((c) => c.id !== id));
         setArticles((items) => items.filter((a) => a.channelId !== id));
-        commitNavigation(origin, () => setStack([{ page: "home" }]), false);
+        setStack([{ page: "home" }]);
       }
     } catch (e) {
-      if (canReceiveData(origin)) setError(String(e));
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1231,11 +1212,10 @@ export default function WatchRSS(props: {
     setPage("search", { channelId: id });
   }
   function updateSearchKeyword(channelId: string, value: string) {
-    const origin = contentRoute();
     searchDebounce?.cancel();
     searchRequestVersion++;
     setQuery(value);
-    if(origin.page==='search'){routeMemory(origin).retained.query=value;saveActivity();}
+    if(effectiveCurrent().page==='search'){routeMemory(effectiveCurrent()).retained.query=value;saveActivity();}
     setSearchResults([]);
     setSearchLoading(false);
     if (!value.trim()) return;
@@ -1243,18 +1223,15 @@ export default function WatchRSS(props: {
     void timer.result.then(() => {
       if (searchDebounce !== timer) return;
       searchDebounce = undefined;
-      if (canReceiveData(origin) && origin.page === "search" && origin.channelId === channelId)
+      if (effectiveCurrent().page === "search" && effectiveCurrent().channelId === channelId)
         void searchChannelArticles(channelId, value);
     }, () => {});
   }
   async function searchChannelArticles(channelId: string, keyword: string) {
     const version = ++searchRequestVersion;
-    const origin = contentRoute();
-    const active = () => canReceiveData(origin) && version === searchRequestVersion &&
-      origin.page === "search" && origin.channelId === channelId;
     const term = keyword.trim();
     setQuery(keyword);
-    if(origin.page==='search'){routeMemory(origin).retained.query=keyword;saveActivity();}
+    if(effectiveCurrent().page==='search'){routeMemory(effectiveCurrent()).retained.query=keyword;saveActivity();}
     setError("");
     setSearchResults([]);
     if (!term) {
@@ -1270,18 +1247,26 @@ export default function WatchRSS(props: {
             query: term,
             pageSize: 120,
           });
-      if (active())
+      if (
+        version === searchRequestVersion &&
+        effectiveCurrent().page === "search" &&
+        effectiveCurrent().channelId === channelId
+      )
         setSearchResults(found);
     } catch (e) {
-      if (active())
+      if (
+        version === searchRequestVersion &&
+        effectiveCurrent().page === "search" &&
+        effectiveCurrent().channelId === channelId
+      )
         setError(String(e));
     } finally {
       if (version === searchRequestVersion) setSearchLoading(false);
     }
   }
   async function refresh() {
-    const origin=contentRoute();
-    const refreshAll = origin.page === "home";
+    const origin=effectiveCurrent();
+    const refreshAll = effectivePage() === "home";
     if (refreshAll && homeRefreshing()) return;
     // Native HomeComposeScreen keeps channel interactions enabled while "刷新全部" runs; the
     // refresh state only drives the indicator. Per-page refresh still holds the busy gate.
@@ -1293,17 +1278,16 @@ export default function WatchRSS(props: {
         await networkFor(origin).run(() => props.services.refresh(origin.channelId));
       }
       finally { if (refreshAll) usageTelemetry.recordFeedRefreshed(); }
-      if(!canReceiveData(origin))return;
-      if(origin.page==="home")await loadChannels(false);
-      else if(origin.page==="articles"&&origin.channelId)
-        await loadFeedArticles(origin.channelId,feedVisibleCount());
-      else if(origin.page==="saved"||origin.page==="watch-later")
-        await loadSaved(origin.page==="saved"?"favorite":"watchLater");
-      else if(origin.page==="search"&&origin.channelId)
-        await searchChannelArticles(origin.channelId,query());
+      if (effectivePage() === "home") await loadChannels();
+      else if (effectivePage() === "articles" && effectiveCurrent().channelId)
+        await loadFeedArticles(effectiveCurrent().channelId!, feedVisibleCount());
+      else if (effectivePage() === "saved" || effectivePage() === "watch-later")
+        await loadSaved(effectivePage() === "saved" ? "favorite" : "watchLater");
+      else if (effectivePage() === "search" && effectiveCurrent().channelId)
+        await searchChannelArticles(effectiveCurrent().channelId!, query());
       else await loadArticles(currentQuery);
     } catch (e) {
-      if(canReceiveData(origin)&&!isNetworkRecoveryCancellation(e))setError(String(e));
+      if(effectiveCurrent()===origin&&!isNetworkRecoveryCancellation(e))setError(String(e));
     } finally {
       if (refreshAll) setHomeRefreshing(false);
       else setBusy(false);
@@ -1313,11 +1297,9 @@ export default function WatchRSS(props: {
   let updatingFeed = false,
     pendingLibraryUpdate = false;
   function updateFeedWhenSettled() {
-    const origin = contentRoute(),
+    const origin = effectiveCurrent(),
       id = origin.channelId,
-      snapshot = currentQuery,
-      version = feedRequestVersion;
-    const active = () => canReceiveData(origin) && currentQuery === snapshot && version === feedRequestVersion;
+      snapshot = currentQuery;
     const libraryUpdate =
       pendingLibraryUpdate &&
       ["articles", "saved", "watch-later", "search"].includes(origin.page);
@@ -1351,7 +1333,7 @@ export default function WatchRSS(props: {
           .then((items) => ({ items, hasMore: false }));
     void request
       .then((window) => {
-        if (active()) {
+        if (effectiveCurrent() === origin && currentQuery === snapshot) {
           if (origin.list?.scroller.state() === "idle") {
             setArticles(window.items);
             if (feed) setFeedHasMore(window.hasMore);
@@ -1364,19 +1346,19 @@ export default function WatchRSS(props: {
           if (libraryUpdate) pendingLibraryUpdate = true;
         }
       })
-      .catch((e) => { if (active()) setError(String(e)); })
+      .catch((e) => setError(String(e)))
       .finally(() => {
         updatingFeed = false;
       });
   }
   onFrame(updateFeedWhenSettled,()=>false);
-  onFrame(()=>{if(page()==="home")idleHit(2);},()=>false);
+  onFrame(()=>{if(effectivePage()==="home")idleHit(2);},()=>false);
   let debugDisposed=false,debugStop:(()=>void)|undefined,shellStop:(()=>void)|undefined;
   onCleanup(()=>{debugDisposed=true;debugStop?.();shellStop?.();});
   onMount(() => {
     const unsubscribe = props.services.subscribeChannel((event) => {idleHit(47);
       if (event.kind === "error") {
-        if (contentRoute().channelId === event.id)
+        if (effectiveCurrent().channelId === event.id)
           setError(event.message ?? "刷新失败");
         return;
       }
@@ -1395,15 +1377,9 @@ export default function WatchRSS(props: {
     });
     onCleanup(unsubscribe);
     if (homeSnapshot) startupMark("channels.snapshot");
-    void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
+    void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current:effectiveCurrent,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
-  function removeWarningRoute(){
-    if(!warningShown())return;
-    cancelActiveTouches();
-    finishPopPage(current());
-  }
-  createEffect(()=>{if(cloudOwnerChoice()&&warningShown())untrack(removeWarningRoute);});
-  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: warningShown() || effectiveStack().length > 1, rootSwipeEnabled: !networkPageBlocksSwipe() });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);
@@ -1417,30 +1393,32 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
+    if (warningNavigation.onBack()) return true;
     if (disclosurePending()) return true;
-    if (page() === "home" && dismissHomeNotice()) return true;
-    if (stack().length <= 1) return false;
-    const closeEditor = current().noteEditorBack;
+    if (effectivePage() === "home" && dismissHomeNotice()) return true;
+    if (effectiveStack().length <= 1) return false;
+    const closeEditor = effectiveCurrent().noteEditorBack;
     if (closeEditor) {
       closeEditor();
       return true;
     }
     if (motion.phase !== "idle") return true;
-    rememberBackRotation();
-    beginBack(0);
+    editorBack = undefined;
+    motion.begin(0);
     motion.release(0, Date.now(), false, true);
     return true;
   });
   const removeAxis = onAxisDelta(RelativeAxis.Primary, (delta: number) => {
+    if (warningShown()) return;
     if (disclosurePending()) {
-      const list = page() === "home" ? homeDisclosureList : current().disclosureList;
+      const list = effectivePage() === "home" ? homeDisclosureList : effectiveCurrent().disclosureList;
       list?.scroller.scrollBy((delta * rowHeight) / (12 * RelativeAxisUnits.PerDegree), {durMs:120});
       return;
     }
-    if (page() === "home" && homeNoticeVisible()) return;
-    if (motion.phase === "idle" && !current().player?.onCrown(delta)) {
-      if (current().page === "reader") current().reader?.manualScroll();
-      current().list?.scroller.scrollBy(
+    if (effectivePage() === "home" && homeNoticeVisible()) return;
+    if (motion.phase === "idle" && !effectiveCurrent().player?.onCrown(delta)) {
+      if (effectiveCurrent().page === "reader") effectiveCurrent().reader?.manualScroll();
+      effectiveCurrent().list?.scroller.scrollBy(
         (delta * rowHeight) / (12 * RelativeAxisUnits.PerDegree),
         { durMs: 120 },
       );
@@ -1464,11 +1442,10 @@ export default function WatchRSS(props: {
     setPage("add-rss", { addUrl: prefill });
   };
   const openUrl = async (url: string, origin: BrowserOrigin = "information") => {
-    const source = contentRoute();
     try {
       await openBrowserUrl(url, origin, readerPreset());
     } catch (e) {
-      if (canReceiveData(source)) setError(browserOpenFailureMessage(e));
+      setError(browserOpenFailureMessage(e));
     }
   };
   const updateSettings = (patch: Partial<SettingsState>) => {
@@ -1490,10 +1467,10 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
-    if (page() === "bluetooth-connection") return;
+    if (effectivePage() === "bluetooth-connection") return;
     const url = takeRemoteInput();
     if (url === undefined) return;
-    if (page() === "remote-input") popPage(true);
+    if (effectivePage() === "remote-input") popPage(true);
     remotePromptActive = true;
     void doAdd(url)
       .catch((error) => setError(String(error)))
@@ -1517,6 +1494,8 @@ export default function WatchRSS(props: {
       setPage("information", { informationPage: "beian" });
     else setError("此设置页尚未迁移");
   };
+  const informationNavigate = (informationPage: InformationPage) =>
+    setPage("information", { informationPage });
   const {
     biliBackground,
     setBiliBackground,
@@ -1547,14 +1526,13 @@ export default function WatchRSS(props: {
     videoLoading,
     deleteBuiltin,
   } = createMediaRouteController({
-    network:()=>networkFor(contentRoute()),
+    network:()=>networkFor(effectiveCurrent()),
     initialVideoBounds:()=>hasCapability("media.video.sessions")?{x:0,y:0,width,height,visible:false}:undefined,
     onActivityStateChange:saveActivity,
     onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
     services: props.services,
-    current:contentRoute,
-    motion:{get phase(){return motion.phase;}},
-    ownership: { canReceiveData, canCommitNavigation, commitNavigation },
+    current: effectiveCurrent,
+    motion,
     busy,
     setBusy,
     setError,
@@ -1577,7 +1555,7 @@ export default function WatchRSS(props: {
     setPage("remote-input", { exportMode });
   const receiveBluetoothUrl = (url: string, destination: "return" | "add") => {
     takeRemoteInput(url);
-    const entries = stack();
+    const entries = effectiveStack();
     const caller = entries.at(-2);
     const target: Entry = { page: "add-rss", addUrl: url };
     if (destination === "return" && caller?.page === "add-rss")
@@ -1586,10 +1564,10 @@ export default function WatchRSS(props: {
     motion.reset();
     setBackOffset(0);
   };
-  createEffect(()=>{if(page()!=='home')douyinBench.cancelLogoutFeedback(douyinClient);});
+  createEffect(()=>{if(effectivePage()!=='home')douyinBench.cancelLogoutFeedback(douyinClient);});
   onCleanup(()=>douyinBench.cancelLogoutFeedback(douyinClient));
-  const returnHomeAfterDouyinLogout = (entry: Entry) => commitNavigation(entry, () => {
-    for (const entry of stack()) entry.queue?.cancel();
+  const returnHomeAfterDouyinLogout = () => {
+    for (const entry of effectiveStack()) entry.queue?.cancel();
     batch(() => {
       setStack([{ page: "home" }]);
       setPlayingSource(undefined);
@@ -1600,12 +1578,10 @@ export default function WatchRSS(props: {
     void video.stop().catch(() => {});
     void hostToast("已退出登录");
     douyinBench.logoutFeedback(douyinClient);
-  }, false);
-  const openAddedChannel = async (channel: Channel, source: Entry) => {
+  };
+  const openAddedChannel = async (channel: Channel) => {
     await loadChannels();
-    if (!commitNavigation(source, () => {
-      if (source.page === "add-rss") setStack((entries) => entries.slice(0, -1));
-    })) return;
+    if (effectivePage() === "add-rss") setStack((entries) => entries.slice(0, -1));
     if (channel.url === "builtin:bili") await biliNavigate({ name: "entry" });
     else if (channel.url === "builtin:douyin")
       await douyinNavigate({ name: "entry" });
@@ -1620,28 +1596,15 @@ export default function WatchRSS(props: {
   const renderPage = (entry: Entry) => {
     const network=networkFor(entry);
     preserveNetworkContent(network,()=>hasLocalPageContent(entry));
-    if(entry.page==='reader-scroll-controls')entry.reader=stack().slice(0,stack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
+    if(entry.page==='reader-scroll-controls')entry.reader=effectiveStack().slice(0,effectiveStack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
     const entryPage = () => entry.page;
-    const active = () => current() === entry;
-    const contentActive = () => canReceiveData(entry);
-    const routeSetPage = (next: Page, data?: Partial<Entry>) => setPage(next, data, entry);
-    const routeOpenBili: typeof biliNavigate = async (route, memory) => {
-      if (canReceiveData(entry)) await biliNavigate(route, memory);
-    };
-    const routeOpenDouyin: typeof douyinNavigate = async (route, memory) => {
-      if (canReceiveData(entry)) await douyinNavigate(route, memory);
-    };
-    const routePopPage = (skipInternal?: boolean) => {
-      let popped = false;
-      commitNavigation(entry, () => { popped = popPage(skipInternal); }, false);
-      return popped;
-    };
+    const active = () => effectiveCurrent() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
     return (
-      <NetworkRecoveryProvider network={network} active={()=>contentActive()&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
+      <NetworkRecoveryProvider network={network} active={()=>active()&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
       <View
         class={
           entryPage() === "video"
@@ -1655,7 +1618,7 @@ export default function WatchRSS(props: {
         style={{
           translateX: active()
             ? backTranslation().x
-            : current().page === "video"
+            : effectiveCurrent().page === "video"
               ? -2 * width
               : 0,
           translateY: active() ? backTranslation().y : 0,
@@ -1677,7 +1640,7 @@ export default function WatchRSS(props: {
         >
           <Show
             when={
-              contentRoute() !== entry ||
+              !active() ||
               !loading() ||
               entryPage() === "saved" ||
               entryPage() === "watch-later"
@@ -1688,13 +1651,10 @@ export default function WatchRSS(props: {
               </View>
             }
           >
-            <Show when={entryPage()==='bluetooth-warning'}>
-              <BluetoothWarningPage width={width} height={height} rotation={playerRotation()} onBack={()=>{if(active()&&motion.phase==='idle')popPage();}}/>
-            </Show>
             <HomeRoutes
               ownerChoiceNetwork={ownerChoiceNetwork}
               foreground={foreground}
-              goHome={() => goHome(entry)}
+              goHome={goHome}
               entry={entry}
               page={entryPage}
               active={() => active() && !(entryPage() === "home" && (homeNoticeVisible() || !!homeDisclosurePending()))}
@@ -1710,27 +1670,26 @@ export default function WatchRSS(props: {
               speechState={speechState}
               speechSpectrum={speechSpectrum}
               services={routeServices}
-              go={next => go(next, entry)}
+              go={go}
               openSpeech={() => setPage("speech-playback")}
               openAdd={() => void doAdd()}
               refresh={refresh}
-              openBili={routeOpenBili}
-              openDouyin={routeOpenDouyin}
-              openFeed={(channel) => commitNavigation(entry, () => {
+              openBili={biliNavigate}
+              openDouyin={douyinNavigate}
+              openFeed={(channel) => {
                 setFeedVisibleCount(12);
                 setFeedHasMore(false);
                 setPage("articles", { channelId: channel.id });
                 void loadFeedArticles(channel.id, 12, true);
-              })}
+              }}
               channelAction={channelAction}
-              openInformation={informationPage => routeSetPage("information", { informationPage })}
+              openInformation={informationNavigate}
               setError={setError}
             />
             <RssRoutes
               entry={entry}
               page={entryPage}
               active={active}
-              contentActive={contentActive}
               width={width}
               height={height}
               services={routeServices}
@@ -1748,10 +1707,10 @@ export default function WatchRSS(props: {
               systemShareEnabled={() =>
                 settings().shareUseSystem && systemShareAvailable()
               }
-              setPage={routeSetPage}
-              popPage={routePopPage}
+              setPage={setPage}
+              popPage={popPage}
               setError={setError}
-              openAddedChannel={channel => openAddedChannel(channel, entry)}
+              openAddedChannel={openAddedChannel}
               searchChannelArticles={searchChannelArticles}
               updateSearchKeyword={updateSearchKeyword}
               openArticle={openArticle}
@@ -1778,8 +1737,8 @@ export default function WatchRSS(props: {
               loading={loading}
               undoVisible={() => !!savedUndo()}
               openArticle={openArticle}
-              openBili={routeOpenBili}
-              openDouyin={routeOpenDouyin}
+              openBili={biliNavigate}
+              openDouyin={douyinNavigate}
               remove={removeSaved}
               undo={undoSaved}
               reorder={reorderSaved}
@@ -1787,14 +1746,14 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
-              onOpenImage={url=>routeSetPage("reader-image",{imageUrl:url})}
+              onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
               preset={readerPreset}
               entry={entry}
               page={entryPage}
               active={active}
-              coveredByActions={() => current().douyinActionsOwner === entry}
+              coveredByActions={() => effectiveCurrent().douyinActionsOwner === entry}
               width={width}
               height={height}
               round={metrics.shape === "round"}
@@ -1816,14 +1775,14 @@ export default function WatchRSS(props: {
               }
               deleteBuiltin={deleteBuiltin}
               share={share}
-              openBili={routeOpenBili}
-              openDouyin={routeOpenDouyin}
+              openBili={biliNavigate}
+              openDouyin={douyinNavigate}
               playDouyin={douyinPlay}
               primeDouyinEntry={primeDouyinEntry}
               stopDouyinEntry={stopDouyinEntry}
               loginDouyin={douyinLogin}
               openUrl={openUrl}
-              popPage={routePopPage}
+              popPage={popPage}
               setError={setError}
               recoverDouyinVideo={recoverDouyinVideo}
               rejectDouyinAdjacent={rejectDouyinAdjacent}
@@ -1836,10 +1795,9 @@ export default function WatchRSS(props: {
               promoteDouyinAdjacent={promoteDouyinAdjacent}
               selectDouyinTarget={selectDouyinTarget}
               openHttpExport={openHttpExport}
-              onDouyinLogoutSuccess={() => returnHomeAfterDouyinLogout(entry)}
+              onDouyinLogoutSuccess={returnHomeAfterDouyinLogout}
             />
             <SettingsRoutes
-              contentActive={contentActive}
               createDebugBluetooth={props.createDebugBluetooth}
               entry={entry}
               page={entryPage}
@@ -1852,14 +1810,13 @@ export default function WatchRSS(props: {
               presetActions={presetStore}
               updatePreset={updatePreset}
               updateSettings={updateSettings}
-              navigate={route => { if (canCommitNavigation(entry)) settingsNavigate(route); }}
+              navigate={settingsNavigate}
               systemShareAvailable={systemShareAvailable}
               reloadSettings={() => setSettings(settingsStore.load())}
-              popPage={routePopPage}
+              popPage={popPage}
               setError={setError}
             />
             <NotesRoutes
-              contentActive={contentActive}
               onStateChange={saveActivity}
               entry={entry}
               page={entryPage}
@@ -1874,8 +1831,8 @@ export default function WatchRSS(props: {
               bumpRefreshKey={() => setNotesRefreshKey((value) => value + 1)}
               preset={readerPreset}
               backgroundSnapshot={informationBackground}
-              setPage={routeSetPage}
-              popPage={routePopPage}
+              setPage={setPage}
+              popPage={popPage}
               setError={setError}
             />
             <InfoRoutes
@@ -1886,8 +1843,8 @@ export default function WatchRSS(props: {
               foreground={foreground}
               width={width}
               height={height}
-              setPage={routeSetPage}
-              openInformation={informationPage => routeSetPage("information", { informationPage })}
+              setPage={setPage}
+              openInformation={informationNavigate}
               addRecommendation={addRecommendation}
               openUrl={(url) => openBrowserUrl(url,"information",readerPreset())}
             />
@@ -1898,12 +1855,12 @@ export default function WatchRSS(props: {
               width={width}
               height={height}
               bluetoothSync={bluetoothSync}
-              onUrl={(url, destination) => commitNavigation(entry, () => receiveBluetoothUrl(url, destination), false)}
-              popPage={routePopPage}
+              onUrl={receiveBluetoothUrl}
+              popPage={popPage}
             />
           </Show>
           <ReaderRoutes
-            openNovelChapter={async item => { if (canReceiveData(entry)) await openArticle(item, false, true); }}
+            openNovelChapter={article=>openArticle(article,false,true)}
             updateSettings={updateSettings}
             entry={entry}
             page={entryPage}
@@ -1911,7 +1868,7 @@ export default function WatchRSS(props: {
             width={width}
             height={height}
             density={metrics.density}
-            stack={stack}
+            stack={effectiveStack}
             motion={motion}
             setBackOffset={setBackOffset}
             services={routeServices}
@@ -1925,8 +1882,8 @@ export default function WatchRSS(props: {
             article={article}
             setArticle={setArticle}
             openArticle={openArticle}
-            setPage={routeSetPage}
-            popPage={routePopPage}
+            setPage={setPage}
+            popPage={popPage}
             setError={setError}
             saveArticleState={saveArticleState}
             share={share}
@@ -1956,61 +1913,66 @@ export default function WatchRSS(props: {
     );
   };
 
-  // Each entry here is a browsing surface. A new route must explicitly opt in.
-  const warningBrowseReady:Partial<Record<Page,(entry:Entry)=>boolean>>={
-    home:entry=>entry.browseReady?.()!==false&&!homeNoticeVisible()&&!homeDisclosurePending(),
-    articles:entry=>entry.browseReady?.()!==false,
-    notes:entry=>entry.browseReady?.()!==false,
-    settings:()=>true,
+  const warningBrowseReady: Partial<Record<Page, (entry: Entry) => boolean>> = {
+    home: entry => entry.browseReady?.() !== false && !homeNoticeVisible() && !homeDisclosurePending(),
+    articles: entry => entry.browseReady?.() !== false,
+    notes: entry => entry.browseReady?.() !== false,
+    settings: () => true,
   };
-  bindBluetoothWarningRoute(warningNetwork,{
-    shown:warningShown,
-    canShow:()=>{
-      const entry=current();
-      if(!warningBrowseReady[entry.page]?.(entry))return false;
-      if(!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe()||nativeInputOpen()||systemShareOpen())return false;
-      if(motion.phase!=='idle'||playingSource())return false;
-      return (entry.list?.scroller.state()??'idle')==='idle';
-    },
-    push:()=>setPage('bluetooth-warning'),
-    pop:removeWarningRoute,
+  const warningMustYield = () => cloudOwnerChoice() || networkPageBlocksSwipe() ||
+    nativeInputCount() > 0 || systemShareCount() > 0 || playingSource() ||
+    !warningBrowseReady[effectivePage()]?.(effectiveCurrent());
+  createEffect(() => {
+    if (warningShown() && warningMustYield()) untrack(warningNavigation.dismiss);
+  });
+  bindBluetoothWarningRoute(warningNetwork, {
+    shown: warningShown,
+    canShow: () => foreground() && !warningMustYield() && motion.phase === "idle" &&
+      (effectiveCurrent().list?.scroller.state() ?? "idle") === "idle",
+    push: showWarning,
+    pop: warningNavigation.dismiss,
   });
 
-  const noticeFrame=createMemo(()=>readerControlViewport(width,height,metrics.shape==="round",page()==="reader"&&settings().readerPageMode));
+  const noticeFrame=createMemo(()=>readerControlViewport(width,height,metrics.shape==="round",effectivePage()==="reader"&&settings().readerPageMode));
   return (
     <View
       class={
-        page() === "video"
+        effectivePage() === "video"
           ? "relative overflow-hidden"
           : "relative overflow-hidden bg-[#000000]"
       }
       style={{ width, height }}
     >
-      <For each={stack()}>{renderPage}</For>
-      <Show when={!warningShown()}>
-      <TopNotice message={error()} width={width} height={height} round={metrics.shape==="round"}
-        top={noticeFrame().top+38} maxWidth={noticeFrame().width-24} background="#4b2030" color="#ffd5dc" />
-      <Show when={busy()}>
-        <Text class="absolute z-10 text-xs text-center text-[#45d6a7]" style={{insetL:noticeFrame().left,width:noticeFrame().width,insetT:noticeFrame().top+18}}>
-          处理中
-        </Text>
-      </Show>
-      <PlayerLoadingIndicator width={width} height={height} visible={foreground()&&videoLoading()} phase="fetching"/>
-      <ReadAloudFloatingBubble
-        width={width}
-        height={height}
-        round={metrics.shape === "round"}
-        active={foreground()}
-        page={page()}
-        state={speechState()}
-        onOpen={() => setPage("speech-playback")}
-      />
-      </Show>
-      <Show when={cloudOwnerChoice()&&!warningShown()}>
-        <NetworkRecoveryLayer network={ownerChoiceNetwork} width={width} height={height} round={metrics.shape==='round'}/>
-      </Show>
-      <Show when={recoveryEnabled(current())}>
-        <NetworkRecoveryLayer network={networkFor(current())} width={width} height={height} round={metrics.shape==='round'} rotation={playerRotation()}/>
+      <View class="absolute inset-0" accessibilityHidden={warningShown()}>
+        <For each={effectiveStack()}>{renderPage}</For>
+        <TopNotice message={error()} width={width} height={height} round={metrics.shape==="round"}
+          top={noticeFrame().top+38} maxWidth={noticeFrame().width-24} background="#4b2030" color="#ffd5dc" />
+        <Show when={busy()}>
+          <Text class="absolute z-10 text-xs text-center text-[#45d6a7]" style={{insetL:noticeFrame().left,width:noticeFrame().width,insetT:noticeFrame().top+18}}>
+            处理中
+          </Text>
+        </Show>
+        <PlayerLoadingIndicator width={width} height={height} visible={foreground()&&videoLoading()} phase="fetching"/>
+        <ReadAloudFloatingBubble
+          width={width}
+          height={height}
+          round={metrics.shape === "round"}
+          active={foreground()}
+          page={effectivePage()}
+          state={speechState()}
+          onOpen={() => setPage("speech-playback")}
+        />
+        <Show when={cloudOwnerChoice()}>
+          <NetworkRecoveryLayer network={ownerChoiceNetwork} width={width} height={height} round={metrics.shape==='round'}/>
+        </Show>
+        <Show when={recoveryEnabled(effectiveCurrent())}>
+          <NetworkRecoveryLayer network={networkFor(effectiveCurrent())} width={width} height={height} round={metrics.shape==='round'} rotation={playerRotation()}/>
+        </Show>
+      </View>
+      <Show when={warningShown()}>
+        <View class="absolute inset-0 overflow-hidden" style={{ translateX: warningNavigation.offset() }}>
+          <BluetoothWarningPage width={width} height={height} onBack={warningNavigation.onContinue}/>
+        </View>
       </Show>
     </View>
   );

@@ -16,7 +16,6 @@ interface NotesRoutesProps {
   onStateChange?:()=>void;
   page: () => Page;
   active: () => boolean;
-  contentActive: () => boolean;
   backOffset: () => number;
   transitionIdle: () => boolean;
   cancelBack: () => void;
@@ -34,7 +33,6 @@ interface NotesRoutesProps {
 
 export function NotesRoutes(props: NotesRoutesProps) {
   const finishEditing = () => {
-    if (!props.contentActive()) return;
     props.bumpRefreshKey();
     props.popPage(true);
   };
@@ -67,7 +65,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
           backgroundSnapshot={props.backgroundSnapshot()}
           active={props.active()}
           onImage={async (path) => {
-            const source = await resolveNoteImageSource(path).catch(error=>{if(props.contentActive())props.setError(String(error));return null;});
+            const source = await resolveNoteImageSource(path).catch(error=>{props.setError(String(error));return null;});
             if(!source)return;
             props.setPage("reader-image", {
               imageUrl: source.url,
@@ -98,10 +96,6 @@ export function NotesRoutes(props: NotesRoutesProps) {
           refreshKey={props.refreshKey()}
           noteId={props.entry.noteId!}
           onDone={finishEditing}
-          onWriteDone={() => {
-            if (props.contentActive()) finishEditing();
-            else props.bumpRefreshKey();
-          }}
           onError={props.setError}
           ref={(value) => {
             props.entry.list = value;

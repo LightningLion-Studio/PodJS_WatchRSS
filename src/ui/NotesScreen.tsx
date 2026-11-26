@@ -101,7 +101,7 @@ export function NotesListScreen(props: NotesListScreenProps) {
   </View></Show>;
 }
 
-export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean; editing:()=>boolean; editorClose?:()=>void }
+export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean; editorClose?:()=>void }
 export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; backOffset?:()=>number; transitionIdle?:()=>boolean; onCloseStart?:()=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
 
 function NoteEditButton(props:{width:number;height:number;active:()=>boolean;visible:()=>boolean;backOffset?:()=>number;onEdit:()=>void;background:string;color:string}) {
@@ -239,26 +239,13 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   },()=>editPending);
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
   onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
-  let modalRecoveryChecked=false,modalRecoveryChecking=false;
+  let modalRecoveryChecked=false;
   createEffect(()=>{
-    const recovery=props.inputRecovery;
-    if(!loaded()||editing()||props.active===false||!note()||!inputKey||!recovery||modalRecoveryChecked||modalRecoveryChecking)return;
-    modalRecoveryChecking=true;
-    void (async()=>{
-      try{
-        const pending=await Promise.all(['title','body'].map(part=>recovery.pending(`${inputKey}:${part}`)));
-        if(disposed||props.active===false)return;
-        modalRecoveryChecked=true;
-        if(!editing()&&note()&&pending.some(Boolean)){
-          setEditorSeed(note());
-          setEditing(true);
-        }
-      }catch{
-        modalRecoveryChecked=true;
-      }finally{
-        modalRecoveryChecking=false;
-      }
-    })();
+    if(!loaded()||editing()||props.active===false||!note()||!inputKey||!props.inputRecovery||modalRecoveryChecked)return;
+    modalRecoveryChecked=true;
+    void Promise.all(['title','body'].map(part=>props.inputRecovery!.pending(`${inputKey}:${part}`))).then(pending=>{
+      if(!disposed&&props.active!==false&&!editing()&&note()&&pending.some(Boolean)){setEditorSeed(note());setEditing(true);}
+    }).catch(()=>{});
   });
   createEffect(on(()=>props.refreshKey,()=>{if(!editing()&&props.noteId)void reload(props.noteId);},{defer:true}));
   const entries=createMemo<ScrollEntry[]>(()=>{ const n=note(); if(!n)return[]; const titleStyle=titleFont(),subtitleStyle=subtitleFont(),contentWidth=props.width-28,titleWidth=Math.min(190,contentWidth);const titleLines=watchTitleLines(n.title||"未命名笔记",contentWidth,value=>getOps().measureText(value,titleStyle.fontSlot)*titleStyle.scale);const measured=nativeHeader(),titleHeight=Math.max(32,measured?.title??titleLines.length*titleStyle.lineHeight),subtitleHeight=Math.max(22,measured?.subtitle??subtitleStyle.lineHeight),pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;return [
@@ -270,13 +257,13 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     {height:42,render:()=>null}
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
-  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack,editing})}/><NoteEditButton width={props.width} height={props.height} active={()=>props.active!==false&&!download()} visible={editButtonVisible} backOffset={props.backOffset} onEdit={requestEdit} background={editBackground()} color={bodyColor()}/><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
-    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editing,editorClose});}}/>
+  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><NoteEditButton width={props.width} height={props.height} active={()=>props.active!==false&&!download()} visible={editButtonVisible} backOffset={props.backOffset} onEdit={requestEdit} background={editBackground()} color={bodyColor()}/><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
+    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onCloseStart={props.onCloseStart} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack,editorClose});}}/>
   </Show></Show>;
 }
 
 export interface NoteActionsHandle { scroller:Scroller; goBack:()=>boolean }
-export interface NoteActionsScreenProps extends BaseProps { noteId:string; refreshKey?:number; onDone:()=>void; onWriteDone?:()=>void; ref?:(value:NoteActionsHandle)=>void }
+export interface NoteActionsScreenProps extends BaseProps { noteId:string; refreshKey?:number; onDone:()=>void; ref?:(value:NoteActionsHandle)=>void }
 export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const [note,setNote]=createSignal<MemoNote|null>(null), [folders,setFolders]=createSignal<MemoFolder[]>([]), [selectingFolder,setSelectingFolder]=createSignal(false), [confirmDelete,setConfirmDelete]=createSignal(false), [busy,setBusy]=createSignal(false);
   let readVersion=0,disposed=false;
@@ -284,18 +271,7 @@ export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const reload=async()=>{const version=++readVersion;try{const [value,groups]=await Promise.all([props.repository.get(props.noteId),props.repository.listFolders()]);if(disposed||version!==readVersion)return;setNote(value);setFolders(groups);if(!value){setSelectingFolder(false);setConfirmDelete(false);}}catch(e){if(!disposed&&version===readVersion)fail(props,e);}};
   onMount(()=>void reload());
   createEffect(on(()=>props.refreshKey,()=>void reload(),{defer:true}));
-  const act = async (operation: () => Promise<unknown>) => {
-    if (busy()) return;
-    setBusy(true);
-    try {
-      await operation();
-      (props.onWriteDone ?? props.onDone)();
-    } catch (error) {
-      fail(props, error);
-    } finally {
-      if (!disposed) setBusy(false);
-    }
-  };
+  const act=async(operation:()=>Promise<unknown>)=>{if(busy())return;setBusy(true);try{await operation();props.onDone();}catch(e){fail(props,e);}finally{if(!disposed)setBusy(false);}};
   const button=(label:string,onPress:()=>void,danger=false,enabled=true)=><View onPress={enabled&&!busy()?onPress:undefined} focusable={enabled&&!busy()} accessibilityRole="button" accessibilityLabel={label} style={{insetL:(props.width-160)/2-9}} class="absolute top-[0] w-[160] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class={danger?"text-[17px] leading-[23px] text-[#e54d4d]":enabled?"text-[17px] leading-[23px] text-[#f5f5f5]":"text-[17px] leading-[23px] text-[#999999]"}>{label}</Text></View>;
   // Visible content is the centred 160-wide pill, not the full 215-wide row.
   const pill={x:(props.width-160)/2-9,y:0,width:160,height:48};

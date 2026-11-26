@@ -688,11 +688,15 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    expect(state()).toEqual(['home','articles']);
    expect(releaseFeed).toBeDefined();
    await back();
-   expect(displayed('Test feed')).toBe(true);
-   await network(true);
-   expect(warnings()).toHaveLength(1);
+   // Startup still uses the master's loading state until its read settles.
+   expect(displayed('加载中…')).toBe(true);
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
    releaseFeed!();
-   await assertOnce('home');
+   if(!bluetoothControl)await assertOnce('home');
+   else await pump();
+   expect(state()).toEqual(['home']);
+   expect(displayed('Test feed')).toBe(true);
    return;
   }
   if(noteDownload){
@@ -761,8 +765,8 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     if(operation==='delete')await back();
     await back();
    }
-   await network(true);
-   expect(warnings()).toHaveLength(state().at(-1)===destination?1:0);
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(!bluetoothControl&&state().at(-1)===destination?1:0);
    const cancel=noteActionCancel||operation==='cancel';
    if(cancel)await network(false);
    releaseOperation!();
@@ -771,12 +775,16 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    if(writeFailure){
     for(let i=0;i<2&&state().at(-1)!==destination;i++)await back();
    }
+   // A successful write on master still runs its completion Back after the
+   // action page has been left. That Back pops the destination under the warning.
+   const landed=!writeFailure&&(noteActionLeave||operation==='leave')?'home':destination;
+   expect(state().at(-1)).toBe(landed);
    if(cancel){
-    expect(state().at(-1)).toBe(destination);
     expect(warning()).toBeUndefined();
-    await network(true);
+    await network(!bluetoothControl);
    }
-   await assertOnce(destination);
+   if(!bluetoothControl&&(landed===destination||cancel))await assertOnce(landed);
+   else expect(warnings()).toHaveLength(0);
    return;
   }
   if(videoCase){

@@ -38,7 +38,6 @@ function argsFor(entry:ActivityRoute):Record<string,unknown>{
 }
 function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRoute|null {
  if(!object(raw)||!routeIsKnown(raw.page)||!identifier(raw.id)||!/^r[1-9]\d{0,8}$/.test(raw.id)||!object(raw.args)||!json(raw.ui))return null;
- if(raw.page==='bluetooth-warning')return null;
  if((raw.page==='debug-tools'||raw.page==='debug-summary')&&!debug)return null;
  const a=raw.args,entry:ActivityRoute={page:raw.page,memory:{id:raw.id,saved:data(raw.ui,16384),retained:data(retained,524288)}};
  for(const key of fields)if(Object.hasOwn(a,key)){
@@ -85,7 +84,7 @@ const stack=createRestorableStack<ActivityRoute,Descriptor,boolean>({
  encode(entry,memory){const args=argsFor(entry);return json(args)?{page:entry.page,id:memory.id,args,ui:data(memory.saved,16384)}:null;},
  retained:memory=>data(memory.retained,524288),isRoot:entry=>entry.page==='home',restoredIds:ids=>identities.observe(ids),
 });
-const captureActivityNavigationImpl=(state:ActivityState,entries:readonly ActivityRoute[])=>stack.capture(state,entries.filter(entry=>entry.page!=='bluetooth-warning'));
+const captureActivityNavigationImpl=stack.capture;
 /** Recover the last valid prefix; routes, debug policy and entity validation stay here. */
 export function restoreActivityNavigation(state:ActivityState,debug=false):ActivityRoute[]|null {return stack.restore(state,debug);}
 export function resolveActivityNavigation(entries:ActivityRoute[],resolver:{hasChannel:(id:string)=>boolean;article:(id:string)=>Promise<RouteEntry['readerArticle']|null>;canRestore?:(entry:ActivityRoute)=>boolean}):Promise<ActivityRoute[]>{

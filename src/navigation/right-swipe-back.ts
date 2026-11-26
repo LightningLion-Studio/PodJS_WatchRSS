@@ -1,10 +1,5 @@
 import type {GestureContact,GestureOptions,GestureRegion} from '@pocketjs/framework/gesture';
 
-export const rightSwipeSlop = 8;
-function isRightSwipe(dx:number,dy:number):boolean {
- return dx>rightSwipeSlop&&dx>=Math.abs(dy);
-}
-
 /** Observe only rightward Back. Do not claim the opposite direction: a player
  * detail recognizer can own it regardless of registration order. A competing
  * progress drag, vertical page or long press cancels this observer normally. */
@@ -18,7 +13,7 @@ export function rightSwipeBack(region:GestureRegion,handlers:{
   onDown(c){if(contact===undefined)contact=c.id;else cancel();},
   onMove(c:GestureContact){
    if(c.id!==contact)return;
-   if(!dragging){if(!isRightSwipe(c.dx,c.dy))return;dragging=true;handlers.start(c.dx);}
+   if(!dragging){if(c.dx<=8||c.dx<Math.abs(c.dy))return;dragging=true;handlers.start(c.dx);}
    handlers.move(c.dx);
   },
   onUp(c){if(c.id!==contact)return;if(dragging)handlers.end(c.vx);dragging=false;contact=undefined;},

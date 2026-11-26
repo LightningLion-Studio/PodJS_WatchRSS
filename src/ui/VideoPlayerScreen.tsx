@@ -1079,10 +1079,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const releaseOwnedPlayback=()=>{
     captureFrame(true);const owns=videoSessionOwner===sessionOwner,legacy=!usingSessions();
     if(owns)videoSessionOwner=undefined;
-    const operations:Promise<unknown>[]=[];
-    if(sessionPool)operations.push(sessionPool.releaseAll());
-    if(owns&&legacy)operations.push(video.stop());
-    void Promise.allSettled(operations);
+    if(sessionPool)void sessionPool.releaseAll().catch(()=>{});
+    if(owns&&legacy)void video.stop().catch(()=>{});
   };
   const suspendDouyinRoute = () => {
     if (props.onReload) {
@@ -1443,7 +1441,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     </View></Show>
     <Show when={props.active && controlsVisible() && !error() && !networkPrompt() && !detailShown() && !(props.round && volumeVisible())}><PlayerDetailArrow left={uiLeft()} top={uiTop()} scale={uiScale()} rotation={displayRotation()} round={props.round} onOpen={() => { if (canOpenDetail()) slide.open(); }} /></Show>
     <Show when={volumeVisible() && props.round && !detailShown()}><VolumeArcCapsule width={props.width} height={props.height} percent={volumePercent()} muted={state()?.muted === true} /></Show>
-    <Show when={props.active&&detailShown()}><View class="absolute overflow-hidden" style={{
+    <Show when={detailShown()}><View class="absolute overflow-hidden" style={{
       insetL: detailViewport().x, insetT: detailViewport().y - top(), width: detailViewport().width,
       height: detailViewport().height, radius: detailViewport().radius,
     }}>

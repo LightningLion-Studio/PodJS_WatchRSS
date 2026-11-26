@@ -7,9 +7,8 @@ import type { RouteEntry } from "./types.ts";
 interface SavedControllerDependencies {
   services: AppServices;
   current: () => RouteEntry;
-  canReceiveData: (entry: RouteEntry) => boolean;
   setArticles: Setter<Article[]>;
-  startPageLoading: () => () => void;
+  setLoading: Setter<boolean>;
   setError: Setter<string>;
   setCurrentQuery: (query: ArticleQuery) => void;
 }
@@ -29,11 +28,8 @@ export function createSavedRouteController(
   onCleanup(() => savedUndoTimer?.cancel());
 
   async function loadSaved(type: "favorite" | "watchLater") {
-    const origin = dependencies.current();
     const version = ++savedLoadVersion;
-    const active = () => dependencies.canReceiveData(origin) && version === savedLoadVersion &&
-      origin.page === (type === "favorite" ? "saved" : "watch-later");
-    const loaded = dependencies.startPageLoading();
+    dependencies.setLoading(true);
     dependencies.setError("");
     try {
       const rss: Article[] = [];
@@ -56,7 +52,11 @@ export function createSavedRouteController(
         savedAt: article.savedAt ?? 0,
         sortOrder: article.saveSortOrder ?? -(article.savedAt ?? 0),
       }));
-      if (active()) {
+      if (
+        version === savedLoadVersion &&
+        dependencies.current().page ===
+          (type === "favorite" ? "saved" : "watch-later")
+      ) {
         batch(() => {
           dependencies.setArticles(rss);
           setSavedEntries(entries);
@@ -64,11 +64,11 @@ export function createSavedRouteController(
         });
       }
     } catch (error) {
-      if (active()) {
+      if (version === savedLoadVersion) {
         dependencies.setError(String(error));
       }
     } finally {
-      loaded();
+      if (version === savedLoadVersion) dependencies.setLoading(false);
     }
   }
 
@@ -80,11 +80,10 @@ export function createSavedRouteController(
   }
 
   async function removeSaved(item: SavedDisplayItem) {
-    const origin = dependencies.current();
-    const type = origin.page === "saved" ? "favorite" : "watchLater";
+    const type =
+      dependencies.current().page === "saved" ? "favorite" : "watchLater";
     try {
       await dependencies.services.setSaveState(item.articleId!, type, false);
-      if (!dependencies.canReceiveData(origin)) return;
       clearSavedUndo();
       setSavedUndo({ item, type });
       const version = savedUndoVersion;
@@ -109,7 +108,6 @@ export function createSavedRouteController(
   async function undoSaved() {
     const undo = savedUndo();
     if (!undo) return;
-    const origin = dependencies.current();
     clearSavedUndo();
     try {
       await dependencies.services.setSaveState(
@@ -117,15 +115,15 @@ export function createSavedRouteController(
         undo.type,
         true,
       );
-      if (dependencies.canReceiveData(origin)) await loadSaved(undo.type);
+      await loadSaved(undo.type);
     } catch (error) {
       dependencies.setError(String(error));
     }
   }
 
   async function reorderSaved(items: SavedDisplayItem[]) {
-    const origin = dependencies.current();
-    const type = origin.page === "saved" ? "favorite" : "watchLater";
+    const type =
+      dependencies.current().page === "saved" ? "favorite" : "watchLater";
     try {
       setSavedEntries(items);
       await dependencies.services.reorderSavedArticles(
@@ -134,7 +132,7 @@ export function createSavedRouteController(
       );
     } catch (error) {
       dependencies.setError(String(error));
-      if (dependencies.canReceiveData(origin)) await loadSaved(type);
+      await loadSaved(type);
     }
   }
 
