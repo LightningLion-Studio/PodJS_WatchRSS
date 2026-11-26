@@ -203,8 +203,32 @@ export class WatchIndexPublisher {
  private async resumeResult(requestId:string){try{return await this.http.requestResult(requestId);}catch(error){throw new PublicationLookupUnavailable(error);}}
  private async flushOnce(){
   await this.http.capabilities();const state=await this.store.readState(),queued=state.cloud?.pendingPublish;
-  if(queued?.explicit){if(queued.phase==='confirmed')return queued.result;const saved=await this.resumeResult(queued.requestId);if(saved.status==='succeeded')return this.accept(queued,saved.response);if(saved.status!=='unknown'||saved.response!==null)throw Error('invalid_schema');}
-  const {plan}=await this.pending(),known=await this.resumeResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  if(!queued)throw Error('publication_missing');
+  if(queued.explicit&&queued.phase==='confirmed')return queued.result;
+  const known=await this.resumeResult(queued.requestId);
+  if(known.status==='succeeded')return this.accept(queued,known.response);
+  if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  if(!queued.explicit){
+   const before=await this.store.readState();
+   if(before.cloud?.pendingPublish?.requestId!==queued.requestId)throw Error('choice_stale');
+   if(before.localChangeRevision!==queued.capturedLocalRevision){
+    // The old request may still become visible remotely. Retain its immutable
+    // identity for lookup, but never send it after a newer save.
+    const next=copy(before);
+    next.cloud.pendingPublish=null;
+    next.cloud.detachedPublications={...next.cloud.detachedPublications,[queued.requestId]:{...queued,phase:'detached',outcome:'unknown'}};
+    await this.store.finishUpload(before,next,queued.requestId);
+    return;
+   }
+  }
+  const {plan}=await this.pending();
+  if(plan.explicit){
+   // A previously delivered choice can commit after the first unknown reply.
+   // Recover that result before the head check can classify the choice as stale.
+   const latest=await this.resumeResult(plan.requestId);
+   if(latest.status==='succeeded')return this.accept(plan,latest.response);
+   if(latest.status!=='unknown'||latest.response!==null)throw Error('invalid_schema');
+  }
   if(plan.phase==='conflicted')throw new SyncV2Error('ref_conflict',true);
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
   const window=await this.http.negotiate([],[]);if(plan.explicit&&!publicationCurrent({...await this.store.readState(),account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},plan))throw Error('choice_stale');let after='';for(;;){const page=await this.store.uploadBatch(plan.requestId,after);if(!page.length)break;const upload=page.filter(o=>!o.oid.startsWith('state-refs:'));
@@ -302,6 +326,17 @@ export class WatchIndexPublisher {
   if(plan.explicit){const before=await this.store.readState(),next=copy(before);if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');next.cloud.pendingPublish={...next.cloud.pendingPublish,phase:'confirmed',result};await this.store.observationUpdate(before,next);return result;}
   // R2: a local change of a quarantined note is not uploaded; it stays unsent
   // until the next pull keeps it as a new note.
-  const {before}=await this.pending(),next=copy(before);next.hasUnsentEdits=plan.heldEdits===true;next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);return result;
+  const before=await this.store.readState();
+  if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');
+  if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');
+  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||
+     !publicationCurrent({...before,localChangeRevision:plan.capturedLocalRevision},{...plan,phase:'confirmed',result}))throw Error('choice_stale');
+  const next=copy(before),newer=before.localChangeRevision!==plan.capturedLocalRevision;
+  next.hasUnsentEdits=newer||plan.heldEdits===true;
+  next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;
+  next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};
+  next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};
+  await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);
+  return result;
  }
 }

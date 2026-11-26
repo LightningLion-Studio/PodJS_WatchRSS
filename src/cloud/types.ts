@@ -11,8 +11,12 @@ export interface HttpRequest {
   url: string;
   headers: Record<string, string>;
   body?: Uint8Array;
+  /** Synchronous guard at dispatch, after asynchronous request preparation. */
+  beforeDispatch?: () => void;
   /** Per-connect/read inactivity budgets, not an overall request deadline. */
   timeoutMs?: number;
+  /** Overall host deadline for a bounded request such as a token rotation. */
+  callTimeoutMs?: number;
   readTimeoutMs?: number;
   acceptHttpErrors?: boolean;
   fileProjection?: {

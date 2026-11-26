@@ -1,3 +1,5 @@
+import {sha256Hex} from '@podjs/framework/crypto';
+import {utf8Encode} from '../cloud/types';
 import { SecureStorage, WatchAccountState, WatchEntitlementSnapshot, WatchTelemetryConfig } from "./types";
 
 export const LIBRARY_OWNER_MISMATCH='library_owner_mismatch';
@@ -9,6 +11,13 @@ const entitlement = (v: any): WatchEntitlementSnapshot => ({ plan: typeof v?.pla
 const telemetry = (v: any): WatchTelemetryConfig => ({ anonymousEnabled: v?.anonymousEnabled !== false, diagnosticsEnabled: v?.diagnosticsEnabled === true, sampleRate: typeof v?.sampleRate === "number" ? v.sampleRate : 1 });
 
 export type WatchAccountIdentity = Pick<WatchAccountState,'userId'|'backendBaseUrl'>;
+interface WatchRefreshAttempt {
+  startedAt: number|undefined;
+  record(startedAt:number):Promise<void>;
+  clear():Promise<void>;
+  requireRelogin():Promise<void>;
+}
+
 export class WatchAccountStore {
   private tail:Promise<unknown>=Promise.resolve();
   private change<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>this.storage.exclusive?this.storage.exclusive(action):action());this.tail=result.catch(()=>{});return result;}
@@ -31,7 +40,7 @@ export class WatchAccountStore {
     }
     return run();
   });}
-  async read(): Promise<WatchAccountState | null> { const raw = await this.storage.get(this.key); if (!raw) return null; try { const j = JSON.parse(raw); const state: WatchAccountState = { userId: String(j.userId || "").trim(), phoneMasked: String(j.phoneMasked || "").trim(), installId: String(j.installId || "").trim(), watchDeviceToken: String(j.watchAccessToken || j.watchDeviceToken || "").trim(), tokenExpiresAtMillis: Number(j.accessTokenExpiresAtMillis || j.tokenExpiresAtMillis || 0), watchRefreshToken: String(j.watchRefreshToken || "").trim(), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAtMillis || 0), backendBaseUrl: String(j.backendBaseUrl || "").trim(), posthogHost: String(j.posthogHost || "").trim(), posthogProjectApiKey: String(j.posthogProjectApiKey || "").trim(), entitlement: entitlement(j.entitlement), telemetryConfig: telemetry(j.telemetryConfig), updatedAtMillis: Number(j.updatedAtMillis || 0) }; return state.userId && state.watchDeviceToken ? state : null; } catch (_) { return null; } }
+  async read(): Promise<WatchAccountState | null> { const raw = await this.storage.get(this.key); if (!raw) return null; try { const j = JSON.parse(raw); const state: WatchAccountState = { userId: String(j.userId || "").trim(), phoneMasked: String(j.phoneMasked || "").trim(), installId: String(j.installId || "").trim(), watchDeviceToken: String(j.watchAccessToken || j.watchDeviceToken || "").trim(), tokenExpiresAtMillis: Number(j.accessTokenExpiresAtMillis || j.tokenExpiresAtMillis || 0), watchRefreshToken: String(j.watchRefreshToken || "").trim(), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAtMillis || 0), backendBaseUrl: String(j.backendBaseUrl || "").trim(), posthogHost: String(j.posthogHost || "").trim(), posthogProjectApiKey: String(j.posthogProjectApiKey || "").trim(), entitlement: entitlement(j.entitlement), telemetryConfig: telemetry(j.telemetryConfig), updatedAtMillis: Number(j.updatedAtMillis || 0), ...(j.needsRelogin===true?{needsRelogin:true as const}:{}) }; return state.userId && state.watchDeviceToken ? state : null; } catch (_) { return null; } }
   async assertLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>):Promise<void>{const key='watchrss.library.owner',owner=await this.storage.get(key),scope=JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]);if(owner&&owner!==scope)throw new LibraryOwnerMismatchError();if(!owner)await this.storage.set(key,scope);}
   /** Empty-library adoption is the only automatic ownership transfer. Probe
    * under the account mutation lease and recheck the account after async SQL. */
@@ -45,22 +54,35 @@ export class WatchAccountStore {
   });}
   /** Call only from an explicit local user action; clearing must finish before ownership changes. */
   resolveLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>,choice:'clear'|'merge',clearLocal?:()=>Promise<void>){return this.change(async()=>{const current=await this.read();if(current&&(current.userId!==state.userId||current.backendBaseUrl!==state.backendBaseUrl))throw Error('account_switch_rejected');if(choice==='clear'){if(!clearLocal)throw Error('local_clear_required');await clearLocal();}else if(choice!=='merge')throw Error('explicit_owner_choice_required');await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));});}
-  save(state: WatchAccountState,expected?:WatchAccountState,check?:()=>void): Promise<void> { return this.change(async()=>{check?.();const previous=await this.read();if(expected&&(!previous||previous.userId!==expected.userId||previous.backendBaseUrl!==expected.backendBaseUrl||previous.watchRefreshToken!==expected.watchRefreshToken))throw Error("账号已变更，请重试");if(previous&&(previous.userId!==state.userId||previous.backendBaseUrl.replace(/\/+$/,'')!==state.backendBaseUrl.replace(/\/+$/,'')))throw Error('account_switch_rejected: 请先退出原账号');if(!await this.storage.get('watchrss.library.owner')){check?.();await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));}check?.();await this.write(state); });}
+  save(state: WatchAccountState,expected?:WatchAccountState,check?:()=>void): Promise<void> { return this.change(async()=>{check?.();const previous=await this.read();if(expected&&(!previous||previous.userId!==expected.userId||previous.backendBaseUrl!==expected.backendBaseUrl||previous.watchRefreshToken!==expected.watchRefreshToken))throw Error("账号已变更，请重试");if(previous&&(previous.userId!==state.userId||previous.backendBaseUrl.replace(/\/+$/,'')!==state.backendBaseUrl.replace(/\/+$/,'')))throw Error('account_switch_rejected: 请先退出原账号');if(!await this.storage.get('watchrss.library.owner')){check?.();await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));}check?.();await this.write(expected&&previous?.needsRelogin?{...state,needsRelogin:true}:state); });}
   /** Rotation is serialized with every account mutation, including other host guests.
    * Reread after acquiring the lease: queued consumers reuse the committed pair. */
-  refresh(expected:WatchAccountState,rotate:(state:WatchAccountState)=>Promise<WatchAccountState>,denied:(error:unknown)=>boolean=()=>false):Promise<WatchAccountState>{return this.change(async()=>{
+  refresh(expected:WatchAccountState,rotate:(state:WatchAccountState,attempt:WatchRefreshAttempt)=>Promise<WatchAccountState>,denied:(error:unknown)=>boolean=()=>false):Promise<WatchAccountState>{return this.change(async()=>{
     const current=await this.read();
     if(!current||current.userId!==expected.userId||current.backendBaseUrl!==expected.backendBaseUrl||current.installId!==expected.installId)throw Error('账号已变更，请重试');
     if(current.watchRefreshToken!==expected.watchRefreshToken)return current;
+    // Keep one durable recovery marker under the same lease as the token pair.
+    // A fingerprint binds it to the parent generation without storing the token twice.
+    const key=this.key+'.refresh-attempt';
+    const fingerprint=()=>sha256Hex(utf8Encode(JSON.stringify([current.userId,current.backendBaseUrl,current.installId,current.watchRefreshToken])));
+    const raw=await this.storage.get(key);
+    const [generation,timestamp]=raw?.split(':')??[];
+    const startedAt=raw&&generation===fingerprint()?Number(timestamp):undefined;
+    const attempt:WatchRefreshAttempt={
+      startedAt,
+      record:async time=>{await this.storage.set(key,fingerprint()+':'+time);},
+      clear:async()=>{await this.storage.remove(key);},
+      requireRelogin:async()=>{if(!current.needsRelogin)await this.write({...current,needsRelogin:true});},
+    };
     let updated:WatchAccountState;
-    try{updated=await rotate(current);}catch(error){if(denied(error))await this.clearStored(current,false);throw error;}
+    try{updated=await rotate(current,attempt);}catch(error){if(denied(error))await this.clearStored(current,false);throw error;}
     const latest=await this.read();
     if(!latest||latest.userId!==current.userId||latest.backendBaseUrl!==current.backendBaseUrl||latest.watchRefreshToken!==current.watchRefreshToken)throw Error('账号已变更，请重试');
     await this.write(updated);return updated;
   });}
   /** A confirmed refresh denial is not an explicit R10 logout. Never refresh/revoke again. */
   expire(expected:WatchAccountState):Promise<void>{return this.change(()=>this.clearStored(expected,false));}
-  private async write(state:WatchAccountState):Promise<void>{await this.storage.set(this.key, JSON.stringify({ userId: state.userId, phoneMasked: state.phoneMasked, installId: state.installId, watchDeviceToken: state.watchDeviceToken, tokenExpiresAtMillis: state.tokenExpiresAtMillis, watchAccessToken: state.watchDeviceToken, accessTokenExpiresAtMillis: state.tokenExpiresAtMillis, watchRefreshToken: state.watchRefreshToken, refreshTokenExpiresAtMillis: state.refreshTokenExpiresAtMillis, backendBaseUrl: state.backendBaseUrl, posthogHost: state.posthogHost, posthogProjectApiKey: state.posthogProjectApiKey, updatedAtMillis: state.updatedAtMillis, entitlement: { plan: state.entitlement.plan, active: state.entitlement.active, expiresAtMillis: state.entitlement.expiresAtMillis, features: state.entitlement.features }, telemetryConfig: state.telemetryConfig })); this.changed();}
+  private async write(state:WatchAccountState):Promise<void>{await this.storage.set(this.key, JSON.stringify({ userId: state.userId, phoneMasked: state.phoneMasked, installId: state.installId, watchDeviceToken: state.watchDeviceToken, tokenExpiresAtMillis: state.tokenExpiresAtMillis, watchAccessToken: state.watchDeviceToken, accessTokenExpiresAtMillis: state.tokenExpiresAtMillis, watchRefreshToken: state.watchRefreshToken, refreshTokenExpiresAtMillis: state.refreshTokenExpiresAtMillis, backendBaseUrl: state.backendBaseUrl, posthogHost: state.posthogHost, posthogProjectApiKey: state.posthogProjectApiKey, updatedAtMillis: state.updatedAtMillis, needsRelogin: state.needsRelogin, entitlement: { plan: state.entitlement.plan, active: state.entitlement.active, expiresAtMillis: state.entitlement.expiresAtMillis, features: state.entitlement.features }, telemetryConfig: state.telemetryConfig })); this.changed();}
   /** Pairing replacement: strict remote receipt under the same mutation lease.
    * Unlike ordinary offline logout, failure must retain local credentials. */
   releaseOwnershipForPairing(expected:WatchAccountState|null,release:(state:WatchAccountState|null,saveFresh:(state:WatchAccountState)=>Promise<void>)=>Promise<void>):Promise<void>{return this.change(async()=>{

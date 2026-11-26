@@ -2,9 +2,31 @@ import {test,expect} from 'bun:test';
 import {setup,ownSends} from './p6-joint3-rereview3-fixture';
 import {MemoRepository} from '../../src/notes/repository';
 import {p5Fixture} from './p5-fixture';
-import {canonical,jsonBytes,nextD64} from '../../src/sync-v2/protocol';
+import {canonical,jsonBytes,nextD64,parseCanonicalJson} from '../../src/sync-v2/protocol';
 import {fromWire} from '../../src/sync-v2/business';
 const memo=(db:any)=>new MemoRepository(db,'review-local',()=> 'imported-note',()=>200);
+test('an explicit choice accepted after the first unknown lookup finishes in the same round',async()=>{
+ const x=await setup('unknown');
+ let accepted=false;
+ try{
+  x.hooks.network=async(r,stage,lookup)=>{
+   if(stage!=='after'||accepted||!new URL(r.url).pathname.endsWith('/requests/'+x.plan.requestId))return;
+   expect(parseCanonicalJson(lookup.body).status).toBe('unknown');
+   const response=await x.transport.request({
+    url:'http://localhost:3000/functions/v1/sync/v2/account/publish',
+    method:'POST',headers:{},body:jsonBytes(x.plan.request),
+   });
+   expect(response.status).toBe(200);
+   accepted=true;
+  };
+  const fault=await x.opened.ui.syncNow().then(()=>null,(error:Error)=>error.message);
+  const state=await x.store().readState();
+  expect({accepted,fault,pending:state.cloud.pendingPublish?.phase??null,
+   applied:x.a.server.applied.length,deliveries:ownSends(x).length})
+   .toEqual({accepted:true,fault:null,pending:null,applied:1,deliveries:1});
+ }finally{await x.close();}
+});
+
 test('WRR4 equivalent legacy merge must not consume an accepted original cloud journal',async()=>{
  const f=await p5Fixture();try{const first=await f.publish();await f.edit('second');await f.publish();await f.control.rollback(first.account.commitOid,await f.control.captureAccount(),'a'.repeat(32));const row=(await f.projection.candidatePage())[0],value=fromWire(row.candidate.meta.kind,row.candidate.meta.payload,row.candidate.state.payload),key=canonical(['review-merge-peer',14,'one']);await f.projection.receiveLegacy({peer:'review-merge-peer',version:14,cursor:'one',entityKeys:[row.entityKey],body:{[row.entityKey]:{identity:'n',...value}},bodyRefsByEntity:{[row.entityKey]:[]}},null);
  const preview=await f.control.pendingLegacyChoice(key);expect(preview.canMerge).toBe(true);f.server.onChoice=async()=>{await f.control.setWriteGates({history_restore:true,choice_apply:false});};await expect(f.control.chooseCloud(preview.proof,'b'.repeat(32))).rejects.toThrow('feature_disabled');f.server.onChoice=undefined;const accepted=await f.projection.readState();expect(accepted.cloud.pendingCloudChoice.phase).toBe('accepted');await f.control.setWriteGates({history_restore:true,choice_apply:true});const next=await f.control.pendingLegacyChoice(key);expect(next.canMerge).toBe(true);

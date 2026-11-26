@@ -30,16 +30,24 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
   http.requestGuard=()=>{if(destroyed)throw Error('feature_disabled');};
   await http.capabilities();const reader=new WatchCloudIndex(local.store,http,crypto,keys,async deviceId=>authors.get(deviceId),async(window)=>{const response=window.checkpoint?{version:2,scope:session.scope,...window.checkpoint}:await http.json('GET','/checkpoint');exact(response,['version','scope','body','signature']);const checkpoint=await pin.checkpoint(crypto,{body:response.body,signature:response.signature},session.scope,now());options.clock?.observe(response.body.issuedAtMillis);if(canonical(checkpoint.account)!==canonical(window.account)||checkpoint.serverRevision!==window.serverRevision)throw Error('ref_conflict');},now,()=>local.rebuild(),{noteSegments:segments,indexObjects}),publisher=new WatchIndexPublisher(local.store,http,crypto,keys,now,options.bodyResolver,{noteSegments:segments,indexObjects});
   const authenticateWithRevision=async()=>{
+   const registrationRevision=signer.registrationRevision;
    const window=await http.negotiate([],segments?['note-conflicts.v1','note-segments.v1']:['note-conflicts.v1']);
-   return {window,revision:await authors.refresh(window.windowId)};
+   return {window,revision:await authors.refresh(window.windowId),registrationRevision};
   };
   const authenticate=async()=>(await authenticateWithRevision()).window;
+  const registerAuthor=async(proof:Awaited<ReturnType<typeof authenticateWithRevision>>,at:number)=>{
+   const author=await signer.register(http,proof.revision,at);
+   // Registration advances the approval revision and invalidates older windows.
+   const window=proof.registrationRevision===signer.registrationRevision?proof.window:await authenticate();
+   const own=window.refs.find((ref:any)=>ref.deviceId===author.deviceId);
+   return {...author,own:{commitOid:own?.commitOid??null,revision:own?.refRevision??'0'}};
+  };
   let observed:Awaited<ReturnType<typeof authenticateWithRevision>>|undefined;
   let accountControl:WatchAccountControl|undefined;let contentOpen:ReturnType<ReturnType<typeof watchContentV2>['open']>|undefined,contentBinding:string|undefined;
-  return {destroy,http,reader,publisher,authenticate,async bodyAuthor(){const window=await authenticate(),revision=await authors.refresh(window.windowId);return signer.register(http,revision,now());},async bodyCheck(){await http.requestGuard?.();await pin.assertBootstrap(false);},async pullReadOnly(){return reader.pull(await authenticate(),true);},approved:async(id:string)=>authors.get(id),async refreshTrustedTime(){const response=await http.json('GET','/checkpoint');exact(response,['version','scope','body','signature']);const checkpoint=await pin.checkpoint(crypto,{body:response.body,signature:response.signature},session.scope,now());options.clock?.observe(checkpoint.issuedAtMillis);return checkpoint;},signingDeviceId:()=>signer.registeredDeviceId(),signingStatus:()=>signer.status(),accountControl(ports:Pick<AccountControlOptions,'business'|'recovery'|'trustedNow'|'preserveStalePublication'|'prepareArchivedBook'>){return accountControl=new WatchAccountControl({...ports,store:local.store,http,reader,publisher:new WatchIndexPublisher(local.store,http,crypto,keys,()=>{const n=ports.trustedNow();if(n===null)throw Error('clock_unknown');return n;},options.bodyResolver,{noteSegments:segments}),crypto,approved:async id=>authors.get(id),rebuildProjection:()=>local.rebuild(),resolveBody:options.bodyResolver,historyRestore:options.historyRestore,choiceApply:options.choiceApply,author:async()=>{const window=await http.negotiate([],[]),revision=await authors.refresh(window.windowId),identity=await signer.register(http,revision,ports.trustedNow()??(()=>{throw Error('clock_unknown');})()),own=window.refs.find((r:any)=>r.deviceId===identity.deviceId);return {deviceId:identity.deviceId,alias:identity.alias,own:{commitOid:own?.commitOid??null,revision:own?.refRevision??'0'}};}});},async content(business:Pick<Parameters<typeof watchContentV2>[0],'enabled'|'authBinding'|'source'|'sessions'|'allowChargingCellular'|'metric'>){
+  return {destroy,http,reader,publisher,authenticate,async bodyAuthor(){return registerAuthor(await authenticateWithRevision(),now());},async bodyCheck(){await http.requestGuard?.();await pin.assertBootstrap(false);},async pullReadOnly(){return reader.pull(await authenticate(),true);},approved:async(id:string)=>authors.get(id),async refreshTrustedTime(){const response=await http.json('GET','/checkpoint');exact(response,['version','scope','body','signature']);const checkpoint=await pin.checkpoint(crypto,{body:response.body,signature:response.signature},session.scope,now());options.clock?.observe(checkpoint.issuedAtMillis);return checkpoint;},signingDeviceId:()=>signer.registeredDeviceId(),signingStatus:()=>signer.status(),accountControl(ports:Pick<AccountControlOptions,'business'|'recovery'|'trustedNow'|'preserveStalePublication'|'prepareArchivedBook'>){return accountControl=new WatchAccountControl({...ports,store:local.store,http,reader,publisher:new WatchIndexPublisher(local.store,http,crypto,keys,()=>{const n=ports.trustedNow();if(n===null)throw Error('clock_unknown');return n;},options.bodyResolver,{noteSegments:segments}),crypto,approved:async id=>authors.get(id),rebuildProjection:()=>local.rebuild(),resolveBody:options.bodyResolver,historyRestore:options.historyRestore,choiceApply:options.choiceApply,author:async()=>registerAuthor(await authenticateWithRevision(),ports.trustedNow()??(()=>{throw Error('clock_unknown');})())});},async content(business:Pick<Parameters<typeof watchContentV2>[0],'enabled'|'authBinding'|'source'|'sessions'|'allowChargingCellular'|'metric'>){
    if(business.enabled!==true)return null;if(options.indexWrite!==true)throw Error('feature_disabled');
    if(contentOpen&&contentBinding!==business.authBinding)throw Error('body_revision_changed');contentBinding=business.authBinding;
-   return contentOpen??=(async()=>{const window=await http.negotiate([],[]),revision=await authors.refresh(window.windowId),author=await signer.register(http,revision,now());
+   return contentOpen??=(async()=>{const author=await registerAuthor(await authenticateWithRevision(),now());
     return watchContentV2({...business,origin:options.origin,originPolicy:options.originPolicy,host:options.host,session:options.session,servicePin:pin,keys,alias:author.alias,now,
      approved:async id=>authors.get(id),refreshApproved:async id=>{await authors.refresh(id);},assertCurrent:async()=>{
       const current=await options.session();if(accountIdFromUserId(current.userId)!==accountId)throw Error('cloud_account_busy');sameScope(current.scope,session.scope);
@@ -53,12 +61,20 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
   },async publish(useObservedWindow=false){
    const proof=useObservedWindow?observed:undefined;observed=undefined;
    const current=await local.store.readState();if(current.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(current.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(current.pendingChoice)throw Error('choice_pending');
-   const bound=proof&&now()<=proof.window.expiresAtMillis&&proof.window.account.commitOid===(current.account?.oid??null)&&
+   const bound=proof&&proof.registrationRevision===signer.registrationRevision&&now()<=proof.window.expiresAtMillis&&proof.window.account.commitOid===(current.account?.oid??null)&&
     proof.window.account.revision===(current.account?.revision??'0')&&proof.window.account.rollbackGeneration===current.rollbackGeneration;
-   const window=bound?proof.window:await http.negotiate([],[]);
-   const revision=bound?proof.revision:await authors.refresh(window.windowId);
-   const identity=await signer.register(http,revision,now()),own=window.refs.find((ref:any)=>ref.deviceId===identity.deviceId),requestId=hex(await crypto.random(16));
-   await publisher.prepare(identity.deviceId,identity.alias,{commitOid:own?.commitOid??null,revision:own?.refRevision??'0'},requestId);return publisher.flush();
+   const author=await registerAuthor(bound?proof:await authenticateWithRevision(),now());
+   const requestId=hex(await crypto.random(16));
+   try{
+    await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+   }catch(error){
+    if((error as Error).message!=='projection_incomplete')throw error;
+    // A local save may commit while the pull is acknowledging its applied head.
+    await local.store.beginTailWindow();
+    while((await local.store.checkpoint())?.phase==='tail')await local.store.catchUpPage(local.source);
+    await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+   }
+   return publisher.flush();
   }};
  })().catch(error=>{opened=undefined;destroy();throw error;});}};
 }

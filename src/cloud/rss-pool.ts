@@ -13,7 +13,7 @@ export async function resolvePoolFeed(accounts:WatchAccountStore,transport:HttpT
  try{await current();const inventory=await client.resolveRssSource(url);await current();return inventory;}
  catch(error){
   const denied=error instanceof WatchLoginExpiredError||error instanceof CloudRequestError&&error.status===401||error instanceof Error&&'status'in error&&error.status===401;
-  if(denied&&!signal?.cancelled){const latest=await accounts.read();if(!latest||latest.userId===account.userId&&latest.backendBaseUrl===account.backendBaseUrl&&latest.watchRefreshToken===account.watchRefreshToken){if(latest)await accounts.expire(latest);throw new RssLocalAccess('expired');}}
+  if(denied&&!signal?.cancelled){const latest=await accounts.read();if(!latest||latest.userId===account.userId&&latest.backendBaseUrl===account.backendBaseUrl&&latest.watchRefreshToken===account.watchRefreshToken){throw new RssLocalAccess('expired');}}
   throw error;
  }
 }

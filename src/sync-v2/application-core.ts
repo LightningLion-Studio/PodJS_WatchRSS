@@ -148,13 +148,19 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const flushPublication=async()=>{
    await control.recoverPreparation();
    const state=await local.store.readState();if(state.cloud?.pendingCloudChoice){try{await runtime.authenticate();await control.resumeCloudChoice();}catch(error){if((error as Error).message==='choice_stale')await control.retireStaleCloudChoice();throw error;}return;}const pending=state.cloud?.pendingPublish;if(!pending)return false;
-   if(pending.phase==='conflicted'&&!pending.explicit){await recoverConflict();return;}
+   if(pending.phase==='conflicted'&&!pending.explicit&&pending.capturedLocalRevision===state.localChangeRevision){await recoverConflict();return;}
    try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else await runtime.publisher.flush();}catch(error){
     if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
      if(!(await local.store.readState()).cloud?.pendingPublish||await reconcileStalePublication())return;
      throw error;
     }
-    if((error as Error).message!=='ref_conflict'||pending.explicit||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
+    if(pending.explicit)throw error;
+    const latest=await local.store.readState();
+    if((error as Error).message==='choice_stale'&&latest.cloud?.pendingPublish?.requestId===pending.requestId&&latest.localChangeRevision!==pending.capturedLocalRevision){
+     await runtime.publisher.flush();
+     return;
+    }
+    if((error as Error).message!=='ref_conflict'||latest.cloud?.pendingPublish?.phase!=='conflicted')throw error;
     await recoverConflict();
    }
   };

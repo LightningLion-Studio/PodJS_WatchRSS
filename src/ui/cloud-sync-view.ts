@@ -28,6 +28,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   if (!available) return {title: '暂未开放', detail: '当前版本还不能使用云同步。本机内容和手机同步照常可用。', tone: 'muted'};
   if (status === null) return {title: '未登录账号', detail: '在手机端登录腕上RSS，再把账号同步到手表。', tone: 'muted', button: phone};
   if(status.cloud&&(status.cloud.ownerChoiceRequired||status.cloud.errorCode==='library_owner_mismatch'||status.cloud.message.includes('属于其他账号')))return{title:'需要选择资料归属',detail:'本机资料属于其他账号。清空仅删除本机资料；合并会上传本机资料。',tone:'attention'};
+  if (status.refreshTokenStatus === 'needs-relogin') return {title: '需要重新登录', detail: '请在手机端重新把账号同步到手表。本机资料已保留。', tone: 'attention', button: phone};
   const expired = status.refreshTokenStatus === 'expired' || (status.refreshTokenStatus === 'legacy' && status.accessTokenExpired);
   if (expired) return {title: '登录已过期', detail: '请在手机端重新把账号同步到手表。', tone: 'attention', button: phone};
   if (!status.cloud) return {title: '暂未开放', detail: '当前版本还不能使用云同步。本机内容和手机同步照常可用。', tone: 'muted'};

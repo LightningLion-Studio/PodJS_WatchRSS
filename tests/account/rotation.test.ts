@@ -56,3 +56,88 @@ test('explicit logout waits for rotation, then revokes using the newest committe
 test('refresh network/503/malformed responses preserve account and release the cross-guest lease',async()=>{
  for(const mode of ['network','503','malformed']){const f=fixture();await f.store.save(state);const transport:HttpTransport={request:async()=>{if(mode==='network')throw Error('offline');return response({},mode==='503'?503:200);}};await expect(new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport}).freshAccount()).rejects.toThrow();expect((await f.store.read())?.watchRefreshToken).toBe('refresh');expect(f.held).toBe(false);expect(f.revokes).toBe(0);expect(f.cleanups).toBe(0);}
 });
+
+test('ordinary sync backs off across repeated pre-send failures without opening a recovery window',async()=>{
+ const f=fixture();
+ await f.store.save(state);
+ let now=1_000,calls=0,online=false;
+ const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
+  request.beforeDispatch?.();
+  calls++;
+  if(!online)throw Object.assign(Error('failed to connect to unit.invalid (port 443) after 8000ms'),{code:'host_error'});
+  return response(rotated);
+ }}},()=>now);
+ for(let attempt=1;attempt<=3;attempt++){
+  await expect(tokens.freshAccount()).rejects.toThrow('failed to connect');
+  expect(calls).toBe(attempt);
+  expect(f.values.has('state_json.refresh-attempt')).toBe(false);
+  expect(await f.store.read()).toEqual(state);
+  now+=60_000;
+ }
+ online=true;
+ expect((await tokens.freshAccount()).watchRefreshToken).toBe('next');
+ expect(calls).toBe(4);
+ expect(f.cleanups).toBe(0);
+});
+
+test('ordinary sync gives up replay after a lost response and preserves local data and ownership',async()=>{
+ const f=fixture();
+ await f.store.save(state);
+ f.values.set('business-data','local draft');
+ let now=1_000,calls=0;
+ const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
+  request.beforeDispatch?.();
+  calls++;
+  now+=10_000;
+  throw Object.assign(Error('timeout'),{code:'host_error',nativeTransportFailure:true});
+ }}},()=>now);
+ await expect(tokens.freshAccount()).rejects.toThrow('需要重新登录');
+ expect(calls).toBe(2);
+ expect(await f.store.read()).toEqual({...state,needsRelogin:true});
+ expect(f.values.get('business-data')).toBe('local draft');
+ expect(f.values.has('watchrss.library.owner')).toBe(true);
+ expect(f.cleanups).toBe(0);
+ expect(f.revokes).toBe(0);
+ now+=60_000;
+ await expect(tokens.freshAccount()).rejects.toThrow('需要重新登录');
+ expect(calls).toBe(2);
+ // Account resynchronization supplies a fresh generation, which takes over.
+ await f.store.save({...state,watchRefreshToken:'replacement',watchDeviceToken:'replacement-access',tokenExpiresAtMillis:9e15});
+ expect((await tokens.freshAccount()).watchDeviceToken).toBe('replacement-access');
+ expect((await f.store.read())?.needsRelogin).toBeUndefined();
+ expect(f.values.get('business-data')).toBe('local draft');
+});
+
+test('ordinary sync saves a successful late reply to a replay sent inside the window',async()=>{
+ const f=fixture();
+ await f.store.save(state);
+ let now=1_000,calls=0;
+ const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
+  request.beforeDispatch?.();
+  if(++calls===1){now+=10_000;throw Error('connection reset');}
+  now+=11_000;
+  return response(rotated);
+ }}},()=>now);
+ expect((await tokens.freshAccount()).watchRefreshToken).toBe('next');
+ expect((await f.store.read())?.needsRelogin).toBeUndefined();
+ expect(calls).toBe(2);
+ expect(f.cleanups).toBe(0);
+});
+
+test('network recovery inside the window can finish an ambiguous rotation after a pre-send retry failure',async()=>{
+ const f=fixture();
+ await f.store.save(state);
+ let now=1_000,calls=0;
+ const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
+  request.beforeDispatch?.();
+  if(++calls===1){now+=10_000;throw Error('timeout');}
+  if(calls===2)throw Object.assign(Error('connect timed out'),{code:'connect_timeout'});
+  return response(rotated);
+ }}},()=>now);
+ await expect(tokens.freshAccount()).rejects.toThrow('connect timed out');
+ expect(f.values.has('state_json.refresh-attempt')).toBe(true);
+ now+=5_000;
+ expect((await tokens.freshAccount()).watchRefreshToken).toBe('next');
+ expect((await f.store.read())?.needsRelogin).toBeUndefined();
+ expect(f.cleanups).toBe(0);
+});
