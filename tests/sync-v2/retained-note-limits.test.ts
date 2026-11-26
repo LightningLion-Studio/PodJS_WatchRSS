@@ -2,7 +2,7 @@ import {expect,test} from 'bun:test';
 import {MemoRepository} from '../../src/notes/repository';
 import {openApplicationSyncV2} from '../../src/sync-v2/application-open';
 import {newConflictId} from '../../src/sync-v2/notes-conflict';
-import {jsonBytes,parseCanonicalJson} from '../../src/sync-v2/protocol';
+import {digest,jsonBytes,parseCanonicalJson} from '../../src/sync-v2/protocol';
 import {fixture,scope} from './p6-fix-fixture';
 
 type Side=Awaited<ReturnType<typeof fixture>>;
@@ -10,7 +10,7 @@ type Client=NonNullable<Awaited<ReturnType<typeof openApplicationSyncV2>>>;
 type Scenario={
  noteId:string;markdown:string;cloudCount:number;localCount:number;
  cloudWidth:number;localWidth:number;standardIds?:boolean;
- expected?:'merged'|'separate'|'recovery';interrupt?:boolean;
+ expected?:'merged'|'separate'|'recovery';interrupt?:boolean;recoveryQuota?:{available:number;depleted?:true};
 };
 
 async function verifyRetention(s:Scenario){
@@ -22,9 +22,17 @@ async function verifyRetention(s:Scenario){
  const sorted=(values:string[])=>[...values].sort();
  const liveNotes=(side:Side)=>side.db.query('SELECT note_id,title,markdown FROM memo_notes WHERE deleted=0 ORDER BY note_id');
  const conflicts=(side:Side)=>side.db.query('SELECT note_id,remote_markdown FROM note_merge_conflicts ORDER BY remote_markdown');
- let requests=0;
+ let requests=0,negotiations=0,negotiationsAtReservation=0,quota:number|undefined;
+ const host:Side['options']['host']=async(method:string,args:any)=>{
+  if(quota!==undefined){
+   if(method==='file.stat')return {usableBytes:quota+1048576};
+   if(method==='sql.transaction'&&args.statements?.some((op:{sql?:string})=>op.sql?.includes('SUM(bytes) FROM podjs_resource_quota')))negotiationsAtReservation=negotiations;
+  }
+  return watch.options.host(method,args);
+ };
  const transport={async request(request:Parameters<typeof phone.options.transport.request>[0]){
   const path=new URL(request.url).pathname;
+  if(path.endsWith('/negotiate'))negotiations++;
   if(path.endsWith('/choices/cloud')){
    requests++;
    const {choiceId}=parseCanonicalJson(request.body!),account=phone.server.account;
@@ -33,7 +41,7 @@ async function verifyRetention(s:Scenario){
   return phone.options.transport.request(request);
  }};
  const openWatch=async()=>{
-  const client=(await openApplicationSyncV2({...watch.options,transport}))!;
+  const client=(await openApplicationSyncV2({...watch.options,host,transport}))!;
   opened.push(client);
   return client;
  };
@@ -63,7 +71,7 @@ async function verifyRetention(s:Scenario){
   await client.ui.setKeepDiscarded(false);
   const {control,projection}=(client.ui as any).o;
   const preview=await client.ui.openChoice();
-  let stagedCopyId:string|undefined,stagedAt:number|undefined;
+  let stagedCopyId:string|undefined,stagedAt:number|undefined,expectedCopyId:string|undefined;
   if(s.interrupt){
    const original=projection.choiceUpdate.bind(projection) as typeof projection.choiceUpdate;
    projection.choiceUpdate=async(...args:any[])=>{
@@ -84,6 +92,28 @@ async function verifyRetention(s:Scenario){
    expect(stagedCopyId).toEqual(expect.any(String));
    expect(watch.options.clock.observe(startedAt+1000)).toBe(true);
    expect((await client.sync()).completionError).toBeNull();
+  }else if(s.recoveryQuota!==undefined){
+   quota=s.recoveryQuota.available;
+   if(s.recoveryQuota.depleted){
+    await expect(client.ui.chooseCloud(preview)).rejects.toThrow('storage_pressure');
+    const pending=(await projection.readState()).cloud.pendingCloudChoice;
+    expect(pending.phase).toBe('accepted');
+    expectedCopyId=digest(['retain-unsent-notes',pending.accountOid,pending.requestId]).slice(0,32);
+    for(let attempt=0;attempt<2;attempt++){
+     expect((await client.sync()).completionError).toBe('choice_pending');
+     expect(negotiations).toBeGreaterThan(negotiationsAtReservation);
+     const state=await projection.readState();
+     expect(state.cloud.pendingCloudChoice).toEqual(pending);
+     expect(state.recoveryCopies??[]).toEqual([]);
+     expect(await liveNotes(watch)).toEqual([{note_id:s.noteId,title,markdown:s.markdown}]);
+     expect((await conflicts(watch)).map(row=>row.remote_markdown)).toEqual(sorted(localTexts));
+     expect(requests).toBe(1);
+    }
+    quota=1000000;
+    expect((await client.sync()).completionError).toBeNull();
+   }else{
+    expect(await client.ui.chooseCloud(preview)).toMatchObject({applied:true});
+   }
   }else{
    let apply=()=>client.ui.chooseCloud(preview);
    for(let attempt=0;;attempt++){
@@ -113,6 +143,7 @@ async function verifyRetention(s:Scenario){
    expect(copies).toHaveLength(1);
    const [copy]=copies;
    expect(copy.header.retainedUnsentNotes).toBe(true);
+   if(expectedCopyId)expect(copy.copyId).toBe(expectedCopyId);
    if(s.interrupt){
     expect(copy.copyId).toBe(stagedCopyId);
     expect(copy.header.createdAtMillis).toBeGreaterThan(stagedAt!);
@@ -167,6 +198,13 @@ test('archives the original when the longer copy ID makes it unencodable',()=>ve
  noteId:'n',markdown:'Original offline content',cloudCount:1,localCount:512,
  cloudWidth:39999,localWidth:289,standardIds:true,expected:'recovery',interrupt:true,
 }),30000);
+
+for(const [available,depleted] of [[1000000,undefined],[700000,true],[600000,true]] as const){
+ test(`retains the original memo with a recovery quota of ${available} bytes`,()=>verifyRetention({
+  noteId:'n',markdown:'Original offline content',cloudCount:1,localCount:512,
+  cloudWidth:39999,localWidth:289,standardIds:true,expected:'recovery',recoveryQuota:{available,depleted},
+ }),30000);
+}
 
 // Count is the proposed union. Body targets are the sum of both Markdown
 // inputs, clipped only when necessary to keep each source record encodable.

@@ -80,7 +80,7 @@ export class WatchRecovery {
   * changes, recovery reference and pins commit at the prepared SQL snapshot.
   * Journal validity uses only the authenticated head and local business edits.
   * This entry must be invoked only after explicit choices/cloud confirmation. */
- async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];requiredRecovery?:{keys:string[];copyId:string};explicitCloudChoice:true;next:SyncState;statements:Statement[];incomingBody?:LegacyBodyRef;incomingMetadata?:true}){
+ async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];requiredRecovery?:{keys:string[];copyId:string};explicitCloudChoice:true;next:SyncState;statements:Statement[];incomingBody?:LegacyBodyRef;incomingMetadata?:true;releaseProjection?:()=>Promise<void>}){
   if(input.explicitCloudChoice!==true)throw Error('choice_pending');const before=await this.projection.readState();checkCapture(before,input.capture);await this.checkRecords(before);
   const next={...input.next,recoveryCopies:[...before.recoveryCopies??[]],recoveryPins:[...before.recoveryPins??[]],recoveryClock:before.recoveryClock??0,recoveryEditPins:[...before.recoveryEditPins??[]]};
   // The caller cannot alter recovery references through next state.
@@ -106,7 +106,15 @@ export class WatchRecovery {
   // ordinary recipe named by the recovery delta still requires its closure.
   const sources=(incomingBody||input.incomingMetadata)&&!delta.bodyRefs.length?[]:await this.ports.source(delta.bodyRefs,delta.changes);if(canonical(sources.map(s=>s.oid).sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
   let worst=jsonBytes(delta).length*3+16384;for(const source of sources){uint(source.size);if(source.size>266264)throw Error('object_too_large');worst+=source.size*3+16384;}
-  const release=await this.ports.reserve(worst),resources:Resource[]=[],files:RecoveryFile[]=[];let committed=false;
+  // The projection was prepared and budgeted before recovery. Release its
+  // reservation before staging recovery, while keeping their final CAS atomic.
+  await input.releaseProjection?.();
+  let release:Awaited<ReturnType<RecoveryPort['reserve']>>;
+  try{release=await this.ports.reserve(worst);}catch(error){
+   if(!input.releaseProjection)throw error;
+   throw Object.assign(Error('storage_pressure'),{cause:error});
+  }
+  const resources:Resource[]=[],files:RecoveryFile[]=[];let committed=false;
   try{
    for(const source of sources){const hash=new ContentSha256();for(let at=0;at<source.size;at+=65536){const length=Math.min(65536,source.size-at),part=await source.read(at,length);if(part.length!==length)throw Error('closure_incomplete');hash.update(part);
      const id=digest({copyId,oid:source.oid,offset:at}),path=this.cache.binding+'/'+id+'.recovery',aad=canonical({domain:'wrss.sync.v2/local-recovery-body',binding:this.cache.binding,copyId,oid:source.oid,offset:at,length}),sealed=await this.ports.cipher.seal(aad,{dataBase64:encodeBase64(part)}),data=bytes(sealed);
@@ -121,7 +129,10 @@ export class WatchRecovery {
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
    const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,...(incomingBody?this.projection.legacyBodies.guard(incomingBody):[]),this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
    await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);committed=true;return copy;
-  }finally{await this.cache.unstage(resources);await release();if(!committed)try{await this.cache.collect();}catch{}}
+  }finally{
+   try{await this.cache.unstage(resources);}finally{await release();}
+   if(!committed)try{await this.cache.collect();}catch{}
+  }
  }
  /** Trusted time watermark is durable. Expiry removes ciphertext references and
   * pins at one CAS. Physical release follows the committed reference deletion. */

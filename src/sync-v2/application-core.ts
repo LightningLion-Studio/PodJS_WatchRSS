@@ -163,6 +163,8 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const flush=async()=>{
    try{return await flushPublication();}catch(error){
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish;
+    // An accepted choice already journals the retry and its original request.
+    if(state.cloud?.pendingCloudChoice?.phase==='accepted'&&(error as Error).message==='storage_pressure')return true;
     if((pending?.explicit||state.cloud?.pendingCloudChoice)&&(error instanceof PublicationLookupUnavailable||(error as Error).message==='feature_disabled'))return true;
     throw error;
    }

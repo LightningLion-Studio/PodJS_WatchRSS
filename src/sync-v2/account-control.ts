@@ -55,6 +55,7 @@ export interface AccountControlOptions {
 export class WatchAccountControl {
  private plans=new WeakMap<object,{capture:Capture;local:RecordRow[];cloud:RecordRow[];merge:any;mergedRows?:RecordRow[];release?:()=>Promise<void>;legacyKey?:string;legacyHash?:string;legacyMerge?:any;applyPlan?:import('@podjs/framework/sql-program').SqlProgramRef}>();
  private activePreview?:object;
+ private cloudChoiceResume?:ReturnType<WatchAccountControl['resumeCloudChoiceOnce']>;
  constructor(private readonly o:AccountControlOptions){}
  private now(){const n=this.o.trustedNow();if(n===null)throw Error('clock_unknown');uint(n);return n;}
  private async gate(kind:'history'|'choice'){if(kind==='history'?(!this.o.historyRestore||!this.o.http.historyRestoreOpen()):!this.o.choiceApply)throw Error('feature_disabled');const s=await this.o.store.readStableState(),flag=kind==='history'?'history_restore':'choice_apply';if(s.cloud?.p5Gates?.[flag]===false)throw Error('feature_disabled');}
@@ -167,7 +168,19 @@ export class WatchAccountControl {
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
  }
  private async reserveBytes(bytes:number){try{return await this.o.business.reserve(bytes);}catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}}
- private async reserveProjection(statements:import('@podjs/framework/sql-projection').Statement[]){const plan=(statements as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef|undefined;if(!plan)return this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements)),reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let ref=plan;try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}catch(e){if(!await this.o.store.planOwned(plan.id))await release();throw e;}return async()=>{if(!await this.o.store.planOwned(plan.id)){if(reservation)await this.o.store.releasePlanReservation(ref);else await release();}};}
+ private async reserveProjection(statements:Statement[],options:{allowPendingCloudChoice?:boolean}={}){
+  const plan=(statements as Statement[]&{preparedPlan?:import('@podjs/framework/sql-program').SqlProgramRef}).preparedPlan;
+  if(!plan)return this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));
+  const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));
+  const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;
+  let ref=plan;
+  try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}
+  catch(error){if(options.allowPendingCloudChoice||!await this.o.store.planOwned(plan.id))await release();throw error;}
+  return async()=>{
+   if(reservation)await this.o.store.releasePlanReservation(ref,options);
+   else if(options.allowPendingCloudChoice||!await this.o.store.planOwned(plan.id))await release();
+  };
+ }
  private async checked(proof:object){const p=this.plans.get(proof);if(!p)throw Error('choice_stale');const s=await this.o.store.readState();checkCapture(s,p.capture);if(p.legacyKey&&digest(await this.o.store.legacyChoiceEntry(p.legacyKey))!==p.legacyHash)throw Error('choice_stale');return {p,s};}
  async pendingLegacyChoice(key:string){
   const view=await this.pendingChoice();if(!view)throw Error('choice_stale');const p=this.plans.get(view.proof)!;checkCapture(await this.o.store.readState(),p.capture,key);
@@ -233,6 +246,12 @@ export class WatchAccountControl {
   }
  }
  async resumeCloudChoice(){
+  // Foreground sync and explicit actions can resume the same journal.
+  const attempt=this.cloudChoiceResume??=this.resumeCloudChoiceOnce();
+  try{return await attempt;}
+  finally{if(this.cloudChoiceResume===attempt)this.cloudChoiceResume=undefined;}
+ }
+ private async resumeCloudChoiceOnce(){
   await this.gate('choice');const s=await this.o.store.readState(),intent=s.cloud?.pendingCloudChoice;if(!intent){await this.flushApplied();return {applied:false,commit:null};}
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
   const window=await this.o.http.negotiate([],[]),current=await this.o.store.readState();if(!choiceCurrent({...current,account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},capture)){await this.o.reader.pull(window);throw Error('choice_stale');}
@@ -242,6 +261,7 @@ export class WatchAccountControl {
   for(let attempt=0;;attempt++){
    const before=await this.o.store.readState();
    try{return await this.applyAcceptedCloudChoice();}catch(error){
+    if((error as {code?:string})?.code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(String(error)))throw Object.assign(Error('storage_pressure'),{cause:error});
     const after=await this.o.store.readState();if((error as Error).message!=='choice_stale'||attempt>=3||canonical(before)===canonical(after)||!choiceCurrent(after,capture))throw error;
    }
   }
@@ -255,7 +275,9 @@ export class WatchAccountControl {
   const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
   const records=this.records(retained?.rows??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
   if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
-  const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business),release=await this.reserveProjection(statements);
+  const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business);
+  let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,{allowPendingCloudChoice:true});
+  const releaseProjection=async()=>{await release?.();release=undefined;};
   try{
    const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;
    for(const r of localRows){
@@ -266,8 +288,8 @@ export class WatchAccountControl {
    for(const r of cloudRows)if(!selected||selected.has(r.entityKey))cloud[r.entityKey]={kind:r.candidate.meta.kind,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),bodyRefs:[]};
    const incomingBody=legacy?.entry.transferBody as LegacyBodyRef|undefined;
    const requiredRecovery=retained?.localOnly.length?{keys:retained.localOnly,copyId:digest(['retain-unsent-notes',capture.accountOid,intent.requestId]).slice(0,32)}:undefined;
-   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,requiredRecovery,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
-  }finally{await release();}
+   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,requiredRecovery,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements,releaseProjection});
+  }finally{await releaseProjection();}
   if(!intent.legacyKey)await this.flushApplied();await this.o.store.dropInactiveCloudRows(s.cloud.current.treeRoot);return {applied:!intent.legacyKey,commit:null,...(intent.legacyKey?{discarded:true}: {})};
  }
 
