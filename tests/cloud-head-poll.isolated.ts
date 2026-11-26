@@ -163,7 +163,7 @@ const {startApplicationCloudSync,stopApplicationCloudSync}=await import('../src/
 let offStatus:()=>void;
 beforeEach(async()=>{
  clock=new Clock();clock.now=1000;sql=stateSqlFixture();
- Date.now=()=>clock.now;Math.random=()=>0.5;
+ Date.now=()=>clock.now;Math.random=()=>0.999_999;
  calls.length=syncTimes.length=messages.length=refreshes.length=0;
  writer=worker=false;values.clear();secure.clear();files.clear();life='active';screen={interactive:true,resumed:true};
  forced=null;configEnabled=approved=readable=true;headStatus=configStatus=200;interval=20_000;configTtl=600;etag='head-1';
@@ -391,7 +391,8 @@ test('a transient refresh failure backs off and keeps the login',async()=>{
 
 for(const message of ['Unable to resolve host "backend.invalid": No address associated with hostname',
  'Failed to connect to backend.invalid/192.0.2.1:443',
- 'failed to connect to backend.invalid/192.0.2.1 (port 443) after 8000ms'] as const){
+ 'failed to connect to backend.invalid/192.0.2.1 (port 443) after 8000ms',
+ 'java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.'] as const){
  test('undelivered refresh backs off, then recovers: '+message,async()=>{
   refreshNetworkError=Object.assign(Error(message),{code:'host_error',nativeTransportFailure:true});
   await startWithRefresh(10_000);
@@ -400,6 +401,7 @@ for(const message of ['Unable to resolve host "backend.invalid": No address asso
   await clock.advance(40_000);
   expect(refreshTimes).toEqual([21_000,41_000,81_000]);
   expect((await store.read())?.watchRefreshToken).toBe('fixture-refresh');
+  expect((await store.read())?.needsRelogin).toBeUndefined();
   refreshNetworkError=undefined;
   await clock.advance(80_000);
   expect(refreshTimes).toEqual([21_000,41_000,81_000,161_000]);
@@ -473,11 +475,11 @@ for(const failure of ['no response','gateway 504'] as const){
   loseRefreshReply=true;
   replaceRefreshReplyWith504=failure==='gateway 504';
   await startWithRefresh(10_000);
-  await clock.advance(22_000);
-  expect(refreshTimes).toEqual([23_000]);
+  await clock.advance(20_000);
+  expect(refreshTimes).toEqual([21_000]);
   await clock.advance(20_000);
   expect(refreshTimes).toHaveLength(2);
-  expect(refreshTimes).toEqual([23_000,33_000]);
+  expect(refreshTimes).toEqual([21_000,31_000]);
   expect(serverRevocations).toBe(0);
   expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
   expect(heads()).toHaveLength(1);
@@ -665,7 +667,7 @@ test('approval, account, and the writer lease gate head traffic',async()=>{
  expect(heads()).toHaveLength(1);
 });
 
-for(const [random,wait] of [[0,18_000],[0.5,20_000],[0.999_999,22_000]] as const){
+for(const [random,wait] of [[0,18_000],[0.5,19_000],[0.999_999,20_000]] as const){
  test('jitter boundary '+wait+' ms',async()=>{
   Math.random=()=>random;
   await start();

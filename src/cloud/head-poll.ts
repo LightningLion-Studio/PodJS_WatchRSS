@@ -126,7 +126,7 @@ export class WatchHeadPoll {
  }
 
  private jitter(interval:number){
-  return Math.max(1,interval+Math.round((Math.random()*2-1)*2000));
+  return Math.max(1,interval+Math.round((Math.random()-1)*2000));
  }
 
  private retry(minimum=0){

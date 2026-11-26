@@ -32,12 +32,15 @@ export class WatchTokenManager {
     const state=await this.store.read();if(!state)throw Error('手表尚未绑定腕上RSS账号');
     if(rejectedAccessToken&&rejectedAccessToken!==state.watchDeviceToken)forceRefresh=false;
     if(!state.needsRelogin&&!forceRefresh&&state.tokenExpiresAtMillis>this.now()+60000)return state;
-    if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now()))throw new WatchLoginExpiredError();
+    if(!state.needsRelogin&&(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now())))throw new WatchLoginExpiredError();
     return this.refreshAccount(state);
+  }
+  private requestProfile(state:WatchAccountState,beforeDispatch?:()=>void){
+    return this.options.transport.request({method:'GET',url:this.options.backendBaseUrl.replace(/\/$/,'')+'/functions/v1/account/profile',headers:{accept:'application/json',authorization:'Bearer '+state.watchDeviceToken},beforeDispatch});
   }
   async refreshProfile():Promise<WatchAccountSafetyProfile>{
     const state=await this.freshAccount();
-    const r=await this.options.transport.request({method:'GET',url:this.options.backendBaseUrl.replace(/\/$/,'')+'/functions/v1/account/profile',headers:{accept:'application/json',authorization:'Bearer '+state.watchDeviceToken}});
+    const r=await this.requestProfile(state);
     if(r.status===401)throw new WatchLoginExpiredError();
     if(r.status<200||r.status>=300)throw Error('账号信息刷新失败');
     const data=JSON.parse(utf8Decode(r.body));if(data.userId!==state.userId||typeof data.phoneMasked!=='string'||!data.phoneMasked.includes('*'))throw Error('账号信息响应无效');
@@ -66,7 +69,17 @@ export class WatchTokenManager {
         await attempt.requireRelogin();
         throw new WatchLoginExpiredError(WATCH_RELOGIN_MESSAGE);
       };
-      if(current.needsRelogin||(recovering&&!windowOpen()))return relogin();
+      if(current.needsRelogin){
+        // Old builds also set this flag for TLS failures. Authentication with
+        // the current access token proves the server has not rotated this pair.
+        if(current.tokenExpiresAtMillis>0&&current.tokenExpiresAtMillis<=this.now())return relogin();
+        const profile=await this.requestProfile(current,poll?.beforeDispatch);
+        if(profile.status<200||profile.status>=300||JSON.parse(utf8Decode(profile.body))?.userId!==current.userId)return relogin();
+        await attempt.clear();
+        const {needsRelogin,...verified}=current;
+        return verified;
+      }
+      if(recovering&&!windowOpen())return relogin();
       // Write ahead of dispatch so a killed guest cannot lose a possible
       // rotation. A confirmed pre-send failure removes its own marker.
       if(!recovering)await attempt.record(startedAt);

@@ -1,10 +1,30 @@
 import {contentFixture} from './content-fixture';
 import {test,expect} from 'bun:test';
-import {createCloudTransport} from '../../src/cloud/transport';
+import {createCloudTransport,httpFailedBeforeSend} from '../../src/cloud/transport';
 import {WatchCloudClient} from '../../src/cloud/client';
 import {crypto,enabled} from './k2-crypto';
 import {utf8Encode,utf8Decode} from '../../src/cloud/types';
 import {SupabaseTusUploader} from '../../src/cloud/tus';
+test('Android TLS handshake and certificate diagnostics prove that the request was not sent',()=>{
+ for(const message of [
+  'java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.',
+  'javax.net.ssl.SSLHandshakeException: Chain validation failed',
+  'javax.net.ssl.SSLPeerUnverifiedException: Hostname unit.invalid not verified',
+  'java.security.cert.CertificateException: invalid certificate',
+  'CertificateExpiredException: certificate expired',
+  'CertificateNotYetValidException: certificate is not yet valid',
+  'Trust anchor for certification path not found.',
+  'Chain validation failed',
+  'Hostname unit.invalid not verified',
+ ]){
+  expect(httpFailedBeforeSend(Object.assign(Error(message),{code:'host_error'}))).toBe(true);
+  expect(httpFailedBeforeSend({code:message})).toBe(true);
+ }
+ for(const message of ['Socket closed','timeout','SSLException: connection reset','TLS alert after request']){
+  expect(httpFailedBeforeSend(Object.assign(Error(message),{code:'host_error'}))).toBe(false);
+ }
+});
+
 test('large PATCH uses bounded chunks/bodyPath, response file validation and cleanup on success/failure',async()=>{
  const files=new Map<string,Uint8Array>();let n=0,fail=false;const methods:string[]=[];
  const transport=createCloudTransport(async<T>(method:string,a:any):Promise<T>=>{methods.push(method);expect(JSON.stringify(a).length).toBeLessThan(65536);let out:any;

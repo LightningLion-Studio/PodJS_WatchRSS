@@ -13,12 +13,12 @@ test('unbound/expired public RSS is fetched on watch with accurate add/refresh s
  for(const error of [Error('HTTP 503'),Error('账号已变更')])await expect(acquireRssFeed('u','refresh',true,{pool:async()=>{throw error;},direct:async()=>{throw Error('unexpected direct');}})).rejects.toBe(error);
  await expect(acquireRssFeed('u','refresh',true,{cancelled:()=>true,pool:async()=>{throw new RssLocalAccess('unbound');},direct:async()=>{throw Error('unexpected direct');}})).rejects.toBeInstanceOf(RssLocalAccess);
 });
-test('public client classifies absent/locally expired credentials and confirmed HTTP401, while keeping 503 distinct',async()=>{
+test('public client classifies absent/locally expired credentials and pool HTTP 401 while preserving the account, with 503 distinct',async()=>{
  const store=accounts();let requests=0;const transport={request:async()=>{requests++;return {status:401,headers:{},body:utf8Encode('{}')};}};
  await expect(resolvePoolFeed(store,transport,'https://feed.example/rss','test')).rejects.toMatchObject({reason:'unbound'});expect(requests).toBe(0);
  await store.save({...state,tokenExpiresAtMillis:1});await expect(resolvePoolFeed(store,transport,'https://feed.example/rss','test')).rejects.toMatchObject({reason:'expired'});expect(requests).toBe(0);
- await store.save(state);await expect(resolvePoolFeed(store,transport,'https://feed.example/rss','test')).rejects.toMatchObject({reason:'expired'});expect(await store.read()).toBeNull();
- await store.save(state);await expect(resolvePoolFeed(store,{request:async()=>({status:503,headers:{},body:utf8Encode('{}')})},'https://feed.example/rss','test')).rejects.toMatchObject({status:503});expect(await store.read()).not.toBeNull();
+ await store.save(state);await expect(resolvePoolFeed(store,transport,'https://feed.example/rss','test')).rejects.toMatchObject({reason:'expired'});expect(await store.read()).toEqual(state);
+ await expect(resolvePoolFeed(store,{request:async()=>({status:503,headers:{},body:utf8Encode('{}')})},'https://feed.example/rss','test')).rejects.toMatchObject({status:503});expect(await store.read()).not.toBeNull();
 });
 test('binding local feeds to public identities is idempotent and preserves local article/read/save clocks',async()=>{
  const {Database}=await import('bun:sqlite'),{initializeSchema}=await import('../../src/core/schema'),{WatchRssRepository}=await import('../../src/core/repository'),{poolFeedXml}=await import('../../src/cloud/rss-pool');

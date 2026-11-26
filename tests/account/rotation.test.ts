@@ -57,18 +57,21 @@ test('refresh network/503/malformed responses preserve account and release the c
  for(const mode of ['network','503','malformed']){const f=fixture();await f.store.save(state);const transport:HttpTransport={request:async()=>{if(mode==='network')throw Error('offline');return response({},mode==='503'?503:200);}};await expect(new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport}).freshAccount()).rejects.toThrow();expect((await f.store.read())?.watchRefreshToken).toBe('refresh');expect(f.held).toBe(false);expect(f.revokes).toBe(0);expect(f.cleanups).toBe(0);}
 });
 
-test('ordinary sync backs off across repeated pre-send failures without opening a recovery window',async()=>{
+for(const message of [
+ 'failed to connect to unit.invalid (port 443) after 8000ms',
+ 'java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.',
+])test('ordinary sync backs off without opening a recovery window: '+message,async()=>{
  const f=fixture();
  await f.store.save(state);
  let now=1_000,calls=0,online=false;
  const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
   request.beforeDispatch?.();
   calls++;
-  if(!online)throw Object.assign(Error('failed to connect to unit.invalid (port 443) after 8000ms'),{code:'host_error'});
+  if(!online)throw Object.assign(Error(message),{code:'host_error'});
   return response(rotated);
  }}},()=>now);
  for(let attempt=1;attempt<=3;attempt++){
-  await expect(tokens.freshAccount()).rejects.toThrow('failed to connect');
+  await expect(tokens.freshAccount()).rejects.toThrow(message);
   expect(calls).toBe(attempt);
   expect(f.values.has('state_json.refresh-attempt')).toBe(false);
   expect(await f.store.read()).toEqual(state);
@@ -77,6 +80,42 @@ test('ordinary sync backs off across repeated pre-send failures without opening 
  online=true;
  expect((await tokens.freshAccount()).watchRefreshToken).toBe('next');
  expect(calls).toBe(4);
+ expect(f.cleanups).toBe(0);
+});
+
+test('an authenticated profile response clears an old relogin prompt without replaying refresh',async()=>{
+ const f=fixture();
+ const stored={...state,tokenExpiresAtMillis:120_000};
+ await f.store.save(stored);
+ let online=false,probes=0,rotations=0;
+ const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{async request(request){
+  if(request.method==='GET'){
+   expect(request.url).toEndWith('/account/profile');
+   expect(request.headers.authorization).toBe('Bearer old');
+   probes++;
+   return response({userId:state.userId},online?200:401);
+  }
+  request.beforeDispatch?.();
+  rotations++;
+  return response(rotated);
+ }}},()=>1000);
+ // Simulate the state the previous release wrote after misclassifying TLS.
+ await f.store.refresh(stored,async(current,attempt)=>{
+  await attempt.record(1);
+  await attempt.requireRelogin();
+  return {...current,needsRelogin:true};
+ });
+ await expect(tokens.freshAccount()).rejects.toThrow('需要重新登录');
+ expect((await f.store.read())?.needsRelogin).toBe(true);
+ expect(f.values.has('state_json.refresh-attempt')).toBe(true);
+ online=true;
+ expect(await tokens.freshAccount()).toEqual(stored);
+ expect(await f.store.read()).toEqual(stored);
+ expect(f.values.has('state_json.refresh-attempt')).toBe(false);
+ expect(probes).toBe(2);
+ expect(rotations).toBe(0);
+ expect((await tokens.freshAccount(true)).watchRefreshToken).toBe('next');
+ expect(rotations).toBe(1);
  expect(f.cleanups).toBe(0);
 });
 

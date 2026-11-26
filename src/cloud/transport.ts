@@ -2,7 +2,7 @@ import {encodeBase64 as bytesToBase64,base64ToBytes} from '@podjs/framework/byte
 import type {HttpTransport} from './types';
 import type {CloudHostRequest} from './host-ports';
 import {cloudDisabled,type CloudGuard} from './guard';
-/** The pinned host preserves Android/OkHttp DNS and connect diagnostics in
+/** The pinned host preserves Android/OkHttp DNS, connect and TLS diagnostics in
  * the foreground and in the worker bridge. Generic timeouts are ambiguous. */
 export function httpFailedBeforeSend(error:unknown):boolean {
  const {code,message}=(error??{}) as {code?:unknown;message?:unknown};
@@ -10,7 +10,10 @@ export function httpFailedBeforeSend(error:unknown):boolean {
  const diagnostic=code==='host_error'?message:code??message;
  return typeof diagnostic==='string'&&(
   /^(UnknownHostException|ConnectException|NoRouteToHostException)$/.test(diagnostic)||
-  /^(unable to resolve host |failed to connect to |connect (?:timeout|timed out)\b)/i.test(diagnostic)
+  /^(unable to resolve host |failed to connect to |connect (?:timeout|timed out)\b)/i.test(diagnostic)||
+  /^(?:javax\.net\.ssl\.)?SSL(?:Handshake|PeerUnverified)Exception(?::|$)/.test(diagnostic)||
+  /^(?:java\.security\.cert\.)?(?:CertPathValidator|Certificate(?:Expired|NotYetValid)?)Exception(?::|$)/.test(diagnostic)||
+  /^(?:Trust anchor for certification path not found\b|Chain validation failed\b|Hostname \S+ not verified\b)/i.test(diagnostic)
  );
 }
 
