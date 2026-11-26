@@ -253,8 +253,8 @@ export class WatchAccountControl {
   const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
   const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
-  const records=this.records(retained??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
-  if(retained){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
+  const records=this.records(retained?.rows??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
+  if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
   const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business),release=await this.reserveProjection(statements);
   try{
    const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;
@@ -265,7 +265,8 @@ export class WatchAccountControl {
    }
    for(const r of cloudRows)if(!selected||selected.has(r.entityKey))cloud[r.entityKey]={kind:r.candidate.meta.kind,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),bodyRefs:[]};
    const incomingBody=legacy?.entry.transferBody as LegacyBodyRef|undefined;
-   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
+   const requiredRecovery=retained?.localOnly.length?{keys:retained.localOnly,copyId:digest(['retain-unsent-notes',capture.accountOid,intent.requestId]).slice(0,32)}:undefined;
+   checkCapture(await this.o.store.readStableState(),capture);await this.o.recovery.applyCloud({capture,local,cloud,requiredRecovery,...(capturedKeys?{capturedKeys}:{}),...(incomingBody?{incomingBody}:{}),...(legacy?.entry.localTransfer&&!incomingBody?{incomingMetadata:true}:{}),explicitCloudChoice:true,next,statements});
   }finally{await release();}
   if(!intent.legacyKey)await this.flushApplied();await this.o.store.dropInactiveCloudRows(s.cloud.current.treeRoot);return {applied:!intent.legacyKey,commit:null,...(intent.legacyKey?{discarded:true}: {})};
  }
@@ -279,13 +280,14 @@ export class WatchAccountControl {
   const localById=new Map(local.map(row=>[row.entityKey,row]));
   const unopenable=state.cloud?.unopenableNotes??{};
   const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
-  let retained=false;
+  const localOnly:string[]=[];
+  let changed=false;
   for(const row of local){
    const c=row.candidate;
    if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
    const existing=cloudById.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
    if((existing&&hash===noteEditDigest(existing.candidate))||(base&&hash===digest(base)))continue;
-   let selected=rows.get(row.entityKey)??row;
+   let selected:RecordRow|null=rows.get(row.entityKey)??row;
    if(state.editBase.accountOid===null&&existing&&sameLiveNoteContent(c,existing.candidate)){
     const updatedAt=Math.max(c.state.payload.updatedAt,selected.candidate.state.payload.updatedAt);
     selected=this.retainNote(row,c.meta.logicalId,row.entityKey,selected,updatedAt)
@@ -297,51 +299,53 @@ export class WatchAccountControl {
      selected=this.retainNoteCopy(row,hash,rows,localById,unopenable);
     }
    }
-   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);retained=true;}
+   if(!selected){localOnly.push(row.entityKey);continue;}
+   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);changed=true;}
    const folder=selected.candidate.meta.payload.folderId;
    const p=selected.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
    const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
    for(const key of dependencies){
     const dependency=localById.get(key),selected=rows.get(key);
-    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);retained=true;}
+    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);changed=true;}
    }
   }
-  return retained?[...rows.values()]:null;
+  return {rows:[...rows.values()],changed,localOnly};
  }
 
  /** Reusing text must still retain conflicts from each local memo. */
  private retainNote(row:RecordRow,noteId:string,entityKey:string,matching?:RecordRow,updatedAt?:number){
-  const source=row.candidate,selected=(matching??row).candidate,p=selected.state.payload;
-  const sourceConflicts:ConflictSet|undefined=source.state.payload.noteConflicts;
-  let conflicts:ConflictSet|undefined=sourceConflicts;
-  if(sourceConflicts&&source.meta.logicalId!==noteId){
-   const records=conflictSet(source.meta.logicalId,sourceConflicts.records).records;
-   conflicts=conflictSet(noteId,records.map(r=>({
-    ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
-   })));
-  }
-  if(matching){
-   const existing:ConflictSet|undefined=p.noteConflicts;
-   conflicts=conflicts?.records.length?mergeConflicts(noteId,existing??{version:1,records:[]},conflicts):existing;
-   if((updatedAt===undefined||updatedAt===p.updatedAt)&&canonical(conflicts??null)===canonical(existing??null))return matching;
-  }
-  const value=fromWire('note',selected.meta.payload,p);
-  value.noteId=noteId;
-  if(updatedAt!==undefined)value.updatedAt=updatedAt;
-  if(conflicts)value.noteConflicts=conflicts;
+  // This block only builds and validates the replacement. A rejected union
+  // leaves both inputs intact, including when a validator rejects it before
+  // encoding. Failure of an independent copy leaves the original for recovery.
   try{
-   // Check the encoded record before replacing the selected row.
+   const source=row.candidate,selected=(matching??row).candidate,p=selected.state.payload;
+   const sourceConflicts:ConflictSet|undefined=source.state.payload.noteConflicts;
+   let conflicts:ConflictSet|undefined=sourceConflicts;
+   if(sourceConflicts&&source.meta.logicalId!==noteId){
+    const records=conflictSet(source.meta.logicalId,sourceConflicts.records).records;
+    conflicts=conflictSet(noteId,records.map(r=>({
+     ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
+    })));
+   }
+   if(matching){
+    const existing:ConflictSet|undefined=p.noteConflicts;
+    conflicts=conflicts?.records.length?mergeConflicts(noteId,existing??{version:1,records:[]},conflicts):existing;
+    if((updatedAt===undefined||updatedAt===p.updatedAt)&&canonical(conflicts??null)===canonical(existing??null))return matching;
+   }
+   const value=fromWire('note',selected.meta.payload,p);
+   value.noteId=noteId;
+   if(updatedAt!==undefined)value.updatedAt=updatedAt;
+   if(conflicts)value.noteConflicts=conflicts;
    const candidate=candidates('note',noteId,entityKey,value,selected.meta.addedAtSource==='original'?selected.addedAtMillis:undefined,this.o.store.segmentOptions());
    return {entityKey,rowSequence:(matching??row).rowSequence,candidate};
-  }catch(error){
-   if(matching&&(error as Error).message==='object_too_large')return null;
-   throw error;
+  }catch{
+   return null;
   }
  }
 
  /** Preserve existing cloud copies, including those created by older builds.
   * New IDs depend on memo content, so re-saving without edits keeps the ID. */
- private retainNoteCopy(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>):RecordRow{
+ private retainNoteCopy(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>):RecordRow|null{
   const c=row.candidate,domain='watchrss/retain-unsent-note';
   const contentHash=digest([c.meta.payload.title,c.state.payload.markdown]);
   for(let attempt=0;;attempt++){
@@ -352,8 +356,9 @@ export class WatchAccountControl {
    const matching=existing??local.get(entityKey);
    if(matching?!sameLiveNoteContent(c,matching.candidate):attempt===0)continue;
    const retained=this.retainNote(row,noteId,entityKey,matching);
-   // An oversized union leaves this row intact. Probe the next stable ID.
-   if(retained)return retained;
+   // A rejected union may fit at another stable ID. An independent copy
+   // already uses the same fixed-width ID as every subsequent attempt.
+   if(retained||!matching)return retained;
   }
  }
 
