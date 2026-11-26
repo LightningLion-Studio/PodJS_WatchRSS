@@ -59,7 +59,7 @@ export function NotesListScreen(props: NotesListScreenProps) {
   let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
   const addSize=promptHeight-1;
-  const promptText="下载手机端可在手机编辑和同步";
+  const promptLines=["下载手机端可在","手机编辑和同步"];
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
   const load=async()=>{const version=++readVersion;try{const value=await props.repository.list();if(!disposed&&version===readVersion)setNotes(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}finally{if(!disposed&&version===readVersion)setLoaded(true);}};
@@ -78,8 +78,14 @@ export function NotesListScreen(props: NotesListScreenProps) {
   const phoneActions=():ScrollEntry=>{
     const visual={x:props.width-2*padding-addSize,y:0,width:addSize,height:addSize};
     const hitSlop=createListHitSlop(visual,3);
+    const promptWidth=visual.x-gap;
+    const fontSlot=22,lineHeight=20;
+    const textWidth=Math.max(...promptLines.map(line=>getOps().measureText(line,fontSlot)));
+    const textScale=Math.min(1,Math.max(1,promptWidth-16)/Math.max(1,textWidth));
     return {height:promptHeight,hitSlop,render:()=> <View class="absolute inset-0">
-      <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel={promptText} style={{insetT:0,width:visual.x-gap,height:addSize}} class="absolute left-[0] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class="text-[17px] leading-[20] text-center text-[#f5f5f5]">{"下载手机端可在\n手机编辑和同步"}</Text></View>
+      <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel={promptLines.join("")} style={{insetT:0,width:promptWidth,height:addSize}} class="absolute left-[0] rounded-[16] bg-[#2a2a2a] active:scale-96">
+        {promptLines.map((line,index)=><Text class="absolute text-center text-[#f5f5f5]" accessibilityHidden style={{insetL:0,insetT:(addSize-2*lineHeight)/2+index*lineHeight,width:promptWidth/textScale,fontSlot,scale:textScale,originX:-.5,originY:-.5,lineHeight:lineHeight/textScale}}>{line}</Text>)}
+      </View>
       <View ref={hitSlop.ref} onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetL:visual.x,insetT:visual.y,width:visual.width,height:visual.height}} class="absolute rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View>
     </View>};
   };
