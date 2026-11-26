@@ -4,7 +4,9 @@ import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {restoredSignal,stringState,booleanState} from './route-activity.tsx';
 import {createEffect,createMemo,createSignal,onCleanup,onMount} from "solid-js";
 import {Text,View} from "@pocketjs/framework/components";
+import { createListHitSlop } from "@podjs/framework/list-hit-slop";
 import {ScrollEntries,type ScrollEntry} from "./ScrollEntries.tsx";
+import {centredBounds} from "./round-bounds.ts";
 import type {Scroller} from "@pocketjs/framework/kinetics";
 import type {AddChannelPreview,Channel} from "./service.ts";
 import {rssAcquisitionState,subscribeRssAcquisition,type RssAcquisitionState} from "../rss/acquisition.ts";
@@ -82,7 +84,11 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     <View onPress={()=>void submit()} focusable accessibilityRole="button" accessibilityLabel="重试按钮" class="w-[76] h-[40] rounded-[24] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-base text-[#f5f5f5]">重试</Text></View>
     <View onPress={clearError} focusable accessibilityRole="button" accessibilityLabel="取消按钮" class="w-[76] h-[40] rounded-[24] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-base text-[#f5f5f5]">取消</Text></View>
   </View>});
-  const submitAction=():ScrollEntry=>({height:44,render:()=> <View class="absolute inset-0 items-center justify-center"><View onPress={()=>void submit()} focusable={!loading()} accessibilityRole="button" accessibilityLabel={loading()?"添加中":"添加订阅按钮"} class="h-[44] w-[44] rounded-[22] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-[21px] text-[#f5f5f5]">+</Text></View></View>});
+  const submitAction=():ScrollEntry=>{
+    const size=44;
+    const hitSlop=createListHitSlop(centredBounds(props.width-2*SAFE,size,0,size),3);
+    return {height:size,hitSlop,render:()=> <View class="absolute inset-0 items-center justify-center"><View ref={hitSlop.ref} onPress={()=>void submit()} focusable={!loading()} accessibilityRole="button" accessibilityLabel={loading()?"添加中":"添加订阅按钮"} style={{width:size,height:size}} class="rounded-[22] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-[21px] text-[#f5f5f5]">+</Text></View></View>};
+  };
   const entries=createMemo<ScrollEntry[]>(()=>{
     if(step()==="input")return [heading("添加 RSS"),{height:2,render:()=> <View/>},
       {height:error()?86:94,render:()=> <View class="absolute inset-0">

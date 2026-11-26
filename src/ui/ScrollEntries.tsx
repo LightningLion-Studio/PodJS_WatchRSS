@@ -13,7 +13,9 @@ export function ScrollEntries(props:Props) {
  // Document controllers own their text anchors and max offset; fixed QR/input
  // layouts own their geometry. Callers can opt out with round=null or supply
  // explicit viewport geometry for a differently positioned list.
- return traceServiceWork("navigation.ScrollEntries",()=>VariableList(mergeProps({padding:18,gap:6,overscan:80,refreshDistance:48,get round(){
+ return traceServiceWork("navigation.ScrollEntries",()=>VariableList(mergeProps({padding:18,gap:6,overscan:80,refreshDistance:48,get hitSlopOrigin(){
+  return props.round?.viewport??{x:metrics.safeInsets.left,y:metrics.logicalHeight-metrics.safeInsets.bottom-props.height};
+ },get round(){
   return metrics.shape==='round'&&!props.controller&&!props.fixed?{
    width:metrics.logicalWidth,height:metrics.logicalHeight,
    viewport:{x:metrics.safeInsets.left,y:metrics.logicalHeight-metrics.safeInsets.bottom-props.height,width:metrics.logicalWidth-metrics.safeInsets.left-metrics.safeInsets.right},

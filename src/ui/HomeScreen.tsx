@@ -1,6 +1,7 @@
 import {idleHit} from '../diagnostics/idle-counters';
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
+import { createListHitSlop } from "@podjs/framework/list-hit-slop";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { centredBounds, textWidthBound } from "./round-bounds.ts";
 import type { Scroller } from "@pocketjs/framework/kinetics";
@@ -120,6 +121,11 @@ export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
   };
   // Narrow centred rows declare what they draw, so the round list does not treat them as full-width boxes.
   const centred=(width:number,top:number,height:number)=>centredBounds(props.width-36,width,top,height);
+  const addButton=():ScrollEntry=>{
+    const bounds=centred(48,4,48);
+    const hitSlop=createListHitSlop(bounds,3);
+    return {height:56,bounds,hitSlop,render:() => <View class="absolute inset-0 items-center"><View ref={hitSlop.ref} onPress={props.onAdd} focusable style={{insetL:bounds.x,insetT:bounds.y,width:bounds.width,height:bounds.height}} class="absolute rounded-[47] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>};
+  };
   const caption=(text:string)=>textWidthBound(text,9);
   const rows=createMemo<Array<{entry:ScrollEntry;channel?:Channel;notes?:boolean}>>(()=>[
     {entry:{height: 73, bounds:centred(Math.max(44,caption("点击进入我的")),4,65), render: () => <View class="absolute inset-0 items-center">
@@ -134,7 +140,7 @@ export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
       : {entry:channelCard(item.channel),channel:item.channel}),
     ...(shouldShowHomeEmptyState(props.channels)?[{entry:card({title:"还没有 RSS 频道",summary:"点击下方添加你的第一个订阅源",summaryLines:1,titleSize:17})}]:[]),
     {entry:card({title:"RSS推荐",summary:"一键加入官方支持频道",onPress:props.onRecommend,summaryLines:1,titleSize:17})},
-    {entry:{height:56,bounds:centred(48,4,48),render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
+    {entry:addButton()},
     {entry:{height:25,bounds:centred(caption("浙ICP备2024111886号-5A"),4,17),render:() => <View onPress={props.onBeian} focusable class="absolute inset-0 items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">浙ICP备2024111886号-5A</Text></View>}},
   ]);
   const entries=()=>rows().map(row=>row.entry);
