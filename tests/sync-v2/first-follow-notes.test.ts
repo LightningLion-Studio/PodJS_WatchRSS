@@ -214,6 +214,47 @@ test('cloud choice keeps edited copies and deduplicates a later restore of the s
  }
 },30000);
 
+test('cloud choice reuses one retained memo and preserves each offline conflict',async()=>{
+ const phone=await fixture(),first=await fixture(),restored=await fixture(),repeated=await fixture();
+ const opened:NonNullable<Awaited<ReturnType<typeof openApplicationSyncV2>>>[]=[];
+ try{
+  const remote=(await openApplicationSyncV2(phone.options))!;
+  opened.push(remote);
+  const transport=cloudChoiceTransport(phone);
+  const copies=(side:typeof first)=>side.db.query("SELECT note_id FROM memo_notes WHERE note_id!='n' AND deleted=0");
+  const conflicts=(side:typeof first)=>side.db.query('SELECT note_id,remote_markdown FROM note_merge_conflicts ORDER BY remote_markdown');
+  const sync=async(side:typeof first,offlineText:string,expectedTexts:string[])=>{
+   const notes=new MemoRepository(side.db,side.options.legacyDeviceId,undefined,()=>200);
+   await notes.save({noteId:'n',title:'Offline memo',markdown:'Unpublished text'});
+   const note=(await notes.get('n'))!;
+   await notes.applyRemote({...note,markdown:offlineText,modifiedBy:'offline-peer',updatedAt:250});
+   expect(await conflicts(side)).toEqual([{note_id:'n',remote_markdown:offlineText}]);
+   const client=(await openApplicationSyncV2({...side.options,transport}))!;
+   opened.push(client);
+   await client.ui.setKeepDiscarded(false);
+   await client.ui.chooseCloud(await client.ui.openChoice());
+   const retained=await copies(side);
+   expect(retained).toHaveLength(1);
+   const expected=expectedTexts.map(text=>({note_id:retained[0]!.note_id,remote_markdown:text}));
+   expect(await conflicts(side)).toEqual(expected);
+   await client.sync();
+   await client.sync();
+   await remote.sync();
+   expect(await copies(phone)).toEqual(retained);
+   expect(await conflicts(phone)).toEqual(expected);
+  };
+  await sync(first,'First offline conflict',['First offline conflict']);
+  const retained=await copies(phone);
+  const conflictsAfterRestore=['First offline conflict','Second offline conflict'];
+  await sync(restored,'Second offline conflict',conflictsAfterRestore);
+  await sync(repeated,'Second offline conflict',conflictsAfterRestore);
+  expect(await copies(phone)).toEqual(retained);
+ }finally{
+  for(const client of opened.reverse())await client.close();
+  for(const side of [repeated,restored,first,phone])side.db.close();
+ }
+},30000);
+
 test.each([
  ['Shared folder',200,201],
  ['Shared folder',201,200],

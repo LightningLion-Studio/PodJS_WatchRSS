@@ -1,8 +1,8 @@
 import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription,emptyBodyDescription,businessBodyWitness} from './body-binding';
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
-import {conflictTexts} from './note-conflict-set';
-import {newConflictId,noteEditDigest,sameLiveNoteContent,type Conflict} from './notes-conflict';
+import {conflictSet,conflictTexts,mergeConflicts,type ConflictSet} from './note-conflict-set';
+import {newConflictId,noteEditDigest,sameLiveNoteContent} from './notes-conflict';
 import {sameBusinessRevision} from './business-revision';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {phoneNotePlainText} from '../notes/phone-text';
@@ -274,7 +274,8 @@ export class WatchAccountControl {
   * overlapping memo gets its own identity so the selected cloud row survives. */
  private async retainUnsentNotes(state:SyncState,local:RecordRow[],cloud:RecordRow[]){
   if(!state.hasUnsentEdits)return null;
-  const bases=await this.o.store.editBases(state),rows=new Map(cloud.map(row=>[row.entityKey,row]));
+  const bases=await this.o.store.editBases(state),cloudById=new Map(cloud.map(row=>[row.entityKey,row]));
+  const rows=new Map(cloudById);
   const localById=new Map(local.map(row=>[row.entityKey,row]));
   const unopenable=state.cloud?.unopenableNotes??{};
   const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
@@ -282,37 +283,23 @@ export class WatchAccountControl {
   for(const row of local){
    const c=row.candidate;
    if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
-   const existing=rows.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
+   const existing=cloudById.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
    if((existing&&hash===noteEditDigest(existing.candidate))||(base&&hash===digest(base)))continue;
+   let selected=rows.get(row.entityKey)??row;
    if(state.editBase.accountOid===null&&existing&&sameLiveNoteContent(c,existing.candidate)){
-    const cloud=existing.candidate,updatedAt=c.state.payload.updatedAt;
-    if(updatedAt>cloud.state.payload.updatedAt){
-     rows.set(row.entityKey,{...existing,candidate:{...cloud,state:{...cloud.state,payload:{...cloud.state.payload,updatedAt}}}});
-     retained=true;
-    }
-    continue;
-   }
-   const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
-   if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
-   if(!existing&&!Object.hasOwn(unopenable,c.meta.logicalId)){rows.set(row.entityKey,row);retained=true;}
-   else{
-    const copy=this.retainedNoteIdentity(row,hash,rows,localById,unopenable);
-    if(copy){
-     const {noteId,entityKey,localCopy}=copy;
-     if(localCopy)rows.set(entityKey,localCopy);
-     else{
-      const value=fromWire('note',c.meta.payload,c.state.payload);
-      if(value.noteConflicts)value.noteConflicts={...value.noteConflicts,records:value.noteConflicts.records.map((r:Conflict)=>({
-       ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
-      })).sort((a:Conflict,b:Conflict)=>a.conflictId<b.conflictId?-1:1)};
-      const candidate=candidates('note',noteId,entityKey,{...value,noteId},c.meta.addedAtSource==='original'?c.addedAtMillis:undefined,this.o.store.segmentOptions());
-      rows.set(entityKey,{entityKey,rowSequence:row.rowSequence,candidate});
-     }
-     retained=true;
+    const updatedAt=Math.max(c.state.payload.updatedAt,selected.candidate.state.payload.updatedAt);
+    selected=this.retainNote(row,c.meta.logicalId,row.entityKey,selected,updatedAt);
+   }else{
+    const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
+    if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
+    if(existing||Object.hasOwn(unopenable,c.meta.logicalId)){
+     const {noteId,entityKey,matching}=this.retainedNoteIdentity(row,hash,rows,localById,unopenable);
+     selected=this.retainNote(row,noteId,entityKey,matching);
     }
    }
-   const folder=c.meta.payload.folderId;
-   const p=c.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
+   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);retained=true;}
+   const folder=selected.candidate.meta.payload.folderId;
+   const p=selected.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
    const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
    for(const key of dependencies){
     const dependency=localById.get(key),selected=rows.get(key);
@@ -320,6 +307,30 @@ export class WatchAccountControl {
    }
   }
   return retained?[...rows.values()]:null;
+ }
+
+ /** Reusing text must still retain conflicts from each local memo. */
+ private retainNote(row:RecordRow,noteId:string,entityKey:string,matching?:RecordRow,updatedAt?:number){
+  const source=row.candidate,selected=(matching??row).candidate,p=selected.state.payload;
+  const sourceConflicts:ConflictSet|undefined=source.state.payload.noteConflicts;
+  let conflicts:ConflictSet|undefined=sourceConflicts;
+  if(sourceConflicts&&source.meta.logicalId!==noteId){
+   const records=conflictSet(source.meta.logicalId,sourceConflicts.records).records;
+   conflicts=conflictSet(noteId,records.map(r=>({
+    ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
+   })));
+  }
+  if(matching){
+   const existing:ConflictSet|undefined=p.noteConflicts;
+   conflicts=conflicts?.records.length?mergeConflicts(noteId,existing??{version:1,records:[]},conflicts):existing;
+   if((updatedAt===undefined||updatedAt===p.updatedAt)&&canonical(conflicts??null)===canonical(existing??null))return matching;
+  }
+  const value=fromWire('note',selected.meta.payload,p);
+  value.noteId=noteId;
+  if(updatedAt!==undefined)value.updatedAt=updatedAt;
+  if(conflicts)value.noteConflicts=conflicts;
+  const candidate=candidates('note',noteId,entityKey,value,selected.meta.addedAtSource==='original'?selected.addedAtMillis:undefined,this.o.store.segmentOptions());
+  return {entityKey,rowSequence:(matching??row).rowSequence,candidate};
  }
 
  /** Preserve existing cloud copies, including those created by older builds.
@@ -331,10 +342,10 @@ export class WatchAccountControl {
    const id=digest(attempt===0?[domain,row.entityKey,editHash]:[domain,row.entityKey,contentHash,attempt]);
    const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
    const entityKey=this.o.store.entityKeyFor('note',noteId),existing=rows.get(entityKey);
-   if(existing&&sameLiveNoteContent(c,existing.candidate))return null;
+   if(existing&&sameLiveNoteContent(c,existing.candidate))return {noteId,entityKey,matching:existing};
    if(existing||Object.hasOwn(unopenable,noteId))continue;
    const localCopy=local.get(entityKey);
-   if(localCopy?sameLiveNoteContent(c,localCopy.candidate):attempt>0)return {noteId,entityKey,localCopy};
+   if(localCopy?sameLiveNoteContent(c,localCopy.candidate):attempt>0)return {noteId,entityKey,matching:localCopy};
   }
  }
 
