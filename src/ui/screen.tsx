@@ -200,7 +200,14 @@ export default function WatchRSS(props: {
   onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
   const warningNetwork=useBluetoothWarningConnection();
   const warningShown=()=>page()==='bluetooth-warning';
-  const contentRoute=()=>warningShown()?stack().at(-2)!:current();
+  // A warning covers the content stack without changing its navigation ownership.
+  const contentStack = createMemo(
+    () => warningShown() ? stack().slice(0, -1) : stack(),
+    undefined,
+    { equals: (previous, next) =>
+      previous.length === next.length && previous.every((entry, index) => entry === next[index]) },
+  );
+  const contentRoute = () => contentStack().at(-1)!;
   const recoveryEnabled = (entry:Entry) => entry.page !== 'sync-v2' && entry.page !== 'bluetooth-warning' && !cloudOwnerChoice();
   const ownerChoiceNetwork=createHostNetworkRecovery();
   onCleanup(()=>ownerChoiceNetwork.dispose());
@@ -271,11 +278,9 @@ export default function WatchRSS(props: {
   }
   function setPageImpl(next: Page, data: Partial<Entry>) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
-    if(warningShown()){
-      if(next==="bluetooth-warning")return;
-      removeWarningRoute();
-    }
-    if(next===page()&&Object.keys(data).length===0)return;
+    if (next === "bluetooth-warning" && warningShown()) return;
+    if (next === contentRoute().page && Object.keys(data).length === 0) return;
+    removeWarningRoute();
     traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(current()));
     traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
@@ -873,8 +878,8 @@ export default function WatchRSS(props: {
     }
   }
   async function restoreStartupNavigation() {
-    const baseline=stack();let owned=baseline;
-    const ownsStack=(entries:Entry[])=>contentRoute()===entries.at(-1);
+    const baseline=contentStack();let owned=baseline;
+    const ownsStack=(entries:Entry[])=>contentStack()===entries;
     try {
       if(startupNeedsChannels){
         if(homeSnapshot)void loadChannels(false);
@@ -990,17 +995,21 @@ export default function WatchRSS(props: {
     if (next === "saved" || next === "watch-later")
       await loadSaved(next === "saved" ? "favorite" : "watchLater");
   }
+  let articleOpenRevision = 0;
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
-    const origin=contentRoute();
-    const previousReader=replaceReader&&origin.page==="reader"?origin:undefined;
+    const origin = contentStack(), revision = ++articleOpenRevision;
+    const active = () => !startupDisposed && revision === articleOpenRevision &&
+      contentStack() === origin && foreground();
+    const source = origin.at(-1)!;
+    const previousReader = replaceReader && source.page === "reader" ? source : undefined;
     try {
       const full = await props.services.getArticle(item.id,article());
+      if (!active()) return;
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
       if(available)await props.services.markRead(item.id);
       navigate(()=>{
-        const active = contentRoute();
-        if(active.page==="reader"&&active.readerArticle?.id===full.id)return;
+        if (!active()) return;
         setArticle({ ...full, read });
         // Reopening an already-read article must not rebuild the retained feed
         // and synchronously remeasure every card for an unchanged read flag.
@@ -1019,15 +1028,17 @@ export default function WatchRSS(props: {
         if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
       });
     } catch (e) {
-      if(!startupDisposed)setError(String(e));
+      if (active() && motion.phase === "idle") setError(String(e));
     }
   }
   async function openArticleActions(item: Article) {
     if (busy()) return;
+    const origin = contentRoute();
     setBusy(true);
     try {
       const full = await props.services.getArticle(item.id,article());
       navigate(()=>{
+        if (contentRoute() !== origin) return;
         setArticle(full ?? item);
         setPage("rss-actions");
       });
@@ -1629,12 +1640,13 @@ export default function WatchRSS(props: {
     if(entry.page==='reader-scroll-controls')entry.reader=stack().slice(0,stack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
     const entryPage = () => entry.page;
     const active = () => current() === entry;
+    const contentActive = () => contentRoute() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
     return (
-      <NetworkRecoveryProvider network={network} active={()=>contentRoute()===entry&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
+      <NetworkRecoveryProvider network={network} active={()=>contentActive()&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
       <View
         class={
           entryPage() === "video"
@@ -1723,6 +1735,7 @@ export default function WatchRSS(props: {
               entry={entry}
               page={entryPage}
               active={active}
+              contentActive={contentActive}
               width={width}
               height={height}
               services={routeServices}

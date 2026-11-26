@@ -35,6 +35,7 @@ interface RssRoutesProps {
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
+  contentActive: () => boolean;
   width: number;
   height: number;
   services: AppServices;
@@ -87,7 +88,7 @@ export function RssRoutes(props: RssRoutesProps) {
 
   const [resumeChapter,setResumeChapter]=createSignal<NovelChapter>();
   createEffect(()=>{
-    const source=novelBookSource(channel()?.url),active=props.active()&&props.page()==='articles'&&!props.busy();
+    const source=novelBookSource(channel()?.url),active=props.contentActive()&&props.page()==='articles'&&!props.busy();
     let cancelled=false;
     if(!source){setResumeChapter(undefined);return;}
     if(active)setResumeChapter(undefined);

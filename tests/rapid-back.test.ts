@@ -35,3 +35,7 @@ for(const failure of ['WRITE_FAILED','CANCELLED']){
 routeTest('note editor pending write','bluetooth-modal',{REVIEW_HOLD_DRAFT:'1'});
 routeTest('note editor empty draft','bluetooth-modal',{REVIEW_EMPTY_DRAFT:'1'});
 for(const count of [59,60,61])routeTest(`reader host occupancy ${count}`,'timeout',{REVIEW_HOST_PENDING:String(count)});
+for(const scenario of ['bluetooth-novel-background','bluetooth-feed-open-slow-modal-takeover']){
+ routeTest(scenario,scenario);
+ routeTest(`${scenario} without warning`,scenario,{REVIEW_BLUETOOTH_CONTROL:'1'});
+}

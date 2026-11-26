@@ -7,6 +7,12 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const mode=process.env.RAPID_BACK_CASE??'4';
+const modalTakeover=mode==='bluetooth-feed-open-slow-modal-takeover';
+const novelProbe=mode==='bluetooth-novel-background';
+const bluetoothControl=process.env.REVIEW_BLUETOOTH_CONTROL==='1';
+const novelSource='https://watchrss.local/import-txt-novel/review';
+let novelReads=0;
+let finishNovelRead:(()=>void)|undefined;
 const restoredNoteCase=['bluetooth-note-restore','bluetooth-note-body','bluetooth-note-empty','bluetooth-note-leave'].includes(mode);
 const noteDownload=mode==='bluetooth-note-download';
 const noteListLoad=mode==='bluetooth-note-load';
@@ -138,6 +144,18 @@ const {INITIAL_DISCLOSURE_KEY}=await import('../src/announcement/platform.ts');
 if(mode!=='bluetooth-home-disclosure')kv.set(INITIAL_DISCLOSURE_KEY,'true');
 const article={id:hostPending?'12':'fixture',channelId:'feed',channelTitle:'Test feed',title:'Article',link:'https://example.invalid/article',contentBlocks:videoCase?[{type:'video' as const,url:'https://example.invalid/video.mp4'}]:undefined,content:Array.from({length:30},()=>'<p>Reader regression body line.</p>').join(''),read:true};
 let pendingSave:(()=>void)|undefined,rejectPendingSave:(()=>void)|undefined;const services:any=new Proxy({listChannels:async()=>[{id:'feed',title:'Test feed',url:'https://watchrss.local/import-content'}],listArticles:async()=>[article],getArticle:async()=>article,getChannelOriginalMode:async()=>false,getChannelPlaybackSettings:async()=>({hasPlayableMedia:false,continuePlaybackInBackground:false}),subscribeChannel:()=>()=>{},subscribeAccountStatus:()=>()=>{},readingProgress:{load:async()=>({offset:0,progress:0,updatedAt:0}),save:async()=>{saveCalls++;await new Promise<void>((resolve,reject)=>{pendingSave=resolve;rejectPendingSave=()=>reject(Error("fixture late write reject"));});completedSaves++;}},readAccountStatus:async()=>null,createSummary:()=>({dispose(){},state:{state:'idle'},start:async()=>{},cancel(){}})}, {get:(t,k)=>Reflect.get(t,k)??(k==='inputRecovery'||k==='openInlineInput'||k==='retryOfflineMedia'||k==='readSummaryUsage'||k==='subscribeSummaryUsage'||k==='loadImportedTextChunk'?undefined:()=>Promise.resolve(null))});
+if(novelProbe){
+ services.listChannels=async()=>[{id:'feed',title:'Test feed',url:novelSource}];
+ services.listNovelChapters=(source:string)=>{
+  if(source!==novelSource)throw new Error('unexpected novel source '+source);
+  novelReads++;
+  return new Promise(resolve=>{
+   finishNovelRead=()=>resolve([{
+    ...article,title:'Fixture resume chapter',link:novelSource+'/chapter/1',readingPositionChangedAt:1,
+   }]);
+  });
+ };
+}
 if(hostPending){
  const {db}=await import('../src/services.ts');
  const {SqlReadingProgressStore}=await import('../src/reader/sql-progress.ts');
@@ -190,7 +208,7 @@ if(backgroundRead)services.listChannels=async()=>{
 };
 if(settingsQuery)services.hasSummaryAccount=async()=>{await deferOperation();return false;};
 if(rssSaveCase)services.setSaveState=()=>new Promise<void>(resolve=>{resolveFavorite=resolve;});
-if(searchCase){
+if(searchCase||modalTakeover){
  const {textInput}=await import('@podjs/framework/services');
  services.openInlineInput=mode==='bluetooth-inline'?textInput.openInline:undefined;
  services.input=(title:string)=>{modalCalls.push(title);return new Promise<string|null>(resolve=>{resolveModal=resolve;});};
@@ -293,6 +311,53 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
  try{
   await pump(50);
 
+  if(novelProbe){
+   expect(state()).toEqual(['home','articles']);
+   const readsBeforeWarning=novelReads;
+   expect(readsBeforeWarning).toBeGreaterThan(0);
+   expect(finishNovelRead).toBeDefined();
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   finishNovelRead!();
+   await pump(15);
+   if(!bluetoothControl)press('继续');
+   await pump(20);
+   const resume=displayed('继续阅读：Fixture resume chapter');
+   expect(state().at(-1)).toBe('articles');
+   expect({novelReads,resume}).toEqual({novelReads:readsBeforeWarning,resume:true});
+   return;
+  }
+  if(modalTakeover){
+   expect(state()).toEqual(['home','articles']);
+   press('Article');
+   await pump(20);
+   expect(releaseOperation).toBeDefined();
+   if(!bluetoothControl){
+    await network(true);
+    expect(warnings()).toHaveLength(1);
+    press('继续');
+    await pump(20);
+   }
+   let header=connected().find(node=>images.get(node.id)?.endsWith('info-hint.svg'));
+   while(header&&!header.onPress)header=header.parent;
+   expect(header?.onPress).toBeDefined();
+   header.onPress();
+   await pump(20);
+   expect(state().at(-1)).toBe('channel-detail');
+   press('搜索');
+   await pump(20);
+   expect(state().at(-1)).toBe('search');
+   press('输入关键词开始搜索');
+   await pump(20);
+   expect(modalCalls).toEqual(['搜索文章']);
+   releaseOperation!();
+   await pump(20);
+   const whileInput=state().at(-1);
+   resolveModal('Fixture keyword');
+   await pump(20);
+   expect({whileInput,searchedFor}).toEqual({whileInput:'search',searchedFor:'Fixture keyword'});
+   return;
+  }
   if(swipeMenu){
    const target=connected().find(node=>texts.get(node.id)==='Article 0');
    expect(target).toBeDefined();
@@ -759,17 +824,33 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     await pump();
     expect(releaseSecondOpen).toBeDefined();
    }
+   const leftSource = mode.endsWith('-back');
+   if(leftSource){
+    expect(warnings()).toHaveLength(0);
+    await network(false);
+    await network(true);
+    expect(warnings()).toHaveLength(1);
+   }
    releaseOperation!();
    await pump();
-   if(mode.endsWith('-fail')){
+   if(leftSource){
+    expect(state()).toEqual(['home']);
+    expect(warnings()).toHaveLength(1);
+    press('继续');
+    await pump();
+   }else if(mode.endsWith('-fail')){
     expect(warnings()).toHaveLength(1);
     press('继续');
     await pump();
     expect(displayed('Error: fixture markRead failed')).toBe(true);
    }else{
+    if(releaseSecondOpen){
+     expect(state().at(-1)).toBe('articles');
+     expect(warnings()).toHaveLength(mode.endsWith('-reenter')?0:1);
+     releaseSecondOpen();
+     await pump();
+    }
     expect(state().at(-1)).toBe('reader');
-    releaseSecondOpen?.();
-    await pump();
     expect(state().filter(page=>page==='reader')).toHaveLength(1);
     expect(warnings()).toHaveLength(0);
     await back();
@@ -813,15 +894,15 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     }
     releaseOperation!();
     await pump();
-    if(mode.startsWith('bluetooth-feed-actions'))expect(displayed('标为未读')).toBe(true);
-    else expect(state().at(-1)).toBe('reader');
-    expect(warning()).toBeUndefined();
-    await back();
     if(leave){
      expect(state()).toEqual(['home']);
      expect(warnings()).toHaveLength(0);
      return;
     }
+    if(mode.startsWith('bluetooth-feed-actions'))expect(displayed('标为未读')).toBe(true);
+    else expect(state().at(-1)).toBe('reader');
+    expect(warning()).toBeUndefined();
+    await back();
    }
    expect(state().at(-1)).toBe('articles');
    expect(warnings()).toHaveLength(0);
