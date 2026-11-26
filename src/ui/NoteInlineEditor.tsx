@@ -78,7 +78,31 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
       }
       titleInput=await textInput.openInline(draft.title,{x:inset,y:42.5,width:fieldWidth,height:29.3},value=>draft.setTitle(value),undefined,{hint:props.initial?"未命名笔记":"新建备忘录",fontSizeSp:21.7,fontWeight:700,includeFontPadding:false,textAlign:"center",autoFocus:false,horizontalPaddingDp:title?title.x-inset:undefined,document:{id:documentId,role:"title",viewportHeight,viewportOverhangDp:1,roundSafe:round,swipeBack:true,metadata:props.initial?noteMetadata(props.initial):undefined}});
       if(disposed){await closeInputs();return;}
-      bodyInput=await textInput.openInline(draft.markdown,{x:bodyInset,y:body?.y??bodyTop,width:props.width-2*bodyInset,height:Math.max(56,props.height-bodyTop-56)},changeMarkdown,undefined,{hint:"直接输入原始文本",fontSizeSp:17,fontWeight:400,includeFontPadding:false,multiline:true,keepExisting:true,selectionStart:props.initialSelection,horizontalPaddingDp:0,verticalPaddingDp:0,autoFocus:false,document:{id:documentId,role:"body",viewportHeight,unfocusedCaretColor:"#ff6026"}});
+      bodyInput = await textInput.openInline(
+        draft.markdown,
+        {x:bodyInset,y:body?.y??bodyTop,width:props.width-2*bodyInset,height:Math.max(56,props.height-bodyTop-56)},
+        changeMarkdown,
+        undefined,
+        {
+          hint:"直接输入原始文本",
+          fontSizeSp:17,
+          fontWeight:400,
+          includeFontPadding:false,
+          multiline:true,
+          keepExisting:true,
+          selectionStart:props.initial?props.initialSelection:0,
+          horizontalPaddingDp:0,
+          verticalPaddingDp:0,
+          autoFocus:false,
+          document:{
+            id:documentId,
+            role:"body",
+            viewportHeight,
+            focusOnOpenWithoutKeyboard:true,
+            entryToast:"滚动滚轮调整光标位置，再次点击打开输入法",
+          },
+        },
+      );
       if(disposed)await closeInputs();
     }catch(error){
       await closeInputs().catch(()=>{});
