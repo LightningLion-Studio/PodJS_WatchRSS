@@ -58,6 +58,13 @@ export function toWire(kind:Kind,value:Record<string,any>){
  if(conflictChannel)state.noteConflicts=clone(noteConflicts);
  return {meta:clone(meta),state:clone(state)};
 }
+/** Match folder data independently of the edit clock and its author. */
+export function sameFolderContent(a:any,b:any){
+ if(a.meta.kind!=='folder'||b.meta.kind!=='folder'||a.meta.logicalId!==b.meta.logicalId)return false;
+ const {updatedAt:_a,modifiedBy:_aBy,...aData}=a.state.payload;
+ const {updatedAt:_b,modifiedBy:_bBy,...bData}=b.state.payload;
+ return canonical(a.meta.payload)===canonical(b.meta.payload)&&canonical(aData)===canonical(bData);
+}
 export function fromWire(kind:Kind,meta:Record<string,any>,state:Record<string,any>){
  if(Object.keys(meta).some(k=>!metaFields.has(k))||Object.keys(state).some(k=>metaFields.has(k)&&!noteState(kind,k)||Object.hasOwn(meta,k)))throw Error('invalid_schema');
  const value={...meta,...state};if(Object.hasOwn(value,'readingProgressMicros')){if(Object.hasOwn(value,'readingProgress'))throw Error('invalid_schema');uint(value.readingProgressMicros,1000000);value.readingProgress=value.readingProgressMicros/1000000;delete value.readingProgressMicros;}

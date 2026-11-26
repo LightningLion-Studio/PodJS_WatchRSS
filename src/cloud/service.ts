@@ -111,7 +111,9 @@ export class WatchCloudSyncService {
    case 'feature_disabled': attention=code; message='云同步暂未开放，\n开放后自动同步'; break;
    case 'cloud_v2_start_unavailable': message='云同步未能启动，\n请重试'; break;
    case 'cloud_v2_read_only': attention=code; message='云端当前只读，\n本机修改已保留'; break;
-   case 'cloud_v2_pending': attention=code; message='还有资料待同步'; break;
+   case 'first_follow_pending':
+   case 'projection_preparing':
+   case 'cloud_v2_pending': attention='cloud_v2_pending'; message='还有资料待同步'; break;
    case 'choice_pending': attention=code; message='请选择要保留的资料'; break;
    case 'body_channel_waiting_wifi': attention=code; message='正文等待 Wi-Fi，\n也可手动同步'; break;
    case 'body_channel_write_disabled': attention=code; message='正文上传暂未开放，\n本机正文已保留'; break;
@@ -132,7 +134,7 @@ export class WatchCloudSyncService {
    case 'ETIMEDOUT': message='连接云端超时，\n请重试'; break;
    default: message=this.networkFailure?'无法连接云端，\n请检查网络':'云同步未能完成，\n请重试';
   }
-  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+30_000;
+  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(code==='projection_preparing'||code==='first_follow_pending'?1000:30_000);
   this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,retryable:true,retryAtMillis};
   this.set(attention?'idle':'error',message,member);
  }

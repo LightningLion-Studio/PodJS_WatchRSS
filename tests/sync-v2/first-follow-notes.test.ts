@@ -60,6 +60,7 @@ for(const when of ['offline','offline title edit','during download','during appl
    expect(local).not.toBeNull();
    expect(await notes.get(noteId)).toMatchObject({title,markdown});
    expect(phone.server.events).toBe(2);
+   expect(await notes.get('n')).toMatchObject({title:'title n'});
    await remote!.sync();
    await local!.sync();
    for(const {db} of [phone,watch]){
@@ -128,14 +129,7 @@ test('first follow with a shared memo ID keeps both versions through cloud choic
   remote=await openApplicationSyncV2(phone.options);
   const notes=new MemoRepository(watch.db,watch.options.legacyDeviceId);
   await notes.save({noteId:'n',title:'offline edit',markdown:'Unpublished watch text.'});
-  const transport={async request(request:Parameters<typeof phone.options.transport.request>[0]){
-   if(new URL(request.url).pathname.endsWith('/choices/cloud')){
-    const {choiceId}=parseCanonicalJson(request.body!);
-    const account=phone.server.account;
-    return {status:200,headers:{},body:jsonBytes({version:2,scope,choiceId,account,confirmedAccount:account,auditRevision:phone.server.serverRevision})};
-   }
-   return phone.options.transport.request(request);
-  }};
+  const transport=cloudChoiceTransport(phone);
   local=await openApplicationSyncV2({...watch.options,transport});
   expect(phone.server.events).toBe(1);
   expect(await notes.get('n')).toMatchObject({title:'offline edit'});
@@ -165,3 +159,100 @@ test('first follow with a shared memo ID keeps both versions through cloud choic
   phone.db.close();
  }
 });
+
+
+function cloudChoiceTransport(phone:Awaited<ReturnType<typeof fixture>>){
+ return {async request(request:Parameters<typeof phone.options.transport.request>[0]){
+  if(new URL(request.url).pathname.endsWith('/choices/cloud')){
+   const {choiceId}=parseCanonicalJson(request.body!),account=phone.server.account;
+   return {status:200,headers:{},body:jsonBytes({version:2,scope,choiceId,account,confirmedAccount:account,auditRevision:phone.server.serverRevision})};
+  }
+  return phone.options.transport.request(request);
+ }};
+}
+
+test('cloud choice keeps edited copies and deduplicates a later restore of the same memo',async()=>{
+ const phone=await fixture(),first=await fixture(),restored=await fixture(),repeated=await fixture();
+ const opened:NonNullable<Awaited<ReturnType<typeof openApplicationSyncV2>>>[]=[];
+ const title='Offline memo',markdown='The original unpublished text.';
+ try{
+  const remote=(await openApplicationSyncV2(phone.options))!;
+  opened.push(remote);
+  const transport=cloudChoiceTransport(phone);
+  const choose=async(side:typeof first,time:number)=>{
+   await new MemoRepository(side.db,side.options.legacyDeviceId,undefined,()=>time).save({noteId:'n',title,markdown});
+   const client=(await openApplicationSyncV2({...side.options,transport}))!;
+   opened.push(client);
+   expect((await client.ui.snapshot()).choice).not.toBeNull();
+   await client.ui.chooseCloud(await client.ui.openChoice());
+   const snapshot=await client.ui.snapshot();
+   expect(snapshot.keepDiscardedLocalChanges7Days).toBe(true);
+   expect(snapshot.recoveryCopies).toHaveLength(1);
+   await client.sync();
+   await client.sync();
+   await remote.sync();
+  };
+  const copies=()=>phone.db.query("SELECT note_id,title,markdown FROM memo_notes WHERE note_id!='n' AND deleted=0 ORDER BY note_id");
+  await choose(first,200);
+  const [original]=await copies();
+  const noteId=String(original!.note_id),edited={note_id:noteId,title:'Edited cloud copy',markdown:'This edit must survive.'};
+  await new MemoRepository(phone.db,phone.options.legacyDeviceId,undefined,()=>250).save({noteId,title:edited.title,markdown:edited.markdown});
+  await remote.sync();
+  await remote.sync();
+  await choose(restored,200);
+  const afterRestore=await copies();
+  expect(afterRestore).toHaveLength(2);
+  expect(afterRestore).toContainEqual(edited);
+  expect(afterRestore.find(row=>row.note_id!==noteId)).toMatchObject({title,markdown});
+  const events=phone.server.events;
+  await choose(repeated,201);
+  expect(await copies()).toEqual(afterRestore);
+  expect(phone.server.events).toBe(events);
+ }finally{
+  for(const client of opened.reverse())await client.close();
+  for(const side of [repeated,restored,first,phone])side.db.close();
+ }
+},30000);
+
+test.each([
+ ['Shared folder',200,201],
+ ['Shared folder',201,200],
+ ['Local name',200,201],
+] as const)('first follow resolves a shared folder (%s, cloud %d, watch %d)',async(name,cloudTime,watchTime)=>{
+ const phone=await fixture(),watch=await fixture();
+ let remote:Awaited<ReturnType<typeof openApplicationSyncV2>>|undefined;
+ let local:typeof remote;
+ try{
+  await watch.db.execute('DELETE FROM memo_notes');
+  await new MemoRepository(phone.db,phone.options.legacyDeviceId,()=>'shared-folder',()=>cloudTime).createFolder('Shared folder');
+  await new MemoRepository(watch.db,watch.options.legacyDeviceId,()=>'shared-folder',()=>watchTime).createFolder(name);
+  const notes=new MemoRepository(watch.db,watch.options.legacyDeviceId,()=>'offline-note',()=>202);
+  await notes.save({title:'Offline memo',markdown:'Unpublished text'});
+  await notes.move('offline-note','shared-folder');
+  remote=await openApplicationSyncV2(phone.options);
+  local=await openApplicationSyncV2({...watch.options,transport:cloudChoiceTransport(phone)});
+  const different=name!=='Shared folder';
+  if(different){
+   expect((await local!.ui.snapshot()).choice).not.toBeNull();
+   expect(phone.server.events).toBe(1);
+   await local!.ui.chooseCloud(await local!.ui.openChoice());
+   await local!.sync();
+  }
+  expect((await local!.ui.snapshot()).choice).toBeNull();
+  expect(phone.server.events).toBe(2);
+  await remote!.sync();
+  for(const {db} of [watch,phone]){
+   expect(await db.query("SELECT name,updated_at FROM memo_folders WHERE folder_id='shared-folder' AND deleted=0")).toEqual([
+    {name:'Shared folder',updated_at:different?cloudTime:Math.max(cloudTime,watchTime)},
+   ]);
+   expect(await db.query("SELECT folder_id,markdown FROM memo_notes WHERE note_id='offline-note' AND deleted=0")).toEqual([
+    {folder_id:'shared-folder',markdown:'Unpublished text'},
+   ]);
+  }
+ }finally{
+  await local?.close();
+  await remote?.close();
+  watch.db.close();
+  phone.db.close();
+ }
+},30000);

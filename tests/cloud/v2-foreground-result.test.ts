@@ -111,3 +111,9 @@ test('known offline ends this v2 attempt without waiting on a request', async ()
  expect(await service.syncNowResult(true)).toMatchObject({ok:false,networkFailure:true,retryable:true});
  expect(service.status).toMatchObject({phase:'error',message:'未连接网络，\n请联网后重试'});
 });
+
+test.each(['projection_preparing','first_follow_pending'])('v2 %s schedules a continuation without marking the round complete',async code=>{
+ const service=await setup(async()=>{throw Error(code);});
+ expect(await service.syncNowResult()).toMatchObject({ok:false,retryable:true,retryAtMillis:11_000});
+ expect(service.status).toMatchObject({phase:'idle',v2Attention:'cloud_v2_pending',lastCompletedAt:0});
+});

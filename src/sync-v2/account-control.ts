@@ -10,7 +10,7 @@ import {phoneNotePlainText} from '../notes/phone-text';
 import type {Statement} from '@podjs/framework/sql-projection';
 import {canonical,digest,hexId,oid,exact,uint,nextD64,compareD64,bytes,type Kind} from './protocol';
 import {choiceCurrent,publicationCurrent,captureChoice,checkChoiceWindow,checkCapture,currentAccount,observeAccount,type Capture,type SyncState} from './state';
-import {fromWire,candidates,toWire} from './business';
+import {fromWire,candidates,toWire,sameFolderContent} from './business';
 import {canMerge} from './merge-planner';
 import {verifyCommit,type SigningPort} from './signing';
 import type {EnvelopeCrypto} from './sealed';
@@ -276,6 +276,7 @@ export class WatchAccountControl {
   if(!state.hasUnsentEdits)return null;
   const bases=await this.o.store.editBases(state),rows=new Map(cloud.map(row=>[row.entityKey,row]));
   const localById=new Map(local.map(row=>[row.entityKey,row]));
+  const unopenable=state.cloud?.unopenableNotes??{};
   const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
   let retained=false;
   for(const row of local){
@@ -293,28 +294,48 @@ export class WatchAccountControl {
    }
    const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
    if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
-   retained=true;
-   if(!existing)rows.set(row.entityKey,row);
+   if(!existing&&!Object.hasOwn(unopenable,c.meta.logicalId)){rows.set(row.entityKey,row);retained=true;}
    else{
-    const value=fromWire('note',c.meta.payload,c.state.payload);
-    const id=digest(['watchrss/retain-unsent-note',row.entityKey,hash]);
-    const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
-    const entityKey=this.o.store.entityKeyFor('note',noteId);
-    if(value.noteConflicts)value.noteConflicts={...value.noteConflicts,records:value.noteConflicts.records.map((r:Conflict)=>({
-     ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
-    })).sort((a:Conflict,b:Conflict)=>a.conflictId<b.conflictId?-1:1)};
-    const candidate=candidates('note',noteId,entityKey,{...value,noteId},c.meta.addedAtSource==='original'?c.addedAtMillis:undefined,this.o.store.segmentOptions());
-    rows.set(entityKey,{entityKey,rowSequence:row.rowSequence,candidate});
+    const copy=this.retainedNoteIdentity(row,hash,rows,localById,unopenable);
+    if(copy){
+     const {noteId,entityKey,localCopy}=copy;
+     if(localCopy)rows.set(entityKey,localCopy);
+     else{
+      const value=fromWire('note',c.meta.payload,c.state.payload);
+      if(value.noteConflicts)value.noteConflicts={...value.noteConflicts,records:value.noteConflicts.records.map((r:Conflict)=>({
+       ...r,noteId,conflictId:newConflictId(noteId,r.baseMarkdown,r.localMarkdown,r.remoteMarkdown,r.remoteDeviceId),
+      })).sort((a:Conflict,b:Conflict)=>a.conflictId<b.conflictId?-1:1)};
+      const candidate=candidates('note',noteId,entityKey,{...value,noteId},c.meta.addedAtSource==='original'?c.addedAtMillis:undefined,this.o.store.segmentOptions());
+      rows.set(entityKey,{entityKey,rowSequence:row.rowSequence,candidate});
+     }
+     retained=true;
+    }
    }
    const folder=c.meta.payload.folderId;
    const p=c.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
    const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
    for(const key of dependencies){
     const dependency=localById.get(key),selected=rows.get(key);
-    if(dependency&&(!selected||selected.candidate.state.payload.deleted))rows.set(key,dependency);
+    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);retained=true;}
    }
   }
   return retained?[...rows.values()]:null;
+ }
+
+ /** Preserve existing cloud copies, including those created by older builds.
+  * New IDs depend on memo content, so re-saving without edits keeps the ID. */
+ private retainedNoteIdentity(row:RecordRow,editHash:string,rows:Map<string,RecordRow>,local:Map<string,RecordRow>,unopenable:Record<string,unknown>){
+  const c=row.candidate,domain='watchrss/retain-unsent-note';
+  const contentHash=digest([c.meta.payload.title,c.state.payload.markdown]);
+  for(let attempt=0;;attempt++){
+   const id=digest(attempt===0?[domain,row.entityKey,editHash]:[domain,row.entityKey,contentHash,attempt]);
+   const noteId=`${id.slice(0,8)}-${id.slice(8,12)}-4${id.slice(13,16)}-8${id.slice(17,20)}-${id.slice(20,32)}`;
+   const entityKey=this.o.store.entityKeyFor('note',noteId),existing=rows.get(entityKey);
+   if(existing&&sameLiveNoteContent(c,existing.candidate))return null;
+   if(existing||Object.hasOwn(unopenable,noteId))continue;
+   const localCopy=local.get(entityKey);
+   if(localCopy?sameLiveNoteContent(c,localCopy.candidate):attempt>0)return {noteId,entityKey,localCopy};
+  }
  }
 
  private applied(s:SyncState,commitOid:string,revision:string,generation:string,requestId:string){
@@ -403,7 +424,7 @@ export class WatchAccountControl {
    before=await this.o.store.readState();
   }
   if(before.pendingChoice||before.hasUnsentEdits){
-   if(!before.pendingChoice&&await this.firstFollowNoteCollision(before)){
+   if(!before.pendingChoice&&await this.firstFollowMemoCollision(before)){
     const pendingChoice={generation:before.account!.generation,inboxKeys:[],accountOid:before.account!.oid,accountRevision:before.account!.revision,selectedLocalChangeRevision:before.localChangeRevision};
     await this.o.store.controlUpdate(before,{...before,pendingChoice});
     return {awaitingUser:true,localEditsRetained:true};
@@ -411,6 +432,8 @@ export class WatchAccountControl {
    return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
   }
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
+  const published=before.cloud?.lastPublication?.result?.account;
+  if(before.activeGeneration===null&&published&&(!before.account||compareD64(before.account.revision,published.revision)<0))throw Error('first_follow_pending');
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
  }
@@ -422,7 +445,7 @@ export class WatchAccountControl {
  }
  /** Without a common base, overlapping first-sync edits need a choice. The
   * normal publisher can carry non-overlapping notes onto the remote tree. */
- private async firstFollowNoteCollision(before:SyncState){
+ private async firstFollowMemoCollision(before:SyncState){
   const current=before.cloud?.current;
   if(before.editBase.accountOid!==null||!current||current.commitOid!==before.account?.oid)return false;
   let after='';
@@ -430,9 +453,11 @@ export class WatchAccountControl {
    const page=await this.o.store.candidatePage(after,32,PAGE_BYTES);
    if(!page.length)return false;
    for(const {entityKey,candidate} of page){
-    if(candidate.meta.kind!=='note')continue;
+    const kind=candidate.meta.kind;
+    if(kind!=='note'&&kind!=='folder')continue;
     const row=await this.o.store.cloudRow(current.treeRoot,entityKey);
-    if(row&&!row.unopenable&&!sameLiveNoteContent(row,candidate)&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
+    if(!row||row.unopenable)continue;
+    if(kind==='folder'?!sameFolderContent(row,candidate):!sameLiveNoteContent(row,candidate)&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
    }
    after=page.at(-1)!.entityKey;
   }

@@ -8,7 +8,7 @@ import {hex} from '@podjs/framework/crypto';
 import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
-import {fromWire} from './business';
+import {fromWire,sameFolderContent} from './business';
 import {readConflicts,conflictNeutral,noteEditDigest,sameLiveNoteContent} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
@@ -110,6 +110,13 @@ export class WatchIndexPublisher {
     }
     if(local||remote){c.state.payload.noteConflicts=mergeConflicts(context.noteId,local??conflictSet(context.noteId,[]),remote??conflictSet(context.noteId,[]));c.state.requiredFeatures=[...new Set([...c.state.requiredFeatures,'note-conflicts.v1'])].sort();}
    }
+   const mergeFolderClock=baseOid===null&&existing&&sameFolderContent(c,existing);
+   if(mergeFolderClock){
+    const clock=c.state.payload.updatedAt>existing.state.payload.updatedAt?c.state.payload:existing.state.payload;
+    c.meta=existing.meta;
+    c.addedAtMillis=existing.row.addedAtMillis;
+    c.state={...existing.state,payload:{...existing.state.payload,updatedAt:clock.updatedAt,modifiedBy:clock.modifiedBy}};
+   }
    let body;try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}catch(error){if((error as Error).message!=='body_channel_source_missing')throw error;heldEdits=true;continue;}
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)continue;
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
@@ -118,7 +125,7 @@ export class WatchIndexPublisher {
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
    // business adapter before replacing an overlapping authenticated row.
-   if(old&&before.account&&before.editBase.accountOid!==before.account.oid&&!mergeNoteClock)throw Error('merge_unavailable');
+   if(old&&before.account&&before.editBase.accountOid!==before.account.oid&&!mergeNoteClock&&!mergeFolderClock)throw Error('merge_unavailable');
    indexRow(row);rows.set(entry.entityKey,row);changedRows.push(row);
    await stage();
   }after=page.at(-1)!.entityKey;}
