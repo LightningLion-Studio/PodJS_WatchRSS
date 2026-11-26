@@ -25,6 +25,11 @@ export interface RecoveryPort {
  source:(refs:string[],changes:RecoveryDelta['changes'])=>Promise<{oid:string;size:number;read:(offset:number,length:number)=>Promise<Uint8Array>}[]>;
  /** Reserves worst-case persistent quota, released after commit or failure. */
  reserve:(bytes:number)=>Promise<()=>Promise<void>>;
+ /** Both phases of a journaled cloud choice use the same quota owner. */
+ choiceQuota?:{
+  reserve:(bytes:number,requestId:string)=>Promise<()=>Promise<void>>;
+  clear:(requestId:string)=>Statement;
+ };
  /** Authenticated CURRENT business rows + fresh SignedAvailability for every
   * necessary recipe/blob closure. No upload/lease/custody receipt can substitute. */
  acknowledge?:(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,check?:()=>Promise<void>)=>Promise<{expiresAtMillis:number}>;
@@ -48,6 +53,10 @@ export function recoveryDelta(local:Record<string,RecoveryValue>,cloud:Record<st
 }
 export class WatchRecovery {
  constructor(readonly projection:WatchProjectionStore,readonly cache:WatchSpaceStore,readonly ports:RecoveryPort){}
+ async reclaimChoiceQuota(requestId:string){
+  const quota=this.ports.choiceQuota;
+  if(quota)await this.cache.journal.db.transaction([quota.clear(requestId)]);
+ }
  async setKeep(enabled:boolean){const state=await this.projection.readState();await this.projection.controlUpdate(state,{...state,keepDiscardedLocalChanges7Days:enabled});}
  /** N1: a delta above one AEAD block (a long note) is stored as chunk rows
   * owned by its copyId; the copy in state keeps only a sealed small ref. */
@@ -87,6 +96,9 @@ export class WatchRecovery {
   // Unencodable retained notes are pending in local recovery even when the
   // user has disabled the optional archive of discarded changes.
   const required=input.requiredRecovery;
+  const requestId=before.cloud?.pendingCloudChoice?.requestId;
+  const quota=this.ports.choiceQuota;
+  const quotaCleanup=quota&&requestId?[quota.clear(requestId)]:[];
   const keep=before.keepDiscardedLocalChanges7Days;
   const delta=recoveryDelta(input.local,input.cloud,before.editBase,keep?input.capturedKeys:required?.keys??input.capturedKeys);
   const incomingBody=input.incomingBody;
@@ -97,7 +109,7 @@ export class WatchRecovery {
   }
   if((!keep&&!required)||(!delta.changes.length&&!incomingBody)){
    const statements=incomingBody?[...input.statements,this.projection.legacyBodies.drop(incomingBody)]:input.statements;
-   await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);return null;
+   await this.projection.choiceUpdate(before,next,[...statements,...quotaCleanup],'choice_apply',input.next.stateVersion);return null;
   }
   const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0)||now>Number.MAX_SAFE_INTEGER-SEVEN_DAYS)throw Error('clock_unknown');
   const copyId=required?.copyId??await this.ports.randomId();hexId(copyId,32);if(next.recoveryCopies.some(c=>c.copyId===copyId)||next.recoveryPins.some(p=>p.copyId===copyId))throw Error('idempotency_conflict');
@@ -110,7 +122,7 @@ export class WatchRecovery {
   // reservation before staging recovery, while keeping their final CAS atomic.
   await input.releaseProjection?.();
   let release:Awaited<ReturnType<RecoveryPort['reserve']>>;
-  try{release=await this.ports.reserve(worst);}catch(error){
+  try{release=await (quota&&requestId?quota.reserve(worst,requestId):this.ports.reserve(worst));}catch(error){
    if(!input.releaseProjection)throw error;
    throw Object.assign(Error('storage_pressure'),{cause:error});
   }
@@ -128,7 +140,7 @@ export class WatchRecovery {
    // Body files are durable before state CAS. Uncommitted files carry no pin.
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
    const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,...(incomingBody?this.projection.legacyBodies.guard(incomingBody):[]),this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
-   await this.projection.choiceUpdate(before,next,statements,'choice_apply',input.next.stateVersion);committed=true;return copy;
+   await this.projection.choiceUpdate(before,next,[...statements,...quotaCleanup],'choice_apply',input.next.stateVersion);committed=true;return copy;
   }finally{
    try{await this.cache.unstage(resources);}finally{await release();}
    if(!committed)try{await this.cache.collect();}catch{}

@@ -168,10 +168,20 @@ export class WatchAccountControl {
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
  }
  private async reserveBytes(bytes:number){try{return await this.o.business.reserve(bytes);}catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}}
- private async reserveProjection(statements:Statement[],options:{allowPendingCloudChoice?:boolean}={}){
+ private async reserveProjection(statements:Statement[],requestId?:string){
   const plan=(statements as Statement[]&{preparedPlan?:import('@podjs/framework/sql-program').SqlProgramRef}).preparedPlan;
-  if(!plan)return this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));
-  const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));
+  const quota=this.o.recovery.ports.choiceQuota;
+  const options={allowPendingCloudChoice:requestId!==undefined};
+  const reserve=async()=>{
+   const bytes=this.o.store.accountProjectionReservationBytes(statements);
+   if(!quota||!requestId)return this.reserveBytes(bytes);
+   try{return await quota.reserve(bytes,requestId);}
+   catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}
+  };
+  if(!plan)return reserve();
+  // Migrate reservations attached to a plan by older candidates.
+  if(quota&&requestId)await this.o.store.releasePlanReservation(plan,options);
+  const release=await this.o.store.existingPlanReservation(plan)??await reserve();
   const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;
   let ref=plan;
   try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}
@@ -232,7 +242,8 @@ export class WatchAccountControl {
   const before=await this.o.store.readState(),intent=before.cloud?.pendingCloudChoice;if(!intent||!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return false;
   try{checkCapture(before,this.cloudChoiceCapture(intent));return false;}catch(error){if((error as Error).message!=='choice_stale')throw error;}
   const next=clone(before);next.cloud.pendingCloudChoice=null;next.cloud.retiredCloudChoices={...next.cloud.retiredCloudChoices,[intent.requestId]:intent};
-  await this.o.store.choiceUpdate(before,next);return true;
+  const quota=this.o.recovery.ports.choiceQuota;
+  await this.o.store.choiceUpdate(before,next,quota?[quota.clear(intent.requestId)]:[]);return true;
  }
  private cloudChoiceCapture(intent:any):Capture{return Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision});}
  /** Accepted audit results survive a closed apply gate. This transaction only
@@ -269,6 +280,9 @@ export class WatchAccountControl {
  private async applyAcceptedCloudChoice(){
   await this.gate('choice');const s=await this.o.store.readStableState(),intent=s.cloud?.pendingCloudChoice;if(intent?.phase!=='accepted')throw Error('choice_stale');
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
+  // A restarted writer may have stopped in either quota phase. The journal
+  // and writer lease identify the one operation whose reservation we can clear.
+  await this.o.recovery.reclaimChoiceQuota(intent.requestId);
   checkCapture(await this.o.store.readState(),capture);let localRows=await this.local(),cloudRows=await this.cloud(s),applyRows=cloudRows,capturedKeys:string[]|undefined,decision:Awaited<ReturnType<WatchProjectionStore['prepareLegacyDecision']>>|undefined;
   const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
@@ -276,7 +290,7 @@ export class WatchAccountControl {
   const records=this.records(retained?.rows??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
   if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
   const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business);
-  let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,{allowPendingCloudChoice:true});
+  let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,intent.requestId);
   const releaseProjection=async()=>{await release?.();release=undefined;};
   try{
    const local:Record<string,RecoveryValue>={},cloud:Record<string,RecoveryValue>={},selected=capturedKeys?new Set(capturedKeys):null;

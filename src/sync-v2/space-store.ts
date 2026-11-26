@@ -14,6 +14,7 @@ export class WatchSpaceStore {
  readonly journal:ResourceJournal;
  constructor(db:ProjectionSql,readonly cipher:LocalCipher,readonly files:ContentFiles,readonly binding:string){this.journal=new ResourceJournal(db,binding);}
  async init(){await this.journal.init();await this.journal.db.transaction([
+  {sql:'CREATE TABLE IF NOT EXISTS podjs_resource_quota(binding TEXT NOT NULL,id TEXT NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(binding,id))'},
   {sql:'CREATE TABLE IF NOT EXISTS sync2_space_settings(binding TEXT PRIMARY KEY,auto_evict INTEGER NOT NULL DEFAULT 0,clock INTEGER NOT NULL DEFAULT 0)'},
   {sql:'INSERT OR IGNORE INTO sync2_space_settings(binding) VALUES(?)',params:[this.binding]},
   {sql:'CREATE TABLE IF NOT EXISTS sync2_space_round(binding TEXT PRIMARY KEY,round TEXT NOT NULL,controller TEXT NOT NULL,active INTEGER NOT NULL CHECK(active IN (0,1)))'},
