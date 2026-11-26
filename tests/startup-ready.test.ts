@@ -10,3 +10,14 @@ for(const scenario of ['home','feed','missing','settings','timeout','intro','pri
   expect(child.exitCode,child.stdout.toString()+child.stderr.toString()).toBe(0);
  });
 }
+
+for(const control of [false,true]){
+ test(`startup legal reply ${control?'without':'with'} warning`,()=>{
+  const result=Bun.spawnSync([process.execPath,'--conditions=browser','test','./tests/startup-ready.isolated.ts'],{
+   cwd:import.meta.dir+'/..',
+   env:{...process.env,WRSS_STARTUP_FIXTURE:'bluetooth-legal-response',REVIEW_BLUETOOTH_CONTROL:control?'1':'0'},
+   stdout:'pipe',stderr:'pipe',
+  });
+  expect(result.exitCode,result.stdout.toString()+result.stderr.toString()).toBe(0);
+ });
+}

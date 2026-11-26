@@ -1,3 +1,4 @@
+import { createRouteOwnership } from "./route-ownership.ts";
 import {BluetoothWarningPage} from './NetworkUnavailableOverlay.tsx';
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {preserveNetworkContent} from '../network/context.ts';
@@ -109,7 +110,6 @@ import { BackMotion } from "@podjs/framework/navigation";
 import { HomeEntryPlacementStore } from "./home-placement.ts";
 import type { SettingsRoute } from "./SettingsScreen.tsx";
 import { SettingsStore, type SettingsState } from "../settings/index.ts";
-import type { InformationPage } from "./InformationScreens.tsx";
 import { checkpointInformationSnapshot } from "./information-route-state.ts";
 import type { RecommendedChannel } from "../rss/recommendations.ts";
 import { memoRepository } from "../services.ts";
@@ -257,30 +257,21 @@ export default function WatchRSS(props: {
   );
   const [backRotation, setBackRotation] = createSignal(0);
   const backTranslation = createMemo(() => backOffset() === 0 ? { x: 0, y: 0 } : rotateVector(backOffset(), 0, backRotation()));
-  // Hold completed navigation while the current back gesture finishes.
-  // Requests still in flight never participate in this queue.
-  const afterBack: {apply:()=>void;cancel?:()=>void}[]=[];
-  function navigate(apply:()=>void,cancel?:()=>void) {
-    if(startupDisposed){cancel?.();return;}
-    if(motion.phase==="idle")batch(apply);
-    else afterBack.push({apply,cancel});
-  }
-  onFrame(()=>{
-    if(motion.phase!=="idle")return;
-    for(const {apply,cancel} of afterBack.splice(0))navigate(apply,cancel);
-  },()=>afterBack.length>0&&motion.phase==="idle");
-  onCleanup(()=>{for(const {cancel} of afterBack.splice(0))cancel?.();});
-  function waitForBack():Promise<boolean> {
-    return new Promise(resolve=>navigate(()=>resolve(true),()=>resolve(false)));
-  }
-  function setPage(next: Page,data: Partial<Entry> = {}) {
-    navigate(()=>traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))));
+  const { canReceiveData, canCommitNavigation, commitNavigation } = createRouteOwnership({
+    content: contentRoute,
+    backPhase: () => motion.phase,
+    warningShown,
+    dismissWarning: removeWarningRoute,
+    disposed: () => startupDisposed,
+  });
+  function setPage(next: Page,data: Partial<Entry> = {}, source = contentRoute()) {
+    if (next === "bluetooth-warning" && warningShown()) return;
+    if (next === source.page && Object.keys(data).length === 0) return;
+    commitNavigation(source, () =>
+      traceServiceWork("navigation.setPage", () => kv.batch(() => setPageImpl(next, data))));
   }
   function setPageImpl(next: Page, data: Partial<Entry>) {
     if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
-    if (next === "bluetooth-warning" && warningShown()) return;
-    if (next === contentRoute().page && Object.keys(data).length === 0) return;
-    removeWarningRoute();
     traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(current()));
     traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
     traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
@@ -351,7 +342,7 @@ export default function WatchRSS(props: {
       return finishPopPage(leaving);
     leaving.list?.scroller.stop();
     flushReaderProgress(leaving,"exit",()=>{
-      if(current()===leaving)finishPopPage(leaving);
+      commitNavigation(leaving, () => finishPopPage(leaving), false);
     });
     return true;
   }
@@ -492,7 +483,8 @@ export default function WatchRSS(props: {
     reorderSaved,
   } = createSavedRouteController({
     services: props.services,
-    current,
+    current: contentRoute,
+    canReceiveData,
     setArticles,
     startPageLoading,
     setError,
@@ -506,7 +498,7 @@ export default function WatchRSS(props: {
   let searchRequestVersion = 0;
   let searchDebounce: ReturnType<typeof delay> | undefined;
   createEffect(() => {
-    if (page() !== "search" && searchDebounce) {
+    if (contentRoute().page !== "search" && searchDebounce) {
       searchDebounce.cancel();
       searchDebounce = undefined;
       searchRequestVersion++;
@@ -589,8 +581,8 @@ export default function WatchRSS(props: {
       (source.page === "bili" && source.biliRoute?.name === "actions") ||
       (source.page === "douyin" && source.douyinRoute?.name === "actions");
     void shareEnvironment.then(supported => {
-      navigate(() => {
-        if (!shareAlive || contentRoute() !== source) return;
+      if (!shareAlive) return;
+      commitNavigation(source, () => {
         void routeShare(input, settings().shareUseSystem && supported, {
           text: async text => {
             setSystemShareOpen(true);
@@ -601,7 +593,7 @@ export default function WatchRSS(props: {
           unavailable: () => { void hostToast("暂无可分享链接"); },
         }).then(outcome => {
           if (!shareAlive) return;
-          if (onDone && outcome !== "none") onDone();
+          if (onDone && outcome !== "none") commitNavigation(source, onDone, false);
           else if (finishSource) {
             source.list?.scroller.stop();
             setStack(entries => entries.length > 1
@@ -609,7 +601,7 @@ export default function WatchRSS(props: {
               : entries);
           }
         }).catch(error => {
-          if (shareAlive) setError(String(error));
+          if (shareAlive && canReceiveData(source)) setError(String(error));
         });
       });
     });
@@ -704,7 +696,7 @@ export default function WatchRSS(props: {
     }),
   );
   let platformLoginRefresh = 0;
-  const refreshPlatformLoginState = async () => {idleHit(6);
+  const refreshPlatformLoginState = async (origin: Entry) => {idleHit(6);
     const revision = ++platformLoginRefresh;
     const [bili, douyin] = await Promise.all([
       biliClient
@@ -713,11 +705,13 @@ export default function WatchRSS(props: {
         .catch(() => false),
       douyinClient.isLoggedIn().catch(() => false),
     ]);
-    if (revision === platformLoginRefresh)
+    if (canReceiveData(origin) && revision === platformLoginRefresh)
       setPlatformLoginState({ bili, douyin });
   };
   createEffect(() => {
-    idleHit(7);if (page() === "home" && foreground()) void refreshPlatformLoginState();
+    idleHit(7);
+    const origin = contentRoute();
+    if (origin.page === "home" && foreground()) void refreshPlatformLoginState(origin);
   });
   onCleanup(() => {
     platformLoginRefresh++;
@@ -809,6 +803,7 @@ export default function WatchRSS(props: {
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
   async function loadChannels(foregroundLoad=true) {idleHit(5);
+    const origin = contentRoute();
     // Keep the startup snapshot visible and leave a restored page's state alone.
     const loaded=foregroundLoad&&!channels().length?startPageLoading():undefined;
     if(foregroundLoad)setError("");
@@ -818,26 +813,22 @@ export default function WatchRSS(props: {
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
     } catch (e) {
-      if(foregroundLoad||page()==="home")setError(String(e));
+      if (canReceiveData(origin) && (foregroundLoad || origin.page === "home")) setError(String(e));
     } finally {
       loaded?.();
     }
   }
   async function loadArticles(opts?: ArticleQuery) {
-    const loaded=startPageLoading();
+    const origin = contentRoute();
+    const loaded = startPageLoading();
+    const snapshot = currentQuery = { ...opts, page: opts?.page ?? 0 };
+    const active = () => canReceiveData(origin) && currentQuery === snapshot;
     setError("");
     try {
-      const next = opts?.page ?? 0;
-      currentQuery = { ...opts, page: next };
-      setArticles(
-        await props.services.listArticles({
-          ...opts,
-          page: next,
-          pageSize: 30,
-        }),
-      );
+      const items = await props.services.listArticles({ ...snapshot, pageSize: 30 });
+      if (active()) setArticles(items);
     } catch (e) {
-      setError(String(e));
+      if (active()) setError(String(e));
     } finally {
       loaded();
     }
@@ -849,6 +840,7 @@ export default function WatchRSS(props: {
   ) {
     const origin=contentRoute();
     const version = ++feedRequestVersion;
+    const active = () => canReceiveData(origin) && version === feedRequestVersion && origin.channelId === channelId;
     const loaded=initial?startPageLoading():undefined;
     try {
       const window = await loadFeedWindow(
@@ -856,12 +848,7 @@ export default function WatchRSS(props: {
         channelId,
         limit,
       );
-      if (
-        version !== feedRequestVersion ||
-        contentRoute() !== origin ||
-        origin.channelId !== channelId
-      )
-        return;
+      if (!active()) return;
       batch(() => {
         setArticles(window.items);
         setFeedVisibleCount(limit);
@@ -869,7 +856,7 @@ export default function WatchRSS(props: {
         currentQuery = { channelId, page: 0 };
       });
     } catch (e) {
-      if (version === feedRequestVersion) setError(String(e));
+      if (active()) setError(String(e));
     } finally {
       loaded?.();
       if (version === feedRequestVersion) {
@@ -894,15 +881,13 @@ export default function WatchRSS(props: {
         for(const entry of entries)await informationActivity.restore(entry);
         if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
         if(startupDisposed||!ownsStack(baseline))return;
-        if(!await waitForBack()||!ownsStack(baseline))return;
-        owned=entries;
-        batch(()=>{
-          removeWarningRoute();
+        if (!commitNavigation(baseline.at(-1)!, () => {
+          owned=entries;
           setStack(entries);
           const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);
           if(lastReader)setArticle(lastReader.readerArticle!);
           setActivityReady(true);
-        });
+        }, false)) return;
         const destination=entries.at(-1);
         if(destination?.page==='articles'&&destination.channelId)
           await loadFeedArticles(destination.channelId,Number(routeMemory(destination).retained.feedCount)||12,true);
@@ -961,30 +946,30 @@ export default function WatchRSS(props: {
     go: () => go("phone-connection"),
   }));
   // Finishing a flow (for example watch pairing) returns to the home page instead of the page it started from.
-  function goHome() {
-    navigate(()=>{
-      removeWarningRoute();
+  function goHome(source = contentRoute()) {
+    commitNavigation(source, () => {
       if (stack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
       else setStack([{ page: "home" }]);
       kv.set("page", "home");
       void loadChannels();
     });
   }
-  async function go(next: Page) {
+  async function go(next: Page, source = contentRoute()) {
+    if (!canCommitNavigation(source)) return;
     if (next === "notes") {
       if (busy()) return;
       setBusy(true);
       try {
         await memoRepository.initialize();
       } catch (error) {
-        if(!startupDisposed)setError(String(error));
+        if(canReceiveData(source))setError(String(error));
         return;
       } finally {
         setBusy(false);
       }
     }
-    if(!await waitForBack())return;
-    setPage(next);
+    if (!canCommitNavigation(source)) return;
+    setPage(next, {}, source);
     kv.set("page", next);
     if (next === "home") await loadChannels();
     if (next === "articles") {
@@ -998,9 +983,9 @@ export default function WatchRSS(props: {
   let articleOpenRevision = 0;
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
     const origin = contentStack(), revision = ++articleOpenRevision;
-    const active = () => !startupDisposed && revision === articleOpenRevision &&
-      contentStack() === origin && foreground();
     const source = origin.at(-1)!;
+    const active = () => revision === articleOpenRevision && contentStack() === origin &&
+      foreground() && canCommitNavigation(source);
     const previousReader = replaceReader && source.page === "reader" ? source : undefined;
     try {
       const full = await props.services.getArticle(item.id,article());
@@ -1008,8 +993,8 @@ export default function WatchRSS(props: {
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
       if(available)await props.services.markRead(item.id);
-      navigate(()=>{
-        if (!active()) return;
+      if (!active()) return;
+      commitNavigation(source, () => {
         setArticle({ ...full, read });
         // Reopening an already-read article must not rebuild the retained feed
         // and synchronously remeasure every card for an unchanged read flag.
@@ -1028,7 +1013,7 @@ export default function WatchRSS(props: {
         if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
       });
     } catch (e) {
-      if (active() && motion.phase === "idle") setError(String(e));
+      if (active()) setError(String(e));
     }
   }
   async function openArticleActions(item: Article) {
@@ -1037,13 +1022,12 @@ export default function WatchRSS(props: {
     setBusy(true);
     try {
       const full = await props.services.getArticle(item.id,article());
-      navigate(()=>{
-        if (contentRoute() !== origin) return;
-        setArticle(full ?? item);
+      if (canReceiveData(origin)) setArticle(full ?? item);
+      commitNavigation(origin, () => {
         setPage("rss-actions");
       });
     } catch (e) {
-      if(!startupDisposed)setError(String(e));
+      if(canReceiveData(origin))setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1051,15 +1035,15 @@ export default function WatchRSS(props: {
   async function deleteArticle() {
     const selected = article();
     if (!selected || busy()) return;
-    const origin = current();
+    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.deleteArticle(selected.id);
       setArticles((items) => items.filter((item) => item.id !== selected.id));
-      if (current() === origin && popPage(true)) setArticle(null);
+      commitNavigation(origin, () => { if (popPage(true)) setArticle(null); }, false);
       await loadChannels(false);
     } catch (e) {
-      setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1071,12 +1055,12 @@ export default function WatchRSS(props: {
   ) {
     const selected = article();
     if (!selected || busy()) return;
-    const origin = current();
+    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.setSaveState(selected.id, type, saved);
       const patch = type === "favorite" ? { saved } : { watchLater: saved };
-      setArticle({ ...selected, ...patch });
+      setArticle((latest) => latest?.id === selected.id ? { ...latest, ...patch } : latest);
       setArticles((items) =>
         items
           .map((a) => (a.id === selected.id ? { ...a, ...patch } : a))
@@ -1090,9 +1074,9 @@ export default function WatchRSS(props: {
               ),
           ),
       );
-      if (navigateBack && current() === origin) popPage();
+      if (navigateBack) commitNavigation(origin, () => popPage(), false);
     } catch (e) {
-      setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1100,11 +1084,11 @@ export default function WatchRSS(props: {
   async function markArticleUnread() {
     const selected = article();
     if (!selected?.read || busy()) return;
-    const origin = current();
+    const origin = contentRoute();
     setBusy(true);
     try {
       await props.services.markRead(selected.id, false);
-      setArticle({ ...selected, read: false });
+      setArticle((latest) => latest?.id === selected.id ? { ...latest, read: false } : latest);
       setArticles((items) =>
         items.map((a) => (a.id === selected.id ? { ...a, read: false } : a)),
       );
@@ -1115,9 +1099,9 @@ export default function WatchRSS(props: {
             : c,
         ),
       );
-      if (current() === origin) popPage();
+      commitNavigation(origin, () => popPage(), false);
     } catch (e) {
-      setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1127,6 +1111,7 @@ export default function WatchRSS(props: {
     type: "favorite" | "watchLater",
   ) {
     if (busy()) return;
+    const origin = contentRoute();
     const saved = type === "favorite" ? !item.saved : !item.watchLater;
     setBusy(true);
     try {
@@ -1142,26 +1127,25 @@ export default function WatchRSS(props: {
         ),
       );
     } catch (e) {
-      setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
   }
   async function openChannelSettings(id: string) {
     if (busy()) return;
+    const origin = contentRoute();
     setBusy(true);
     try {
       const [enabled, playback] = await Promise.all([
         props.services.getChannelOriginalMode(id),
         props.services.getChannelPlaybackSettings(id),
       ]);
-      navigate(()=>{
-        setOriginalModes((m) => ({ ...m, [id]: enabled }));
-        setChannelPlayback((m) => ({ ...m, [id]: playback }));
-        setPage("channel-settings", { channelId: id });
-      });
+      setOriginalModes((m) => ({ ...m, [id]: enabled }));
+      setChannelPlayback((m) => ({ ...m, [id]: playback }));
+      setPage("channel-settings", { channelId: id }, origin);
     } catch (e) {
-      if(!startupDisposed)setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1178,6 +1162,7 @@ export default function WatchRSS(props: {
       | "clear",
   ) {
     if (busy()) return;
+    const origin = contentRoute();
     setBusy(true);
     setError("");
     try {
@@ -1229,10 +1214,10 @@ export default function WatchRSS(props: {
         await props.services.deleteChannel(id);
         setChannels((items) => items.filter((c) => c.id !== id));
         setArticles((items) => items.filter((a) => a.channelId !== id));
-        navigate(()=>{removeWarningRoute();setStack([{ page: "home" }]);});
+        commitNavigation(origin, () => setStack([{ page: "home" }]), false);
       }
     } catch (e) {
-      setError(String(e));
+      if (canReceiveData(origin)) setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -1246,10 +1231,11 @@ export default function WatchRSS(props: {
     setPage("search", { channelId: id });
   }
   function updateSearchKeyword(channelId: string, value: string) {
+    const origin = contentRoute();
     searchDebounce?.cancel();
     searchRequestVersion++;
     setQuery(value);
-    if(current().page==='search'){routeMemory(current()).retained.query=value;saveActivity();}
+    if(origin.page==='search'){routeMemory(origin).retained.query=value;saveActivity();}
     setSearchResults([]);
     setSearchLoading(false);
     if (!value.trim()) return;
@@ -1257,15 +1243,18 @@ export default function WatchRSS(props: {
     void timer.result.then(() => {
       if (searchDebounce !== timer) return;
       searchDebounce = undefined;
-      if (current().page === "search" && current().channelId === channelId)
+      if (canReceiveData(origin) && origin.page === "search" && origin.channelId === channelId)
         void searchChannelArticles(channelId, value);
     }, () => {});
   }
   async function searchChannelArticles(channelId: string, keyword: string) {
     const version = ++searchRequestVersion;
+    const origin = contentRoute();
+    const active = () => canReceiveData(origin) && version === searchRequestVersion &&
+      origin.page === "search" && origin.channelId === channelId;
     const term = keyword.trim();
     setQuery(keyword);
-    if(current().page==='search'){routeMemory(current()).retained.query=keyword;saveActivity();}
+    if(origin.page==='search'){routeMemory(origin).retained.query=keyword;saveActivity();}
     setError("");
     setSearchResults([]);
     if (!term) {
@@ -1281,26 +1270,18 @@ export default function WatchRSS(props: {
             query: term,
             pageSize: 120,
           });
-      if (
-        version === searchRequestVersion &&
-        current().page === "search" &&
-        current().channelId === channelId
-      )
+      if (active())
         setSearchResults(found);
     } catch (e) {
-      if (
-        version === searchRequestVersion &&
-        current().page === "search" &&
-        current().channelId === channelId
-      )
+      if (active())
         setError(String(e));
     } finally {
       if (version === searchRequestVersion) setSearchLoading(false);
     }
   }
   async function refresh() {
-    const origin=current();
-    const refreshAll = page() === "home";
+    const origin=contentRoute();
+    const refreshAll = origin.page === "home";
     if (refreshAll && homeRefreshing()) return;
     // Native HomeComposeScreen keeps channel interactions enabled while "刷新全部" runs; the
     // refresh state only drives the indicator. Per-page refresh still holds the busy gate.
@@ -1312,7 +1293,7 @@ export default function WatchRSS(props: {
         await networkFor(origin).run(() => props.services.refresh(origin.channelId));
       }
       finally { if (refreshAll) usageTelemetry.recordFeedRefreshed(); }
-      if(contentRoute()!==origin)return;
+      if(!canReceiveData(origin))return;
       if(origin.page==="home")await loadChannels(false);
       else if(origin.page==="articles"&&origin.channelId)
         await loadFeedArticles(origin.channelId,feedVisibleCount());
@@ -1322,7 +1303,7 @@ export default function WatchRSS(props: {
         await searchChannelArticles(origin.channelId,query());
       else await loadArticles(currentQuery);
     } catch (e) {
-      if(current()===origin&&!isNetworkRecoveryCancellation(e))setError(String(e));
+      if(canReceiveData(origin)&&!isNetworkRecoveryCancellation(e))setError(String(e));
     } finally {
       if (refreshAll) setHomeRefreshing(false);
       else setBusy(false);
@@ -1332,9 +1313,11 @@ export default function WatchRSS(props: {
   let updatingFeed = false,
     pendingLibraryUpdate = false;
   function updateFeedWhenSettled() {
-    const origin = current(),
+    const origin = contentRoute(),
       id = origin.channelId,
-      snapshot = currentQuery;
+      snapshot = currentQuery,
+      version = feedRequestVersion;
+    const active = () => canReceiveData(origin) && currentQuery === snapshot && version === feedRequestVersion;
     const libraryUpdate =
       pendingLibraryUpdate &&
       ["articles", "saved", "watch-later", "search"].includes(origin.page);
@@ -1368,7 +1351,7 @@ export default function WatchRSS(props: {
           .then((items) => ({ items, hasMore: false }));
     void request
       .then((window) => {
-        if (current() === origin && currentQuery === snapshot) {
+        if (active()) {
           if (origin.list?.scroller.state() === "idle") {
             setArticles(window.items);
             if (feed) setFeedHasMore(window.hasMore);
@@ -1381,7 +1364,7 @@ export default function WatchRSS(props: {
           if (libraryUpdate) pendingLibraryUpdate = true;
         }
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => { if (active()) setError(String(e)); })
       .finally(() => {
         updatingFeed = false;
       });
@@ -1393,7 +1376,7 @@ export default function WatchRSS(props: {
   onMount(() => {
     const unsubscribe = props.services.subscribeChannel((event) => {idleHit(47);
       if (event.kind === "error") {
-        if (current().channelId === event.id)
+        if (contentRoute().channelId === event.id)
           setError(event.message ?? "刷新失败");
         return;
       }
@@ -1481,10 +1464,11 @@ export default function WatchRSS(props: {
     setPage("add-rss", { addUrl: prefill });
   };
   const openUrl = async (url: string, origin: BrowserOrigin = "information") => {
+    const source = contentRoute();
     try {
       await openBrowserUrl(url, origin, readerPreset());
     } catch (e) {
-      setError(browserOpenFailureMessage(e));
+      if (canReceiveData(source)) setError(browserOpenFailureMessage(e));
     }
   };
   const updateSettings = (patch: Partial<SettingsState>) => {
@@ -1533,8 +1517,6 @@ export default function WatchRSS(props: {
       setPage("information", { informationPage: "beian" });
     else setError("此设置页尚未迁移");
   };
-  const informationNavigate = (informationPage: InformationPage) =>
-    setPage("information", { informationPage });
   const {
     biliBackground,
     setBiliBackground,
@@ -1572,7 +1554,7 @@ export default function WatchRSS(props: {
     services: props.services,
     current:contentRoute,
     motion:{get phase(){return motion.phase;}},
-    waitForBack,
+    ownership: { canReceiveData, canCommitNavigation, commitNavigation },
     busy,
     setBusy,
     setError,
@@ -1606,7 +1588,7 @@ export default function WatchRSS(props: {
   };
   createEffect(()=>{if(page()!=='home')douyinBench.cancelLogoutFeedback(douyinClient);});
   onCleanup(()=>douyinBench.cancelLogoutFeedback(douyinClient));
-  const returnHomeAfterDouyinLogout = () => {
+  const returnHomeAfterDouyinLogout = (entry: Entry) => commitNavigation(entry, () => {
     for (const entry of stack()) entry.queue?.cancel();
     batch(() => {
       setStack([{ page: "home" }]);
@@ -1618,11 +1600,12 @@ export default function WatchRSS(props: {
     void video.stop().catch(() => {});
     void hostToast("已退出登录");
     douyinBench.logoutFeedback(douyinClient);
-  };
-  const openAddedChannel = async (channel: Channel) => {
+  }, false);
+  const openAddedChannel = async (channel: Channel, source: Entry) => {
     await loadChannels();
-    if(!await waitForBack())return;
-    if (page() === "add-rss") setStack((entries) => entries.slice(0, -1));
+    if (!commitNavigation(source, () => {
+      if (source.page === "add-rss") setStack((entries) => entries.slice(0, -1));
+    })) return;
     if (channel.url === "builtin:bili") await biliNavigate({ name: "entry" });
     else if (channel.url === "builtin:douyin")
       await douyinNavigate({ name: "entry" });
@@ -1640,7 +1623,19 @@ export default function WatchRSS(props: {
     if(entry.page==='reader-scroll-controls')entry.reader=stack().slice(0,stack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
     const entryPage = () => entry.page;
     const active = () => current() === entry;
-    const contentActive = () => contentRoute() === entry;
+    const contentActive = () => canReceiveData(entry);
+    const routeSetPage = (next: Page, data?: Partial<Entry>) => setPage(next, data, entry);
+    const routeOpenBili: typeof biliNavigate = async (route, memory) => {
+      if (canReceiveData(entry)) await biliNavigate(route, memory);
+    };
+    const routeOpenDouyin: typeof douyinNavigate = async (route, memory) => {
+      if (canReceiveData(entry)) await douyinNavigate(route, memory);
+    };
+    const routePopPage = (skipInternal?: boolean) => {
+      let popped = false;
+      commitNavigation(entry, () => { popped = popPage(skipInternal); }, false);
+      return popped;
+    };
     const selfTitled = () => routeIsSelfTitled(entryPage());
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
@@ -1699,7 +1694,7 @@ export default function WatchRSS(props: {
             <HomeRoutes
               ownerChoiceNetwork={ownerChoiceNetwork}
               foreground={foreground}
-              goHome={goHome}
+              goHome={() => goHome(entry)}
               entry={entry}
               page={entryPage}
               active={() => active() && !(entryPage() === "home" && (homeNoticeVisible() || !!homeDisclosurePending()))}
@@ -1715,20 +1710,20 @@ export default function WatchRSS(props: {
               speechState={speechState}
               speechSpectrum={speechSpectrum}
               services={routeServices}
-              go={go}
+              go={next => go(next, entry)}
               openSpeech={() => setPage("speech-playback")}
               openAdd={() => void doAdd()}
               refresh={refresh}
-              openBili={biliNavigate}
-              openDouyin={douyinNavigate}
-              openFeed={(channel) => navigate(() => {
+              openBili={routeOpenBili}
+              openDouyin={routeOpenDouyin}
+              openFeed={(channel) => commitNavigation(entry, () => {
                 setFeedVisibleCount(12);
                 setFeedHasMore(false);
                 setPage("articles", { channelId: channel.id });
                 void loadFeedArticles(channel.id, 12, true);
               })}
               channelAction={channelAction}
-              openInformation={informationNavigate}
+              openInformation={informationPage => routeSetPage("information", { informationPage })}
               setError={setError}
             />
             <RssRoutes
@@ -1753,10 +1748,10 @@ export default function WatchRSS(props: {
               systemShareEnabled={() =>
                 settings().shareUseSystem && systemShareAvailable()
               }
-              setPage={setPage}
-              popPage={popPage}
+              setPage={routeSetPage}
+              popPage={routePopPage}
               setError={setError}
-              openAddedChannel={openAddedChannel}
+              openAddedChannel={channel => openAddedChannel(channel, entry)}
               searchChannelArticles={searchChannelArticles}
               updateSearchKeyword={updateSearchKeyword}
               openArticle={openArticle}
@@ -1783,8 +1778,8 @@ export default function WatchRSS(props: {
               loading={loading}
               undoVisible={() => !!savedUndo()}
               openArticle={openArticle}
-              openBili={biliNavigate}
-              openDouyin={douyinNavigate}
+              openBili={routeOpenBili}
+              openDouyin={routeOpenDouyin}
               remove={removeSaved}
               undo={undoSaved}
               reorder={reorderSaved}
@@ -1792,7 +1787,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
-              onOpenImage={url=>setPage("reader-image",{imageUrl:url})}
+              onOpenImage={url=>routeSetPage("reader-image",{imageUrl:url})}
               readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
               preset={readerPreset}
@@ -1821,14 +1816,14 @@ export default function WatchRSS(props: {
               }
               deleteBuiltin={deleteBuiltin}
               share={share}
-              openBili={biliNavigate}
-              openDouyin={douyinNavigate}
+              openBili={routeOpenBili}
+              openDouyin={routeOpenDouyin}
               playDouyin={douyinPlay}
               primeDouyinEntry={primeDouyinEntry}
               stopDouyinEntry={stopDouyinEntry}
               loginDouyin={douyinLogin}
               openUrl={openUrl}
-              popPage={popPage}
+              popPage={routePopPage}
               setError={setError}
               recoverDouyinVideo={recoverDouyinVideo}
               rejectDouyinAdjacent={rejectDouyinAdjacent}
@@ -1841,9 +1836,10 @@ export default function WatchRSS(props: {
               promoteDouyinAdjacent={promoteDouyinAdjacent}
               selectDouyinTarget={selectDouyinTarget}
               openHttpExport={openHttpExport}
-              onDouyinLogoutSuccess={returnHomeAfterDouyinLogout}
+              onDouyinLogoutSuccess={() => returnHomeAfterDouyinLogout(entry)}
             />
             <SettingsRoutes
+              contentActive={contentActive}
               createDebugBluetooth={props.createDebugBluetooth}
               entry={entry}
               page={entryPage}
@@ -1856,13 +1852,14 @@ export default function WatchRSS(props: {
               presetActions={presetStore}
               updatePreset={updatePreset}
               updateSettings={updateSettings}
-              navigate={settingsNavigate}
+              navigate={route => { if (canCommitNavigation(entry)) settingsNavigate(route); }}
               systemShareAvailable={systemShareAvailable}
               reloadSettings={() => setSettings(settingsStore.load())}
-              popPage={popPage}
+              popPage={routePopPage}
               setError={setError}
             />
             <NotesRoutes
+              contentActive={contentActive}
               onStateChange={saveActivity}
               entry={entry}
               page={entryPage}
@@ -1877,8 +1874,8 @@ export default function WatchRSS(props: {
               bumpRefreshKey={() => setNotesRefreshKey((value) => value + 1)}
               preset={readerPreset}
               backgroundSnapshot={informationBackground}
-              setPage={setPage}
-              popPage={popPage}
+              setPage={routeSetPage}
+              popPage={routePopPage}
               setError={setError}
             />
             <InfoRoutes
@@ -1889,8 +1886,8 @@ export default function WatchRSS(props: {
               foreground={foreground}
               width={width}
               height={height}
-              setPage={setPage}
-              openInformation={informationNavigate}
+              setPage={routeSetPage}
+              openInformation={informationPage => routeSetPage("information", { informationPage })}
               addRecommendation={addRecommendation}
               openUrl={(url) => openBrowserUrl(url,"information",readerPreset())}
             />
@@ -1901,12 +1898,12 @@ export default function WatchRSS(props: {
               width={width}
               height={height}
               bluetoothSync={bluetoothSync}
-              onUrl={receiveBluetoothUrl}
-              popPage={popPage}
+              onUrl={(url, destination) => commitNavigation(entry, () => receiveBluetoothUrl(url, destination), false)}
+              popPage={routePopPage}
             />
           </Show>
           <ReaderRoutes
-            openNovelChapter={article=>openArticle(article,false,true)}
+            openNovelChapter={async item => { if (canReceiveData(entry)) await openArticle(item, false, true); }}
             updateSettings={updateSettings}
             entry={entry}
             page={entryPage}
@@ -1928,8 +1925,8 @@ export default function WatchRSS(props: {
             article={article}
             setArticle={setArticle}
             openArticle={openArticle}
-            setPage={setPage}
-            popPage={popPage}
+            setPage={routeSetPage}
+            popPage={routePopPage}
             setError={setError}
             saveArticleState={saveArticleState}
             share={share}
@@ -1972,7 +1969,7 @@ export default function WatchRSS(props: {
       const entry=current();
       if(!warningBrowseReady[entry.page]?.(entry))return false;
       if(!foreground()||cloudOwnerChoice()||networkPageBlocksSwipe()||nativeInputOpen()||systemShareOpen())return false;
-      if(motion.phase!=='idle'||afterBack.length||playingSource())return false;
+      if(motion.phase!=='idle'||playingSource())return false;
       return (entry.list?.scroller.state()??'idle')==='idle';
     },
     push:()=>setPage('bluetooth-warning'),

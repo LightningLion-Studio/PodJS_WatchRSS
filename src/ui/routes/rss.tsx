@@ -92,7 +92,7 @@ export function RssRoutes(props: RssRoutesProps) {
     let cancelled=false;
     if(!source){setResumeChapter(undefined);return;}
     if(active)setResumeChapter(undefined);
-    if(active&&props.services.listNovelChapters)void props.services.listNovelChapters(source).then(chapters=>{if(!cancelled)setResumeChapter(novelResumeChapter(chapters));}).catch(error=>{if(!cancelled)props.setError(String(error));});
+    if(active&&props.services.listNovelChapters)void props.services.listNovelChapters(source).then(chapters=>{if(!cancelled&&props.contentActive())setResumeChapter(novelResumeChapter(chapters));}).catch(error=>{if(!cancelled&&props.contentActive())props.setError(String(error));});
     onCleanup(()=>{cancelled=true;});
   });
 

@@ -42,6 +42,7 @@ interface SettingsRoutesProps {
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
+  contentActive: () => boolean;
   width: number;
   height: number;
   services: AppServices;
@@ -153,6 +154,7 @@ export function SettingsRoutes(props: SettingsRoutesProps) {
       <Show when={props.page() === "settings"}>
         <SettingsScreen
           hasSummaryAccount={props.services.hasSummaryAccount}
+          contentActive={props.contentActive}
           active={props.active}
           width={props.width}
           height={props.height}

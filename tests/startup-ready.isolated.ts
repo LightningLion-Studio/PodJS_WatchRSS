@@ -12,7 +12,9 @@ const scenario=process.env.WRSS_STARTUP_FIXTURE;
 const firstRunAgreement=scenario==='bluetooth-first-run';
 const legalCase=scenario?.startsWith('bluetooth-')??false;
 const legalPage=scenario==='bluetooth-useragreement'?'useragreement':'privacy';
-let bluetooth=legalCase;
+const legalResponse=scenario==='bluetooth-legal-response';
+const control=process.env.REVIEW_BLUETOOTH_CONTROL==='1';
+let bluetooth=legalCase&&!control;
 const subscriptions=new Set<number>();
 let releaseLegal:(()=>void)|undefined;
 const legalDocument='Fixture privacy document';
@@ -174,12 +176,18 @@ if(legalCase)test(`startup Bluetooth advisory: ${scenario}`,async()=>{
   expect(releaseLegal).toBeDefined();
   expect(labels('继续')).toHaveLength(1);
   await pump();
-  expect(labels('继续')).toHaveLength(2);
+  expect(labels('继续')).toHaveLength(control?1:2);
   releaseLegal!();
   await pump();
-  expect(labels('继续')).toHaveLength(2);
+  expect(labels('继续')).toHaveLength(control?1:2);
   expect(restoreLegalNavigation(activityStateHub.read()).pages).toEqual([legalPage]);
   expect(consentWrites).toBe(0);
+  if(legalResponse){
+   if(!control)await activate(labels('继续').at(-1));
+   expect(labels('协议正文')).toHaveLength(1);
+   expect(labels('继续')).toHaveLength(1);
+   return;
+  }
   const {__packTouch}=await import('../node_modules/@pocketjs/framework/framework/src/touch.ts');
   for(const contacts of [[__packTouch(1,166,80)],[__packTouch(1,166,80),__packTouch(2,90,130)]]){
    await tick([__packTouch(1,46,80)]);

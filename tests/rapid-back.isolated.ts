@@ -7,6 +7,12 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'rapid-back-solid',setup(b){b.onLoad({filter:/\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const mode=process.env.RAPID_BACK_CASE??'4';
+const feedEventProbe=mode==='bluetooth-review-feed-event';
+const articleActionsBackProbe=mode==='bluetooth-review-article-actions-back';
+const settingsBackProbe=mode.startsWith('bluetooth-review-channel-settings-back');
+let emitChannel:((event:{kind:string;id:string})=>void)|undefined;
+let feedEventReads=0, deferFeedEvent=false;
+let releaseEventRead:(()=>void)|undefined;
 const modalTakeover=mode==='bluetooth-feed-open-slow-modal-takeover';
 const novelProbe=mode==='bluetooth-novel-background';
 const bluetoothControl=process.env.REVIEW_BLUETOOTH_CONTROL==='1';
@@ -41,12 +47,15 @@ const navigationBackground=mode.startsWith('bluetooth-feed-open-slow-background'
 const navigationAccount=mode.startsWith('bluetooth-feed-open-slow-account');
 const backgroundRead=mode==='bluetooth-safe-settings-background-read';
 const settingsQuery=mode==='bluetooth-safe-settings-account-query';
+const homeLogin=mode==='bluetooth-home-login-reply';
+let loginReads=0;
 const stalledFeedReload=mode==='bluetooth-feed-stalled-reload-leave';
 const rssFromReader=mode==='bluetooth-feed-reload'||stalledFeedReload;
 const videoCase=mode==='bluetooth-video-pan';
 const shareSystem=mode==='bluetooth-rss-action-system';
 const searchRestore=mode==='bluetooth-search-restore';
 const safeRoute=backgroundRead||settingsQuery?'settings':mode.startsWith('bluetooth-safe-') ? mode.slice('bluetooth-safe-'.length) : undefined;
+let accountReads=0;
 let releaseOperation: (()=>void)|undefined;
 let releaseShare: (()=>void)|undefined;
 let releaseShareQuery: (()=>void)|undefined;
@@ -206,7 +215,11 @@ if(backgroundRead)services.listChannels=async()=>{
  await deferOperation();
  return [{id:'feed',title:'Test feed',url:'https://watchrss.local/import-content'}];
 };
-if(settingsQuery)services.hasSummaryAccount=async()=>{await deferOperation();return false;};
+if(homeLogin){
+ const {biliClient}=await import('../src/media-services.ts');
+ biliClient.getLoginState=async()=>{loginReads++;await deferOperation();return {status:'authenticated'};};
+}
+if(settingsQuery)services.hasSummaryAccount=async()=>{accountReads++;await deferOperation();return false;};
 if(rssSaveCase)services.setSaveState=()=>new Promise<void>(resolve=>{resolveFavorite=resolve;});
 if(searchCase||modalTakeover){
  const {textInput}=await import('@podjs/framework/services');
@@ -232,22 +245,34 @@ if(mode==='bluetooth-feed-open'||warningThenOpen||slowArticleOpen)services.markR
    ?()=>reject(new Error('fixture markRead failed')):resolve;
  });
 };
-if(mode.startsWith('bluetooth-feed-actions'))services.getArticle=async()=>{await deferOperation();return article;};
+if(articleActionsBackProbe||mode.startsWith('bluetooth-feed-actions'))services.getArticle=async()=>{await deferOperation();return article;};
 if(rssFromReader||restoredFeedStall)services.listArticles=async()=>{
  await new Promise<void>(resolve=>{releaseFeed=resolve;});
  return [article];
 };
 if(listPull)services.refresh=deferOperation;
 if(listProbe)services.listArticles=async()=>Array.from({length:10},(_,i)=>({...article,id:'item-'+i,title:'Article '+i}));
+if(feedEventProbe){
+ services.subscribeChannel=(listener:typeof emitChannel)=>{emitChannel=listener;return ()=>{};};
+ services.listArticles=async()=>{
+  if(!deferFeedEvent)return [article];
+  feedEventReads++;
+  if(feedEventReads===1)await new Promise<void>(resolve=>{releaseEventRead=resolve;});
+  else return await new Promise(()=>{});
+  return [{...article,id:'fixture-from-event',title:'Fresh article'}];
+ };
+}
+if(settingsBackProbe)services.getChannelOriginalMode=async()=>{await deferOperation();return false;};
 if(shareSystem)new (await import('../src/settings/store.ts')).SettingsStore().update({shareUseSystem:true});
 activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},noteCase
  ?[{page:'home'},{page:'notes'},{page:'note-detail',noteId:restoredNoteCase?'fixture-note':undefined}]
  :noteActionsCase||noteAction?[{page:'home'},{page:'notes'},{page:'note-actions',noteId:'fixture-note'}]
  :rssSaveCase||rssAction||shareQuery?[{page:'home'},{page:'articles',channelId:'feed'},{page:'rss-actions',articleId:article.id}]
+ :settingsBackProbe?[{page:'home'},{page:'articles',channelId:'feed'},{page:'channel-detail',channelId:'feed'}]
  :searchCase?[{page:'home'},{page:'search',channelId:'feed'}]
  :noteDownload||noteListLoad||safeRoute==='notes'?[{page:'home'},{page:'notes'}]
  :safeRoute==='settings'?[{page:'home'},{page:'settings'}]
- :safeRoute==='home'||revalidation||backgroundReplacement||mode==='bluetooth-home-disclosure'?[{page:'home'}]
+ :homeLogin||safeRoute==='home'||revalidation||backgroundReplacement||mode==='bluetooth-home-disclosure'?[{page:'home'}]
  :mode.startsWith('bluetooth')&&!rssFromReader&&!videoCase
    ?[{page:'home'},{page:'articles',channelId:'feed'}]
  :[{page:'home'},{page:'articles',channelId:'feed'},{page:'reader',readerArticle:article}]));
@@ -311,6 +336,79 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
  try{
   await pump(50);
 
+  if(homeLogin){
+   expect(state()).toEqual(['home']);
+   const readsBeforeWarning = loginReads;
+   expect(readsBeforeWarning).toBeGreaterThan(0);
+   expect(releaseOperation).toBeDefined();
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   releaseOperation!();
+   await pump();
+   if(!bluetoothControl)press('继续');
+   await pump();
+   expect(loginReads).toBe(readsBeforeWarning);
+   expect(state()).toEqual(['home']);
+   return;
+  }
+  if(feedEventProbe){
+   expect(state()).toEqual(['home','articles']);
+   expect(displayed('Article')).toBe(true);
+   deferFeedEvent=true;
+   emitChannel!({kind:'refresh',id:'feed'});
+   await pump(10);
+   expect(feedEventReads).toBe(1);
+   expect(releaseEventRead).toBeDefined();
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   releaseEventRead!();
+   await pump(10);
+   if(!bluetoothControl)press('继续');
+   await pump(20);
+   const visibleResult=displayed('Fresh article');
+   console.log(JSON.stringify({feedEventReads,visibleResult,stack:state()}));
+   expect({feedEventReads,visibleResult}).toEqual({feedEventReads:1,visibleResult:true});
+   return;
+  }
+  if(articleActionsBackProbe){
+   expect(state()).toEqual(['home','articles']);
+   const title=connected().find(node=>texts.get(node.id)==='Article');
+   expect(title).toBeDefined();
+   for(let i=0;i<60;i++)await tick(17,[__packTouch(1,116,130)],[title!.id]);
+   await tick();
+   await pump(5);
+   expect(releaseOperation).toBeDefined();
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   releaseOperation!();
+   await pump();
+   expect(displayed('标为未读')).toBe(true);
+   expect(warnings()).toHaveLength(0);
+   return;
+  }
+  if(settingsBackProbe){
+   expect(state()).toEqual(['home','articles','channel-detail']);
+   press('设置');
+   await pump(10);
+   expect(releaseOperation).toBeDefined();
+   await tick(17,[__packTouch(1,46,46)]);
+   await tick(17,[__packTouch(1,165,46)]);
+   expect(visible().some(v=>v.offset===119&&v.opacity===1)).toBe(true);
+   await tick();
+   const afterPop=mode.endsWith('-after-pop');
+   if(afterPop){
+    await pump(80);
+    await network(!bluetoothControl);
+    expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   }
+   releaseOperation!();
+   await pump(2);
+   if(!afterPop)expect(state().at(-1)).toBe('channel-detail');
+   await pump(80);
+   expect(state()).toEqual(['home','articles']);
+   if(afterPop)expect(warnings()).toHaveLength(bluetoothControl?0:1);
+   return;
+  }
   if(novelProbe){
    expect(state()).toEqual(['home','articles']);
    const readsBeforeWarning=novelReads;
@@ -513,12 +611,16 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   if(backgroundRead||settingsQuery){
    expect(state()).toEqual(['home','settings']);
    expect(releaseOperation).toBeDefined();
-   await network(true,50);
+   await network(!bluetoothControl,50);
    expect(warnings()).toHaveLength(0);
-   await assertOnce('settings');
+   await pump();
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
    releaseOperation!();
    await pump();
-   expect(warnings()).toHaveLength(1);
+   if(!bluetoothControl)press('继续');
+   await pump();
+   if(settingsQuery)expect(accountReads).toBe(1);
+   expect(state()).toEqual(['home','settings']);
    return;
   }
   if(mode==='bluetooth-idle-input'){
@@ -558,12 +660,14 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
   }
   if(noteListLoad){
    expect(releaseNotes).toBeDefined();
-   await network(true);
-   expect(warnings()).toHaveLength(1);
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
    releaseNotes!();
    await pump();
-   expect(warnings()).toHaveLength(1);
-   await assertOnce('notes');
+   if(!bluetoothControl)press('继续');
+   await pump();
+   expect(displayed('Fixture note')).toBe(true);
+   expect(state().at(-1)).toBe('notes');
    return;
   }
   if(shareQuery){
@@ -571,12 +675,13 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    press('分享');
    await back();
    expect(state().at(-1)).toBe('articles');
-   await network(true);
-   expect(warnings()).toHaveLength(1);
+   await network(!bluetoothControl);
+   expect(warnings()).toHaveLength(bluetoothControl?0:1);
    releaseShareQuery!();
    await pump();
    expect(displayed(article.link)).toBe(false);
-   await assertOnce('articles');
+   if(!bluetoothControl)await assertOnce('articles');
+   expect(state().at(-1)).toBe('articles');
    return;
   }
   if(restoredFeedStall){
@@ -729,7 +834,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
    releaseOperation!();
    if(dragging){
     await tick(17,[__packTouch(1,165,46)]);
-    expect(state().at(-1)).toBe('articles');
+    expect(state().at(-1)).toBe('reader');
     await tick();
    }
    await pump();
@@ -773,8 +878,7 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     expect(state().at(-1)).toBe('articles');
     await tick();
     await pump();
-    expect(state()).toEqual(['home','articles','reader']);
-    await back();
+    expect(state()).toEqual(['home','articles']);
     await assertOnce('articles');
     return;
    }
@@ -869,10 +973,10 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
      await assertOnce('home');
      return;
     }
-    await network(true);
-    expect(warnings()).toHaveLength(1);
+    await network(!bluetoothControl);
+    expect(warnings()).toHaveLength(bluetoothControl?0:1);
     releaseFeed!();
-    press('继续');
+    if(!bluetoothControl)press('继续');
     await pump();
     expect(displayed('Article')).toBe(true);
    }else{
@@ -884,8 +988,8 @@ if(mode.startsWith('bluetooth')||noteActionsCase)test(`production route: ${mode}
     }else press('Article');
     await pump();
     expect(releaseOperation).toBeDefined();
-    await network(true);
-    expect(warnings()).toHaveLength(1);
+    await network(!bluetoothControl);
+    expect(warnings()).toHaveLength(bluetoothControl?0:1);
     const leave=mode==='bluetooth-feed-actions-leave';
     if(leave){
      await back();

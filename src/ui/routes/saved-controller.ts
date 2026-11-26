@@ -7,6 +7,7 @@ import type { RouteEntry } from "./types.ts";
 interface SavedControllerDependencies {
   services: AppServices;
   current: () => RouteEntry;
+  canReceiveData: (entry: RouteEntry) => boolean;
   setArticles: Setter<Article[]>;
   startPageLoading: () => () => void;
   setError: Setter<string>;
@@ -28,7 +29,10 @@ export function createSavedRouteController(
   onCleanup(() => savedUndoTimer?.cancel());
 
   async function loadSaved(type: "favorite" | "watchLater") {
+    const origin = dependencies.current();
     const version = ++savedLoadVersion;
+    const active = () => dependencies.canReceiveData(origin) && version === savedLoadVersion &&
+      origin.page === (type === "favorite" ? "saved" : "watch-later");
     const loaded = dependencies.startPageLoading();
     dependencies.setError("");
     try {
@@ -52,11 +56,7 @@ export function createSavedRouteController(
         savedAt: article.savedAt ?? 0,
         sortOrder: article.saveSortOrder ?? -(article.savedAt ?? 0),
       }));
-      if (
-        version === savedLoadVersion &&
-        dependencies.current().page ===
-          (type === "favorite" ? "saved" : "watch-later")
-      ) {
+      if (active()) {
         batch(() => {
           dependencies.setArticles(rss);
           setSavedEntries(entries);
@@ -64,7 +64,7 @@ export function createSavedRouteController(
         });
       }
     } catch (error) {
-      if (version === savedLoadVersion) {
+      if (active()) {
         dependencies.setError(String(error));
       }
     } finally {
@@ -80,10 +80,11 @@ export function createSavedRouteController(
   }
 
   async function removeSaved(item: SavedDisplayItem) {
-    const type =
-      dependencies.current().page === "saved" ? "favorite" : "watchLater";
+    const origin = dependencies.current();
+    const type = origin.page === "saved" ? "favorite" : "watchLater";
     try {
       await dependencies.services.setSaveState(item.articleId!, type, false);
+      if (!dependencies.canReceiveData(origin)) return;
       clearSavedUndo();
       setSavedUndo({ item, type });
       const version = savedUndoVersion;
@@ -116,7 +117,7 @@ export function createSavedRouteController(
         undo.type,
         true,
       );
-      if (dependencies.current() === origin) await loadSaved(undo.type);
+      if (dependencies.canReceiveData(origin)) await loadSaved(undo.type);
     } catch (error) {
       dependencies.setError(String(error));
     }
@@ -133,7 +134,7 @@ export function createSavedRouteController(
       );
     } catch (error) {
       dependencies.setError(String(error));
-      if (dependencies.current() === origin) await loadSaved(type);
+      if (dependencies.canReceiveData(origin)) await loadSaved(type);
     }
   }
 

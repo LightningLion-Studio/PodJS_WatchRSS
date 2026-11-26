@@ -39,3 +39,12 @@ for(const scenario of ['bluetooth-novel-background','bluetooth-feed-open-slow-mo
  routeTest(scenario,scenario);
  routeTest(`${scenario} without warning`,scenario,{REVIEW_BLUETOOTH_CONTROL:'1'});
 }
+
+routeTest('channel settings result during content back','bluetooth-review-channel-settings-back',{REVIEW_BLUETOOTH_CONTROL:'1'});
+for(const scenario of ['bluetooth-review-feed-event','bluetooth-review-article-actions-back','bluetooth-review-channel-settings-back-after-pop','bluetooth-home-login-reply']){
+ routeTest(scenario,scenario);
+ routeTest(`${scenario} without warning`,scenario,{REVIEW_BLUETOOTH_CONTROL:'1'});
+}
+for(const scenario of ['bluetooth-safe-settings-account-query','bluetooth-safe-settings-background-read','bluetooth-share-query','bluetooth-feed-open','bluetooth-feed-reload','bluetooth-note-load']){
+ routeTest(`${scenario} without warning`,scenario,{REVIEW_BLUETOOTH_CONTROL:'1'});
+}

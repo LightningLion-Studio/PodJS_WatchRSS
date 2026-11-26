@@ -1,3 +1,4 @@
+import { createRouteOwnership } from "./route-ownership.ts";
 import {BluetoothWarningPage} from './NetworkUnavailableOverlay.tsx';
 import {browserOpenFailureMessage} from "../browser/open-failure.ts";
 import {bindBluetoothWarningRoute,BluetoothWarningConnection,useBluetoothWarningConnection,createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer,observeNetworkRecovery} from './network-recovery.tsx';
@@ -174,11 +175,13 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
    setOffset(0);
   });
  };
- const openLegal=(page:InformationPage)=>{
+ const { canReceiveData, commitNavigation } = createRouteOwnership<LegalEntry | undefined>({
+  content:legalContent,backPhase:()=>motion.phase,warningShown,
+  dismissWarning:()=>{cancelActiveTouches();closeLegal();},
+ });
+ const openLegal=(page:InformationPage, source=legalContent())=>{
   if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;
-  if(motion.phase!=='idle'&&!warningShown())return;
-  batch(()=>{
-   if(warningShown()){cancelActiveTouches();closeLegal();}
+  commitNavigation(source,()=>{
    legalContent()?.scroller?.stop();
    const entries=[...legal(),{page,network:createHostNetworkRecovery()}];
    saveLegal(entries);
@@ -219,8 +222,9 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
   notifyReaderPresetsChanged();
  });
  const openLegalUrl=async(url:string)=>{
+  const source=legalContent();
   try{await openBrowserUrl(url,'information',preset());}
-  catch(error){setError(browserOpenFailureMessage(error));}
+  catch(error){if(canReceiveData(source))setError(browserOpenFailureMessage(error));}
  };
  bindBluetoothWarningRoute(warningNetwork,{
   shown:warningShown,
@@ -243,7 +247,7 @@ function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;contro
    ? <View class="absolute inset-0 bg-black overflow-hidden" style={{translateX:offset()}}>
       <BluetoothWarningPage width={width} height={height} onBack={()=>{if(currentRoute()===entry&&motion.phase==='idle')closeLegal();}}/>
      </View>
-   : <NetworkRecoveryProvider network={entry.network} active={()=>legalContent()===entry&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={openLegal} onOpenUrl={openLegalUrl} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
+   : <NetworkRecoveryProvider network={entry.network} active={()=>canReceiveData(entry)&&active()&&!error()}><View accessibilityHidden={currentRoute()!==entry||!!error()} class="absolute inset-0 bg-black overflow-hidden" style={{translateX:currentRoute()===entry?offset():0,opacity:legal().indexOf(entry)>=legal().length-2?1:0}}><View class="absolute inset-0 bg-black" accessibilityHidden onPress={()=>{}}/><InformationScreen width={width} height={height} page={entry.page} legalBaseUrl={props.legalBaseUrl??'https://sly-data-plane.watchrss.cn'} onNavigate={page=>openLegal(page,entry)} onOpenUrl={openLegalUrl} restoredState={entry.restoredState} restoreMode={entry.restoreMode} onSnapshotChange={snapshot=>cacheSnapshot(entry,snapshot)} onRestorationEvent={event=>props.onLegalRestorationEvent?.(entry.page,event)} accessibilityLabel="协议正文" active={()=>currentRoute()===entry&&active()&&!error()} ref={value=>{entry.scroller=value.scroller;entry.snapshot=value.snapshot;}}/><NetworkRecoveryLayer network={entry.network} width={width} height={height} round={metrics.shape==='round'}/></View></NetworkRecoveryProvider>}</For>
   <Show when={error()}><View onPress={()=>{}} class="absolute inset-0 bg-[#000000eb] flex-col items-center justify-center"><Text class="text-xs leading-[14] text-[#e54d4d]" style={{width:width-48,height:errorLines().length*14}}>{errorLines().join('\n')}</Text><View focusable onPress={()=>{setError('');if(destination()==='finished')finish();}} class="mt-[12] h-[40] px-[20] rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-white">{destination()==='finished'?'重试退出':'知道了'}</Text></View></View></Show>
  </View>;
 }
