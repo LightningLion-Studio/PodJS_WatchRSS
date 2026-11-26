@@ -14,7 +14,8 @@ import { For, Show, createEffect, createMemo, createSignal, untrack, onMount, on
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { rectInsideCircle } from "@podjs/framework/watch-ui";
+import { rectInsideCircle, safeTopBlock } from "@podjs/framework/watch-ui";
+import { VariableList } from "@podjs/framework/variable-list";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
 import { createListHitSlop } from "@podjs/framework/list-hit-slop";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
@@ -271,23 +272,84 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
 
 export interface NoteActionsHandle { scroller:Scroller; goBack:()=>boolean }
 export interface NoteActionsScreenProps extends BaseProps { noteId:string; refreshKey?:number; onDone:()=>void; ref?:(value:NoteActionsHandle)=>void }
+
+function MoveNoteDialog(props:{
+  width:number; height:number; busy:boolean; note:MemoNote; folders:MemoFolder[];
+  onMove:(folderId:string|null)=>void; onCancel:()=>void; ref:(scroller:Scroller)=>void;
+}) {
+  const scale=()=>Math.min(1,props.width/233,props.height/233);
+  const heading=()=>28*scale(), rowHeight=()=>42*scale(), gap=()=>4*scale(), footer=()=>34*scale();
+  const listHeight=()=>rowHeight()+(props.folders.length?rowHeight()+gap():0);
+  const panel=()=>{
+    const height=heading()+listHeight()+footer();
+    return safeTopBlock(props.width,props.height,()=>height,{
+      minTop:(props.height-height)/2,maxWidth:168*scale(),
+    })!;
+  };
+  const option=(folderId:string|null,name:string):ScrollEntry=>{
+    const selected=folderId===props.note.folderId;
+    const label=selected?`${name}（当前位置）`:name;
+    return {height:rowHeight(),render:()=>(
+      <View class="absolute inset-0 rounded-[14] bg-[#2a2a2a] items-center justify-center overflow-hidden active:scale-96"
+        onPress={selected||props.busy?undefined:()=>props.onMove(folderId)}
+        focusable={!selected&&!props.busy} accessibilityRole="button" accessibilityLabel={label}
+        accessibilityState={{selected,disabled:selected||props.busy}}>
+        <Text class="text-sm" style={{textColor:selected?"#999999":"#f5f5f5"}}>{label}</Text>
+      </View>
+    )};
+  };
+  const entries=createMemo(()=>[option(null,"未分类"),...props.folders.map(folder=>option(folder.folderId,folder.name))]);
+  return <View class="absolute inset-0 bg-black" onPress={()=>{}}>
+    <View debugName="MoveNoteDialog" class="absolute rounded-[16] bg-[#1c1f21]"
+      style={{insetL:panel().x,insetT:panel().y,width:panel().width,height:panel().height}}>
+      <View class="absolute left-[0] right-[0] top-[0] items-center justify-center" style={{height:heading()}}>
+        <Text class="text-sm text-[#f5f5f5]" accessibilityRole="header">移动到</Text>
+      </View>
+      <View class="absolute left-[0] right-[0]" style={{insetT:heading(),height:listHeight()}}>
+        <VariableList height={listHeight()} gap={gap()} padding={8*scale()} verticalPadding={0} entries={entries()}
+          accessibilityLabel="备忘录文件夹" inputActive={()=>!props.busy} ref={value=>props.ref(value.scroller)}/>
+      </View>
+      <View class="absolute left-[8] right-[8] bottom-[0] items-center justify-center active:scale-96"
+        style={{height:footer()}} onPress={props.busy?undefined:props.onCancel}
+        focusable={!props.busy} accessibilityRole="button" accessibilityLabel="返回">
+        <Text class="text-sm text-[#b6b6b6]">返回</Text>
+      </View>
+    </View>
+  </View>;
+}
+
 export function NoteActionsScreen(props: NoteActionsScreenProps) {
   const [note,setNote]=createSignal<MemoNote|null>(null), [folders,setFolders]=createSignal<MemoFolder[]>([]), [selectingFolder,setSelectingFolder]=createSignal(false), [confirmDelete,setConfirmDelete]=createSignal(false), [busy,setBusy]=createSignal(false);
+  const actionsActive=()=>!selectingFolder()&&!confirmDelete()&&!busy();
+  let folderScroller:Scroller|undefined;
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
   const reload=async()=>{const version=++readVersion;try{const [value,groups]=await Promise.all([props.repository.get(props.noteId),props.repository.listFolders()]);if(disposed||version!==readVersion)return;setNote(value);setFolders(groups);if(!value){setSelectingFolder(false);setConfirmDelete(false);}}catch(e){if(!disposed&&version===readVersion)fail(props,e);}};
   onMount(()=>void reload());
   createEffect(on(()=>props.refreshKey,()=>void reload(),{defer:true}));
   const act=async(operation:()=>Promise<unknown>)=>{if(busy())return;setBusy(true);try{await operation();props.onDone();}catch(e){fail(props,e);}finally{if(!disposed)setBusy(false);}};
-  const button=(label:string,onPress:()=>void,danger=false,enabled=true)=><View onPress={enabled&&!busy()?onPress:undefined} focusable={enabled&&!busy()} accessibilityRole="button" accessibilityLabel={label} style={{insetL:(props.width-160)/2-9}} class="absolute top-[0] w-[160] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class={danger?"text-[17px] leading-[23px] text-[#e54d4d]":enabled?"text-[17px] leading-[23px] text-[#f5f5f5]":"text-[17px] leading-[23px] text-[#999999]"}>{label}</Text></View>;
+  const button=(label:string,onPress:()=>void,danger=false,enabled=true)=><View onPress={enabled&&actionsActive()?onPress:undefined} focusable={enabled&&actionsActive()} accessibilityHidden={!actionsActive()} accessibilityRole="button" accessibilityLabel={label} style={{insetL:(props.width-160)/2-9}} class="absolute top-[0] w-[160] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class={danger?"text-[17px] leading-[23px] text-[#e54d4d]":enabled?"text-[17px] leading-[23px] text-[#f5f5f5]":"text-[17px] leading-[23px] text-[#999999]"}>{label}</Text></View>;
   // Visible content is the centred 160-wide pill, not the full 215-wide row.
   const pill={x:(props.width-160)/2-9,y:0,width:160,height:48};
-  const entries=createMemo<ScrollEntry[]>(()=>{
-    if(selectingFolder()) return [{height:48,bounds:pill,render:()=>button(note()?.folderId==null?"未分类（当前位置）":"未分类",()=>void act(()=>props.repository.move(props.noteId,null)),false,note()?.folderId!=null)},...folders().map(f=>({height:48,bounds:pill,render:()=>button(f.folderId===note()?.folderId?`${f.name}（当前位置）`:f.name,()=>void act(()=>props.repository.move(props.noteId,f.folderId)),false,f.folderId!==note()?.folderId)})),{height:48,bounds:pill,render:()=>button("返回",()=>setSelectingFolder(false))}];
-    return [{height:48,bounds:pill,render:()=>button(note()?.pinned?"取消置顶":"置顶",()=>void act(()=>props.repository.setPinned(props.noteId,!note()?.pinned)),false,!!note())},{height:48,bounds:pill,render:()=>button("移动到…",()=>setSelectingFolder(true),false,!!note())},{height:48,bounds:pill,render:()=>button("删除",()=>setConfirmDelete(true),true,!!note())},{height:48,bounds:pill,render:()=>button("取消",props.onDone)}];
-  });
+  const entries:ScrollEntry[]=[
+    {height:48,bounds:pill,render:()=>button(note()?.pinned?"取消置顶":"置顶",()=>void act(()=>props.repository.setPinned(props.noteId,!note()?.pinned)),false,!!note())},
+    {height:48,bounds:pill,render:()=>button("移动到…",()=>setSelectingFolder(true),false,!!note())},
+    {height:48,bounds:pill,render:()=>button("删除",()=>setConfirmDelete(true),true,!!note())},
+    {height:48,bounds:pill,render:()=>button("取消",props.onDone)},
+  ];
   const goBack=()=>{if(confirmDelete()){setConfirmDelete(false);return true;}if(selectingFolder()){setSelectingFolder(false);return true;}return false;};
-  return <View class="absolute inset-0 bg-black"><ScrollEntries height={props.height} entries={entries()} gap={8} padding={9} verticalPadding={22} inputActive={()=>!confirmDelete()&&!busy()} ref={value=>props.ref?.({...value,goBack})}/><Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除备忘录" message="删除后会从本机和下次同步中移除此备忘录" busy={busy()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void act(()=>props.repository.delete(props.noteId))}/></Show></View>;
+  return <View class="absolute inset-0 bg-black">
+    <ScrollEntries height={props.height} entries={entries} gap={8} padding={9} verticalPadding={22}
+      inputActive={actionsActive} ref={value=>props.ref?.({
+        get scroller(){return selectingFolder()&&folderScroller?folderScroller:value.scroller;},goBack,
+      })}/>
+    <Show when={selectingFolder()&&note()}>
+      {current=><MoveNoteDialog width={props.width} height={props.height} busy={busy()} note={current()} folders={folders()}
+        ref={value=>{folderScroller=value;}} onCancel={()=>setSelectingFolder(false)}
+        onMove={folderId=>void act(()=>props.repository.move(props.noteId,folderId))}/>}
+    </Show>
+    <Show when={confirmDelete()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除备忘录" message="删除后会从本机和下次同步中移除此备忘录" busy={busy()} onCancel={()=>setConfirmDelete(false)} onConfirm={()=>void act(()=>props.repository.delete(props.noteId))}/></Show>
+  </View>;
 }
 
 export const NotesScreen = NotesListScreen;

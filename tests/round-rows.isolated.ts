@@ -2,15 +2,21 @@ import {expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
 import * as solid from 'solid-js';
-import {createComponent,createMemo,createRenderEffect,createSignal,mergeProps,onCleanup} from 'solid-js';
+import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps,onCleanup} from 'solid-js';
 import {roundRowRange} from '@podjs/framework/round-list';
+import type {MemoRepository} from '../src/notes/repository.ts';
+import type {NoteActionsHandle} from '../src/ui/NotesScreen.tsx';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'round-rows',setup(b){b.onLoad({filter:/\/(ScrollEntries|variable-list|round-rows|PlatformNotice|advanced-cache-settings|media-volume-settings|AutoScrollSettingsScreen)\.tsx$/},async a=>({contents:transformSync(await Bun.file(a.path).text(),{filename:a.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 const fw=Bun.resolveSync('@podjs/framework/variable-list',import.meta.dir);
 mock.module(Bun.resolveSync('solid-js',fw),()=>solid);
 const {createScrollerWith}=await import(Bun.resolveSync('@pocketjs/framework/kinetics',fw).replace('kinetics.ts','kinetics-core.ts'));
-const element=(props:any)=>({props});
-for(const [name,impl] of Object.entries({renderer:{createComponent,mergeProps,memo:createMemo,effect:createRenderEffect},components:{View:element,Text:element,Image:element,FocusScope:element},gesture:{createGesture:()=>({dispose(){}})},lifecycle:{onFrame:()=>{}},kinetics:{createScroller:(o:any)=>createScrollerWith(createSignal,o),bindDpadScroll:()=>{}},input:{pressNode:()=>{},hitNode:()=>undefined}}))for(const p of ['@pocketjs/framework/'+name,Bun.resolveSync('@pocketjs/framework/'+name,fw)])mock.module(p,()=>impl);
+const element=(props:any)=>{
+ const children='children' in props?createMemo(()=>props.children):undefined;
+ return {props:children?mergeProps(props,{get children(){return children();}}):props};
+};
+const renderer=await import('@pocketjs/framework/renderer');
+for(const [name,impl] of Object.entries({renderer:{...renderer,createComponent,mergeProps,memo:createMemo,effect:createRenderEffect},components:{View:element,Text:element,Image:element,FocusScope:element},gesture:{createGesture:()=>({dispose(){}})},lifecycle:{onFrame:()=>{}},kinetics:{createScroller:(o:any)=>createScrollerWith(createSignal,o),bindDpadScroll:()=>{}},input:{pressNode:()=>{},hitNode:()=>undefined}}))for(const p of ['@pocketjs/framework/'+name,Bun.resolveSync('@pocketjs/framework/'+name,fw)])mock.module(p,()=>impl);
 // Glyph advances by font slot (PocketJS tailwind slots): CJK at full size, Latin at half.
 const SLOT_PX:Record<number,number>={0:12,1:14,2:16,3:18,5:24,7:12,8:14,10:18,19:9,20:11,21:13,22:17,23:21,24:9};
 const measureText=(text:string,slot:number)=>Array.from(text).reduce((sum,ch)=>sum+(SLOT_PX[slot]??14)*(ch.codePointAt(0)!>255?1:.55),0);
@@ -22,6 +28,8 @@ const {platformScope,accessBoundary,platformNotice}=await import('../src/announc
 const {advancedCacheRows}=await import('../src/ui/advanced-cache-settings.tsx');
 const {mediaVolumeSettingsRows}=await import('../src/ui/media-volume-settings.tsx');
 const {DEFAULT_SETTINGS}=await import('../src/settings/store.ts');
+const {rectInsideCircle}=await import('@podjs/framework/watch-ui');
+const {NoteActionsScreen}=await import('../src/ui/NotesScreen.tsx');
 
 const ROUND={width:233,height:233};
 /** Every row of a full-screen list (padding 18) must have a scroll position where it is fully visible. */
@@ -55,4 +63,60 @@ test('pages below the fixed platform notice still fit their pills and feed cards
  // Bili/Douyin entry, login and action pages: the list fills the display below a ~94px notice.
  const below={...ROUND,viewport:{x:0,y:94,width:233}};
  for(const row of [{height:48},{height:56},{height:78}])expect(roundRowRange(row,below,139,18)).toBeDefined();
+});
+
+test('the note move dialog stays centered at every action list offset',async()=>{
+ const moved:Array<string|null>=[];
+ const repository={
+  get:async()=>({noteId:'note',folderId:null}),
+  listFolders:async()=>Array.from({length:8},(_,index)=>({folderId:`folder-${index}`,name:`文件夹 ${index}`})),
+  move:async(_id:string,folderId:string|null)=>{moved.push(folderId);},
+ } as unknown as MemoRepository;
+ let actions!:NoteActionsHandle;
+ let done=0;
+ const mounted=createRoot(dispose=>({dispose,tree:createComponent(NoteActionsScreen,{
+  ...ROUND,noteId:'note',repository,onDone:()=>{done++;},ref:value=>{actions=value;},
+ })}));
+ type Node={props:{children?:unknown;accessibilityLabel?:string;onPress?:()=>void;debugName?:string;style?:Record<string,number>}};
+ function nodes(value:unknown):Node[]{
+  if(typeof value==='function')return nodes(value());
+  if(Array.isArray(value))return value.flatMap(nodes);
+  if(!value||typeof value!=='object'||!('props'in value))return [];
+  const node=value as Node;
+  return [node,...nodes(node.props.children)];
+ }
+ const find=(label:string)=>nodes(mounted.tree).find(node=>node.props.accessibilityLabel===label);
+ try{
+  await new Promise<void>(resolve=>setTimeout(resolve,0));
+  const parent=actions.scroller;
+  parent.scrollTo(1000,{immediate:true});
+  const bottom=parent.offset();
+  expect(bottom).toBeGreaterThan(0);
+  for(const offset of [0,bottom/2,bottom]){
+   parent.scrollTo(offset,{immediate:true});
+   find('移动到…')!.props.onPress!();
+   const style=nodes(mounted.tree).find(node=>node.props.debugName==='MoveNoteDialog')?.props.style;
+   expect(style).toBeDefined();
+   const {insetL:x,insetT:y,width,height}=style!;
+   expect(x!+width!/2).toBe(116.5);
+   expect(y!+height!/2).toBe(116.5);
+   expect(rectInsideCircle({x:x!,y:y!,width:width!,height:height!},{cx:116.5,cy:116.5,radius:116.5})).toBe(true);
+   expect(actions.scroller).not.toBe(parent);
+   expect(actions.scroller.offset()).toBe(0);
+   actions.scroller.scrollTo(1000,{immediate:true});
+   expect(actions.scroller.offset()).toBeGreaterThan(0);
+   expect(parent.offset()).toBe(offset);
+   expect(actions.goBack()).toBe(true);
+   expect(actions.scroller).toBe(parent);
+   expect(parent.offset()).toBe(offset);
+  }
+  find('移动到…')!.props.onPress!();
+  actions.scroller.scrollTo(1000,{immediate:true});
+  find('文件夹 7')!.props.onPress!();
+  await new Promise<void>(resolve=>setTimeout(resolve,0));
+  expect(moved).toEqual(['folder-7']);
+  expect(done).toBe(1);
+ }finally{
+  mounted.dispose();
+ }
 });
