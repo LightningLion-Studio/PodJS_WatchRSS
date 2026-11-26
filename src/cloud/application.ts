@@ -177,9 +177,8 @@ function start(){
       <T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,
       cloudGate,{callTimeoutMs:10_000,maxResponseBytes:16_384});
      const tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:origin,appVersion:watchAppVersion,
-      transport:{request(request){check();return authTransport.request(request);}}});
-     check();
-     const refreshed=await tokens.refreshAccount(account);
+      transport:authTransport});
+     const refreshed=await tokens.refreshAccount(account,{beforeDispatch:check});
      check();
      const result=await head(refreshed.watchDeviceToken);
      if(result.status===401){check();await summaryAccountStore.expire(refreshed);}

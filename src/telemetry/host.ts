@@ -12,6 +12,7 @@ export const telemetryTransport:HttpTransport={async request(request){
   const path=`telemetry/response-${Date.now()}-${++sequence}.json`;
   const refreshing=request.url.endsWith('/account/watch-token/refresh');
   try{
+    request.beforeDispatch?.();
     const response=await hostOperation<DownloadResult>('http.download',{url:request.url,path,temporary:true,
       method:request.method,headers:request.headers,bodyBase64:request.body?bytesToBase64(request.body):undefined,
       acceptHttpErrors:true,timeoutMs:refreshing?15000:8000,readTimeoutMs:refreshing?30000:12000,maxBytes:1024*1024}).result;

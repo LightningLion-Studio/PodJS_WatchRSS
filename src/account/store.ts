@@ -1,3 +1,5 @@
+import {sha256Hex} from '@podjs/framework/crypto';
+import {utf8Encode} from '../cloud/types';
 import { SecureStorage, WatchAccountState, WatchEntitlementSnapshot, WatchTelemetryConfig } from "./types";
 
 export const LIBRARY_OWNER_MISMATCH='library_owner_mismatch';
@@ -9,6 +11,12 @@ const entitlement = (v: any): WatchEntitlementSnapshot => ({ plan: typeof v?.pla
 const telemetry = (v: any): WatchTelemetryConfig => ({ anonymousEnabled: v?.anonymousEnabled !== false, diagnosticsEnabled: v?.diagnosticsEnabled === true, sampleRate: typeof v?.sampleRate === "number" ? v.sampleRate : 1 });
 
 export type WatchAccountIdentity = Pick<WatchAccountState,'userId'|'backendBaseUrl'>;
+interface WatchRefreshAttempt {
+  startedAt: number|undefined;
+  record(startedAt:number):Promise<void>;
+  clear():Promise<void>;
+}
+
 export class WatchAccountStore {
   private tail:Promise<unknown>=Promise.resolve();
   private change<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>this.storage.exclusive?this.storage.exclusive(action):action());this.tail=result.catch(()=>{});return result;}
@@ -48,12 +56,24 @@ export class WatchAccountStore {
   save(state: WatchAccountState,expected?:WatchAccountState,check?:()=>void): Promise<void> { return this.change(async()=>{check?.();const previous=await this.read();if(expected&&(!previous||previous.userId!==expected.userId||previous.backendBaseUrl!==expected.backendBaseUrl||previous.watchRefreshToken!==expected.watchRefreshToken))throw Error("账号已变更，请重试");if(previous&&(previous.userId!==state.userId||previous.backendBaseUrl.replace(/\/+$/,'')!==state.backendBaseUrl.replace(/\/+$/,'')))throw Error('account_switch_rejected: 请先退出原账号');if(!await this.storage.get('watchrss.library.owner')){check?.();await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));}check?.();await this.write(state); });}
   /** Rotation is serialized with every account mutation, including other host guests.
    * Reread after acquiring the lease: queued consumers reuse the committed pair. */
-  refresh(expected:WatchAccountState,rotate:(state:WatchAccountState)=>Promise<WatchAccountState>,denied:(error:unknown)=>boolean=()=>false):Promise<WatchAccountState>{return this.change(async()=>{
+  refresh(expected:WatchAccountState,rotate:(state:WatchAccountState,attempt:WatchRefreshAttempt)=>Promise<WatchAccountState>,denied:(error:unknown)=>boolean=()=>false):Promise<WatchAccountState>{return this.change(async()=>{
     const current=await this.read();
     if(!current||current.userId!==expected.userId||current.backendBaseUrl!==expected.backendBaseUrl||current.installId!==expected.installId)throw Error('账号已变更，请重试');
     if(current.watchRefreshToken!==expected.watchRefreshToken)return current;
+    // Keep one durable recovery marker under the same lease as the token pair.
+    // A fingerprint binds it to the parent generation without storing the token twice.
+    const key=this.key+'.refresh-attempt';
+    const fingerprint=()=>sha256Hex(utf8Encode(JSON.stringify([current.userId,current.backendBaseUrl,current.installId,current.watchRefreshToken])));
+    const raw=await this.storage.get(key);
+    const [generation,timestamp]=raw?.split(':')??[];
+    const startedAt=raw&&generation===fingerprint()?Number(timestamp):undefined;
+    const attempt:WatchRefreshAttempt={
+      startedAt,
+      record:async time=>{await this.storage.set(key,fingerprint()+':'+time);},
+      clear:async()=>{await this.storage.remove(key);},
+    };
     let updated:WatchAccountState;
-    try{updated=await rotate(current);}catch(error){if(denied(error))await this.clearStored(current,false);throw error;}
+    try{updated=await rotate(current,attempt);}catch(error){if(denied(error))await this.clearStored(current,false);throw error;}
     const latest=await this.read();
     if(!latest||latest.userId!==current.userId||latest.backendBaseUrl!==current.backendBaseUrl||latest.watchRefreshToken!==current.watchRefreshToken)throw Error('账号已变更，请重试');
     await this.write(updated);return updated;

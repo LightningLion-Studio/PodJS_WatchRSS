@@ -1,5 +1,6 @@
 import {afterEach,beforeEach,expect,mock,test} from 'bun:test';
 import {WatchAccountStore} from '../src/account/store';
+import {WatchTokenManager} from '../src/account/token';
 import type {WatchAccountState} from '../src/account/types';
 import {CLOUD_INTERVAL} from '../src/cloud/scheduler';
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from '../src/cloud/status';
@@ -19,7 +20,8 @@ const account:WatchAccountState={
  telemetryConfig:{anonymousEnabled:false,diagnosticsEnabled:false,sampleRate:0},
 };
 const values=new Map<string,string>();
-const store=new WatchAccountStore({get:key=>values.get(key)??null,set:(key,value)=>{values.set(key,value);},remove:key=>{values.delete(key);}});
+const fixtureStore=()=>new WatchAccountStore({revokeCloudScope:async()=>{serverRevocations++;},get:key=>values.get(key)??null,set:(key,value)=>{values.set(key,value);},remove:key=>{values.delete(key);}});
+const store=fixtureStore();
 const lifeListeners=new Set<(state:string)=>void>();
 const screenListeners=new Set<(screen:{interactive:boolean;resumed:boolean})=>void>();
 const networkListeners=new Set<()=>void>();
@@ -31,6 +33,9 @@ let headCode:string|undefined;
 let headHeaders:Record<string,string>,headError:Error|undefined,headResponse:ReturnType<typeof deferred<void>>|undefined;
 let headRetryMillis:number|undefined,rejectToken:string|undefined,refreshStatus:number;
 let refreshResponse:ReturnType<typeof deferred<void>>|undefined;
+let refreshWrite:ReturnType<typeof deferred<void>>|undefined,loseRefreshReply=false;
+const refreshTimes:number[]=[];
+let serverRevocations=0;
 let v2Result:string|null=null,holdSync:ReturnType<typeof deferred<void>>|undefined,writer=false,worker=false;
 const files=new Map<string,Uint8Array>();
 const secure=new Map<string,string>();
@@ -70,6 +75,7 @@ mock.module('@podjs/framework/services',()=>({
    if(method==='file.delete'){files.delete(args.path);return;}
    if(method==='file.write'){
     const bytes=Buffer.from(args.dataBase64,'base64');
+    if(bytes.toString().includes('"refreshToken"'))await refreshWrite?.result;
     files.set(args.path,bytes);
     return {size:bytes.length};
    }
@@ -80,9 +86,15 @@ mock.module('@podjs/framework/services',()=>({
    if(method==='http.download'){
     const config=args.url.includes('/client-config?');
     const refresh=args.url.endsWith('/watch-token/refresh');
-    const status=config?configStatus:refresh?refreshStatus:args.headers.Authorization==='Bearer '+rejectToken?401:headStatus;
+    let status=config?configStatus:refresh?refreshStatus:args.headers.Authorization==='Bearer '+rejectToken?401:headStatus;
     if(refresh){
      expect(writer).toBe(true);
+     refreshTimes.push(clock.now);
+     if(loseRefreshReply&&refreshTimes.length===1){
+      await clock.delay(args.callTimeoutMs).result;
+      throw Error('refresh reply timed out after commit');
+     }
+     if(loseRefreshReply&&clock.now-refreshTimes[0]!>=30_000){serverRevocations++;status=401;}
      if(refreshResponse)await Promise.race([refreshResponse.result,cancelled.result]);
     }else if(!config){
      if(headError)throw headError;
@@ -151,7 +163,8 @@ beforeEach(async()=>{
  writer=worker=false;values.clear();secure.clear();files.clear();life='active';screen={interactive:true,resumed:true};
  forced=null;configEnabled=approved=readable=true;headStatus=configStatus=200;interval=20_000;configTtl=600;etag='head-1';
  headHeaders={};headCode=undefined;headError=headResponse=holdSync=undefined;v2Result=null;
- headRetryMillis=rejectToken=refreshResponse=undefined;refreshStatus=200;
+ headRetryMillis=rejectToken=refreshResponse=refreshWrite=undefined;refreshStatus=200;
+ refreshTimes.length=serverRevocations=0;loseRefreshReply=false;
  await store.save(account);
  offStatus=subscribeCloudAccountStatus(()=>messages.push(readCloudAccountStatus()?.message));
 });
@@ -381,6 +394,132 @@ test('foreground suspension lets a dispatched refresh persist before releasing t
  expect(writer).toBe(false);
  expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
  expect(heads()).toHaveLength(0);
+});
+
+for(const gate of ['screen','background','transfer','playback'] as const){
+ test(gate+' stops a refresh whose request body is still being prepared',async()=>{
+  refreshWrite=deferred<void>();
+  await startWithRefresh(10_000);
+  await clock.advance(20_000);
+  const original=await store.read();
+  expect(writer).toBe(true);
+  expect(calls.some(call=>call.method==='file.write')).toBe(true);
+  expect(refreshTimes).toEqual([]);
+  const reopen=gate==='screen'?(setScreen(false),()=>setScreen(true)):
+   gate==='background'?(setLife('background'),()=>setLife('active')):
+   gate==='transfer'?localTransferActivity.acquire():playbackWork.hold();
+  try{
+   refreshWrite.resolve();
+   refreshWrite=undefined;
+   await flush();
+   expect(refreshTimes).toEqual([]);
+   expect(heads()).toHaveLength(0);
+   expect(await store.read()).toEqual(original);
+   expect(writer).toBe(false);
+  }finally{reopen();}
+  await clock.advance(20_000);
+  expect(refreshTimes).toEqual([41_000]);
+  expect(heads()).toHaveLength(1);
+  expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+ });
+}
+
+test('a lost refresh reply recovers before 20 seconds at maximum poll jitter',async()=>{
+ Math.random=()=>0.999_999;
+ loseRefreshReply=true;
+ await startWithRefresh(10_000);
+ await clock.advance(22_000);
+ expect(refreshTimes).toEqual([23_000]);
+ await clock.advance(20_000);
+ expect(refreshTimes).toHaveLength(2);
+ expect(refreshTimes).toEqual([23_000,33_000]);
+ expect(serverRevocations).toBe(0);
+ expect((await store.read())?.watchDeviceToken).toBe('rotated-token');
+ expect(heads()).toHaveLength(1);
+ expect(writer).toBe(false);
+});
+
+test('poll recovery and a queued ordinary sync refresh use the same token rotation',async()=>{
+ loseRefreshReply=true;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ const tokens=new WatchTokenManager(store,{backendBaseUrl:account.backendBaseUrl,transport:{
+  async request(){throw Error('ordinary sync sent another refresh');},
+ }});
+ const ordinary=tokens.freshAccount(true,account.watchDeviceToken);
+ await flush();
+ expect(refreshTimes).toEqual([21_000]);
+ await clock.advance(10_000);
+ expect((await ordinary).watchDeviceToken).toBe('rotated-token');
+ expect(refreshTimes).toEqual([21_000,31_000]);
+ expect(heads()).toHaveLength(1);
+});
+
+test('an ordinary sync guest does not replay an expired poll recovery marker',async()=>{
+ loseRefreshReply=true;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ setLife('background');
+ await clock.advance(40_000);
+ const otherStore=fixtureStore();
+ const tokens=new WatchTokenManager(otherStore,{backendBaseUrl:account.backendBaseUrl,transport:{
+  async request(){throw Error('ordinary sync replayed the old refresh token');},
+ }});
+ await expect(tokens.freshAccount()).rejects.toThrow('登录已过期');
+ expect(await otherStore.read()).toBeNull();
+ expect(refreshTimes).toEqual([21_000]);
+ expect(serverRevocations).toBe(0);
+ expect(writer).toBe(false);
+});
+
+test('a recovery request that reaches dispatch at 20 seconds expires locally without replay',async()=>{
+ loseRefreshReply=true;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ refreshWrite=deferred<void>();
+ await clock.advance(20_000);
+ expect(refreshTimes).toEqual([21_000]);
+ expect(writer).toBe(true);
+ refreshWrite.resolve();
+ refreshWrite=undefined;
+ await flush();
+ expect(refreshTimes).toEqual([21_000]);
+ expect(await store.read()).toBeNull();
+ expect(serverRevocations).toBe(0);
+ expect(writer).toBe(false);
+});
+
+test('repeated HTTP 503 refreshes back off to the five-minute cap',async()=>{
+ refreshStatus=503;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ for(const wait of [20_000,40_000,80_000,160_000,300_000,300_000]){
+  const before=refreshTimes.length;
+  await clock.advance(wait-1);
+  expect(refreshTimes).toHaveLength(before);
+  await clock.advance(1);
+  expect(refreshTimes).toHaveLength(before+1);
+  expect(writer).toBe(false);
+ }
+ expect(await store.read()).not.toBeNull();
+ expect(heads()).toHaveLength(0);
+});
+
+test('foreground return after the refresh recovery window expires the local login without replay',async()=>{
+ loseRefreshReply=true;
+ await startWithRefresh(10_000);
+ await clock.advance(20_000);
+ setLife('background');
+ await clock.advance(40_000);
+ expect(refreshTimes).toEqual([21_000]);
+ expect((await store.read())?.watchDeviceToken).toBe(account.watchDeviceToken);
+ setLife('active');
+ await clock.advance(20_000);
+ expect(refreshTimes).toEqual([21_000]);
+ expect(await store.read()).toBeNull();
+ expect(serverRevocations).toBe(0);
+ expect(heads()).toHaveLength(0);
+ expect(writer).toBe(false);
 });
 
 for(const gate of ['screen','background','transfer','playback'] as const){

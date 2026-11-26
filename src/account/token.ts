@@ -3,14 +3,16 @@ import { WatchAccountStore } from './store';
 import type { WatchAccountState, AccountClientOptions } from './types';
 import { utf8Encode, utf8Decode } from '../cloud/types';
 
+// The server keeps only the immediate parent's unused response for 30 seconds.
+const REFRESH_RECOVERY_WINDOW_MS=20_000;
 export class WatchLoginExpiredError extends Error { constructor(){super('登录已过期，请用手机重新同步账号');} }
 class WatchTokenRefreshError extends Error {
   constructor(readonly status:number){super(`手表令牌刷新失败：HTTP ${status}`);}
 }
 /** Stateless refresh also used under the logout lock: never saves a session or recursively clears it. */
-export async function refreshWatchAccount(state:WatchAccountState,options:AccountClientOptions,now:()=>number=Date.now):Promise<WatchAccountState>{
+export async function refreshWatchAccount(state:WatchAccountState,options:AccountClientOptions,now:()=>number=Date.now,beforeDispatch?:()=>void):Promise<WatchAccountState>{
   if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=now()))throw new WatchLoginExpiredError();
-  const r=await options.transport.request({method:'POST',url:options.backendBaseUrl.replace(/\/$/,'')+'/functions/v1/account/watch-token/refresh',headers:{accept:'application/json','content-type':'application/json; charset=utf-8',...(options.appVersion?{'X-WatchRSS-App-Version':options.appVersion}:{})},body:utf8Encode(JSON.stringify({refreshToken:state.watchRefreshToken}))});
+  const r=await options.transport.request({method:'POST',url:options.backendBaseUrl.replace(/\/$/,'')+'/functions/v1/account/watch-token/refresh',headers:{accept:'application/json','content-type':'application/json; charset=utf-8',...(options.appVersion?{'X-WatchRSS-App-Version':options.appVersion}:{})},body:utf8Encode(JSON.stringify({refreshToken:state.watchRefreshToken})),...(beforeDispatch?{beforeDispatch}:{})});
   if(r.status<200||r.status>=300)throw new WatchTokenRefreshError(r.status);
   const j=JSON.parse(utf8Decode(r.body));
   if(typeof j.watchAccessToken!=='string'||!j.watchAccessToken||typeof j.watchRefreshToken!=='string'||!j.watchRefreshToken)throw Error('无效手表令牌刷新响应');
@@ -45,8 +47,38 @@ export class WatchTokenManager {
   }
   async logout():Promise<void>{await this.store.clear();}
   /** Rotate a captured token pair or reuse the newer pair committed under the account lease. */
-  async refreshAccount(state:WatchAccountState):Promise<WatchAccountState>{
-    try{return await this.store.refresh(state,current=>refreshWatchAccount(current,this.options,this.now),error=>error instanceof WatchLoginExpiredError||error instanceof WatchTokenRefreshError&&error.status===401);}
+  async refreshAccount(state:WatchAccountState,poll?:{beforeDispatch():void}):Promise<WatchAccountState>{
+    try{return await this.store.refresh(state,async(current,attempt)=>{
+      poll?.beforeDispatch();
+      const recovering=attempt.startedAt!==undefined;
+      if(!poll&&!recovering)return refreshWatchAccount(current,this.options,this.now);
+      const startedAt=attempt.startedAt??this.now();
+      const windowOpen=()=>{
+        const elapsed=this.now()-startedAt;
+        return elapsed>=0&&elapsed<REFRESH_RECOVERY_WINDOW_MS;
+      };
+      if(recovering&&!windowOpen())throw new WatchLoginExpiredError();
+      if(!recovering)await attempt.record(startedAt);
+      let dispatched=false;
+      const rotate=()=>refreshWatchAccount(current,this.options,this.now,()=>{
+        poll?.beforeDispatch();
+        if(!windowOpen()){
+          if(recovering||dispatched)throw new WatchLoginExpiredError();
+          throw Error('refresh_preparation_timed_out');
+        }
+        dispatched=true;
+      });
+      try{return await rotate();}
+      catch(error){
+        // A completed HTTP error keeps the normal poll backoff. A transport
+        // error or invalid success body may hide a committed rotation.
+        const ambiguous=dispatched&&!(error instanceof WatchTokenRefreshError);
+        if(!recovering&&!ambiguous)await attempt.clear();
+        if(!ambiguous||recovering||!poll)throw error;
+        poll.beforeDispatch();
+        return rotate();
+      }
+    },error=>error instanceof WatchLoginExpiredError||error instanceof WatchTokenRefreshError&&error.status===401);}
     catch(error){
       const current=await this.store.read();
       // A newer committed pair wins over an old request's rejection.

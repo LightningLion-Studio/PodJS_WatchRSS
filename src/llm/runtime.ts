@@ -18,6 +18,7 @@ export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,
  const rawTransport:HttpTransport={async request(request){
   if(disposed)throw new Error("总结已取消");
   const path=`llm/response-${Date.now()}-${++sequence}.json`;
+  request.beforeDispatch?.();
   const task=hostOperation<DownloadResult>("http.download",{url:request.url,path,temporary:true,method:request.method,headers:request.headers,bodyBase64:request.body?bytesToBase64(request.body):undefined,acceptHttpErrors:true,timeoutMs:15000,readTimeoutMs:600000,maxBytes:8*1024*1024});
   requests.add(task);
   try{
