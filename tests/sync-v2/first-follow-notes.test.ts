@@ -75,11 +75,56 @@ for(const when of ['offline','offline title edit','during download','during appl
  });
 }
 
+for(const change of ['none','resave','older timestamp','newer timestamp'] as const){
+ test(`first follow keeps one matching memo (${change})`,async()=>{
+  const phone=await fixture(),watch=await fixture();
+  let remote:Awaited<ReturnType<typeof openApplicationSyncV2>>|undefined;
+  let local:typeof remote;
+  const title='Matching memo',markdown='Same saved text.';
+  try{
+   for(const side of [phone,watch]){
+    await side.db.execute('DELETE FROM memo_notes');
+    const notes=new MemoRepository(side.db,side.options.legacyDeviceId,()=>'n',()=>200);
+    await notes.save({title,markdown});
+   }
+   remote=await openApplicationSyncV2(phone.options);
+   if(change==='resave'){
+    const notes=new MemoRepository(watch.db,watch.options.legacyDeviceId,undefined,()=>202);
+    await notes.save({noteId:'n',title,markdown});
+   }
+   if(change==='older timestamp')await watch.db.execute("UPDATE memo_notes SET updated_at=199 WHERE note_id='n'");
+   if(change==='newer timestamp')await watch.db.execute("UPDATE memo_notes SET updated_at=201 WHERE note_id='n'");
+
+   local=await openApplicationSyncV2({...watch.options,transport:phone.options.transport});
+   expect(local).not.toBeNull();
+   expect(local!.initialResult.completionError).not.toBe('choice_pending');
+   await local!.sync();
+   await remote!.sync();
+   await local!.sync();
+   const updatedAt=change==='resave'?202:change==='newer timestamp'?201:200;
+   for(const {db} of [watch,phone]){
+    expect(await db.query('SELECT note_id,title,markdown,updated_at FROM memo_notes WHERE deleted=0')).toEqual([
+     {note_id:'n',title,markdown,updated_at:updatedAt},
+    ]);
+   }
+  }finally{
+   await local?.close();
+   await remote?.close();
+   watch.db.close();
+   phone.db.close();
+  }
+ });
+}
+
 test('first follow with a shared memo ID keeps both versions through cloud choice',async()=>{
  const phone=await fixture(),watch=await fixture();
  let remote:Awaited<ReturnType<typeof openApplicationSyncV2>>|undefined;
  let local:typeof remote;
  try{
+  for(const side of [phone,watch]){
+   const matching=new MemoRepository(side.db,side.options.legacyDeviceId,()=>noteId,()=>side===watch?201:200);
+   await matching.save({title:'Matching memo',markdown:'Same saved text.'});
+  }
   remote=await openApplicationSyncV2(phone.options);
   const notes=new MemoRepository(watch.db,watch.options.legacyDeviceId);
   await notes.save({noteId:'n',title:'offline edit',markdown:'Unpublished watch text.'});
@@ -105,9 +150,12 @@ test('first follow with a shared memo ID keeps both versions through cloud choic
   await remote!.sync();
   expect(phone.server.events).toBe(3);
   for(const {db} of [watch,phone]){
-   expect(await db.query('SELECT title,markdown FROM memo_notes WHERE deleted=0 ORDER BY title')).toEqual([
+   expect(await db.query('SELECT title,markdown FROM memo_notes WHERE deleted=0 AND note_id!=? ORDER BY title',[noteId])).toEqual([
     {title:'new cloud title',markdown:'New cloud text.'},
     {title:'offline edit',markdown:'Unpublished watch text.'},
+   ]);
+   expect(await db.query("SELECT note_id,updated_at FROM memo_notes WHERE title='Matching memo' AND deleted=0")).toEqual([
+    {note_id:noteId,updated_at:201},
    ]);
   }
  }finally{

@@ -2,7 +2,7 @@ import {sameIndependentIdentity,isBodyTombstone,tombstoneBodyDescription,emptyBo
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
 import {conflictTexts} from './note-conflict-set';
-import {newConflictId,noteEditDigest,type Conflict} from './notes-conflict';
+import {newConflictId,noteEditDigest,sameLiveNoteContent,type Conflict} from './notes-conflict';
 import {sameBusinessRevision} from './business-revision';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {phoneNotePlainText} from '../notes/phone-text';
@@ -283,6 +283,14 @@ export class WatchAccountControl {
    if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
    const existing=rows.get(row.entityKey),hash=noteEditDigest(c),base=bases[row.entityKey];
    if((existing&&hash===noteEditDigest(existing.candidate))||(base&&hash===digest(base)))continue;
+   if(state.editBase.accountOid===null&&existing&&sameLiveNoteContent(c,existing.candidate)){
+    const cloud=existing.candidate,updatedAt=c.state.payload.updatedAt;
+    if(updatedAt>cloud.state.payload.updatedAt){
+     rows.set(row.entityKey,{...existing,candidate:{...cloud,state:{...cloud.state,payload:{...cloud.state.payload,updatedAt}}}});
+     retained=true;
+    }
+    continue;
+   }
    const acknowledged=root&&!base?await this.o.store.cloudRow(root,row.entityKey):null;
    if(acknowledged&&!acknowledged.unopenable&&hash===noteEditDigest(acknowledged))continue;
    retained=true;
@@ -424,7 +432,7 @@ export class WatchAccountControl {
    for(const {entityKey,candidate} of page){
     if(candidate.meta.kind!=='note')continue;
     const row=await this.o.store.cloudRow(current.treeRoot,entityKey);
-    if(row&&!row.unopenable&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
+    if(row&&!row.unopenable&&!sameLiveNoteContent(row,candidate)&&noteEditDigest(row)!==noteEditDigest(candidate))return true;
    }
    after=page.at(-1)!.entityKey;
   }

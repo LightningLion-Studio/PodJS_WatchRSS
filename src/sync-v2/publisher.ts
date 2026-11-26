@@ -9,7 +9,7 @@ import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
 import {fromWire} from './business';
-import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
+import {readConflicts,conflictNeutral,noteEditDigest,sameLiveNoteContent} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
 import {PAGE_BYTES,type WatchProjectionStore} from './store';
@@ -83,13 +83,31 @@ export class WatchIndexPublisher {
    // R2: a local change against its quarantine baseline is held as unsent.
    if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate))heldEdits=true;continue;}
    const c=copy(entry.candidate);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
+   let mergeNoteClock=false;
    if(baseRoot&&c.meta.kind==='note'){
     const base=await this.store.cloudRow(baseRoot,entry.entityKey);
-    if(base&&!base.unopenable&&noteEditDigest(base)===noteEditDigest(c))continue;
+    if(base&&!base.unopenable){
+     const baseHash=noteEditDigest(base);
+     if(baseHash===noteEditDigest(c))continue;
+     // A first-follow cloud choice can leave only a newer memo clock to
+     // publish. An advanced head's content takes priority over that clock.
+     const atBaseTime={...c,state:{...c.state,payload:{...c.state.payload,updatedAt:base.state.payload.updatedAt}}};
+     if(sameLiveNoteContent(c,base)&&baseHash===noteEditDigest(atBaseTime)){
+      if(!existing||!sameLiveNoteContent(c,existing))continue;
+      mergeNoteClock=true;
+     }
+    }
    }
    if(existing&&c.meta.kind==='note'){
     if(existing.meta.kind!=='note'||existing.meta.logicalId!==c.meta.logicalId)throw Error('identity_conflict');
     const context={entityKey:entry.entityKey,noteId:c.meta.logicalId},local=readConflicts(c.state,context,['note-conflicts.v1']),remote=readConflicts(existing.state,context,['note-conflicts.v1']);
+    mergeNoteClock||=baseOid===null&&sameLiveNoteContent(c,existing);
+    if(mergeNoteClock){
+     const updatedAt=Math.max(c.state.payload.updatedAt,existing.state.payload.updatedAt);
+     c.meta=existing.meta;
+     c.addedAtMillis=existing.row.addedAtMillis;
+     c.state={...existing.state,payload:{...existing.state.payload,updatedAt}};
+    }
     if(local||remote){c.state.payload.noteConflicts=mergeConflicts(context.noteId,local??conflictSet(context.noteId,[]),remote??conflictSet(context.noteId,[]));c.state.requiredFeatures=[...new Set([...c.state.requiredFeatures,'note-conflicts.v1'])].sort();}
    }
    let body;try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}catch(error){if((error as Error).message!=='body_channel_source_missing')throw error;heldEdits=true;continue;}
@@ -100,7 +118,7 @@ export class WatchIndexPublisher {
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
    // business adapter before replacing an overlapping authenticated row.
-   if(old&&before.account&&before.editBase.accountOid!==before.account.oid)throw Error('merge_unavailable');
+   if(old&&before.account&&before.editBase.accountOid!==before.account.oid&&!mergeNoteClock)throw Error('merge_unavailable');
    indexRow(row);rows.set(entry.entityKey,row);changedRows.push(row);
    await stage();
   }after=page.at(-1)!.entityKey;}

@@ -34,7 +34,33 @@ test('SyncV2 shared B09 concurrent native edit preserves the old inbox and the n
 
 test('SyncV2 legacy inbox preserves fractional v13/v14 progress as encrypted legacy JSON',async()=>{const db=new SqlFixture();try{await seed(db,1);const store=db.store();await store.initialize();const input={peer:'p',version:13 as const,cursor:'fractional',entityKeys:['n'],body:{n:{readingProgress:.1234567}}};expect((await store.receiveLegacy(input,null)).ack).toBe(false);expect(await store.receiveLegacy(input,null)).toEqual({duplicate:true,ack:false});expect(db.raw.query('SELECT count(*) n FROM syncv2_legacy_inbox').get()).toEqual({n:1});}finally{db.close();}});
 
-test('SyncV2 native legacy mutation after rollback persists a business witness then materializes awaiting-user in a fresh store',async()=>{const db=new SqlFixture();try{await seed(db,1);await db.execute('UPDATE memo_notes SET base_content_hash=content_hash');const store=db.store();await store.initialize();await store.observe(account,async()=>({authors:{},parents:{}}));expect((await store.readState()).pendingChoice).toBeNull();await db.execute("UPDATE memo_notes SET markdown='received via old channel' WHERE note_id='n00000'");const restarted=await db.store().readState();expect(restarted.localChangeRevision).toBe('1');expect(restarted.pendingChoice).toEqual({generation:account.generation,inboxKeys:[]});expect(db.raw.query('SELECT awaiting_user FROM syncv2_state').get()).toEqual({awaiting_user:1});expect(restarted.editBase.generation).toBe('0');}finally{db.close();}});
+test('SyncV2 native legacy mutation after rollback persists a business witness then materializes awaiting-user in a fresh store',async()=>{
+ const db=new SqlFixture();
+ try{
+  const [note]=await seed(db,1);
+  const value={...note!,baseContentHash:note!.contentHash};
+  await db.execute('UPDATE memo_notes SET base_content_hash=content_hash');
+  const store=db.store(),auth=async()=>({authors:{},parents:{}});
+  await store.initialize();
+  const acknowledged={oid:'commit:sha256:'+'a'.repeat(64),revision:'1',generation:'0'};
+  await store.observe(acknowledged,auth);
+  const before=await store.readState();
+  const statements=await store.prepareAccountProjection(before,[{kind:'note',logicalId:value.noteId,value}],[]);
+  const editBase={accountOid:acknowledged.oid,generation:acknowledged.generation};
+  await store.controlUpdate(before,{...before,editBase,activeGeneration:acknowledged.oid,hasUnsentEdits:false,acknowledgedLocalChangeRevision:before.localChangeRevision},statements);
+
+  await store.observe(account,auth);
+  expect(await store.readState()).toMatchObject({pendingChoice:null,editBase,hasUnsentEdits:false});
+  await db.execute("UPDATE memo_notes SET markdown='received via old channel' WHERE note_id='n00000'");
+
+  const reopened=db.store(),restarted=await reopened.readState();
+  expect(restarted.localChangeRevision).toBe('1');
+  expect(restarted.pendingChoice).toEqual({generation:account.generation,inboxKeys:[]});
+  expect(db.raw.query('SELECT awaiting_user FROM syncv2_state').get()).toEqual({awaiting_user:1});
+  expect(restarted.editBase).toEqual(editBase);
+  expect((await reopened.readState()).pendingChoice).toEqual(restarted.pendingChoice);
+ }finally{db.close();}
+});
 
 test('SyncV2 bootstrap preserves existing unsent note ancestry before the first rollback observation',async()=>{const db=new SqlFixture();try{await seed(db,1);const original=db.raw.query('SELECT * FROM memo_notes').all(),store=db.store();await store.initialize();expect((await store.readState()).hasUnsentEdits).toBe(true);await store.observe(account,async()=>({authors:{},parents:{}}));expect((await db.store().readState()).pendingChoice).not.toBeNull();expect(db.raw.query('SELECT * FROM memo_notes').all()).toEqual(original);}finally{db.close();}});
 

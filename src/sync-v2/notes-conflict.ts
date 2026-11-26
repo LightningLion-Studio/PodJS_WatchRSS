@@ -27,6 +27,12 @@ export function conflictNeutral(state:any){
 /** R2: digest of the conflict-neutral note model compared for local edits of a
  * candidate or decoded row (the edit-base shape). */
 export const noteEditDigest=(r:any)=>sha256Hex(jb({identity:r.meta.logicalId,...r.meta.payload,...conflictNeutral(r.state).payload}));
+/** First-follow callers already matched the entity key. Markdown includes the
+ * attachment references, so a different reference is also a content change. */
+export function sameLiveNoteContent(a:any,b:any){
+ return a.meta.kind==='note'&&b.meta.kind==='note'&&a.state.payload.deleted===false&&b.state.payload.deleted===false&&
+  a.meta.payload.title===b.meta.payload.title&&a.state.payload.markdown===b.state.payload.markdown;
+}
 export function newConflictId(noteId:string,base:string,local:string,remote:string,device:string){
  for(const v of [noteId,base,local,remote,device])c.canonical(v);
  return noteConflictId(noteId,base,local,remote,device);
