@@ -729,3 +729,35 @@ test('an unavailable client-config uses the packaged default for polling and mem
  await clock.advance(3000);
  expect(syncTimes).toEqual([1000,21_000,24_000]);
 });
+
+for(const [random,cold,steady] of [[0,18_000,10_500],[0.999_999,20_000,12_500]] as const){
+ test('steady head deadline '+steady+' ms includes time spent in the changed round',async()=>{
+  Math.random=()=>random;
+  await start();
+  await clock.advance(cold);
+  expect(heads()).toHaveLength(1);
+  expect(syncTimes).toHaveLength(2);
+
+  etag='head-2';
+  holdSync=deferred<void>();
+  await clock.advance(steady-1);
+  expect(heads()).toHaveLength(1);
+  await clock.advance(1);
+  expect(heads()).toHaveLength(2);
+  expect(syncTimes).toHaveLength(3);
+
+  await clock.advance(8000);
+  holdSync.resolve();
+  await flush();
+  headStatus=429;
+  headRetryMillis=60_000;
+  await clock.advance(steady-8000-1);
+  expect(heads()).toHaveLength(2);
+  await clock.advance(1);
+  expect(heads()).toHaveLength(3);
+  await clock.advance(59_999);
+  expect(heads()).toHaveLength(3);
+  await clock.advance(1);
+  expect(heads()).toHaveLength(4);
+ });
+}

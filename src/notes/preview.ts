@@ -51,7 +51,7 @@ function* htmlPreviewChunks(markup:string,max:number):Generator<string|undefined
  const paragraphTags=/^(?:p|div|h[1-6]|blockquote|ol|ul|table|pre|section|article)$/i;
  const containers:string[]=[];
  let start=0,paragraphStart=0,length=0,paragraphs=0;
- for(const match of markup.matchAll(/<!--[^]*?-->|<(\/?)([a-z][a-z0-9-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)){
+ for(const match of markup.matchAll(/<!--[^]*?(?:-->|$)|<(\/?)([a-z][a-z0-9-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)){
   yield;
   const [,closing,tag]=match;
   if(!tag||!paragraphTags.test(tag))continue;
@@ -94,7 +94,8 @@ function* parseHtmlSteps(markup:string,max:number,append:(block:NotePreviewBlock
   }
  };
  let cursor=0;
- for(const image of markup.matchAll(/<img\b[^>]*>(?:[ \t\n\v\f\r]*<\/img>)?/gis)){
+ for(const image of markup.matchAll(/<!--[^]*?(?:-->|$)|<img\b[^>]*>(?:[ \t\n\v\f\r]*<\/img>)?/gis)){
+  if(image[0].startsWith('<!--')){yield;continue;}
   yield* appendText(cursor,image.index);
   const attr=(name:string)=>new RegExp('\\b'+name+'[ \\t\\n\\v\\f\\r]*=[ \\t\\n\\v\\f\\r]*["\x27]([^"\x27]*)["\x27]','is').exec(image[0])?.[1];
   const src=attr('src');

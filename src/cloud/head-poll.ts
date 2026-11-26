@@ -3,6 +3,10 @@ import {SyncV2Lifetime} from '../sync-v2/lifetime';
 import {utf8Decode,utf8Encode,type HttpResponse,type HttpTransport} from './types';
 
 const DEFAULT_INTERVAL=20_000;
+// Backend 238089f admits a request for the same device every 10 seconds.
+// Leave slack above admission even at the lower edge of the two-second jitter.
+const MIN_HEAD_INTERVAL=10_500;
+const STEADY_INTERVAL=12_500;
 const MAX_BACKOFF=300_000;
 const DEFAULT_CONFIG_TTL=600_000;
 const CONFIG_KEY='sync_head_poll_v1';
@@ -91,7 +95,7 @@ export class WatchHeadPoll {
   }
   if(this.running)return;
   const now=this.ports.now();
-  if(this.enabled)this.headDue??=now+this.jitter(this.interval);
+  if(this.enabled)this.headDue??=now+this.pollDelay();
   const at=Math.min(this.configDue,this.enabled?this.headDue!:Infinity);
   if(this.timer?.at===at)return;
   this.clearTimer();
@@ -129,6 +133,13 @@ export class WatchHeadPoll {
   return Math.max(1,interval+Math.round((Math.random()-1)*2000));
  }
 
+ private pollDelay(){
+  // Keep the cold start and explicit server overrides on their original
+  // cadence. Only a successfully synchronized head enables the steady cadence.
+  const interval=this.etag&&this.interval===DEFAULT_INTERVAL?STEADY_INTERVAL:this.interval;
+  return Math.max(MIN_HEAD_INTERVAL,this.jitter(interval));
+ }
+
  private retry(minimum=0){
   this.failures=Math.min(5,this.failures+1);
   const delay=minimum>0?minimum:Math.min(MAX_BACKOFF,this.jitter(DEFAULT_INTERVAL*2**(this.failures-1)));
@@ -157,7 +168,7 @@ export class WatchHeadPoll {
     return;
    }
    if(!result||!('status' in result)){
-    this.headDue=this.ports.now()+this.jitter(this.interval);
+    this.headDue=this.ports.now()+this.pollDelay();
     return;
    }
    const code=(result.status===400||result.status===403)?headErrorCode(result):undefined;
@@ -180,6 +191,7 @@ export class WatchHeadPoll {
     this.retry(Math.max(Number.isSafeInteger(minimum)?minimum:0,pollAfter));
     return;
    }
+   const observedAt=this.ports.now();
    if(result.status!==304){
     if(result.status!==200)throw Error('head_request_failed');
     const data=json(result);
@@ -189,7 +201,8 @@ export class WatchHeadPoll {
    }
    if(current()){
     this.failures=0;
-    this.headDue=this.ports.now()+this.jitter(this.interval);
+    // Long rounds already consume time in the next polling interval.
+    this.headDue=observedAt+this.pollDelay();
    }
   }catch{
    if(current()&&lifetime.isCurrent()){

@@ -30,9 +30,10 @@ export function notePreviewPlainText(value:string,context?:NoteHtmlPreviewContex
   numbers=next.value;
  }
  const sourceStart=context?.list?.sourceStart??0,ordinals=numbers;
- if(ordinals?.size){
-  value=value.replace(listTags,(token,_closing,_name,index:number)=>{
-   const number=ordinals.get(sourceStart+index);
+ if(ordinals?.size||value.includes('<!--')){
+  value=value.replace(listTags,(token,_closing,name,index:number)=>{
+   if(!name)return '';
+   const number=ordinals?.get(sourceStart+index);
    return number===undefined?token:`\n${number}. `;
   });
  }
@@ -49,12 +50,12 @@ function listAttributes(tag:string):Map<string,string> {
 }
 
 function listInteger(value:string|undefined):number|undefined {
- if(value===undefined||!/^[-+]?\d+$/.test(value))return undefined;
+ if(value===undefined||!/^[ \t\n\f\r]*[-+]?\d+[ \t\n\f\r]*$/.test(value))return undefined;
  const number=Number(value);
  return Number.isSafeInteger(number)?number:undefined;
 }
 
-const listTags=/<(\/?)(ol|ul|li)(?=[ \t\n\f\r/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+const listTags=/<!--[^]*?(?:-->|$)|<(\/?)(ol|ul|li)(?=[ \t\n\f\r/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
 
 /** Assign ordinals in the original source before images divide it into text fragments. */
 export function* noteHtmlListNumberSteps(value:string):Generator<void,Map<number,number>> {
@@ -72,7 +73,9 @@ export function* noteHtmlListNumberSteps(value:string):Generator<void,Map<number
  };
  for(const match of value.matchAll(listTags)){
   yield;
-  const [,closing,name]=match,tag=name.toLowerCase();
+  const [,closing,name]=match;
+  if(!name)continue;
+  const tag=name.toLowerCase();
   if(tag==='li'){
    if(!closing)lists.at(-1)?.items.push({index:match.index,value:listInteger(listAttributes(match[0]).get('value'))});
   }else if(closing){

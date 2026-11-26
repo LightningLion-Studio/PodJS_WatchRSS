@@ -111,3 +111,23 @@ test('FIX2: a complete list in a subsequent HTML chunk keeps its local numbering
  expect(blocks).toHaveLength(2);
  expect(layout(source,blocks).map(row=>row.text)).toEqual(['A','B','C','D','8. Eighth','9. Ninth']);
 });
+
+test('ordered list ignores HTML comments when assigning ordinals',()=>{
+ const source='<ol><!-- <li>hidden</li> --><li>A</li><li>B</li></ol>';
+ expect(layout(source).map(row=>row.text)).toEqual(['1. A','2. B']);
+ expect(prepareNotePreview(source)[0]).toMatchObject({kind:'rich',markup:source});
+});
+
+test('ordered list accepts HTML whitespace around start and value',()=>{
+ const source='<ol start=" \t5 "><li>A</li><li value="\t -2\f ">B</li><li>C</li></ol>';
+ expect(layout(source).map(row=>row.text)).toEqual(['5. A','-2. B','-1. C']);
+ const nonHtmlSpace='<ol start="\u00a05\u00a0"><li>A</li></ol>';
+ expect(layout(nonHtmlSpace).map(row=>row.text)).toEqual(['1. A']);
+});
+
+test('commented images do not split ordered-list source offsets',()=>{
+ const source='<ol reversed><!-- <li><img src="assets/hidden.png"></li> --><li>A</li><li><img src="assets/visible.png">B</li><li>C</li></ol>';
+ const blocks=prepareNotePreview(source);
+ expect(blocks.filter(block=>block.kind==='image').map(block=>block.path)).toEqual(['assets/visible.png']);
+ expect(layout(source,blocks).map(row=>row.text)).toEqual(['3. A','2.','B','1. C']);
+});
