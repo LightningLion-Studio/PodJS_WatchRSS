@@ -2,8 +2,8 @@
   "memoryBudgetMb": 256,
   "entry": "src/main.tsx",
   "appId": "com.lightningstudio.watchrss.podjs",
-  "versionName": "2.0.6-1",
-  "versionCode": 1337,
+  "versionName": "2.0.6-2",
+  "versionCode": 1338,
   "name": "腕上RSS",
   "bytecode": {
     "stripSource": true

@@ -99,6 +99,7 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
             role:"body",
             viewportHeight,
             focusOnOpenWithoutKeyboard:true,
+            focusFromTitleToast:"转动表冠调整光标，再次点击开始输入。",
             entryToast:"滚动滚轮调整光标位置，再次点击打开输入法",
           },
         },

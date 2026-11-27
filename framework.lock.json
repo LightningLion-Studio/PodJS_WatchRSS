@@ -1,6 +1,6 @@
 {
   "path": "../../PodJS/podjs-watch",
-  "revision": "3aa1f9f47e9e9cb3d97685f4b131fcd6400c0b57",
+  "revision": "4cd6befef84a905ed4bc527db72b62d328ef63e9",
   "requiresLocalChanges": false,
   "pocketjsRevision": "75d79c5b6bd6a56d42ee78b7f61552a4371b8ab6",
   "branch": "t-watch-week-release"
