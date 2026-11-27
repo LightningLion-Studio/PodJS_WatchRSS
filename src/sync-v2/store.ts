@@ -7,12 +7,12 @@ import {SqlProgram,SQL_PROGRAM_SCHEMA,sqlExactSetGuards,sqlProgramRelationGuards
 import {SqlStateJournal,SQL_STATE_SCHEMA} from '@podjs/framework/sql-state-journal';
 import {chargedReplayBytes} from './resume';
 import {WatchEquivalentLegacy} from './legacy-store';
-import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
+import {updateRadixIndex,type RadixNode,type RadixRow} from '@podjs/framework/radix-index';
 import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {CHUNKED_AEAD_BLOCK_BYTES,CHUNKED_REF_KEY,SQL_CHUNKED_VALUE_SCHEMA,SqlChunkedValues,chunkedRef,type AeadBlockPort,type ChunkedValueRef} from '@podjs/framework/chunked-aead';
 import {readBoundedKeysetBatch,commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
-import {canonical,canonicalLegacy,jsonBytes,parseCanonicalJson,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
+import {bytes as utf8Bytes,canonical,canonicalLegacy,jsonBytes,parseCanonicalJson,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
 import {candidates,toWire} from './business';
 import {carrierBodyRevision} from './body-channel-codec';
 import {ProjectionGate} from './gate';
@@ -85,16 +85,49 @@ export const PAGE_BYTES=384*1024;
 /** R4: serialized bytes of business statements appended in one preparation step. */
 const BUSINESS_STEP_BYTES=512*1024;
 export class ObservationReadOnly extends Error {constructor(){super('feature_disabled');}}
+const HEX_64=/^[0-9a-f]{64}$/,HEX_PREFIX=/^[0-9a-f]{0,64}$/,HEX_DIGIT=/^[0-9a-f]$/,DEC_STR=/^(?:0|[1-9][0-9]*)$/;
+function radixNodeCanonical(node:RadixNode):string {
+ if(node&&node.version===1&&node.domain==='podjs/local-radix-index'&&typeof node.prefix==='string'&&HEX_PREFIX.test(node.prefix)&&Object.keys(node).length===5){
+  if(node.form==='node'&&Array.isArray(node.children)){
+   const parts:string[]=[];let ok=true;
+   for(const c of node.children){
+    if(!c||typeof c.digit!=='string'||!HEX_DIGIT.test(c.digit)||typeof c.hash!=='string'||!HEX_64.test(c.hash)||!Number.isSafeInteger(c.count)||Object.is(c.count,-0)||Object.keys(c).length!==3){ok=false;break;}
+    parts.push(`{"count":${c.count},"digit":"${c.digit}","hash":"${c.hash}"}`);
+   }
+   if(ok)return `{"children":[${parts.join(',')}],"domain":"podjs/local-radix-index","form":"node","prefix":"${node.prefix}","version":1}`;
+  }else if(node.form==='leaf'&&Array.isArray(node.rows)){
+   const parts:string[]=[];let ok=true;
+   for(const r of node.rows){
+    const v=r?.value as {addedAtMillis?:unknown;candidateHash?:unknown;rowSequence?:unknown}|undefined;
+    if(!r||typeof r.key!=='string'||!HEX_64.test(r.key)||!v||typeof v!=='object'||Object.keys(r).length!==2||Object.keys(v).length!==3||!Number.isSafeInteger(v.addedAtMillis)||Object.is(v.addedAtMillis,-0)||typeof v.candidateHash!=='string'||!HEX_64.test(v.candidateHash)||typeof v.rowSequence!=='string'||!DEC_STR.test(v.rowSequence)){ok=false;break;}
+    parts.push(`{"key":"${r.key}","value":{"addedAtMillis":${v.addedAtMillis},"candidateHash":"${v.candidateHash}","rowSequence":"${v.rowSequence}"}}`);
+   }
+   if(ok)return `{"domain":"podjs/local-radix-index","form":"leaf","prefix":"${node.prefix}","rows":[${parts.join(',')}],"version":1}`;
+  }
+ }
+ return canonical(node);
+}
+function radixEncoder(){
+ const cache=new WeakMap<object,{text:string;bytes:Uint8Array}>();
+ const entry=(node:RadixNode)=>{
+  let cached=cache.get(node);
+  if(!cached){const text=radixNodeCanonical(node);cached={text,bytes:utf8Bytes(text)};cache.set(node,cached);}
+  return cached;
+ };
+ return {encode:(node:RadixNode)=>entry(node).bytes,text:(node:RadixNode)=>entry(node).text};
+}
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  private legacyAdapter?:WatchEquivalentLegacy;
  private cloudCache:SqlAuthenticatedCache<any>;
  private readonly stateJournal:SqlStateJournal<SyncState>;
+ private readonly verifiedCandidates=new Map<string,{body:string;digest:string;deletedNote:boolean}>();
+ private adaptiveScanLimit=32;
  readonly legacyBodies:WatchLegacyBody;
  /** Candidate options every builder (scan, follow, choice, recovery) must share. */
  segmentOptions(){return {noteSegments:this.options.noteSegments===true};}
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean;localIntake?:boolean}={}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);this.legacyBodies=new WatchLegacyBody(db,cipher,this.scopeKey);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(async()=>{this.key.fill(0);if(!this.options.localIntake)await stopExistingProjection(this.db);});
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);this.legacyBodies=new WatchLegacyBody(db,cipher,this.scopeKey);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(async()=>{this.verifiedCandidates.clear();this.key.fill(0);if(!this.options.localIntake)await stopExistingProjection(this.db);});
  }
  entityKeyFor(kind:Kind,logicalId:string){this.gate.require();return entityKey(this.key,this.scope.repoId,kind,logicalId);}
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
@@ -109,7 +142,16 @@ export class WatchProjectionStore {
   const value=await this.cipher.open(aad,body),ref=chunkedRef(value);if(!ref)return value;if(ref.owner!==owner)throw Error('authentication_required');
   return parseCanonicalJson(await this.chunks(kind).read(ref,aad));
  }
- private openCandidate(entity:string,body:unknown){return this.openSpilled('candidate',entity,this.aad('candidate',entity),String(body));}
+ private rememberCandidate(entity:string,body:string,value:any){
+  if(this.verifiedCandidates.size>=8192&&!this.verifiedCandidates.has(entity)){const oldest=this.verifiedCandidates.keys().next().value;if(oldest!==undefined)this.verifiedCandidates.delete(oldest);}
+  this.verifiedCandidates.set(entity,{body,digest:digest(value),deletedNote:value?.state?.payload?.deleted===true});
+ }
+ private async openCandidate(entity:string,body:unknown){
+  const text=String(body),value=await this.cipher.open(this.aad('candidate',entity),text),ref=chunkedRef(value);
+  if(!ref){this.rememberCandidate(entity,text,value);return value;}
+  if(ref.owner!==entity)throw Error('authentication_required');
+  return parseCanonicalJson(await this.chunks('candidate').read(ref,this.aad('candidate',entity)));
+ }
  /** Base of an unsent edit kept in state.cloud.editBases. A large base (a long
   * note) is a chunked ref; the caller commits `statements` with the state. */
  async editBaseEntry(entity:string,base:any){const sealed=await this.sealSpilled('edit-base',entity,this.aad('edit-base',entity),base);if(!sealed.ref)return {value:base,statements:[]};return {value:{[CHUNKED_REF_KEY]:sealed.ref},statements:sealed.statements.filter(s=>!s.sql.startsWith('DELETE'))};}
@@ -274,7 +316,7 @@ export class WatchProjectionStore {
    }
    if(work.phase==='remove'){
     const page=await this.db.query('SELECT entity_key FROM syncv2_candidates c WHERE scope=? AND entity_key>? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=c.scope AND k.plan_id=? AND k.entity_key=c.entity_key) ORDER BY entity_key LIMIT 32',[this.scopeKey,work.after,id]);
-    if(page.length){const tree=await updateRadixIndex({read:readTree,encode:jsonBytes,hash:sha256Hex},page.map(r=>({key:String(r.entity_key),value:null,remove:true as const}))),writes=tree.writes.map(r=>({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,r.prefix,r.hash,canonical(r.node),r.count]}));await stageTrees(writes);work.after=String(page.at(-1)!.entity_key);await checkpoint();continue;}
+    if(page.length){const enc=radixEncoder(),tree=await updateRadixIndex({read:readTree,encode:enc.encode,hash:sha256Hex},page.map(r=>({key:String(r.entity_key),value:null,remove:true as const}))),writes=tree.writes.map(r=>({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,r.prefix,r.hash,enc.text(r.node),r.count]}));await stageTrees(writes);work.after=String(page.at(-1)!.entity_key);await checkpoint();continue;}
     await program.append([{sql:'INSERT INTO syncv2_tree_nodes(scope,prefix,hash,body,count) SELECT scope,prefix,hash,body,count FROM syncv2_apply_tree_v2 t WHERE scope=? AND plan_id=? AND step=(SELECT MAX(newer.step) FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id]},{sql:'DELETE FROM syncv2_candidates WHERE scope=? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=syncv2_candidates.scope AND k.plan_id=? AND k.entity_key=syncv2_candidates.entity_key)',params:[this.scopeKey,id]},{sql:'DELETE FROM podjs_sql_value_chunks WHERE binding=? AND NOT EXISTS(SELECT 1 FROM syncv2_candidates c WHERE c.scope=? AND c.entity_key=podjs_sql_value_chunks.owner)',params:[this.scopeKey+'#candidate',this.scopeKey]}]);work.phase='finalize';await checkpoint();continue;
    }
    if(work.phase==='finalize'){work.ref=await program.finish();work.phase='ready';await checkpoint();}
@@ -411,6 +453,16 @@ export class WatchProjectionStore {
   this.gate.require();limit=await this.boundedLimit('SELECT length(body)'+(this.cipher.blocks?'+'+this.chunks('candidate').sizeSql('entity_key'):'')+' AS n FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
   const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.openCandidate(String(row.entity_key),row.body)});return out;
  }
+ async priorityCandidateKeys(kinds:readonly Kind[]){
+  this.gate.require();if(!kinds.length)return [] as string[];
+  const rows=await this.db.query(`SELECT DISTINCT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY entity_key`,[this.libraryId,this.scope.repoId,...kinds]);
+  return rows.map(r=>String(r.entity_key));
+ }
+ async candidateBatch(entityKeys:readonly string[]){
+  this.gate.require();if(!entityKeys.length)return [];
+  const rows=await this.db.query(`SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key IN (${entityKeys.map(()=>'?').join(',')}) ORDER BY entity_key`,[this.scopeKey,...entityKeys]);
+  const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.openCandidate(String(row.entity_key),row.body)});return out;
+ }
  /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
  async stageCloudRows(root:string,rows:any[],baseline:SyncState,observation=false){
   this.gate.require();const db=observation?this.observationSql(baseline):this.db;
@@ -439,6 +491,10 @@ export class WatchProjectionStore {
  async uploadCount(planId:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',[this.scopeKey,planId]))[0]?.n??0);}
  async uploadPage(planId:string,after='',limit=1){
   this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
+  for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
+ }
+ async uploadStateRefsPage(planId:string,after='',limit=16){
+  this.gate.require();const rows=await this.db.query("SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid LIKE 'state-refs:%' AND oid>? ORDER BY oid LIMIT ?",[this.scopeKey,planId,after,limit]),out=[];
   for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
  }
  async uploadBatch(planId:string,after=''){return readBoundedKeysetBatch(async key=>(await this.uploadPage(planId,key,1))[0],after,item=>item.oid,item=>item.bytes.length,16,65536);}
@@ -494,23 +550,54 @@ export class WatchProjectionStore {
  }
  private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
-  for(const row of rows){const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId),candidate=candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis,this.segmentOptions()),mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
-   const existing=(await this.db.query('SELECT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id=?',mapKey))[0];if(existing&&existing.entity_key!==entity)throw Error('identity_conflict');
+  if(!rows.length)return {statements,total};
+  const prepared=rows.map(row=>{const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId);return {row,entity,candidate:candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis,this.segmentOptions())};});
+  const byKind=new Map<Kind,Set<string>>();
+  for(const item of prepared){let set=byKind.get(item.row.kind);if(!set){set=new Set();byKind.set(item.row.kind,set);}set.add(item.row.logicalId);}
+  const existingIdentity=new Map<string,string>();
+  for(const [kind,idSet] of byKind){
+   const ids=[...idSet];
+   for(let at=0;at<ids.length;at+=64){
+    const slice=ids.slice(at,at+64);
+    for(const r of await this.db.query(`SELECT logical_id,entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id IN (${slice.map(()=>'?').join(',')})`,[this.libraryId,this.scope.repoId,kind,...slice]))existingIdentity.set(kind+'\0'+String(r.logical_id),String(r.entity_key));
+   }
+  }
+  const uniqueEntities=[...new Set(prepared.map(item=>item.entity))];
+  const existingCandidate=new Map<string,string>();
+  for(let at=0;at<uniqueEntities.length;at+=64){
+   const slice=uniqueEntities.slice(at,at+64);
+   for(const r of await this.db.query(`SELECT entity_key,body FROM syncv2_candidates WHERE scope=? AND entity_key IN (${slice.map(()=>'?').join(',')})`,[this.scopeKey,...slice]))existingCandidate.set(String(r.entity_key),String(r.body));
+  }
+  for(const {row,entity,candidate} of prepared){const mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
+   const existing=existingIdentity.get(row.kind+'\0'+row.logicalId);if(existing&&existing!==entity)throw Error('identity_conflict');
    if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
-   const prior=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];
-   const priorValue=prior?await this.openCandidate(entity,prior.body):null;
-   if(!force&&priorValue&&canonical(priorValue)===canonical(candidate))continue;
+   const priorBody=existingCandidate.get(entity);
+   const candidateDigest=digest(candidate);
+   let hasPrior=false,priorDeletedNote=false;
+   if(priorBody!==undefined){
+    const cached=this.verifiedCandidates.get(entity);
+    if(cached&&cached.body===priorBody){
+     if(!force&&cached.digest===candidateDigest)continue;
+     hasPrior=true;priorDeletedNote=cached.deletedNote;
+    }else{
+     const priorValue=await this.openCandidate(entity,priorBody);
+     if(!force&&digest(priorValue)===candidateDigest)continue;
+     hasPrior=true;priorDeletedNote=priorValue.state.payload.deleted===true;
+    }
+   }
    // rc7 25.3: a local deletion ends the note life in the same transaction.
-   if(row.kind==='note'&&candidate.state.payload.deleted===true&&priorValue&&priorValue.state.payload.deleted!==true)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
+   if(row.kind==='note'&&candidate.state.payload.deleted===true&&hasPrior&&!priorDeletedNote)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
    const spilled=await this.sealSpilled('candidate',entity,this.aad('candidate',entity),candidate),sealed=spilled.body;total+=sealed.length;statements.push(...spilled.statements);
+   if(!spilled.ref)this.rememberCandidate(entity,sealed,candidate);
    if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');
-   treeChanges.push({key:entity,value:{candidateHash:sha256Hex(jsonBytes(sealed)),rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
+   const sealedHash=sha256Hex(jsonBytes(sealed));
+   treeChanges.push({key:entity,value:{candidateHash:sealedHash,rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
    statements.push({sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[...mapKey,entity]},
     {sql:'INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body,meta_bytes=excluded.meta_bytes,state_bytes=excluded.state_bytes,added_at=excluded.added_at,row_sequence=excluded.row_sequence',params:[this.scopeKey,entity,sealed,candidate.metaBytes,candidate.stateBytes,candidate.addedAtMillis,sequence]},
-    {sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:sha256Hex(jsonBytes(sealed))})]});
+    {sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:sealedHash})]});
   }
-  if(treeChanges.length){const tree=await updateRadixIndex({read:readTree??(async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;}),encode:jsonBytes,hash:sha256Hex},treeChanges);
-   for(const row of tree.writes){const body=canonical(row.node);total+=body.length;if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
+  if(treeChanges.length){const enc=radixEncoder(),tree=await updateRadixIndex({read:readTree??(async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;}),encode:enc.encode,hash:sha256Hex},treeChanges);
+   for(const row of tree.writes){const body=enc.text(row.node);total+=body.length;if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
   }
   return {statements,total};
  }
@@ -519,8 +606,10 @@ export class WatchProjectionStore {
  async scanPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'scan',hook);}
  private async projectPage(source:SourceReader,limit:number,phase:'scan'|'tail',hook?:()=>void){
   const state=await this.readState();if(queuedReadOnly(state))throw new ObservationReadOnly();const revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!==phase)return cp;
+  let effectiveLimit=Math.min(limit,this.adaptiveScanLimit);
   let page:SourcePage,prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
-  for(;;){page=await source.page(cp.after,limit);if(page.rows.length>limit||!page.done&&page.after===cp.after)throw Error('scan_no_progress');try{prepared=await this.prepareRows(page.rows,state.localChangeRevision,revision);break;}catch(error){if(limit===1||(error as Error).message!=='page_too_large')throw error;limit=Math.max(1,Math.floor(limit/2));}}
+  for(;;){page=await source.page(cp.after,effectiveLimit);if(page.rows.length>effectiveLimit||!page.done&&page.after===cp.after)throw Error('scan_no_progress');try{prepared=await this.prepareRows(page.rows,state.localChangeRevision,revision);break;}catch(error){if(effectiveLimit===1||(error as Error).message!=='page_too_large')throw error;effectiveLimit=Math.max(1,Math.floor(effectiveLimit/2));this.adaptiveScanLimit=Math.min(this.adaptiveScanLimit,effectiveLimit);}}
+  if(prepared.total<192*1024&&effectiveLimit===this.adaptiveScanLimit&&this.adaptiveScanLimit<32)this.adaptiveScanLimit=Math.min(32,this.adaptiveScanLimit*2);
   const nextCp:Checkpoint={...cp,after:page.after,rows:cp.rows+page.rows.length};
   if(page.done){
    nextCp.R1=state.localChangeRevision;
@@ -540,6 +629,21 @@ export class WatchProjectionStore {
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
+ async readCandidates(kind:Kind,logicalIds:string[]){
+  this.gate.require();const out=new Map<string,any>();
+  if(!logicalIds.length)return out;
+  const entities=new Map<string,string>();
+  for(const id of logicalIds)entities.set(this.entityKeyFor(kind,id),id);
+  const keys=[...entities.keys()];
+  for(let at=0;at<keys.length;at+=64){
+   const slice=keys.slice(at,at+64);
+   for(const row of await this.db.query(`SELECT entity_key,body FROM syncv2_candidates WHERE scope=? AND entity_key IN (${slice.map(()=>'?').join(',')})`,[this.scopeKey,...slice])){
+    const entity=String(row.entity_key),id=entities.get(entity);
+    if(id!==undefined)out.set(id,await this.openCandidate(entity,row.body));
+   }
+  }
+  return out;
+ }
  /** Captured while holding the account and writer leases. */
  async localTransferFence(reading=false){
   const state=await this.persistedState();

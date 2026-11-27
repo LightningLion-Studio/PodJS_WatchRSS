@@ -114,7 +114,16 @@ function start(){
    if(!ready||!account||account.userId!==ready.userId)throw Error('cloud_v2_start_unavailable');
    const {accountBoundCasHost}=await import('../sync-v2/product'),accountHost=accountBoundCasHost(v2Host,account,()=>summaryAccountStore.read());
    const transport=createCloudTransport(accountHost,v2Guard,{progress:()=>v2Progress}),tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
-   const session=async()=>{const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);return current;};
+   let cachedSession:{account:Awaited<ReturnType<typeof tokens.freshAccount>>;at:number}|undefined;
+   const offSession=summaryAccountStore.subscribe(()=>{cachedSession=undefined;});
+   lifetime.onCancel(()=>{cachedSession=undefined;offSession();});
+   const session=async()=>{
+    const now=Date.now();
+    if(cachedSession&&now-cachedSession.at<1000&&!cachedSession.account.needsRelogin&&(!cachedSession.account.tokenExpiresAtMillis||cachedSession.account.tokenExpiresAtMillis>now+90_000))return cachedSession.account;
+    const current=await tokens.freshAccount();if(cloudAccountIdentity(current)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await summaryAccountStore.assertLibraryOwner(current);
+    cachedSession={account:current,at:Date.now()};
+    return current;
+   };
    const {openApplicationSyncV2}=await import('../sync-v2/application-open');
    const trackV2=async<T>(work:()=>Promise<T>)=>{
     v2Progress=progress;

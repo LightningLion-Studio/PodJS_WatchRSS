@@ -6,7 +6,7 @@ import type {SourceReader,SourceRecord} from './store';
 /** A materializer consumes one existing business row plus its stable key. It
  * must return the complete frozen business record. It may not change the DB.
  * Missing metadata/identity/ancestry fails the page; no invented defaults. */
-export type Materialize=(table:string,row:Record<string,unknown>)=>Promise<SourceRecord[]>;
+export type Materialize=((table:string,row:Record<string,unknown>)=>Promise<SourceRecord[]>)&{batch?:(table:string,rows:Record<string,unknown>[])=>Promise<SourceRecord[][]>};
 export const BUSINESS_TABLE_KEYS:Readonly<Record<string,readonly string[]>>=Object.freeze({
  sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_assets:['asset_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],
 });
@@ -32,11 +32,22 @@ export async function completeNoteRow(db:Pick<ProjectionSql,'query'>,row:Record<
  return row;
 }
 export class SqlBusinessSource implements SourceReader {
- private constructor(private readonly db:ProjectionSql,private readonly tables:string[],private readonly materialize:Materialize,private readonly notes:string){}
+ private constructor(private readonly db:ProjectionSql,private readonly tables:string[],private readonly materialize:Materialize,private readonly notes:string,private readonly articleFilter:string,private readonly deletionFilter:string){}
  static async open(db:ProjectionSql,materialize:Materialize=materializeFrozen){
   const existing=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   const notes=existing.has('memo_notes')?noteColumns((await db.query('PRAGMA table_info(memo_notes)')).map(r=>String(r.name))):'*';
-  return new SqlBusinessSource(db,Object.keys(BUSINESS_TABLE_KEYS).filter(t=>existing.has(t)),materialize,notes);
+  const filters:string[]=[];
+  if(existing.has('article_register_state'))filters.push('NOT EXISTS(SELECT 1 FROM article_register_state r WHERE r.item_id=articles.id)');
+  if(existing.has('sync_book_aliases'))filters.push('NOT EXISTS(SELECT 1 FROM sync_book_aliases b WHERE b.item_id=articles.id)');
+  if(existing.has('channels')){
+   const relevant=['EXISTS(SELECT 1 FROM channels ch WHERE ch.id=articles.channel_id AND ((ch.url NOT LIKE \'http://%\' AND ch.url NOT LIKE \'https://%\') OR ch.url LIKE \'https://watchrss.local/import-%\'))','articles.is_read!=0','articles.is_saved!=0','articles.reading_progress>0'];
+   if(existing.has('article_saved_states'))relevant.push('EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=articles.id)');
+   if(existing.has('sync_saved_states'))relevant.push('EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=articles.id)');
+   if(existing.has('article_reading_state'))relevant.push('EXISTS(SELECT 1 FROM article_reading_state rs WHERE rs.article_id=articles.id AND (rs.progress>0 OR rs.changed_at>0 OR rs.position_bytes>0))');
+   filters.push('('+relevant.join(' OR ')+')');
+  }
+  const deletionFilter=existing.has('sync_book_aliases')&&existing.has('sync_books')?'NOT EXISTS(SELECT 1 FROM sync_book_aliases b JOIN sync_books s ON s.book_id=b.book_id WHERE (b.article_id=sync_article_deletions.article_id OR b.url=sync_article_deletions.url) AND s.registration_complete=1)':'';
+  return new SqlBusinessSource(db,Object.keys(BUSINESS_TABLE_KEYS).filter(t=>existing.has(t)),materialize,notes,filters.join(' AND '),deletionFilter);
  }
  private columns(table:string){return table==='articles'?'id':table==='memo_notes'?this.notes:'*';}
  private complete(table:string,row:Record<string,unknown>|undefined){return row&&table==='memo_notes'?completeNoteRow(this.db,row):row;}
@@ -51,10 +62,14 @@ export class SqlBusinessSource implements SourceReader {
    const row=await complete((await this.db.query(`SELECT ${this.columns(table)} FROM ${quote(table)} WHERE ${keys.map(k=>quote(k)+' IS ?').join(' AND ')}`,token.pending.keys))[0]),records=row?attach(row,await this.materialize(table,row)):[],end=Math.min(records.length,token.pending.offset+limit),pending=end<records.length?{keys:token.pending.keys,offset:end}:null;
    return {rows:records.slice(token.pending.offset,end),after:canonical(pending?{...token,pending}:{table:token.table,keys:token.pending.keys}),done:false};
   }
-  const params:unknown[]=[],where=values?' WHERE '+keys.map((key,i)=>{for(let j=0;j<i;j++)params.push(values[j]);params.push(values[i]);return '('+[...keys.slice(0,i).map(k=>quote(k)+' IS ?'),quote(key)+'>?'].join(' AND ')+')';}).join(' OR '):'';
+  const params:unknown[]=[],keyWhere=values?'('+keys.map((key,i)=>{for(let j=0;j<i;j++)params.push(values[j]);params.push(values[i]);return '('+[...keys.slice(0,i).map(k=>quote(k)+' IS ?'),quote(key)+'>?'].join(' AND ')+')';}).join(' OR ')+')':'';
+  const extraWhere=table==='articles'?this.articleFilter:table==='sync_article_deletions'?this.deletionFilter:'';
+  const where=keyWhere&&extraWhere?` WHERE ${extraWhere} AND ${keyWhere}`:keyWhere?` WHERE ${keyWhere}`:extraWhere?` WHERE ${extraWhere}`:'';
   const result=await readSqlKeysetPage(this.db,`SELECT ${this.columns(table)} FROM ${quote(table)}${where} ORDER BY ${keys.map(quote).join(',')}`,params,limit);
   const rows:SourceRecord[]=[];let last=values;
-  for(const row of result.rows){await complete(row);const records=attach(row,await this.materialize(table,row)),space=limit-rows.length;if(records.length>space){rows.push(...records.slice(0,space));return {rows,after:canonical({table:token.table,keys:last,pending:{keys:keys.map(k=>row[k]),offset:space}}),done:false};}rows.push(...records);last=keys.map(k=>row[k]);}
+  for(const row of result.rows)await complete(row);
+  const materialized=this.materialize.batch&&result.rows.length>1?await this.materialize.batch(table,result.rows):undefined;
+  for(let i=0;i<result.rows.length;i++){const row=result.rows[i]!,records=attach(row,materialized?materialized[i]!:await this.materialize(table,row)),space=limit-rows.length;if(records.length>space){rows.push(...records.slice(0,space));return {rows,after:canonical({table:token.table,keys:last,pending:{keys:keys.map(k=>row[k]),offset:space}}),done:false};}rows.push(...records);last=keys.map(k=>row[k]);}
   const next=result.rows.length===0?{table:token.table+1,keys:null}:{table:token.table,keys:last};
   return {rows,after:canonical(next),done:next.table>=this.tables.length};
  }

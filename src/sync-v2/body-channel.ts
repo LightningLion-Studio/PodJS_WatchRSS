@@ -30,11 +30,20 @@ export function independentBodyResolver(repository:BodyChannelRepository,fallbac
  const prior=existing?.candidate??existing,description=existing?.manifest??existing?.row;
  const same=prior&&description&&description.bodyRevision!=null&&prior.state.payload.deleted!==true&&sameIndependentIdentity(kind,entry.candidate,prior),keep=()=>Object.fromEntries(bodyFields.map(k=>[k,description[k]])) as any;
  if(same&&description.recipeOid)return keep();
- try{const raw=await repository.read(kind,entry.candidate.meta.logicalId);
- if(!raw){if(same)return keep();onPending?.('body_channel_source_missing');throw Error('body_channel_source_missing');}
- await repository.validate(kind,entry.candidate.meta.logicalId,fromWire(kind,entry.candidate.meta.payload,entry.candidate.state.payload),raw);
- const bodyRevision=carrierBodyRevision(kind,entry.entityKey,sha256Hex(raw));if(same&&description.bodyRevision===bodyRevision)return keep();
- return {bodyRevision,promiseId:bodyRevision,recipeOid:null,opaqueContentId:null,contentBytes:null};
+ try{
+  if(kind==='book'&&repository.readBookWitness){
+   const value=fromWire(kind,entry.candidate.meta.payload,entry.candidate.state.payload);
+   const witness=await repository.readBookWitness(entry.candidate.meta.logicalId,value as any);
+   if(!witness){if(same)return keep();onPending?.('body_channel_source_missing');throw Error('body_channel_source_missing');}
+   if(witness.size>64*1024*1024){onPending?.('body_channel_capacity_pending');throw Error('body_channel_source_missing');}
+   const bodyRevision=carrierBodyRevision(kind,entry.entityKey,witness.sha256);if(same&&description.bodyRevision===bodyRevision)return keep();
+   return {bodyRevision,promiseId:bodyRevision,recipeOid:null,opaqueContentId:null,contentBytes:null};
+  }
+  const raw=await repository.read(kind,entry.candidate.meta.logicalId);
+  if(!raw){if(same)return keep();onPending?.('body_channel_source_missing');throw Error('body_channel_source_missing');}
+  await repository.validate(kind,entry.candidate.meta.logicalId,fromWire(kind,entry.candidate.meta.payload,entry.candidate.state.payload),raw);
+  const bodyRevision=carrierBodyRevision(kind,entry.entityKey,sha256Hex(raw));if(same&&description.bodyRevision===bodyRevision)return keep();
+  return {bodyRevision,promiseId:bodyRevision,recipeOid:null,opaqueContentId:null,contentBytes:null};
  }catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended','body_channel_source_missing'].includes((error as Error).message))throw error;if(same)return keep();onPending?.((error as Error).message==='body_channel_capacity_pending'?'body_channel_capacity_pending':'body_channel_source_missing');throw Error('body_channel_source_missing');}
 };}
 class BodyRetryDeferred extends Error {}

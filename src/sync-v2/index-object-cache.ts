@@ -1,6 +1,7 @@
 import {objectOid} from './sealed';
 
-const cacheBytes=256*1024;
+const cacheBytes=1024*1024;
+const maxEntries=512;
 const maxObjectBytes=64*1024;
 
 /** A runtime-scoped cache of hash-verified index bytes. Callers still validate
@@ -18,13 +19,14 @@ export class IndexObjectCache {
   if(!['tree','meta','state','state-refs'].includes(kind)||raw.length>maxObjectBytes)return;
   if(objectOid(kind,raw)!==id)throw Error('hash_mismatch');
   if(this.objects.has(id))return;
-  while(this.objects.size>=128||this.bytes+raw.length>cacheBytes){
+  while(this.objects.size>=maxEntries||this.bytes+raw.length>cacheBytes){
    const oldest=this.objects.keys().next().value!;
    this.bytes-=this.objects.get(oldest)!.length;
    this.objects.delete(oldest);
   }
   this.objects.set(id,raw);this.bytes+=raw.length;
  }
+ put(id:string,raw:Uint8Array){this.keep(id,raw);}
  async read(id:string,load:(id:string)=>Promise<Uint8Array>){
   const cached=this.get(id);if(cached)return cached;
   const raw=await load(id);this.keep(id,raw);return raw;

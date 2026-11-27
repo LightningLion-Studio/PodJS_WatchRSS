@@ -62,7 +62,14 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   // Logout/refresh cannot clear or replace the account between a file check and
   // publication. All exits release both native leases in cleanup time.
   return await withAccountLease(host,async()=>{
-   const session=async()=>{const now=await accounts.read();if(!now||cloudAccountIdentity(now)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await accounts.assertLibraryOwner(now);return now;};
+   let cachedSession:{account:typeof account;at:number}|undefined;
+   const session=async()=>{
+    const nowMs=Date.now();
+    if(cachedSession&&nowMs-cachedSession.at<1000)return cachedSession.account;
+    const now=await accounts.read();if(!now||cloudAccountIdentity(now)!==cloudAccountIdentity(account))throw Error('cloud_account_busy');await accounts.assertLibraryOwner(now);
+    cachedSession={account:now,at:Date.now()};
+    return now;
+   };
    await session();const deviceId=await library.deviceId(),ports=createCloudHostPorts(host,guard),foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent:async()=>{await session();}}),device=bootstrap.devices.find(d=>d.deviceId===deviceId);
    if(!device||device.revokedAt)return 'retry';
    const ready=await foundation.keys.acceptBootstrap(account.userId,deviceId,bootstrap.keyEnvelopes,bootstrap,device.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);

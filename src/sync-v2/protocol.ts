@@ -16,7 +16,7 @@ export function canonical(value:any):string {
  if(typeof value==='string'){scalar(value);return JSON.stringify(value);}
  if(typeof value==='number'){if(!Number.isSafeInteger(value)||Object.is(value,-0))throw Error('invalid_encoding');return String(value);}
  if(Array.isArray(value)){for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,i))throw Error('invalid_encoding');return '['+value.map(canonical).join(',')+']';}
- if(value&&Object.getPrototypeOf(value)===Object.prototype){const keys=Object.keys(value);exact(value,keys);return '{'+keys.sort().map(k=>{scalar(k);return JSON.stringify(k)+':'+canonical(value[k]);}).join(',')+'}';}
+ if(value&&Object.getPrototypeOf(value)===Object.prototype){const keys=Object.keys(value);if(Reflect.ownKeys(value).length!==keys.length)throw Error('invalid_schema');for(const k of keys){const d=Object.getOwnPropertyDescriptor(value,k);if(!d||!Object.hasOwn(d,'value'))throw Error('invalid_schema');}return '{'+keys.sort().map(k=>{scalar(k);return JSON.stringify(k)+':'+canonical(value[k]);}).join(',')+'}';}
  throw Error('invalid_encoding');
 }
 export const jsonBytes=(value:any)=>bytes(canonical(value));

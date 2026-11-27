@@ -139,8 +139,9 @@ export class WatchCloudSyncService {
    case 'ETIMEDOUT': message='连接云端超时，\n请重试'; break;
    default: message=this.networkFailure?'无法连接云端，\n请检查网络':'云同步未能完成，\n请重试';
   }
-  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(code==='projection_preparing'||code==='first_follow_pending'?1000:30_000);
-  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,retryable:true,retryAtMillis};
+  const fastContinue=code==='projection_preparing'||code==='first_follow_pending'||code==='cloud_v2_pending';
+  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(fastContinue?1000:30_000);
+  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,continuationReady:fastContinue?true:undefined,retryable:true,retryAtMillis};
   this.set(attention?'idle':'error',message,member);
  }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string,note?:NoteSyncTimes):Promise<CloudSyncResult>{

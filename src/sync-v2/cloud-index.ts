@@ -42,7 +42,7 @@ interface ObservedRow {entityKey:string;note:boolean;noteId:string;deleted:boole
  * retained and republished unchanged; the local note keeps its prior version. */
 export type UnopenableNotes=Record<string,{entityKey:string;code:string;deleted:boolean}>;
 const unopenableNotes=(seen:readonly ObservedRow[]):UnopenableNotes=>Object.fromEntries(seen.filter(r=>r.unopenable).map(r=>[r.noteId,{entityKey:r.entityKey,code:r.unopenable!,deleted:r.deleted}]));
-export interface CloudIndexOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache}
+export interface CloudIndexOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache;readConcurrency?:number}
 export type CloudPullResult={empty:boolean;readOnly?:boolean;rows?:number;awaitingUser?:boolean;bodyReads?:number;checkpointHit?:boolean;rebuildRequired?:boolean;rebuilt?:boolean};
 export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipeOid===null?'source-pending':'body-not-downloaded';
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
@@ -110,7 +110,7 @@ export class WatchCloudIndex {
   let staged:SyncState|null=null,count=0;const pending:any[]=[],seen:ObservedRow[]=[];
   const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
   const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
-  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
+  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink,saved.auditBinding===auditBinding);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   this.options.progress?.()?.stage('write');
   const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
   if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
@@ -189,34 +189,68 @@ export class WatchCloudIndex {
  }
  /** Authenticated decoded rows. With `sink`, each row is handed over as soon as
   * it is decoded and nothing is accumulated (F2); otherwise rows are returned. */
- async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>){
-  const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
-  progress?.plan('items',rows.length);
-  for(const row of rows){
-   const pair=batch?await batch([row.metaOid,row.stateOid]):!get?await this.http.objects(windowId,[row.metaOid,row.stateOid]):new Map([[row.metaOid,await read(row.metaOid)],[row.stateOid,await read(row.stateOid)]]);
-   const meta=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);
-   if(!this.keys.readContentKey&&(meta.header.keyVersion!==this.keys.version||state.header.keyVersion!==this.keys.version))throw Error('unsupported_feature');
-   const m=meta.value,s=state.value;exact(m,['version','entityKey','kind','logicalId','addedAtSource','requiredFeatures','payload']);exact(s,['version','entityKey','requiredFeatures','payload','noteSegments']);
-   if(m.version!==2||s.version!==2||m.entityKey!==row.entityKey||s.entityKey!==row.entityKey||entityKey(this.keys.id,this.scope.repoId,m.kind,m.logicalId)!==row.entityKey||!['original','unknown'].includes(m.addedAtSource))throw Error('invalid_schema');features(m.requiredFeatures);features(s.requiredFeatures);features(row.requiredFeatures);if(m.requiredFeatures.length||row.requiredFeatures.some((f:string)=>f!==NOTE_SEGMENTS_FEATURE||!this.supported.includes(f)))throw Error('unsupported_feature');if(!Array.isArray(s.noteSegments))throw Error('invalid_schema');
-   const segmented=s.noteSegments.length>0||s.requiredFeatures.includes(NOTE_SEGMENTS_FEATURE)||s.payload?.segmentedNote!==undefined;let segments:any=null,s0=s;
-   if(segmented){if(m.kind!=='note')throw Error('invalid_schema');const old=await previous?.(row.entityKey);
-    const quarantined=()=>{if(!!s.payload?.metadata?.deleted!==row.deleted)throw Error('invalid_schema');return emit({row,meta:m,state:s,unopenable:{code:'storage_pressure'},placeholder:placeholder(row),placeholderText:placeholderText(row)});};
-    if(old?.row.stateOid===row.stateOid&&old.unopenable){await quarantined();continue;}
-    if(old?.row.stateOid===row.stateOid&&old.segments){s0=old.state;segments=old.segments;}
-    else{let out;try{out=await readSegmentedNote(row.stateOid,s,noteClosurePorts(this.http,direct,this.crypto,this.keys,this.approved,windowId),{entityKey:row.entityKey,supported:this.supported,budget:this.options.noteTextBudget??NOTE_TEXT_BUDGET});}
-     catch(error){if((error as Error).message!=='storage_pressure')throw error;
-      // F1/W3: this entity is quarantined like an unsupported row: not reassembled,
-      // not applied; the authenticated row and parent travel back unchanged.
-      await quarantined();continue;}
-     s0=out.state;segments=storedSegments(out.segments);}}
-   const conflicts=m.kind==='note'?readConflicts(s0,{entityKey:row.entityKey,noteId:m.logicalId},['note-conflicts.v1']):null;if(m.kind!=='note'&&s0.requiredFeatures.length)throw Error('unsupported_feature');
-   const payload={...s0.payload};if(conflicts)delete payload.noteConflicts;const value=fromWire(m.kind,m.payload,payload),logicalId=m.kind==='article'?value.articleId:m.kind==='book'?value.bookId:m.kind==='book-reading'?value.bookId+':'+value.chapterIndex:m.kind==='rss-state'?value.sourceId+':'+value.articleIdHash:m.kind==='source'?value.url:m.kind==='note'?value.noteId:m.kind==='folder'?value.folderId:value.assetId;if(logicalId!==m.logicalId)throw Error('invalid_schema');if(!!value.deleted!==row.deleted)throw Error('invalid_schema');
-   if(segmented){await emit({row,meta:m,state:s0,segments,placeholder:placeholder(row),placeholderText:placeholderText(row)});continue;}
-   const mapping=await this.http.stateRefs(windowId,row.stateOid);exact(mapping,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);sameScope(mapping.scope,this.scope);if(mapping.parentOid!==row.stateOid)throw Error('invalid_schema');oid(mapping.refsOid,'state-refs');const raw=await read(mapping.refsOid);if(raw.length!==mapping.totalBytes||objectOid('state-refs',raw)!==mapping.refsOid)throw Error('hash_mismatch');const refs=parseCanonicalJson(raw);exact(refs,['body','signature']);exact(refs.body,['scope','stateOid','segmentOids']);sameScope(refs.body.scope,this.scope);if(refs.body.stateOid!==row.stateOid||canonical(refs.body.segmentOids)!==canonical(s.noteSegments))throw Error('closure_incomplete');const signer=await this.approved(mapping.authorDeviceId);if(signer.keyId!==mapping.keyId)throw Error('signature_invalid');await verifySigned(this.crypto,signer.publicKey,'wrss.sync.v2/state-refs-sign',refs.body,refs.signature);
-   await emit({row,meta:m,state:s,placeholder:placeholder(row),placeholderText:placeholderText(row)});
+  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>,reuseVerifiedRows=false){
+   const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
+   const concurrency=Math.max(1,Math.floor(this.options.readConcurrency??1));
+   progress?.plan('items',rows.length);
+   for(let at=0;at<rows.length;){
+    const chunk=concurrency>1?rows.slice(at,at+16):rows.slice(at,at+1);
+    at+=chunk.length;
+    const reused=new Map<number,any>(),pending:any[]=[];
+    if(reuseVerifiedRows&&previous){
+     for(let i=0;i<chunk.length;i++){
+      const row=chunk[i]!,prev=await previous(row.entityKey);
+      if(prev&&!prev.unopenable&&!prev.segments&&canonical(prev.row)===canonical(row))reused.set(i,prev);
+      else pending.push(row);
+     }
+    }else pending.push(...chunk);
+    const prefetchedObjects=new Map<string,Uint8Array>();
+    const prefetchedRefs=new Map<string,{value?:any;error?:unknown}>();
+    if(concurrency>1&&pending.length>1){
+     const oids=[...new Set(pending.flatMap(r=>[r.metaOid,r.stateOid]))];
+     const loaded=batch?await batch(oids):!get?await this.http.objects(windowId,oids):undefined;
+     if(loaded)for(const [id,raw]of loaded)prefetchedObjects.set(id,raw);
+     const stateOids=[...new Set(pending.map(r=>r.stateOid))];
+     let next=0;
+     const worker=async()=>{while(true){const idx=next++;if(idx>=stateOids.length)return;const sid=stateOids[idx]!;try{prefetchedRefs.set(sid,{value:await this.http.stateRefs(windowId,sid)});}catch(error){prefetchedRefs.set(sid,{error});}}};
+     await Promise.all(Array.from({length:Math.min(concurrency,stateOids.length)},worker));
+     const refOids=[...new Set([...prefetchedRefs.values()].map(r=>r.value?.refsOid).filter((id):id is string=>typeof id==='string'&&/^state-refs:sha256:[a-f0-9]{64}$/.test(id)))];
+     if(refOids.length){
+      const loadedRefs=batch?await batch(refOids):!get?await this.http.objects(windowId,refOids):undefined;
+      if(loadedRefs)for(const [id,raw]of loadedRefs)prefetchedObjects.set(id,raw);
+     }
+    }
+    const readPrefetched=async(id:string)=>prefetchedObjects.get(id)??read(id);
+    for(let i=0;i<chunk.length;i++){
+     const cached=reused.get(i);if(cached){await emit(cached);continue;}
+     const row=chunk[i]!;
+     const pair=prefetchedObjects.has(row.metaOid)&&prefetchedObjects.has(row.stateOid)?new Map([[row.metaOid,prefetchedObjects.get(row.metaOid)!],[row.stateOid,prefetchedObjects.get(row.stateOid)!]]):batch?await batch([row.metaOid,row.stateOid]):!get?await this.http.objects(windowId,[row.metaOid,row.stateOid]):new Map([[row.metaOid,await read(row.metaOid)],[row.stateOid,await read(row.stateOid)]]);
+     const meta=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);
+     if(!this.keys.readContentKey&&(meta.header.keyVersion!==this.keys.version||state.header.keyVersion!==this.keys.version))throw Error('unsupported_feature');
+     const m=meta.value,s=state.value;exact(m,['version','entityKey','kind','logicalId','addedAtSource','requiredFeatures','payload']);exact(s,['version','entityKey','requiredFeatures','payload','noteSegments']);
+     if(m.version!==2||s.version!==2||m.entityKey!==row.entityKey||s.entityKey!==row.entityKey||entityKey(this.keys.id,this.scope.repoId,m.kind,m.logicalId)!==row.entityKey||!['original','unknown'].includes(m.addedAtSource))throw Error('invalid_schema');features(m.requiredFeatures);features(s.requiredFeatures);features(row.requiredFeatures);if(m.requiredFeatures.length||row.requiredFeatures.some((f:string)=>f!==NOTE_SEGMENTS_FEATURE||!this.supported.includes(f)))throw Error('unsupported_feature');if(!Array.isArray(s.noteSegments))throw Error('invalid_schema');
+     const segmented=s.noteSegments.length>0||s.requiredFeatures.includes(NOTE_SEGMENTS_FEATURE)||s.payload?.segmentedNote!==undefined;let segments:any=null,s0=s;
+     if(segmented){if(m.kind!=='note')throw Error('invalid_schema');const old=await previous?.(row.entityKey);
+      const quarantined=()=>{if(!!s.payload?.metadata?.deleted!==row.deleted)throw Error('invalid_schema');return emit({row,meta:m,state:s,unopenable:{code:'storage_pressure'},placeholder:placeholder(row),placeholderText:placeholderText(row)});};
+      if(old?.row.stateOid===row.stateOid&&old.unopenable){await quarantined();continue;}
+      if(old?.row.stateOid===row.stateOid&&old.segments){s0=old.state;segments=old.segments;}
+      else{let out;try{out=await readSegmentedNote(row.stateOid,s,noteClosurePorts(this.http,direct,this.crypto,this.keys,this.approved,windowId),{entityKey:row.entityKey,supported:this.supported,budget:this.options.noteTextBudget??NOTE_TEXT_BUDGET});}
+       catch(error){if((error as Error).message!=='storage_pressure')throw error;
+        // F1/W3: this entity is quarantined like an unsupported row: not reassembled,
+        // not applied; the authenticated row and parent travel back unchanged.
+        await quarantined();continue;}
+       s0=out.state;segments=storedSegments(out.segments);}}
+     const conflicts=m.kind==='note'?readConflicts(s0,{entityKey:row.entityKey,noteId:m.logicalId},['note-conflicts.v1']):null;if(m.kind!=='note'&&s0.requiredFeatures.length)throw Error('unsupported_feature');
+     const payload={...s0.payload};if(conflicts)delete payload.noteConflicts;const value=fromWire(m.kind,m.payload,payload),logicalId=m.kind==='article'?value.articleId:m.kind==='book'?value.bookId:m.kind==='book-reading'?value.bookId+':'+value.chapterIndex:m.kind==='rss-state'?value.sourceId+':'+value.articleIdHash:m.kind==='source'?value.url:m.kind==='note'?value.noteId:m.kind==='folder'?value.folderId:value.assetId;if(logicalId!==m.logicalId)throw Error('invalid_schema');if(!!value.deleted!==row.deleted)throw Error('invalid_schema');
+     if(segmented){await emit({row,meta:m,state:s0,segments,placeholder:placeholder(row),placeholderText:placeholderText(row)});continue;}
+     const prefetchedRef=prefetchedRefs.get(row.stateOid);
+     if(prefetchedRef?.error)throw prefetchedRef.error;
+     const mapping=prefetchedRef?prefetchedRef.value:await this.http.stateRefs(windowId,row.stateOid);exact(mapping,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);sameScope(mapping.scope,this.scope);if(mapping.parentOid!==row.stateOid)throw Error('invalid_schema');oid(mapping.refsOid,'state-refs');const raw=await readPrefetched(mapping.refsOid);if(raw.length!==mapping.totalBytes||objectOid('state-refs',raw)!==mapping.refsOid)throw Error('hash_mismatch');const refs=parseCanonicalJson(raw);exact(refs,['body','signature']);exact(refs.body,['scope','stateOid','segmentOids']);sameScope(refs.body.scope,this.scope);if(refs.body.stateOid!==row.stateOid||canonical(refs.body.segmentOids)!==canonical(s.noteSegments))throw Error('closure_incomplete');const signer=await this.approved(mapping.authorDeviceId);if(signer.keyId!==mapping.keyId)throw Error('signature_invalid');await verifySigned(this.crypto,signer.publicKey,'wrss.sync.v2/state-refs-sign',refs.body,refs.signature);
+     await emit({row,meta:m,state:s,placeholder:placeholder(row),placeholderText:placeholderText(row)});
+    }
+   }
+   return decoded;
   }
-  return decoded;
- }
  async poll(){const state=await this.store.readState(),saved=this.current(state);try{const window=await this.http.events(saved.cursor);return await this.pull(window);}catch(error){if(error instanceof SyncV2Error&&error.code==='history_expired'){const checkpoint:any=error.details.checkpoint;if(!checkpoint)throw Error('ref_continuity_unavailable');await this.bootstrap({checkpoint,account:checkpoint.body?.account,serverRevision:checkpoint.body?.serverRevision});const window=await this.http.json('GET','/account');const result=await this.pull(window);if(result.readOnly)return {...result,rebuildRequired:true,rebuilt:false};if(!('rebuilt' in result&&result.rebuilt))await this.rebuild?.();return {...result,rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild};}throw error;}}
  /** History is an OID-only directory; selecting/fetching/restoring is P5. */
  async history(pageToken:string|null=null){const v=await this.http.json('GET','/history'+(pageToken===null?'':'?pageToken='+encodeURIComponent(pageToken)));if(!Array.isArray(v.items)||v.items.length>100)throw Error('invalid_schema');for(const x of v.items){exact(x,['commitOid','retiredAtMillis','expiresAtMillis','authorDeviceId']);oid(x.commitOid,'commit');uint(x.retiredAtMillis);uint(x.expiresAtMillis);hexId(x.authorDeviceId,32);}return {items:v.items,pageToken:v.pageToken};}

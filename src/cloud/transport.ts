@@ -18,6 +18,23 @@ export function httpFailedBeforeSend(error:unknown):boolean {
  );
 }
 
+// PodDeviceServices caps live file.createTemp handles at 8 per runtime; each
+// POST/PUT uses up to 2 handles (input + output), so capping in-flight HTTP
+// requests at 3 keeps live temp handles <= 6 and leaves headroom for other I/O.
+const MAX_CONCURRENT_HTTP=3;
+let inFlightHttp=0;
+const httpWaiters:Array<()=>void>=[];
+const acquireHttpSlot=async():Promise<void>=>{
+ if(inFlightHttp<MAX_CONCURRENT_HTTP){inFlightHttp++;return;}
+ await new Promise<void>(resolve=>{httpWaiters.push(resolve);});
+ inFlightHttp++;
+};
+const releaseHttpSlot=()=>{
+ inFlightHttp=Math.max(0,inFlightHttp-1);
+ const next=httpWaiters.shift();
+ if(next)next();
+};
+
 /** Both directions are private files, bounded independently of guest event size.
  * Disable redirects so account tokens and signed upload credentials cannot cross origins. */
 export function createCloudTransport(host:CloudHostRequest,guard:CloudGuard=cloudDisabled,options:{callTimeoutMs?:number;maxResponseBytes?:number;progress?:()=>SyncProgress|undefined}={}):HttpTransport {
@@ -25,8 +42,11 @@ export function createCloudTransport(host:CloudHostRequest,guard:CloudGuard=clou
  return {async request(request){
   guard.require();if(!/^https:\/\/[^/@?#\\\s]+(?:\/|$)/i.test(request.url))throw Error('无效云地址');
   if((request.body?.length??0)>8*1024*1024)throw Error('云请求过大');
-  const output=await host<{path:string}>('file.createTemp',{directory:'cloud-http'});let input:string|undefined;
+  await acquireHttpSlot();
+  let output:{path:string}|undefined,input:string|undefined;
   try{
+   guard.require();
+   output=await host<{path:string}>('file.createTemp',{directory:'cloud-http'});
    if(request.body?.length){input=(await host<{path:string}>('file.createTemp',{directory:'cloud-http'})).path;
     for(let offset=0;offset<request.body.length;offset+=32768){guard.require();const bytes=request.body.subarray(offset,offset+32768);const value=await host<{size:number}>('file.write',{path:input,append:true,expectedOffset:offset,dataBase64:bytesToBase64(bytes)});if(value.size!==offset+bytes.length)throw Error('云上传文件不完整');}
    }
@@ -40,6 +60,6 @@ export function createCloudTransport(host:CloudHostRequest,guard:CloudGuard=clou
    guard.require();if(result.path!==output.path||!Number.isSafeInteger(result.size)||result.size<0||result.size>maxResponseBytes)throw Error('无效云响应');
    const body=new Uint8Array(result.size);for(let offset=0;offset<body.length;){guard.require();const part=await host<{offset:number;size:number;dataBase64:string}>('file.read',{path:output.path,offset,maxBytes:32768});guard.require();const bytes=base64ToBytes(part.dataBase64);if(part.offset!==offset||part.size!==body.length||!bytes.length||bytes.length>body.length-offset)throw Error('云响应不完整');body.set(bytes,offset);offset+=bytes.length;}
    return {status:result.status,headers:result.headers,body};
-  }finally{if(input)await host('file.delete',{path:input}).catch(()=>{});await host('file.delete',{path:output.path}).catch(()=>{});}
+  }finally{if(input)await host('file.delete',{path:input}).catch(()=>{});if(output)await host('file.delete',{path:output.path}).catch(()=>{});releaseHttpSlot();}
  }};
 }

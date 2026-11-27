@@ -5,6 +5,7 @@ import {importLegacy} from './notes-conflict';
 import {uint,type Kind} from './protocol';
 import {BUSINESS_FIELDS,fromWire} from './business';
 import {materializeFrozen,type Materialize} from './source';
+import type {SourceRecord} from './store';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
 import {nativeTrim,type LocalArticleManifestStore} from '../sync/local-manifest';
 /** Pure counterpart of SqlBookStore.captureReading. Source normalization must
@@ -22,7 +23,7 @@ async function pendingBookReading(db:ProjectionSql,bookId:string,chapter:number,
 }
 /** Uses the frozen legacy reader in its explicit read-only mode: no lookup
  * initialization, body scan, recipe computation, old cursor, or business writes. */
-export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>):Materialize {
+export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>,previousBatchById?:(kind:Kind,logicalIds:string[])=>Promise<Map<string,any>>):Materialize {
  const sourceOptions=async(value:any)=>{
   const previous=await previousById?.('source',value.url),tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_preferences','source_media_preferences')")).map(r=>String(r.name)));
   if(previous?.meta.payload.sourceId!==undefined)value.sourceId=previous.meta.payload.sourceId;
@@ -38,7 +39,7 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
   }
   return value;
  };
- return async(table,row)=>{
+ const single:Materialize=async(table,row)=>{
   if(table==='sync_books'){
    const records=await materializeFrozen(table,row),value=records[0]!.value,tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_book_events')")).map(r=>String(r.name)));
    if(tables.has('sync_book_events')){const events=(await db.query('SELECT chapter_index,changed_at FROM sync_book_events WHERE book_id=?',[value.bookId])).filter(e=>!value.lifecycle||Number(e.changed_at)>value.lifecycle.startedAt),whole=events.some(e=>Number(e.chapter_index)===0);value.deleted=value.deleted||whole;value.deletedChapters=[...new Set([...value.deletedChapters,...events.map(e=>Number(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b);value.deletionClock=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletionClock);if(whole)value.deletedAt=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletedAt);}
@@ -98,4 +99,50 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
   }
   return materializeFrozen(table,row);
  };
+ single.batch=async(table,rows)=>{
+  if(!rows.length)return [];
+  if(table==='articles'){
+   const ids=rows.map(r=>Number(r.id)),marks=ids.map(()=>'?').join(',');
+   const tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('article_register_state','sync_book_aliases','article_sync_encoding_cache')")).map(r=>String(r.name)));
+   const registered=tables.has('article_register_state')?new Set((await db.query(`SELECT item_id FROM article_register_state WHERE item_id IN (${marks})`,ids)).map(r=>Number(r.item_id))):new Set<number>();
+   const aliased=tables.has('sync_book_aliases')?new Set((await db.query(`SELECT item_id FROM sync_book_aliases WHERE item_id IN (${marks})`,ids)).map(r=>Number(r.item_id))):new Set<number>();
+   const needed=ids.filter(id=>!registered.has(id)&&!aliased.has(id));
+   if(!needed.length)return rows.map(()=>[]);
+   const byItem=new Map<number,Awaited<ReturnType<LocalArticleManifestStore['cloudRestoreMetadata']>>['articles'][number]>();
+   for(let at=0;at<needed.length;at+=100){
+    const slice=needed.slice(at,at+100);
+    const page=await metadata.cloudRestoreMetadata({itemIds:slice,limit:slice.length},undefined,true);
+    for(const article of page.articles)if(article.cloudReadingItemId!==undefined)byItem.set(article.cloudReadingItemId,article);
+   }
+   const importedAt=new Map<number,number>();
+   if(tables.has('article_sync_encoding_cache')){
+    const neededMarks=needed.map(()=>'?').join(',');
+    for(const r of await db.query(`SELECT item_id,imported_at FROM article_sync_encoding_cache WHERE item_id IN (${neededMarks}) AND imported_at>0`,needed))importedAt.set(Number(r.item_id),Number(r.imported_at));
+   }
+   return ids.map(id=>{
+    if(registered.has(id)||aliased.has(id))return [];
+    const record=byItem.get(id);if(!record)throw Error('source_identity_missing');
+    const value=Object.fromEntries(Object.entries(record).filter(([key])=>BUSINESS_FIELDS.article.includes(key)));
+    const addedAt=importedAt.get(id)??0;value.importedAt=addedAt;
+    return [{kind:'article' as const,logicalId:record.articleId,value,...(addedAt>0?{addedAtMillis:addedAt}:{})}];
+   });
+  }
+  if(table==='sync_book_reading'){
+   const hasDirty=(await db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_book_reading_dirty'")).length>0
+    &&(await db.query('SELECT 1 FROM sync_book_reading_dirty LIMIT 1')).length>0;
+   if(!hasDirty)return Promise.all(rows.map(row=>materializeFrozen(table,row)));
+  }
+  if(table==='sync_article_deletions'&&previousBatchById){
+   const previousMap=await previousBatchById('article',rows.map(r=>String(r.article_id)));
+   return Promise.all(rows.map(async row=>{
+    const previous=previousMap.get(String(row.article_id));
+    if(!previous)return materializeFrozen(table,row);
+    return [{kind:'article' as const,logicalId:String(row.article_id),value:{...fromWire('article',previous.meta.payload,previous.state.payload),deleted:true,deletedAt:Number(row.changed_at),sourceDeviceId:String(row.source_device_id)},...(previous.meta.addedAtSource==='original'?{addedAtMillis:previous.addedAtMillis}:{})}];
+   }));
+  }
+  const out:SourceRecord[][]=[];
+  for(const row of rows)out.push(await single(table,row));
+  return out;
+ };
+ return single;
 }

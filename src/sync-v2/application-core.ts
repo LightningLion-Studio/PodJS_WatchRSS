@@ -115,7 +115,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    return prepared?.manifest.bodyAvailable?articleBodyBytes(prepared.article):undefined;
   };
   const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:readArticlePlain}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
-  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now,progress:options.progress});
+  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:3});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.
@@ -160,6 +160,10 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
      await runtime.publisher.flush();
      return;
     }
+    if((error as Error).message==='publication_expired'&&latest.cloud?.pendingPublish?.requestId===pending.requestId){
+     await runtime.publisher.retryExpired(async()=>{await runtime.refreshAccount();});
+     return;
+    }
     if((error as Error).message!=='ref_conflict'||latest.cloud?.pendingPublish?.phase!=='conflicted')throw error;
     await recoverConflict();
    }
@@ -192,18 +196,26 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     await scanLocalChanges();return runtime.refreshAccount();
    }
    options.progress?.()?.stage('compare');
-   await scanLocalChanges();const pulled=await runtime.pull();if(pulled?.readOnly)return pulled;
-   const state=await local.store.readState();
-   if(state.cloud?.pendingPublish)await flush();
-   else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
-    try{await runtime.publish(true);}catch(error){
-     if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
-     await recoverConflict();
-    }
-   }else return pulled;
-   // First-follow publication leaves the merged head unapplied locally.
-   const followed=state.account&&state.activeGeneration===null?await runtime.pull():pulled;
-   return {...followed,refreshBodies:true};
+   await scanLocalChanges();
+   const roundStart=Date.now();
+   let pulled:any,publishedAny=false;
+   for(;;){
+    pulled=await runtime.pull();
+    if(pulled?.readOnly)return pulled;
+    const state=await local.store.readState();
+    let pubResult:any;
+    if(state.cloud?.pendingPublish){await flush();publishedAny=true;}
+    else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
+     try{pubResult=await runtime.publish(true);publishedAny=true;}catch(error){
+      if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
+      await recoverConflict();
+     }
+    }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
+    if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
+    // First-follow publication leaves the merged head unapplied locally.
+    const followed=state.account&&state.activeGeneration===null||pubResult?.chunked?await runtime.pull():pulled;
+    return {...followed,refreshBodies:true,...(pubResult?.chunked?{chunked:true}:{})};
+   }
   };
   const bodyPorts=createCloudHostPorts(guardedHost,{require(){lifetime.require();}});
   const bluetoothBodies=new LocalBodyClaims(projectionSql(guardedHost));
@@ -213,7 +225,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    bodyError=null;
    const result=await round();
    if(!result?.readOnly){
-    if(channel&&(result?.refreshBodies||await channel.hasWork())){
+    if(channel&&!result?.chunked&&(result?.refreshBodies||await channel.hasWork())){
      let observation=result?.refreshBodies||result?.expiresAtMillis===undefined?await runtime.refreshAccount():result;
      if(await channel.needsPublication()){
       await runtime.publish();

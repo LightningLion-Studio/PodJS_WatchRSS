@@ -29,8 +29,7 @@ export function articleBodyResolver(options:{crypto:EnvelopeCrypto;keys:ObjectKe
   const plain=await options.read(entry.candidate.meta.logicalId);if(!plain)return null;
   const revision=articleBodyRevision(entry.entityKey,plain);
   if(existing?.row.bodyRevision===revision)return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,existing.row[k]])) as unknown as BodyManifest;
-  // Validate the real mapping even while the content upload gate is closed.
-  const mapped=await buildArticleBody(options.crypto,options.keys,options.scope,entry.entityKey,plain);
-  return {...mapped.binding,promiseId:revision,recipeOid:null,opaqueContentId:null,contentBytes:null};
+  if(!plain.length)throw Error('invalid_schema');
+  return {bodyRevision:revision,promiseId:revision,recipeOid:null,opaqueContentId:null,contentBytes:null};
  };
 }

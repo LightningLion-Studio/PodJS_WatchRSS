@@ -87,7 +87,10 @@ export class SqlLibraryBodyRepository {
   const tables=(await this.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ("+optional.map(()=>'?').join(',')+")",optional)).map(r=>String(r.name));
   return !!(await this.db.query("SELECT 1 AS present WHERE EXISTS(SELECT 1 FROM articles) OR EXISTS(SELECT 1 FROM channels WHERE url NOT IN ('builtin:bili','builtin:douyin')) OR EXISTS(SELECT 1 FROM notes)"+tables.map(t=>' OR EXISTS(SELECT 1 FROM '+t+')').join(''))).length;
  });}
- cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void){return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();return this.local.cloudRestoreMetadata(request,check);}));}
+ cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void,readOnlyProjection=false){
+  if(readOnlyProjection)return this.run(()=>this.local.cloudRestoreMetadata(request,check,true));
+  return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();return this.local.cloudRestoreMetadata(request,check,false);}));
+ }
  /** P6 article bytes use the existing verified v1 cache and its native aliases. */
  cloudArticleBody(id:string){return this.run(async()=>{
   const article=await this.cloudArticleSource(id);
@@ -98,6 +101,10 @@ export class SqlLibraryBodyRepository {
   return item===undefined?undefined:this.local.cloudArticlePlain(item);
  });}
  private async cloudArticleSource(id:string){
+  const direct=await this.local.cloudRestoreMetadata({ids:[id],limit:100},undefined,true);
+  const directExact=direct.articles.filter(a=>a.articleId===id||a.cloudLegacyArticleIds?.includes(id));
+  if(directExact.length>1)throw Error('source_identity_missing');
+  if(directExact.length===1)return directExact[0];
   await this.cloudState();const itemIds=await this.local.cloudReadingItemIds([await this.ports.codec.sha256(utf8Encode(id))]);if(itemIds.length>100)throw Error('source_identity_missing');
   const page=await this.local.cloudRestoreMetadata({ids:[id],itemIds,limit:100}),exact=page.articles.filter(a=>a.articleId===id||a.cloudLegacyArticleIds?.includes(id));
   const matches=exact.length?exact:page.articles.filter(a=>a.cloudReadingItemId!==undefined&&itemIds.includes(a.cloudReadingItemId));if(matches.length>1)throw Error('source_identity_missing');
