@@ -117,14 +117,38 @@ export class SqlSourceSyncStore {
    receipt?.check?.();const committed=await (receipt?.transactionChanges??db.transactionChanges!)([...(receipt?.before??[]),...statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})),...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);applied+=changes.slice(1).some(n=>n>0)?1:0;
   }return applied;
  }
+ private async *storedStates(deletedOnly:boolean){
+  let after:string|undefined,limit=400;
+  for(;;){
+   const predicates=[...(deletedOnly?['deleted=1']:[]),...(after===undefined?[]:['rowid>CAST(? AS INTEGER)'])];
+   const where=predicates.length?' WHERE '+predicates.join(' AND '):'';
+   let rows;
+   try{rows=await this.db.query('SELECT CAST(rowid AS TEXT) AS cursor,* FROM sync_source_states'+where+' ORDER BY rowid LIMIT ?',after===undefined?[limit]:[after,limit]);}
+   catch(error){if(limit===1||!/query result too large/i.test(String(error)))throw error;limit=Math.max(1,Math.floor(limit/2));continue;}
+   yield* rows;
+   if(rows.length<limit)return;
+   after=String(rows[rows.length-1]!.cursor);
+  }
+ }
  async export(localDeviceId:string,urls?:readonly string[],readOnly=false):Promise<SyncedSource[]>{
-  if(urls?.length===0)return [];const persisted=new Map((await querySyncPages(this.db,'SELECT * FROM sync_source_states ORDER BY url')).map(r=>[s(r.url),r]));const wanted=urls?new Set(urls):null,active:SyncedSource[]=[],activeUrls=new Set<string>();
+  if(urls?.length===0)return [];
+  const persisted=new Map<string,Record<string,unknown>>();
+  for await(const r of this.storedStates(false))persisted.set(s(r.url),r);
+  const wanted=urls?new Set(urls):null,active:SyncedSource[]=[],activeUrls=new Set<string>();
   const projection=await this.binaryProjectionAvailable();
-  for(let offset=0;;offset+=400){
-   const rows=await this.db.query(projection?`SELECT c.*,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current,
-    CASE WHEN ${articleProjectionCurrent} THEN p.article_title END AS article_title
-    FROM channels c ${articleProjectionJoin} ORDER BY c.is_pinned DESC,c.sort_order,c.created_at DESC,c.id LIMIT 400 OFFSET ?`:
-    'SELECT * FROM channels ORDER BY is_pinned DESC,sort_order,created_at DESC,id LIMIT 400 OFFSET ?',[offset]);
+  let cursor:number[]=[];
+  for(;;){
+   const select=projection?`SELECT c.*,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current,
+    CASE WHEN ${articleProjectionCurrent} THEN p.article_title END AS article_title FROM channels c ${articleProjectionJoin}`:'SELECT c.* FROM channels c';
+   // Each disjoint range seeks into the mixed-direction index. SQLite merges
+   // the four ordered streams and stops after the page limit.
+   const ranges=['c.is_pinned<?','c.is_pinned=? AND c.sort_order>?',
+    'c.is_pinned=? AND c.sort_order=? AND c.created_at<?',
+    'c.is_pinned=? AND c.sort_order=? AND c.created_at=? AND c.id>?'];
+   const query=cursor.length?ranges.map(range=>select+' WHERE '+range).join(' UNION ALL '):select;
+   const params=cursor.length?ranges.flatMap((_,i)=>cursor.slice(0,i+1)):[];
+   const rows=await this.db.query(query+' ORDER BY is_pinned DESC,sort_order,created_at DESC,id LIMIT 400',params);
+   const writes:{sql:string;params:SqlParams}[]=[];
    for(const r of rows){
     const url=s(r.url);
     if(!isSyncedSourceUrl(url)||wanted&&!wanted.has(url))continue;
@@ -143,12 +167,14 @@ export class SqlSourceSyncStore {
      updatedAt:same?n(old.updated_at):old?Math.max(this.now(),n(old.updated_at)+1,storedOrder,createdAt):
       Math.max(storedOrder,createdAt,r.provisional===1?n(r.last_fetched_at):-Infinity),
      sortOrder:same?n(old.sort_order):storedOrder,isPinned:!!n(r.is_pinned),deleted:false,deletedAt:0};
-    if(!same&&!readOnly)await this.db.execute(stateSql,[url,source.sourceDeviceId,source.title,source.description,source.siteUrl,source.imageUrl,source.createdAt,source.updatedAt,source.sortOrder,source.isPinned?1:0,0,0]);
+    if(!same&&!readOnly)writes.push({sql:stateSql,params:[url,source.sourceDeviceId,source.title,source.description,source.siteUrl,source.imageUrl,source.createdAt,source.updatedAt,source.sortOrder,source.isPinned?1:0,0,0]});
     active.push(source);
    }
+   for(let at=0;at<writes.length;at+=32)await this.db.transaction(writes.slice(at,at+32));
    if(rows.length<400)break;
+   const last=rows[rows.length-1]!;cursor=[n(last.is_pinned),n(last.sort_order),n(last.created_at),n(last.id)];
   }
-  for(let offset=0;;offset+=400){const rows=await this.db.query('SELECT * FROM sync_source_states WHERE deleted=1 ORDER BY rowid LIMIT 400 OFFSET ?',[offset]);for(const r of rows){const url=s(r.url);if(activeUrls.has(url)||wanted&&!wanted.has(url))continue;active.push({url,sourceDeviceId:nativeTrim(s(r.source_device_id))?s(r.source_device_id):localDeviceId,title:s(r.title),description:s(r.description),siteUrl:nullable(r.site_url),imageUrl:nullable(r.image_url),createdAt:n(r.created_at),updatedAt:n(r.updated_at),sortOrder:n(r.sort_order),isPinned:!!n(r.is_pinned),deleted:!!n(r.deleted),deletedAt:n(r.deleted_at)});}if(rows.length<400)break;}
+  for await(const r of this.storedStates(true)){const url=s(r.url);if(activeUrls.has(url)||wanted&&!wanted.has(url))continue;active.push({url,sourceDeviceId:nativeTrim(s(r.source_device_id))?s(r.source_device_id):localDeviceId,title:s(r.title),description:s(r.description),siteUrl:nullable(r.site_url),imageUrl:nullable(r.image_url),createdAt:n(r.created_at),updatedAt:n(r.updated_at),sortOrder:n(r.sort_order),isPinned:!!n(r.is_pinned),deleted:!!n(r.deleted),deletedAt:n(r.deleted_at)});}
   return active;
  }
  /** Add these statements to the same transaction as a local channel removal. */

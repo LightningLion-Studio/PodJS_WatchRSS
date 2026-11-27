@@ -16,7 +16,7 @@ import {verifyCommit,type SigningPort} from './signing';
 import type {EnvelopeCrypto} from './sealed';
 import type {ApprovedKey} from './head-pins';
 import {PAGE_BYTES,type WatchProjectionStore,type SourceRecord} from './store';
-import {recordFact,type RecordFact,type RecordFeed,type StatementFeed} from './record-feed';
+import {arrayRecordFeed,recordFact,type RecordFact,type RecordFeed,type StatementFeed} from './record-feed';
 import type {WatchCloudIndex} from './cloud-index';
 import {PublicationLookupUnavailable,type WatchIndexPublisher,type BodyResolver} from './publisher';
 import type {WatchRecovery,RecoveryValue} from './recovery';
@@ -81,8 +81,8 @@ export class WatchAccountControl {
     rows.set(change.id,{entityKey:change.id,rowSequence:nextD64(before.localChangeRevision),candidate:candidates(identity.kind,identity.logicalId,change.id,value,undefined,this.o.store.segmentOptions())});
    }
    const effects=archive?await this.prepareArchivedChoice(delta.changes.map(c=>c.id),rows,archive):[];
-   const records=this.records([...rows.values()]),business=await this.o.business.prepare(records,before);
-   return this.o.store.prepareAccountProjection({...before,localChangeRevision:nextD64(before.localChangeRevision)},records,[...effects,...business]);
+   const records=this.records([...rows.values()]);
+   return this.prepareRecordPlan({...before,localChangeRevision:nextD64(before.localChangeRevision)},records,effects,before);
   });
  }
  private async prepareArchivedChoice(keys:readonly string[],rows:Map<string,RecordRow>,archive:LegacyBodyArchive){
@@ -158,13 +158,25 @@ export class WatchAccountControl {
    out.push({...r,manifest:tombstoneBodyDescription(r.candidate,current)});
   }return out;
  }
+ private async prepareRecordPlan(state:SyncState,records:SourceRecord[],effects:Statement[]=[],basis=state){
+  const business=this.o.business,store=this.o.store;
+  if(!business.prepareFeed)return store.prepareAccountProjection(state,records,[...effects,...await business.prepare(records,basis)]);
+  const hash=store.inputHasher(),byKey=new Map<string,SourceRecord>();
+  for(const r of records){hash.add(r);byKey.set(store.entityKeyFor(r.kind,r.logicalId),r);}
+  const inputHash=hash.finish(),binding=digest(['explicit',inputHash,digest(effects),digest(basis)]);
+  return store.preparePagedProjection(state,async()=>{
+   const feed={...arrayRecordFeed(records,r=>store.entityKeyFor(r.kind,r.logicalId)),inputHash};
+   const native=business.prepareFeed!(feed,basis);
+   return {records:feed,business:{async *run(){if(effects.length)yield effects;yield* native.run();}}};
+  },async keys=>keys.map(k=>byKey.get(k)!),{},binding);
+ }
  private async prepareApply(state:SyncState,rows:RecordRow[],effects:Statement[]=[]){
   rows=await this.retainTombstoneBodies(state,rows);
   const independent=await this.independentReferences(state,rows);
   const assets=new Map(rows.filter(r=>r.candidate.meta.kind==='asset').map(r=>[r.candidate.meta.logicalId,r]));for(const r of rows)if(r.candidate.meta.kind==='note'&&!r.candidate.state.payload.deleted){const p=r.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];for(const text of texts)for(const id of noteAssetKeys(text)){const asset=assets.get(id);if(!asset||asset.candidate.state.payload.deleted||asset.manifest?.bodyRevision==null||asset.manifest?.recipeOid==null&&!independent.has(asset.entityKey))throw Error('closure_incomplete');}}
   const wire=this.o.publisher.preflightRecords(rows),window=await this.o.http.negotiate([],[]),closure=new Map<string,number>();
   for(const r of rows){if(isBodyTombstone(r.candidate))continue;const body={entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null};const witness=independent.has(r.entityKey)||r.archivedBody?{objects:[]}:await this.o.business.verifyBody(body,window.windowId);if(body.bodyRevision!==null&&!witness)throw Error('closure_incomplete');for(const o of witness?.objects??[]){oid(o.oid,o.oid.split(':')[0]!);uint(o.storedBytes);const old=closure.get(o.oid);if(old!==undefined&&old!==o.storedBytes)throw Error('closure_incomplete');closure.set(o.oid,o.storedBytes);}}
-  const records=this.records(rows),business=await this.o.business.prepare(records,state),prepared=await this.o.store.prepareAccountProjection(state,records,[...effects,...business]),plan=(prepared as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef;
+  const records=this.records(rows),prepared=await this.prepareRecordPlan(state,records,effects),plan=(prepared as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef;
   let required=wire.wireBytes+plan.bytes*6+bytes(canonical(state)).length*4+32768;for(const size of closure.values())required+=size*2;if(!Number.isSafeInteger(required))throw Error('object_too_large');
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
  }
@@ -288,9 +300,9 @@ export class WatchAccountControl {
   const legacy=intent.legacyKey?await this.o.store.legacyChoiceEntry(intent.legacyKey):null;
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
   const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
-  const records=this.records(retained?.rows??applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
+  const records=this.records(retained?.rows??applyRows),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
   if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
-  const statements=decision?decision.statements:await this.o.store.prepareAccountProjection(s,records,business);
+  const statements=decision?decision.statements:await this.prepareRecordPlan(s,records);
   let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,intent.requestId);
   const releaseProjection=async()=>{await release?.();release=undefined;};
   try{
@@ -449,7 +461,7 @@ export class WatchAccountControl {
   // result lookup was unavailable. It cannot invalidate unchanged local edits.
   if(!publicationCurrent(before,plan)){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
   const result=plan.result,rows:any[]=[];let after='';for(;;){const page=await this.o.store.cloudRows(plan.treeRoot,after,32);if(!page.length)break;rows.push(...page);after=page.at(-1).row.entityKey;}if(rows.length!==plan.rowCount)throw Error('closure_incomplete');
-  const selected:RecordRow[]=[];for(const r of rows){const row=await this.openable(r);if(row)selected.push(row);}const records=this.records(selected),statements=plan.applyPlan?await this.o.store.resumeAccountProjection(before,plan.applyPlan):await this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before)),next=observeAccount(before,{oid:plan.commitOid,revision:result.account.revision,generation:result.account.rollbackGeneration}),applied=this.applied(next,plan.commitOid,result.account.revision,result.account.rollbackGeneration,plan.requestId);
+  const selected:RecordRow[]=[];for(const r of rows){const row=await this.openable(r);if(row)selected.push(row);}const records=this.records(selected),statements=plan.applyPlan?await this.o.store.resumeAccountProjection(before,plan.applyPlan):await this.prepareRecordPlan(before,records),next=observeAccount(before,{oid:plan.commitOid,revision:result.account.revision,generation:result.account.rollbackGeneration}),applied=this.applied(next,plan.commitOid,result.account.revision,result.account.rollbackGeneration,plan.requestId);
   applied.cloud={...applied.cloud,pendingPublish:null,current:{commitOid:plan.commitOid,treeRoot:plan.treeRoot,rowCount:plan.rowCount},lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result},pins:{...before.cloud.pins,accountOid:plan.commitOid,authors:{...before.cloud.pins.authors,[plan.commit.body.authorDeviceId]:{...await this.o.approved(plan.commit.body.authorDeviceId),sequence:plan.commit.body.deviceSequence,oid:plan.commitOid}}}};
   if(plan.legacyKey){const decision=await this.o.store.prepareLegacyDecision(before,plan.legacyKey,'resolve-local');applied.pendingChoice=decision.next.pendingChoice?.inboxKeys.length?decision.next.pendingChoice:null;applied.applied=decision.next.applied;statements.push(...decision.statements);}
   statements.push(...await this.o.store.preparePublicationFinish(plan));const persistent=plan.applyPlan?await this.o.store.existingPlanReservation(plan.applyPlan):null,release=persistent??await this.reserveProjection(statements);try{await this.o.store.observationUpdate(before,applied,statements);}finally{if(!plan.applyPlan||!await this.o.store.planOwned(plan.applyPlan.id))await release();}
@@ -502,7 +514,9 @@ export class WatchAccountControl {
   * time for every pass; the peak is one long note, whatever the row count. */
  private async followStatements(before:SyncState){
   if(!this.o.business.prepareFeed){const records=this.records(await this.cloud(before));return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
-  const feed=await this.cloudFeed(before);return this.o.store.prepareAccountProjection(before,feed,this.o.business.prepareFeed(feed,before));
+  return this.o.store.preparePagedProjection(before,async()=>{
+   const records=await this.cloudFeed(before);return {records,business:this.o.business.prepareFeed!(records,before)};
+  },keys=>this.readCloudKeys(before.cloud.current.treeRoot,keys));
  }
  /** Without a common base, overlapping first-sync edits need a choice. The
   * normal publisher can carry non-overlapping notes onto the remote tree. */
@@ -527,9 +541,12 @@ export class WatchAccountControl {
   if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const root=s.cloud.current.treeRoot,keys:string[]=[],facts:RecordFact[]=[],input=this.o.store.inputHasher();let after='';
   // One decoding pass yields the keys, the small facts and the input digest.
   for(;;){const page=await this.o.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const row=await this.openable(r);if(!row)continue;const [record]=this.records([row]);keys.push(r.row.entityKey);facts.push(recordFact(record!));input.add(record!);}after=page.at(-1)!.row.entityKey;}
-  return {keys,facts,inputHash:input.finish(),read:async(from,limit)=>{const out:SourceRecord[]=[];let size=0;
-   for(let i=from;i<Math.min(keys.length,from+limit);i++){const r=await this.o.store.cloudRow(root,keys[i]!);const row=r?await this.openable(r):null;if(!row)throw Error('choice_stale');const n=r.segments?PAGE_BYTES:JSON.stringify(r.state).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(...this.records([row]));size+=n;}
-   return out;}};
+  return {keys,facts,inputHash:input.finish(),read:(from,limit)=>this.readCloudKeys(root,keys.slice(from,from+limit))};
+ }
+ private async readCloudKeys(root:string,keys:readonly string[]){
+  const out:SourceRecord[]=[];let size=0;
+  for(const key of keys){const r=await this.o.store.cloudRow(root,key),row=r?await this.openable(r):null;if(!row)throw Error('choice_stale');const n=r.segments?PAGE_BYTES:JSON.stringify(r.state).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(...this.records([row]));size+=n;}
+  return out;
  }
  /** Durable post-commit ACK. Failure retries the same request and never reapplies. */
  async flushApplied(){const before=await this.o.store.readState(),ack=before.cloud?.pendingApplied;if(!ack)return null;let author;try{author=await this.o.author();}catch(error){if(error instanceof SigningStateUnavailable)return {signingUnavailable:true};throw error;}const reply=await this.request('/acks/applied',{scope:this.o.http.scope,...ack,deviceId:author.deviceId});if(reply.accepted!==true)throw Error('invalid_schema');const current=await this.o.store.readState();if(canonical(current.cloud?.pendingApplied)!==canonical(ack))throw Error('choice_stale');const next=clone(current);next.cloud.pendingApplied=null;await this.o.store.observationUpdate(current,next);return reply;}

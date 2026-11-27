@@ -87,7 +87,37 @@ function readableTree(raw:string,baseUrl:string,native:Element|null):string|null
   const tree=native?filterFragment(native,n=>["script","style","noscript"].includes(n.tag)):fragment(raw,n=>["script","style","noscript"].includes(n.tag));
   const all=descendants(tree),candidates=all.filter(n=>n.tag==="article"||n.tag==="main"||n.attrs.role==="main"||(n.tag==="div"&&(["content","article","article_content"].includes(n.attrs.id)||classes(n).some(c=>c==="content"||c==="left_zw"))));
   let root=candidates[0]??all.find(n=>n!==tree&&n.tag==="body")??tree,best=-1;
-  for(const candidate of candidates){const length=text(candidate).length;if(length>best){best=length;root=candidate;}}
+  if(candidates.length>1){
+   // Summaries retain boundary spaces so adjacent inline text joins exactly as in text().
+   type Score={length:number;firstSpace:boolean;lastSpace:boolean;rawLength:number;leading:number;trailing:number};
+   const scores=new Map<Element,Score>();
+   for(let i=all.length-1;i>=0;i--){
+    const node=all[i]!,block=/^(p|div|section|article|blockquote|li|ul|ol|h[1-6]|tr|table)$/.test(node.tag);
+    const score:Score={length:0,firstSpace:false,lastSpace:false,rawLength:0,leading:0,trailing:0};
+    const append=(length:number,first:boolean,last:boolean)=>{
+     if(!length)return;
+     if(!score.length)score.firstSpace=first;
+     score.length+=length-(score.lastSpace&&first?1:0);score.lastSpace=last;
+    };
+    const raw=(length:number,leading:number,trailing:number)=>{
+     if(score.leading===score.rawLength)score.leading+=leading;
+     score.trailing=length===trailing?score.trailing+length:trailing;score.rawLength+=length;
+    };
+    if(node.tag==='br')raw(1,1,1);
+    if(block||node.tag==='br')append(1,true,true);
+    for(const child of node.children){
+     if(typeof child==='string'){const t=normalizeHtmlWhitespace(child);append(t.length,t.startsWith(' '),t.endsWith(' '));raw(child.length,child.length-child.trimStart().length,child.length-child.trimEnd().length);}
+     else{const v=scores.get(child)!;append(v.length,v.firstSpace,v.lastSpace);raw(v.rawLength,v.leading,v.trailing);}
+    }
+    if(block)append(1,true,true);
+    scores.set(node,score);
+   }
+   for(const candidate of candidates){
+    const v=scores.get(candidate)!;
+    const length=candidate.tag==='pre'?Math.max(0,v.rawLength-v.leading-v.trailing):Math.max(0,v.length-Number(v.firstSpace)-Number(v.lastSpace));
+    if(length>best){best=length;root=candidate;}
+   }
+  }
   const removed=new Set("script style noscript header footer nav form aside button svg".split(" "));
   const pending=[root];while(pending.length){const n=pending.pop()!;n.children=n.children.filter(c=>typeof c==="string"||!removed.has(c.tag));for(const c of n.children)if(typeof c!=="string")pending.push(c);}
   const nodes=descendants(root);

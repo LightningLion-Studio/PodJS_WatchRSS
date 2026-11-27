@@ -47,7 +47,7 @@ function v1AssetFiles(){
  });
  return {contents,receiver,readAsset};
 }
-function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'}){
+function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'},maxPart=65536){
  const descriptors=new Map<string,Carrier>(),objects=new Map<string,Uint8Array>(),ready=new Set<string>(),calls:any[]=[];let failOnce=false,closed=false,failReadOnce=false;
  const json=(v:any,status=200)=>({status,headers:{},body:jsonBytes({version:1,purpose:'p6-body.v1',scope,...v})});
  const transport={async request(r:any){calls.push(r);const u=new URL(r.url),p=u.pathname.replace('/functions/v1/cloud/bodies/v1',''),v=r.body&&r.headers['Content-Type']==='application/json'?parseCanonicalJson(r.body):null;
@@ -56,7 +56,7 @@ function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'}){
   if(p==='/reserve'){validateCarrier(v,scope);const b=v.body;expect(r.headers['x-watchrss-library-epoch']).toBe('legacy-epoch');descriptors.set(b.carrierId,v);return json({carrierId:b.carrierId,state:ready.has(b.carrierId)?'ready':'reserved',expiresAtMillis:600000,objects:[b.manifest,...b.chunks].map(o=>({...o,offset:objects.get(o.sha256)?.length??0}))});}
   const parts=p.split('/').slice(1),id=parts[1]!;
   if(r.method==='PUT'){
-   expect(r.body.length).toBeLessThanOrEqual(65536);expect(r.headers['x-watchrss-sync-part-sha256']).toBe(sha256Hex(r.body));expect(r.headers['x-watchrss-sync-repo-id']).toBe(scope.repoId);
+   expect(r.body.length).toBeLessThanOrEqual(maxPart);expect(r.headers['x-watchrss-sync-part-sha256']).toBe(sha256Hex(r.body));expect(r.headers['x-watchrss-sync-repo-id']).toBe(scope.repoId);
    const hash=parts[3]!,at=Number(parts[5]),old=objects.get(hash)??new Uint8Array();expect(old.length).toBe(at);const out=new Uint8Array(at+r.body.length);out.set(old);out.set(r.body,at);objects.set(hash,out);if(failOnce){failOnce=false;throw Error('lost part response');}return json({});
   }
   if(parts[2]==='complete'){const d=descriptors.get(id)!.body;for(const o of [d.manifest,...d.chunks]){expect(objects.get(o.sha256)?.length).toBe(o.sizeBytes);expect(sha256Hex(objects.get(o.sha256)!)).toBe(o.sha256);}ready.add(id);return json({carrierId:id,state:'ready'});}
@@ -69,6 +69,33 @@ function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'}){
  const http=()=>new BodyChannelHttp({enabled:true,origin:'http://127.0.0.1:18991',policy:{accountBaseUrl:'http://127.0.0.1:18991',allowLoopback:true},scope,transport,session:async()=>({accessToken:'synthetic',legacyDeviceId:'legacy-test',legacyEpoch:'legacy-epoch',legacyGeneration:'1'}),check:async()=>{}});
  return {http,transport,objects,descriptors,ready,calls,open:()=>{closed=false;},losePart:()=>{failOnce=true;},loseRead:()=>{failReadOnce=true;},close:()=>{closed=true;}};
 }
+for(const mode of ['large','invalid','413','400','offset_conflict','part_conflict','stalled'] as const)test('P6 negotiated upload '+mode,async()=>{
+ const p=await prepared('asset',new Uint8Array(800000)),b=backend(undefined,524288),request=b.transport.request.bind(b.transport);
+ const sizes:number[]=[],offsets:number[]=[];let missing=0;
+ b.transport.request=async r=>{
+  if(r.url.endsWith('/reserve')||r.url.endsWith('/missing')){
+   if(r.url.endsWith('/missing'))missing++;
+   const reply=await request({...r,url:r.url.replace(/\/carriers\/[^/]+\/missing$/,'/reserve'),body:jsonBytes(p.descriptor)});
+   return {...reply,headers:{'X-WatchRSS-Max-Body-Part-Bytes':mode==='invalid'?'524287':missing&&mode==='part_conflict'?'131072':'524288'}};
+  }
+  if(r.method==='PUT'&&r.url.includes(p.descriptor.body.chunks[0]!.sha256)){
+   const at=Number(r.url.split('/').pop());sizes.push(r.body.length);offsets.push(at);
+   if((sizes.length===1||mode==='stalled')&&!['large','invalid'].includes(mode)){
+    const code=mode==='400'?'object_too_large':mode==='stalled'?'offset_conflict':mode;
+    if(mode==='offset_conflict'||mode==='part_conflict')b.objects.set(p.descriptor.body.chunks[0]!.sha256,r.body.slice(0,65536));
+    return {status:mode==='413'?413:mode==='400'?400:409,headers:{},body:mode==='413'?new Uint8Array():jsonBytes({error:{code,retryable:false,retryAfterMillis:null,details:{}}})};
+   }
+  }
+  return request(r);
+ };
+ const upload=b.http().upload(p.descriptor,async hash=>p.objects.get(hash)!);
+ if(mode==='stalled'){await expect(upload).rejects.toThrow('offset_conflict');expect(missing).toBe(4);return;}
+ await upload;expect(sizes[0]).toBe(mode==='invalid'?65536:524288);
+ if(mode==='413'||mode==='400'){expect(Math.max(...sizes.slice(1))).toBe(65536);expect(offsets[1]).toBe(0);}
+ if(mode==='offset_conflict'||mode==='part_conflict')expect(offsets[1]).toBe(65536);
+ if(mode==='part_conflict')expect(sizes[1]).toBe(131072);
+ expect(b.ready.has(p.descriptor.body.carrierId)).toBe(true);
+});
 for(const kind of ['asset','book'] as const)test('carrier '+kind+' signs and roundtrips exact bytes through v1 ciphertext envelopes',async()=>{
  const p=await prepared(kind),out=await openCarrier({descriptor:p.descriptor,scope,binding:p.binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>key.slice(),read:async h=>p.objects.get(h)!});expect(out.get(bodyObjectName(kind,p.binding.logicalId))).toEqual(p.raw);
 });

@@ -53,3 +53,28 @@ test('native bindings can prove a legacy alias; remapped aliases are fenced even
   expect((await repo.mergeCloudLegacyBookReading([a])).remaining).toEqual([]);const before=await f.db.query('SELECT * FROM sync_book_reading ORDER BY book_id,chapter_index');armed=true;await expect(repo.mergeCloudLegacyBookReading([a])).rejects.toThrow();expect(armed).toBe(false);expect(await f.db.query('SELECT * FROM sync_book_reading ORDER BY book_id,chapter_index')).toEqual(before);
  }finally{f.sql.close();}
 },30000);
+
+test('generic chapter restore batches distinct chapters and keeps deletion replay idempotent',async()=>{
+ const f=await restoreBookFixture();try{
+  const repo=new SqlLibrarySessionRepository(f.db,f.ports),items=f.items.filter(i=>i.book===6).slice(0,7);
+  const rows=items.map(i=>({...legacy(f,6,i.chapter),articleId:i.wire,url:i.url,deleted:true,deletedAt:30000}));
+  repo.books!.states=async()=>{throw Error('full book state scan');};
+  const queries:string[]=[],query=f.db.query.bind(f.db);f.db.query=(q,args)=>{queries.push(q);return query(q,args);};
+  const changed=await repo.mergeCloud([],rows,'restore');
+  const reference=await restoreBookFixture();
+  try{
+   const single=new SqlLibrarySessionRepository(reference.db,reference.ports);
+   let expected=0;for(const row of rows)expected+=await single.mergeCloud([],[row],'restore');
+   expect(changed).toBe(expected);
+   for(const query of ['SELECT state_json FROM sync_books ORDER BY book_id','SELECT * FROM sync_article_deletions ORDER BY article_id','SELECT state_json FROM sync_book_reading ORDER BY book_id,chapter_index']){
+    expect(await f.db.query(query)).toEqual(await reference.db.query(query));
+   }
+  }finally{reference.sql.close();}
+  expect(changed).toBeGreaterThanOrEqual(rows.length);
+  expect(queries.filter(q=>q.includes('FROM article_register_state WHERE article_id IN'))).toHaveLength(1);
+  expect(queries.some(q=>q==='SELECT article_id FROM article_register_state ORDER BY article_id')).toBe(false);
+  expect(await repo.mergeCloud([],rows,'restore')).toBe(0);
+  const state=await repo.books!.capturedState(f.states[6]!.bookId);
+  expect(items.every(i=>state.deletedChapters.includes(i.chapter))).toBe(true);
+ }finally{f.sql.close();}
+},30000);

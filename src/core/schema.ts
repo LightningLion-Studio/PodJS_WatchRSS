@@ -62,6 +62,7 @@ export const SCHEMA = [
   ...TOKEN_USAGE_CURSOR_SCHEMA,
   `CREATE TABLE IF NOT EXISTS channels (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT, image_url TEXT, last_fetched_at INTEGER, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, content TEXT, link TEXT, guid TEXT, pub_date TEXT, image_url TEXT, audio_url TEXT, video_url TEXT, is_read INTEGER NOT NULL DEFAULT 0, is_saved INTEGER NOT NULL DEFAULT 0, reading_progress REAL NOT NULL DEFAULT 0, dedup_key TEXT NOT NULL, fetched_at INTEGER NOT NULL, UNIQUE(channel_id, dedup_key))`,
+  `CREATE INDEX IF NOT EXISTS channels_source_export ON channels(is_pinned DESC,sort_order,created_at DESC,id)`,
   `CREATE INDEX IF NOT EXISTS articles_channel_date ON articles(channel_id, fetched_at DESC)`,
   `CREATE INDEX IF NOT EXISTS articles_sync_order ON articles(fetched_at DESC,id DESC)`,
   `CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,

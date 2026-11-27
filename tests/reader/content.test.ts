@@ -1,5 +1,5 @@
 import {expect,test} from "bun:test";
-import {parseContent,parseContentAsync,contentText} from "../../src/reader/content.ts";
+import {parseContent,parseContentAsync,extractReadableHtml,contentText} from "../../src/reader/content.ts";
 test("native block order and styles survive mixed HTML",()=>{
  const result=parseContent('<h1>Title</h1><p>Hello <b>world</b><img src="a>b.png" width="20" style="height: 10.5px" alt="A &amp; B">after</p><ol><li>First<li>Second</ol><blockquote><ul><li>Quoted</li></ul></blockquote><pre>code</pre><video poster="p"><source src="movie.mp4"></video>');
  expect(result).toEqual([{type:"text",style:"title",text:"Title"},{type:"text",style:"body",text:"Hello world"},{type:"image",url:"a>b.png",alt:"A & B",width:20,height:11},{type:"text",style:"body",text:"after\n1. First\n2. Second"},{type:"text",style:"quote",text:"- Quoted"},{type:"text",style:"code",text:"code"},{type:"video",url:"movie.mp4",poster:"p"}]);
@@ -33,4 +33,12 @@ test('async production default keeps legacy blocks and rejects pre-cancelled inp
  expect(await parseContentAsync('<p>one<img src="a">two</p>')).toEqual(parseContent('<p>one<img src="a">two</p>'));
  const abort=new AbortController();abort.abort();
  await expect(parseContentAsync('plain text',abort.signal)).rejects.toThrow('HTML parse cancelled');
+});
+
+test('readable candidate scoring preserves ties, inline boundaries and pre whitespace',()=>{
+ const pick=(html:string)=>extractReadableHtml(html,'https://example.org/');
+ const nested='<article id="first">'+'<main>'.repeat(1200)+'a<span> b</span>'+'</main>'.repeat(1200)+'</article>';
+ expect(pick(nested+'<article>c d</article>')?.startsWith('<article id="first">')).toBe(true);
+ expect(pick('<main>aaaaa</main><pre role="main">  a<br>  b  </pre>')).toBe('<main>aaaaa</main>');
+ expect(pick('<main>aaaa</main><pre role="main">  a<br>  b  </pre>')?.startsWith('<pre')).toBe(true);
 });

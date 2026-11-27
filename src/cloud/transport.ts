@@ -27,12 +27,11 @@ const httpWaiters:Array<()=>void>=[];
 const acquireHttpSlot=async():Promise<void>=>{
  if(inFlightHttp<MAX_CONCURRENT_HTTP){inFlightHttp++;return;}
  await new Promise<void>(resolve=>{httpWaiters.push(resolve);});
- inFlightHttp++;
 };
 const releaseHttpSlot=()=>{
- inFlightHttp=Math.max(0,inFlightHttp-1);
  const next=httpWaiters.shift();
- if(next)next();
+ if(next)next(); // Transfer the occupied slot directly to its waiter.
+ else inFlightHttp--;
 };
 
 /** Both directions are private files, bounded independently of guest event size.

@@ -5,6 +5,12 @@ import {jsonBytes,exact,hexId,uint,type Scope} from './protocol';
 import {sameScope} from './wire';
 import {parseNetwork,SyncV2Error,syncV2Origin,type OriginPolicy} from './http';
 import {BODY_PURPOSE,validateCarrier,type Carrier} from './body-channel-codec';
+const ALIGNMENT=65536;
+function advertisedPartSize(headers:Record<string,string>){
+ const value=Object.entries(headers).find(([key])=>key.toLowerCase()==='x-watchrss-max-body-part-bytes')?.[1]?.trim();
+ const size=value&&/^\d+$/.test(value)?Number(value):0;
+ return size>=ALIGNMENT&&size<=524288&&size%ALIGNMENT===0?size:ALIGNMENT;
+}
 /** Separate namespace, no legacy snapshots/records calls and no v2 ACK writes. */
 export class BodyChannelHttp {
  readonly prefix:string;
@@ -20,9 +26,10 @@ export class BodyChannelHttp {
   const query=method==='GET'?(path.includes('?')?'&':'?')+Object.entries(this.options.scope).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&'):'';
   const r=await this.options.transport.request({method,url:this.prefix+path+query,headers,...(raw||body!==undefined?{body:raw??jsonBytes(body)}:{}),timeoutMs:10000,readTimeoutMs:10000,acceptHttpErrors:true});await this.options.check();
   if(r.status>=300&&r.status<400)throw Error('transport_error');
-  if(r.status>=400){if(r.body.length>1048576)throw Error('object_too_large');const v=parseNetwork(r.body),e=v?.error;exact(v,['error']);exact(e,['code','retryable','retryAfterMillis','details']);if(typeof e.code!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(e.code)||typeof e.retryable!=='boolean'||!e.details||Object.getPrototypeOf(e.details)!==Object.prototype)throw Error('invalid_schema');if(e.retryAfterMillis!==null)uint(e.retryAfterMillis);throw new SyncV2Error(e.code,e.retryable,e.retryAfterMillis,e.details);}return r;
+  if(raw&&raw.length>ALIGNMENT&&r.status===413)throw Object.assign(new SyncV2Error('object_too_large'),{status:r.status});
+  if(r.status>=400){if(r.body.length>1048576)throw Error('object_too_large');const v=parseNetwork(r.body),e=v?.error;exact(v,['error']);exact(e,['code','retryable','retryAfterMillis','details']);if(typeof e.code!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(e.code)||typeof e.retryable!=='boolean'||!e.details||Object.getPrototypeOf(e.details)!==Object.prototype)throw Error('invalid_schema');if(e.retryAfterMillis!==null)uint(e.retryAfterMillis);throw Object.assign(new SyncV2Error(e.code,e.retryable,e.retryAfterMillis,e.details),{status:r.status});}return r;
  }
- async json(method:string,path:string,body?:unknown){const r=await this.request(method,path,body);if(r.body.length>1048576)throw Error('object_too_large');const v=parseNetwork(r.body);if(v.version!==1||v.purpose!==BODY_PURPOSE)throw Error('invalid_schema');sameScope(v.scope,this.options.scope);return v;}
+ async json(method:string,path:string,body?:unknown,onHeaders?:(headers:Record<string,string>)=>void){const r=await this.request(method,path,body);if(r.body.length>1048576)throw Error('object_too_large');const v=parseNetwork(r.body);if(v.version!==1||v.purpose!==BODY_PURPOSE)throw Error('invalid_schema');sameScope(v.scope,this.options.scope);onHeaders?.(r.headers);return v;}
  async list(entityKey:string,bodyRevision:string,after=''){
   hexId(entityKey,64);hexId(bodyRevision,32);if(after)hexId(after,32);
   const v=await this.json('GET','/carriers?entityKey='+entityKey+'&bodyRevision='+bodyRevision+'&limit=20'+(after?'&after='+after:''));exact(v,['version','purpose','scope','carriers','nextAfter']);
@@ -32,13 +39,45 @@ export class BodyChannelHttp {
  }
  async upload(descriptor:Carrier,read:(hash:string)=>Promise<Uint8Array>){
   validateCarrier(descriptor,this.options.scope);const b=descriptor.body,id=b.carrierId,expected=new Map([b.manifest,...b.chunks].map(o=>[o.sha256,o.sizeBytes]));
-  const reserved=await this.json('POST','/reserve',descriptor);exact(reserved,['version','purpose','scope','carrierId','state','expiresAtMillis','objects']);
-  if(reserved.carrierId!==id||!['reserved','ready'].includes(reserved.state)||!Array.isArray(reserved.objects))throw Error('invalid_schema');uint(reserved.expiresAtMillis);
-  if(reserved.state==='ready')return;
-  if(reserved.objects.length!==expected.size||new Set(reserved.objects.map((o:any)=>o.sha256)).size!==expected.size)throw Error('closure_incomplete');
-  for(const o of reserved.objects){exact(o,['sha256','sizeBytes','offset']);if(expected.get(o.sha256)!==o.sizeBytes)throw Error('closure_incomplete');uint(o.offset,o.sizeBytes);
-   const data=await read(o.sha256);if(data.length!==o.sizeBytes||sha256Hex(data)!==o.sha256)throw Error('hash_mismatch');
-   for(let at=o.offset;at<data.length;){const part=data.subarray(at,Math.min(data.length,at+65536));await this.request('PUT','/carriers/'+id+'/objects/'+o.sha256+'/parts/'+at,undefined,part);at+=part.length;}
+  let size=ALIGNMENT,locked=false;
+  const status=async(path:string,body:unknown)=>{
+   const v=await this.json('POST',path,body,headers=>{size=locked?ALIGNMENT:advertisedPartSize(headers);});
+   exact(v,['version','purpose','scope','carrierId','state','expiresAtMillis','objects']);
+   if(v.carrierId!==id||!['reserved','ready'].includes(v.state)||!Array.isArray(v.objects))throw Error('invalid_schema');
+   uint(v.expiresAtMillis);
+   const offsets=new Map<string,number>();
+   if(v.state==='ready')return null;
+   for(const o of v.objects){
+    exact(o,['sha256','sizeBytes','offset']);
+    if(!expected.has(o.sha256)||expected.get(o.sha256)!==o.sizeBytes||offsets.has(o.sha256))throw Error('closure_incomplete');
+    uint(o.offset,o.sizeBytes);
+    if(o.offset!==o.sizeBytes&&o.offset%ALIGNMENT)throw Error('invalid_range');
+    offsets.set(o.sha256,o.offset);
+   }
+   if(offsets.size!==expected.size)throw Error('closure_incomplete');
+   return offsets;
+  };
+  let offsets=await status('/reserve',descriptor);
+  if(!offsets)return;
+  for(const hash of offsets.keys()){
+   const data=await read(hash);
+   if(data.length!==expected.get(hash)||sha256Hex(data)!==hash)throw Error('hash_mismatch');
+   let at=offsets.get(hash)!,high=at,stalls=0;
+   while(at<data.length){
+    const part=data.subarray(at,at+size);
+    try{await this.request('PUT','/carriers/'+id+'/objects/'+hash+'/parts/'+at,undefined,part);at+=part.length;}
+    catch(error){
+     if(!(error instanceof SyncV2Error))throw error;
+     const httpStatus=(error as SyncV2Error&{status?:number}).status;
+     if(part.length>ALIGNMENT&&(httpStatus===413||httpStatus===400&&error.code==='object_too_large'))locked=true;
+     else if(error.code!=='offset_conflict'&&error.code!=='part_conflict')throw error;
+     offsets=await status('/carriers/'+id+'/missing',{scope:this.options.scope});
+     if(!offsets)return;
+     at=offsets.get(hash)!;
+     if(at<=high&&++stalls>=4)throw error;
+    }
+    if(at>high){high=at;stalls=0;}
+   }
   }
   const completed=await this.json('POST','/carriers/'+id+'/complete',{scope:this.options.scope});exact(completed,['version','purpose','scope','carrierId','state']);if(completed.carrierId!==id||completed.state!=='ready')throw Error('closure_incomplete');
   this.options.progress?.()?.advance(expected.size);

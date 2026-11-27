@@ -32,3 +32,14 @@ test('concurrent edit invalidates prepared source deletion transaction and prese
  expect((await f.db.query('SELECT title FROM channels'))[0]?.title).toBe('Concurrent local title');expect((await f.db.query('SELECT deleted FROM sync_source_states'))[0]?.deleted).toBe(0);
  }finally{f.sql.close();}
 });
+
+test('source export preserves mixed sort directions across keyset boundaries',async()=>{
+ const f=await fixture();try{
+  await f.db.execute(`WITH RECURSIVE ids(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM ids WHERE i<805)
+   INSERT INTO channels(url,title,is_pinned,sort_order,created_at) SELECT 'https://feed/'||i,'s',i%2,i%7,i%5 FROM ids`);
+  const store=new SqlSourceSyncStore(f.db,{parseUri,parseAndroid:parseUri},()=>1000);
+  const expected=await f.db.query('SELECT url FROM channels ORDER BY is_pinned DESC,sort_order,created_at DESC,id');
+  expect((await store.export('watch')).map(r=>r.url)).toEqual(expected.map(r=>String(r.url)));
+  expect((await store.export('watch',undefined,true)).map(r=>r.url)).toEqual(expected.map(r=>String(r.url)));
+ }finally{f.sql.close();}
+});

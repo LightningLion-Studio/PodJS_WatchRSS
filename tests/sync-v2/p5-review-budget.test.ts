@@ -17,3 +17,25 @@ for(const mode of ['local','merge'] as const)test('P5R explicit '+mode+' encrypt
 test('P5R note attachments cannot pass preview without an authenticated selected asset closure',async()=>{const f=await p5Fixture();try{await dirtyRollback(f,async()=>{await f.db.execute('UPDATE memo_notes SET markdown=?,updated_at=updated_at+1 WHERE note_id=?',['![image](assets/missing.png)','n']);await f.scan();});const before=await f.projection.readStableState(),p=await f.control.pendingChoice();expect(p?.canMerge).toBe(false);expect(p?.reason).toBe('missing_content');await expect(f.control.chooseLocal(p!.proof,id())).rejects.toThrow('closure_incomplete');expect(await f.projection.readStableState()).toEqual(before);}finally{f.close();}},180000);
 test('P5R preview budget pause resumes the same capture without inventing a merge reason',async()=>{const f=await p5Fixture();try{await dirtyRollback(f,async()=>{await f.db.execute("UPDATE memo_notes SET markdown='safe merged text',updated_at=updated_at+1 WHERE note_id='n'");await f.scan();});const prepare=f.projection.prepareAccountProjection.bind(f.projection);f.projection.prepareAccountProjection=(before,records,business)=>prepare(before,records,business,{maxSteps:1});const before=await f.projection.readStableState();let pauses=0,p:any;for(;;){try{p=await f.make().pendingChoice();break;}catch(e){expect((e as Error).message).toBe('projection_preparing');expect((e as any).preparation.id).toMatch(/^[a-f0-9]{64}$/);expect(await f.projection.readStableState()).toEqual(before);expect(++pauses).toBeLessThan(20);}}expect(pauses).toBeGreaterThan(1);expect(p.canMerge).toBe(true);expect(p.reason).toBeNull();expect(await f.projection.readStableState()).toEqual(before);}finally{f.close();}},180000);
 test('P5R rollback reserves and validates native apply before publishing the new account generation',async()=>{const f=await p5Fixture();try{const first=await f.publish();await f.edit('current native note');await f.publish();const before=await f.projection.readStableState(),account={...f.server.account},capture=await f.control.captureAccount();f.reserveFails=true;await expect(f.control.rollback(first.account.commitOid,capture,id())).rejects.toThrow('storage_pressure');expect(await f.projection.readStableState()).toEqual(before);expect(f.server.account).toEqual(account);expect((await f.db.query("SELECT title FROM memo_notes WHERE note_id='n'"))[0]!.title).toBe('current native note');}finally{f.close();}},180000);
+
+test('reopened follow plan reads indexed pages without regenerating its business feed',async()=>{
+ const f=await p5Fixture();try{
+  await f.scan();const before=await f.projection.readStableState();let runs=0;
+  const business={async *run(){runs++;for(let i=0;i<1200;i++)yield [{sql:'SELECT '+i}];}};
+  const records=Array.from({length:35},(_,i)=>({kind:'note' as const,logicalId:'page-'+i,value:noteValue('page-'+i)}));
+  const byKey=new Map(records.map(r=>[f.projection.entityKeyFor(r.kind,r.logicalId),r]));
+  const hash=f.projection.inputHasher();for(const r of records)hash.add(r);
+  const build=async()=>({records:{keys:[...byKey.keys()],facts:[],inputHash:hash.finish(),read:async()=>records},business});
+  for(let window=0;window<32;window++){
+   const reopened=f.db.store();
+   try{
+    const prepared=await reopened.preparePagedProjection(before,build,async keys=>keys.map(key=>byKey.get(key)!),{maxSteps:1});
+    expect(window).toBeGreaterThan(10);expect(runs).toBe(1);
+    await reopened.validateAccountProjection(before,prepared);
+    await reopened.controlUpdate(before,JSON.parse(JSON.stringify(before)),prepared);
+    expect(await f.db.query('SELECT 1 FROM syncv2_follow_pages LIMIT 1')).toHaveLength(0);return;
+   }catch(error){if((error as Error).message!=='projection_preparing')throw error;}
+  }
+  throw Error('preparation did not finish');
+ }finally{f.close();}
+},30000);

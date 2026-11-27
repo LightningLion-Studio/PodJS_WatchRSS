@@ -368,7 +368,7 @@ export class SqlLibraryCloudRepository extends SqlLibraryBodyRepository implemen
   for(let at=0;at<ids.length;at+=100){check?.();const page=await this.local.cloudRestoreMetadata({itemIds:ids.slice(at,at+100),limit:100},check);out.push(...page.articles);}check?.();return out;
  }
  cloudReadingCandidates(check?:()=>void,hashes?:readonly string[],work?:<T>(stage:import('../cloud/records').RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){return this.run(()=>this.work('cloudReading',()=>this.readingCandidates(check,hashes,work)));}
- mergeCloudLegacyBookReading(articles:readonly ExportedArticle[],check:()=>void=()=>{}){return this.run(()=>this.work('cloudLegacyBookReading',async()=>{check();const selected=articles.filter(legacyBookReadingArticle);if(!selected.length||!this.books)return {changed:0,remaining:[...articles]};const result=await mergeLegacyBookReading(this.db,this.books,selected,check),accepted=new Set(selected.filter(a=>!result.remaining.includes(a)));if(result.changed)this.snapshotCache=undefined;return {changed:result.changed,remaining:articles.filter(a=>!accepted.has(a))};}));}
+ mergeCloudLegacyBookReading(articles:readonly ExportedArticle[],check:()=>void=()=>{}){return this.run(()=>this.work('cloudLegacyBookReading',async()=>{check();const selected=articles.filter(legacyBookReadingArticle);if(!selected.length||!this.books)return {changed:0,remaining:[...articles]};const result=await mergeLegacyBookReading(this.db,this.books,selected,check),remaining=new Set(result.remaining),accepted=new Set(selected.filter(a=>!remaining.has(a)));if(result.changed)this.snapshotCache=undefined;return {changed:result.changed,remaining:articles.filter(a=>!accepted.has(a))};}));}
  mergeCloudReading(articles:readonly ExportedArticle[],check:()=>void=()=>{}){return this.run(()=>this.work('cloudReading',async()=>{await this.cloudState();const before=await libraryRevision(this.db),result=await (this.readingStore??=new CloudReadingStore(this.db,async ids=>{if(this.ports.prepareReadingMigration)return this.ports.prepareReadingMigration(ids);if(this.ports.migrateReadingMany)await this.ports.migrateReadingMany(ids);else for(const id of ids)await this.ports.migrateReading(id);return [];})).merge(articles,check,false,before);if(this.readingIndex?.revision===before)this.readingIndex.revision=result.revision;else this.readingIndex=undefined;if(result.remaining.length)throw Error('cloud_reading_target_changed');if(result.changed)this.snapshotCache=undefined;return result.changed;}));}
  async mergeCloudPublicMetadata(articles:readonly ExportedArticle[],check:()=>void=()=>{},work?:<T>(stage:import('../cloud/records').RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){return this.run(async()=>{
   const hashes=await Promise.all(articles.map(a=>this.ports.codec.sha256(utf8Encode(a.articleId)))),candidates=await this.readingCandidates(check,hashes,work),byKey=new Map(candidates.map(a=>[a.rssSourceUrl+'\0'+a.articleId,a]));
@@ -432,17 +432,52 @@ export class SqlLibraryCloudRepository extends SqlLibraryBodyRepository implemen
  },canonical,!!this.books,check,true);}));}
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void){return this.run(async()=>{
   await this.cloudState();const id=await this.migrate();const publicUrls=articles.filter(a=>a.rssSourceUrl&&!isImportedContentUrl(a.rssSourceUrl)&&!isLocalOnlyRssSource(a.rssSourceUrl)).map(a=>a.url),identities=publicUrls.length?await this.local.cloudRssIdentitiesForUrls(publicUrls,check,await this.local.cloudReadingItemIds(await Promise.all(articles.map(a=>this.ports.codec.sha256(utf8Encode(a.articleId)))),check)):[];let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
-  const protectedIds=new Set((await querySyncPages(this.db,'SELECT article_id FROM article_register_state ORDER BY article_id')).map(r=>String(r.article_id)));
+  const protectedIds=new Set<string>();
+  for(let at=0;at<articles.length;at+=100){
+   const ids=articles.slice(at,at+100).map(a=>a.articleId);
+   for(const r of await this.db.query('SELECT article_id FROM article_register_state WHERE article_id IN ('+ids.map(()=>'?').join(',')+')',ids))protectedIds.add(String(r.article_id));
+  }
+  type Identity=typeof identities[number];
+  const key=(source:string,value:string)=>JSON.stringify([source,value]);
+  const aliases=new Map<string,Identity>(),current=new Map<string,Set<Identity>>(),links=new Map<string,Set<Identity>>(),items=new Map<number,Identity>();
+  const group=(index:Map<string,Set<Identity>>,k:string)=>{let rows=index.get(k);if(!rows){rows=new Set();index.set(k,rows);}return rows;};
+  const linkKey=(r:Identity)=>{try{return key(r.sourceUrl,canonicalRssUrl(r.url,false));}catch{return null;}};
+  for(const r of identities){
+   group(current,key(r.sourceUrl,r.articleId)).add(r);
+   for(const id of [r.localArticleId,r.nativeArticleId]){if(id){const k=key(r.sourceUrl,id);if(!aliases.has(k))aliases.set(k,r);}}
+   const link=r.legacyMaterialized?linkKey(r):null;if(link)group(links,link).add(r);
+   if(!items.has(r.itemId))items.set(r.itemId,r);
+  }
+  let book:BookState|undefined;
+  const readings:BookReading[]=[],seenChapters=new Set<number>(),deletions=new Map<number,number>();
+  const flushBook=async()=>{
+   if(!book)return;
+   for(let at=0;at<readings.length;at+=100)changed+=await this.books!.mergeReadingBatch(readings.slice(at,at+100),{check});
+   if(deletions.size){
+    const chapters=new Set(book.deletedChapters);let clock=book.deletionClock,transitions=0;
+    for(const [chapter,at] of deletions){if(!chapters.has(chapter)||at>clock)transitions++;chapters.add(chapter);clock=Math.max(clock,at);}
+    const applied=await this.books!.merge({...book,deletedChapters:[...chapters].sort((a,b)=>a-b),deletionClock:clock},check);
+    changed+=applied+Math.max(0,transitions-1);
+   }
+   readings.length=0;seenChapters.clear();deletions.clear();book=undefined;
+  };
   for(const incoming of articles){check?.();
-   if(protectedIds.has(incoming.articleId)){if(!incoming.deleted&&(incoming.contentText.trim()||incoming.contentHtml?.trim()))changed+=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).restoreBody(incoming,await this.prepareCloudArticle(incoming),this.ports.files);continue;}
-   const bookMapping=await this.books?.mapping(incoming.articleId,incoming.url);if(bookMapping){const state=(await this.books!.states()).find(b=>b.bookId===bookMapping.bookId)!;if(incoming.deleted&&state.lifecycle&&(incoming.deletedAt||incoming.updatedAt||0)<=state.lifecycle.startedAt)continue;const values={bookId:bookMapping.bookId,chapterIndex:bookMapping.chapterIndex,isRead:incoming.isRead,readingProgress:incoming.readingProgress,readingPositionBytes:incoming.readingPositionBytes,readingPositionContentHash:incoming.readingPositionContentHash,readingPositionChangedAt:incoming.readingPositionChangedAt,sourceDeviceId:incoming.sourceDeviceId,favoriteSaved:incoming.favoriteSaved,favoriteChangedAt:incoming.favoriteChangedAt,favoriteSortOrder:incoming.favoriteSortOrder,watchLaterSaved:incoming.watchLaterSaved,watchLaterChangedAt:incoming.watchLaterChangedAt,watchLaterSortOrder:incoming.watchLaterSortOrder};changed+=await this.books!.mergeReading(values);if(incoming.deleted){const state=(await this.books!.states()).find(b=>b.bookId===bookMapping.bookId)!;changed+=await this.books!.merge({...state,deletedChapters:[...new Set([...state.deletedChapters,bookMapping.chapterIndex])].sort((a,b)=>a-b),deletionClock:Math.max(state.deletionClock,incoming.deletedAt,incoming.updatedAt)});}continue;}
+   if(protectedIds.has(incoming.articleId)){await flushBook();if(!incoming.deleted&&(incoming.contentText.trim()||incoming.contentHtml?.trim()))changed+=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).restoreBody(incoming,await this.prepareCloudArticle(incoming),this.ports.files);continue;}
+   const bookMapping=await this.books?.mapping(incoming.articleId,incoming.url);if(bookMapping){
+    if(book?.bookId!==bookMapping.bookId||seenChapters.has(bookMapping.chapterIndex))await flushBook();
+    const state=book??=await this.books!.capturedState(bookMapping.bookId,check);
+    if(incoming.deleted&&state.lifecycle&&(incoming.deletedAt||incoming.updatedAt||0)<=state.lifecycle.startedAt)continue;const values={bookId:bookMapping.bookId,chapterIndex:bookMapping.chapterIndex,isRead:incoming.isRead,readingProgress:incoming.readingProgress,readingPositionBytes:incoming.readingPositionBytes,readingPositionContentHash:incoming.readingPositionContentHash,readingPositionChangedAt:incoming.readingPositionChangedAt,sourceDeviceId:incoming.sourceDeviceId,favoriteSaved:incoming.favoriteSaved,favoriteChangedAt:incoming.favoriteChangedAt,favoriteSortOrder:incoming.favoriteSortOrder,watchLaterSaved:incoming.watchLaterSaved,watchLaterChangedAt:incoming.watchLaterChangedAt,watchLaterSortOrder:incoming.watchLaterSortOrder};readings.push(values);seenChapters.add(bookMapping.chapterIndex);
+    if(incoming.deleted)deletions.set(bookMapping.chapterIndex,Math.max(incoming.deletedAt,incoming.updatedAt));
+    continue;
+   }
+   await flushBook();
    let article=incoming;let targetItemId:number|undefined;let publicId:string|undefined;
    if(incoming.rssSourceUrl&&!isImportedContentUrl(incoming.rssSourceUrl)&&!isImportedContentUrl(incoming.url)&&!isLocalOnlyRssSource(incoming.rssSourceUrl)){
-    const candidates=identities.filter(r=>r.sourceUrl===incoming.rssSourceUrl);let target=candidates.find(r=>r.articleId===incoming.articleId)??(!incoming.cloudRssArticleId?candidates.find(r=>r.localArticleId===incoming.articleId||r.nativeArticleId===incoming.articleId):undefined);
+    const k=key(incoming.rssSourceUrl,incoming.articleId);
+    let target=current.get(k)?.values().next().value;
+    if(!target&&!incoming.cloudRssArticleId)target=aliases.get(k);
     if(!target&&remote==='cloud-rss-inventory'){
-     let link:string|undefined;try{link=canonicalRssUrl(incoming.url,false);}catch{}
-     const matches=link?candidates.filter(r=>{if(!r.legacyMaterialized)return false;try{return canonicalRssUrl(r.url,false)===link;}catch{return false;}}):[];
-     if(matches.length===1)target=matches[0];
+     try{const matches=links.get(key(incoming.rssSourceUrl,canonicalRssUrl(incoming.url,false)));if(matches?.size===1)target=matches.values().next().value;}catch{}
     }
     publicId=remote==='cloud-rss-inventory'?incoming.articleId:target?.articleId??incoming.cloudRssArticleId??incoming.articleId;
     if(target){targetItemId=target.itemId;article={...incoming,articleId:target.localArticleId,url:target.url};}
@@ -468,10 +503,18 @@ export class SqlLibraryCloudRepository extends SqlLibraryBodyRepository implemen
    const prepared=await prepareArticle(article,this.ports.codec,true,typeof metaRow?.wire_body_hash==='string'?metaRow.wire_body_hash:undefined);
    const body=bodyForRequest(prepared,{articleId:article.articleId,bodyHash:'',metadataOnly:false,chunkIndexes:[]});
    changed+=article.deleted?await this.deletion.receive(article,body,remote,false):await this.receiver.receiveWithStats(article,body,remote==='cloud-records'||remote==='cloud-rss-inventory'?remote:targetItemId?'cloud-'+remote:remote,false,targetItemId);
-   if(publicId&&!article.deleted&&(remote==='cloud-rss-inventory'||incoming.cloudRssArticleId)){await this.db.execute(`INSERT INTO cloud_rss_article_ids(item_id,article_id) SELECT item_id,? FROM sync_article_ids WHERE article_id=? AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id`,[publicId,article.articleId]);const row=identities.find(r=>r.itemId===targetItemId);if(row){row.articleId=publicId;row.legacyMaterialized=false;}}
+   if(publicId&&!article.deleted&&(remote==='cloud-rss-inventory'||incoming.cloudRssArticleId)){await this.db.execute(`INSERT INTO cloud_rss_article_ids(item_id,article_id) SELECT item_id,? FROM sync_article_ids WHERE article_id=? AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id`,[publicId,article.articleId]);const row=targetItemId===undefined?undefined:items.get(targetItemId);if(row){
+     if(row.articleId!==publicId){
+      // Inventory rebinds only after an exact-ID miss, so the destination is empty.
+      current.get(key(row.sourceUrl,row.articleId))?.delete(row);row.articleId=publicId;
+      group(current,key(row.sourceUrl,publicId)).add(row);
+     }
+     const link=linkKey(row);if(link)links.get(link)?.delete(row);row.legacyMaterialized=false;
+    }}
    if(remote==='cloud-rss-inventory'){const media=(incoming as ExportedArticle&{cloudMedia?:{audioUrl:string|null;videoUrl:string|null;publishedAt:string|null}}).cloudMedia;if(media)await this.db.execute('UPDATE articles SET audio_url=?,video_url=?,pub_date=? WHERE id=(SELECT item_id FROM sync_article_ids WHERE article_id=?)',[media.audioUrl,media.videoUrl,media.publishedAt,article.articleId]);}
    if(remote!=='cloud-rss-inventory'&&!article.deleted){const row=(await this.db.query('SELECT c.body_hash FROM article_sync_content c JOIN sync_article_ids m ON m.item_id=c.item_id WHERE m.article_id=?',[article.articleId]))[0];if(row){const realBody=!!(article.contentText.trim()||article.contentHtml?.trim()),ready=realBody||oldMeta?.content_hash===article.contentHash&&Number(oldMeta.body_ready)===1||String(row.body_hash)===article.contentHash;await this.db.execute(`INSERT INTO cloud_article_state(article_id,content_hash,body_hash,body_ready) VALUES(?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET content_hash=excluded.content_hash,body_hash=excluded.body_hash,body_ready=excluded.body_ready`,[article.articleId,article.contentHash,String(row.body_hash),ready?1:0]);}}
   }
+  await flushBook();
   if(changed>0)this.snapshotCache=undefined;return changed;
  });}
 

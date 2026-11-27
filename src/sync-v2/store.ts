@@ -17,6 +17,7 @@ import {candidates,toWire} from './business';
 import {carrierBodyRevision} from './body-channel-codec';
 import {ProjectionGate} from './gate';
 import {UNOPENABLE_NOTES_SCHEMA,unopenableNotesStatements} from './note-rows';
+import {followPages,FOLLOW_PAGES_SCHEMA,type FollowPages} from './follow-pages';
 import {arrayRecordFeed,arrayStatementFeed,feedPages,type RecordFeed,type StatementFeed} from './record-feed';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {publicationCurrent,queuedReadOnly,initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
@@ -41,7 +42,7 @@ export interface SourceReader {
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
 const CLOUD_ROWS_SCHEMA=`CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`;
-export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
+export const PROJECTION_SCHEMA=[...FOLLOW_PAGES_SCHEMA,SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_apply_tree_v2(scope TEXT NOT NULL,plan_id TEXT NOT NULL,step INTEGER NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,plan_id,prefix,step))`,
  ...sqlProgramRelationGuards('syncv2_apply_tree_v2','scope','plan_id','wrss_apply_tree_ready'),
  `CREATE TABLE IF NOT EXISTS syncv2_apply_work(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id))`,
@@ -288,29 +289,37 @@ export class WatchProjectionStore {
  /** The account-apply input digest, one record at a time (R4 feeds compute it
   * while they are built, so preparation needs no extra pass). */
  inputHasher(){const h=new ContentSha256();return {add:(r:SourceRecord)=>updateSha256Parts(h,[jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis,this.segmentOptions()))]),finish:()=>h.finish()};}
- /** Records and business statements may be arrays or R4 feeds; a feed is read
-  * again for each pass and step, so no step holds more than one bounded page. */
- async prepareAccountProjection(before:SyncState,input:SourceRecord[]|RecordFeed,businessInput:Statement[]|StatementFeed,budget:{maxSteps?:number;maxMillis?:number;onCheckpoint?:(progress:any)=>void}={}){
+ async preparePagedProjection(before:SyncState,build:()=>Promise<{records:RecordFeed;business:StatementFeed}>,read:(keys:readonly string[])=>Promise<SourceRecord[]>,budget:{maxSteps?:number;maxMillis?:number}={},inputBinding='follow'){
+  const stateHash=digest(before),pages=await followPages(this.db,this.cipher,this.scopeKey,this.aad('follow-pages-v1',digest([stateHash,this.segmentOptions(),inputBinding])),stateHash,build);
+  const records:RecordFeed={keys:[],facts:[],inputHash:pages.inputHash,read:async(at,n)=>read(await pages.keys(at,n))};
+  return this.prepareAccountProjection(before,records,[],budget,pages);
+ }
+ async prepareAccountProjection(before:SyncState,input:SourceRecord[]|RecordFeed,businessInput:Statement[]|StatementFeed,budget:{maxSteps?:number;maxMillis?:number;onCheckpoint?:(progress:any)=>void}={},pages?:FollowPages){
   const records=Array.isArray(input)?arrayRecordFeed(input,r=>entityKey(this.key,this.scope.repoId,r.kind,r.logicalId)):input,business=Array.isArray(businessInput)?arrayStatementFeed(businessInput):businessInput;
   await this.collectPreparations(before);let inputHash=records.inputHash;if(inputHash===undefined){const ih=this.inputHasher();for await(const page of feedPages(records))for(const r of page)ih.add(r);inputHash=ih.finish();}
-  const bh=new ContentSha256();for await(const page of business.run())for(const op of page)updateSha256Parts(bh,[jsonBytes(JSON.stringify(op))]);const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
+  const stateHash=digest(before);let businessHash=pages?.businessHash;
+  if(!businessHash){const hash=new ContentSha256();for await(const page of business.run())for(const op of page)updateSha256Parts(hash,[jsonBytes(JSON.stringify(op))]);businessHash=hash.finish();}
+  const id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
   const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];let savedBody=saved?String(saved.body):null;let work=saved?await this.cipher.open(this.aad('apply-work',id),String(saved.body)):{membershipVersion:1,stateHash,inputHash,businessHash,phase:'membership',offset:0,after:'',step:0,ref:{...program.snapshot(),pages:0,fragments:0,operations:0,bytes:0,root:'0'.repeat(64)}};
   if(work.stateHash!==stateHash||work.inputHash!==inputHash||work.businessHash!==businessHash)throw Error('choice_stale');if(work.phase==='ready')return this.preparedResult(before,work.ref);
   if(status==='ready'&&work.phase!=='finalize')throw Error('sql_program_invalid');if(status!=='ready')await program.rewind(work.ref);
   const checkpoint=async()=>{work.ref=program.snapshot();const body=await this.cipher.seal(this.aad('apply-work',id),work);await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN (? IS NULL AND NOT EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=?) OR EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=? AND body=?)) AND EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND pages=? AND root=?) THEN 1 ELSE 0 END',params:[savedBody,this.scopeKey,id,this.scopeKey,id,savedBody,this.scopeKey,id,work.ref.pages,work.ref.root]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'INSERT INTO syncv2_apply_work VALUES(?,?,?) ON CONFLICT(scope,id) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);savedBody=body;if(work.phase!=='ready')await this.db.transaction([{sql:'DELETE FROM syncv2_apply_tree_v2 AS t WHERE scope=? AND plan_id=? AND step<? AND EXISTS(SELECT 1 FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix AND newer.step>t.step AND newer.step<=?)',params:[this.scopeKey,id,work.step,work.step]}]);budget.onCheckpoint?.({...work,id});};
   const readTree=async(prefix:string)=>{const row=(await this.db.query('SELECT hash,body FROM syncv2_apply_tree_v2 WHERE scope=? AND plan_id=? AND prefix=? AND step<=? ORDER BY step DESC LIMIT 1',[this.scopeKey,id,prefix,work.step]))[0]??(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return row?{hash:String(row.hash),node:JSON.parse(String(row.body))}:null;};
   const stageTrees=async(writes:Statement[])=>{let batch:Statement[]=[],size=0;const flush=async()=>{if(batch.length)await this.db.transaction(batch);batch=[];size=0;};for(const op of writes.filter(s=>s.sql.startsWith('INSERT INTO syncv2_tree_nodes'))){const statement={sql:'INSERT INTO syncv2_apply_tree_v2 VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,plan_id,prefix,step) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id,work.step+1,...op.params!.slice(1)]},n=JSON.stringify(statement).length;if(batch.length&&(batch.length>=16||size+n>65536))await flush();batch.push(statement);size+=n;}await flush();work.step++;};
-  const membership=sqlExactSetGuards('syncv2_apply_keys',{scope:this.scopeKey,plan_id:id},'entity_key',records.keys);
+  const membership=pages?[]:sqlExactSetGuards('syncv2_apply_keys',{scope:this.scopeKey,plan_id:id},'entity_key',records.keys);
   // Business statements resume by count; one generator serves all steps of this call.
   let ops:AsyncIterator<Statement[]>|undefined,held:Statement[]=[],opsDone=false;const fill=async()=>{while(!held.length&&!opsDone){const r=await ops!.next();if(r.done)opsDone=true;else held=[...r.value];}};
   const nextOps=async()=>{if(!ops){ops=business.run()[Symbol.asyncIterator]();for(let skip=work.offset;skip>0;){await fill();if(!held.length)throw Error('sql_program_incomplete');const n=Math.min(skip,held.length);held.splice(0,n);skip-=n;}}const out:Statement[]=[];let size=0;for(;;){await fill();if(!held.length)break;const n=JSON.stringify(held[0]).length;if(out.length&&(out.length>=64||size+n>BUSINESS_STEP_BYTES))break;out.push(held.shift()!);size+=n;}await fill();return {page:out,done:!held.length};};
   const start=Date.now();let steps=0;const maxSteps=budget.maxSteps??64,maxMillis=budget.maxMillis??150000;
   while(work.phase!=='ready'){
    if(steps>=maxSteps||Date.now()-start>=maxMillis){await checkpoint();throw Object.assign(Error('projection_preparing'),{preparation:{id,phase:work.phase,offset:work.offset,after:work.after,bytes:work.ref.bytes}});}steps++;
-   if(work.phase==='membership'){const page=membership.slice(work.offset,work.offset+64);await program.append(page);work.offset+=page.length;if(work.offset>=membership.length){work.phase='business';work.offset=0;}await checkpoint();continue;}
-   if(work.phase==='business'){const {page,done}=await nextOps();await program.append(page);work.offset+=page.length;if(done){work.phase='records';work.offset=0;}await checkpoint();continue;}
+   if(work.phase==='membership'){const page=pages?await pages.membership(work.offset):membership.slice(work.offset,work.offset+64);await program.append(page);work.offset+=page.length;if(work.offset>=(pages?.guards??membership.length)){work.phase='business';work.offset=0;}await checkpoint();continue;}
+   if(work.phase==='business'){
+    const batch=pages?{page:await pages.statements(work.offset),done:false}:await nextOps();
+    if(pages)batch.done=work.offset+batch.page.length===pages.operations;
+    await program.append(batch.page);work.offset+=batch.page.length;if(batch.done){work.phase='records';work.offset=0;}await checkpoint();continue;}
    if(work.phase==='records'){
-    if(work.offset>=records.keys.length){work.phase='remove';work.after='';await checkpoint();continue;}let limit=Math.min(32,records.keys.length-work.offset),prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>,batch:SourceRecord[];
+    const recordCount=pages?.records??records.keys.length;if(work.offset>=recordCount){work.phase='remove';work.after='';await checkpoint();continue;}let limit=Math.min(32,recordCount-work.offset),prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>,batch:SourceRecord[];
     for(;;){batch=await records.read(work.offset,limit);if(!batch.length)throw Error('closure_incomplete');try{prepared=await this.prepareRows(batch,before.localChangeRevision,nextD64(before.stateVersion),false,readTree);break;}catch(error){if((error as Error).message!=='page_too_large'||batch.length===1)throw error;limit=Math.max(1,Math.floor(batch.length/2));}}
     await program.append(prepared!.statements.filter(s=>!s.sql.startsWith('INSERT INTO syncv2_tree_nodes')));await stageTrees(prepared!.statements);const keys=batch!.map(r=>({sql:'INSERT OR IGNORE INTO syncv2_apply_keys VALUES(?,?,?)',params:[this.scopeKey,id,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId)]}));for(let i=0;i<keys.length;i+=32)await this.db.transaction(keys.slice(i,i+32));work.offset+=batch!.length;await checkpoint();continue;
    }

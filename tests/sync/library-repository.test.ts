@@ -70,3 +70,20 @@ test('article deletion rejects a concurrent library change before committing any
  const store=new SyncArticleDeletionStore(f.db,codec,async()=>{await f.db.execute("INSERT INTO channels(url,title,created_at) VALUES('https://concurrent.example','New',1)");return null;});const body:SyncBodyPayload={articleId:row.articleId,bodyHash:row.bodyHash,bodyByteCount:row.bodyBytes,chunkSize:row.chunkSize,chunkHashes:row.chunkHashes,metadataOnly:false,chunks:[{index:0,hash:row.chunkHashes[0]!,bytes:new Uint8Array(Buffer.from(row.encodedBase64,'base64'))}]};await expect(store.receive(article,body,'z')).rejects.toThrow();expect(await f.db.query('SELECT * FROM sync_article_deletions')).toEqual([]);expect(await f.db.query('SELECT * FROM sync_saved_states')).toEqual([]);expect((await f.db.query('SELECT * FROM channels')).length).toBe(1);
  }finally{f.sql.close();}
 });
+
+test('inventory preserves alias precedence and URL ambiguity after an in-batch rebind',async()=>{
+ const {fixture,article,sha}=await import('./ble-v2-fixture');
+ const f=await fixture();try{
+  const source='https://feed.example/rss',url='https://article.example/shared';
+  const identity=(itemId:number,sourceUrl=source)=>({itemId,articleId:sha('old'+itemId),nativeArticleId:sha('native'+itemId),
+   localArticleId:sha('local'+itemId),sourceUrl,url,legacyMaterialized:true});
+  const first=identity(1),second=identity(2),unrelated=identity(3,source+'2');
+  const repo=f.repo as any;
+  repo.local.cloudRssIdentitiesForUrls=async()=>[first,second,unrelated];
+  const targets:(number|undefined)[]=[];
+  repo.receiver.receiveWithStats=async(_article:unknown,_body:unknown,_remote:unknown,_authoritative:unknown,target?:number)=>{targets.push(target);return 0;};
+  const ids=[sha('ambiguous'),first.nativeArticleId,sha('now unique'),first.nativeArticleId];
+  await f.repo.mergeCloud([],ids.map(articleId=>article({articleId,rssSourceUrl:source,url})), 'cloud-rss-inventory');
+  expect(targets).toEqual([undefined,1,2,1]);
+ }finally{f.sql.close();}
+});

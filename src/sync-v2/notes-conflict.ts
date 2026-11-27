@@ -148,7 +148,8 @@ export class NoteConflictPlan {
   text(markdown,Number.MAX_SAFE_INTEGER); // rc7: the final candidate budget bounds the body.
   const body=choice==='local'?markdown:markdown.replace(/\r\n?/g,'\n');
   Object.assign(note,{markdown:body,baseMarkdown:body,contentHash:sha256Hex(utf8(body)),baseContentHash:sha256Hex(utf8(body)),updatedAt:Math.max(now,note.updatedAt+1),modifiedBy:device});
-  for(const r of next.conflicts.records)if(capture.openConflictIds.includes(r.conflictId))r.resolvedAt=Math.max(1,now);
+  const openIds=new Set(capture.openConflictIds);
+  for(const r of next.conflicts.records)if(openIds.has(r.conflictId))r.resolvedAt=Math.max(1,now);
   next.stateVersion=s.nextD64(next.stateVersion);next.localChangeRevision=s.nextD64(next.localChangeRevision);
   next.outbox.push({kind:'note-resolution',noteId:note.noteId,resolvedConflictIds:[...capture.openConflictIds]});
   const budget=noteResolutionBudget(this.state,next); // Mandatory, after marker/hash/counter growth.
@@ -157,7 +158,7 @@ export class NoteConflictPlan {
   // its business delta onto the current state, never the prepared whole image.
   const current=this.state,committed={...current,
    note:{...current.note,markdown:note.markdown,baseMarkdown:note.baseMarkdown,contentHash:note.contentHash,baseContentHash:note.baseContentHash,updatedAt:note.updatedAt,modifiedBy:note.modifiedBy},
-   conflicts:{...current.conflicts,records:current.conflicts.records.map((r:Conflict)=>capture.openConflictIds.includes(r.conflictId)?{...r,resolvedAt:Math.max(1,now)}:r)},
+   conflicts:{...current.conflicts,records:current.conflicts.records.map((r:Conflict)=>openIds.has(r.conflictId)?{...r,resolvedAt:Math.max(1,now)}:r)},
    stateVersion:s.nextD64(current.stateVersion),localChangeRevision:s.nextD64(current.localChangeRevision),
    outbox:[...current.outbox,next.outbox[next.outbox.length-1]]};
   noteResolutionBudget(current,committed);this.state=committed;
