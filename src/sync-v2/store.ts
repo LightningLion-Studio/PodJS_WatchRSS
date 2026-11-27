@@ -122,7 +122,7 @@ export class WatchProjectionStore {
  private legacyAdapter?:WatchEquivalentLegacy;
  private cloudCache:SqlAuthenticatedCache<any>;
  private readonly stateJournal:SqlStateJournal<SyncState>;
- private readonly verifiedCandidates=new Map<string,{body:string;digest:string;deletedNote:boolean}>();
+ private readonly verifiedCandidates=new Map<string,{bodyHash:string;digest:string;deletedNote:boolean}>();
  private adaptiveScanLimit=32;
  readonly legacyBodies:WatchLegacyBody;
  /** Candidate options every builder (scan, follow, choice, recovery) must share. */
@@ -143,13 +143,13 @@ export class WatchProjectionStore {
   const value=await this.cipher.open(aad,body),ref=chunkedRef(value);if(!ref)return value;if(ref.owner!==owner)throw Error('authentication_required');
   return parseCanonicalJson(await this.chunks(kind).read(ref,aad));
  }
- private rememberCandidate(entity:string,body:string,value:any){
+ private rememberCandidate(entity:string,bodyHash:string,value:any){
   if(this.verifiedCandidates.size>=8192&&!this.verifiedCandidates.has(entity)){const oldest=this.verifiedCandidates.keys().next().value;if(oldest!==undefined)this.verifiedCandidates.delete(oldest);}
-  this.verifiedCandidates.set(entity,{body,digest:digest(value),deletedNote:value?.state?.payload?.deleted===true});
+  this.verifiedCandidates.set(entity,{bodyHash,digest:digest(value),deletedNote:value?.state?.payload?.deleted===true});
  }
  private async openCandidate(entity:string,body:unknown){
   const text=String(body),value=await this.cipher.open(this.aad('candidate',entity),text),ref=chunkedRef(value);
-  if(!ref){this.rememberCandidate(entity,text,value);return value;}
+  if(!ref){this.rememberCandidate(entity,digest(text),value);return value;}
   if(ref.owner!==entity)throw Error('authentication_required');
   return parseCanonicalJson(await this.chunks('candidate').read(ref,this.aad('candidate',entity)));
  }
@@ -585,7 +585,7 @@ export class WatchProjectionStore {
    let hasPrior=false,priorDeletedNote=false;
    if(priorBody!==undefined){
     const cached=this.verifiedCandidates.get(entity);
-    if(cached&&cached.body===priorBody){
+    if(cached&&cached.bodyHash===digest(priorBody)){
      if(!force&&cached.digest===candidateDigest)continue;
      hasPrior=true;priorDeletedNote=cached.deletedNote;
     }else{
@@ -597,9 +597,9 @@ export class WatchProjectionStore {
    // rc7 25.3: a local deletion ends the note life in the same transaction.
    if(row.kind==='note'&&candidate.state.payload.deleted===true&&hasPrior&&!priorDeletedNote)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
    const spilled=await this.sealSpilled('candidate',entity,this.aad('candidate',entity),candidate),sealed=spilled.body;total+=sealed.length;statements.push(...spilled.statements);
-   if(!spilled.ref)this.rememberCandidate(entity,sealed,candidate);
    if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');
-   const sealedHash=sha256Hex(jsonBytes(sealed));
+   const sealedHash=digest(sealed);
+   if(!spilled.ref)this.rememberCandidate(entity,sealedHash,candidate);
    treeChanges.push({key:entity,value:{candidateHash:sealedHash,rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
    statements.push({sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[...mapKey,entity]},
     {sql:'INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body,meta_bytes=excluded.meta_bytes,state_bytes=excluded.state_bytes,added_at=excluded.added_at,row_sequence=excluded.row_sequence',params:[this.scopeKey,entity,sealed,candidate.metaBytes,candidate.stateBytes,candidate.addedAtMillis,sequence]},

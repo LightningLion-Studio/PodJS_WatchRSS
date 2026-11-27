@@ -138,3 +138,34 @@ test('createCloudTransport bounds concurrent requests so live temp handles stay 
  expect(maxTemp).toBeLessThanOrEqual(6);
  expect(liveTemp.size).toBe(0);
 });
+
+test('chunked publication sends a note after its folder and asset',async()=>{
+ const server=new SyntheticIndexBackend(),db=new SqlFixture();
+ try{
+  const http=new SyncV2Http(server,'http://localhost:3000',scope,async()=>({userId:'00000000-0000-0000-0000-000000000001',accessToken:'t',legacyDeviceId:'d',scope}),true,serverPin());
+  const keys={id:idKey,content:Buffer.alloc(32,0x22),version:1};
+  const store=db.store();await store.initialize();await store.beginScan(binding);
+  const folderId='folder-dependency',assetId='asset-dependency.png';
+  const dependencyKeys=[store.entityKeyFor('folder',folderId),store.entityKeyFor('asset',assetId)].sort();
+  let noteId='note-dependency',suffix=0;
+  while(store.entityKeyFor('note',noteId)>dependencyKeys[0]!)noteId='note-dependency-'+(++suffix);
+  const noteKey=store.entityKeyFor('note',noteId);
+  const records=[
+   {kind:'note' as const,logicalId:noteId,value:{...noteValue(noteId),folderId,markdown:'![image](assets/'+assetId+')'}},
+   {kind:'folder' as const,logicalId:folderId,value:{folderId,name:'Folder',sortOrder:0,updatedAt:1,modifiedBy:'watch',deleted:false,deletedAt:0}},
+   {kind:'asset' as const,logicalId:assetId,value:{assetId,mime:'image/png',originalFilename:assetId,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}},
+  ];
+  await store.scanPage({page:async()=>({rows:records,after:'done',done:true}),changed:async()=>[]});
+  const publisher=new WatchIndexPublisher(store,http,crypto,keys,()=>100,undefined,{maxChangedRows:1});
+  const reader=new WatchCloudIndex(store,http,crypto,keys,async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);
+  const expected=[...dependencyKeys,noteKey];
+  for(let i=0;i<expected.length;i++){
+   const prep=await publisher.prepare('a'.repeat(32),'key',{commitOid:server.device.commitOid,revision:server.device.revision},String(i+1).repeat(32));
+   expect(prep.changedRows).toBe(1);
+   await publisher.flush();
+   await reader.pull(server.window());
+   const rows=await store.cloudRows((await store.readState()).cloud!.current!.treeRoot,'',32);
+   expect(rows.map(r=>r.row.entityKey).sort()).toEqual(expected.slice(0,i+1).sort());
+  }
+ }finally{db.close();}
+});

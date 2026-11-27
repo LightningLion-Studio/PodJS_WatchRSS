@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {initializeSchema} from '../../src/core/schema';
 import {initializeMemoSchema} from '../../src/notes/repository';
-import {canonical,entityKey} from '../../src/sync-v2/protocol';
+import {canonical,digest,entityKey} from '../../src/sync-v2/protocol';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {SqlFixture,binding,account,libraryId,idKey,scope,noteValue} from './fixture';
 import type {SourceReader,SourceRecord} from '../../src/sync-v2/store';
@@ -65,3 +65,17 @@ test('SyncV2 native legacy mutation after rollback persists a business witness t
 test('SyncV2 bootstrap preserves existing unsent note ancestry before the first rollback observation',async()=>{const db=new SqlFixture();try{await seed(db,1);const original=db.raw.query('SELECT * FROM memo_notes').all(),store=db.store();await store.initialize();expect((await store.readState()).hasUnsentEdits).toBe(true);await store.observe(account,async()=>({authors:{},parents:{}}));expect((await db.store().readState()).pendingChoice).not.toBeNull();expect(db.raw.query('SELECT * FROM memo_notes').all()).toEqual(original);}finally{db.close();}});
 
 test('SyncV2 durable change log retains only markers while current candidates retain the latest note',async()=>{const db=new SqlFixture();try{await seed(db,1);const store=db.store();await store.initialize();await store.beginScan(binding);const source=await SqlBusinessSource.open(db);await complete(store,source);await db.execute("UPDATE memo_notes SET markdown='latest local value' WHERE note_id='n00000'");await store.beginTailWindow();while((await store.checkpoint())!.phase==='tail')await store.catchUpPage(source);const rows=db.raw.query('SELECT body FROM syncv2_change_log').all() as {body:string}[];expect(rows.length).toBe(2);for(const row of rows){expect(Object.keys(JSON.parse(row.body)).sort()).toEqual(['candidateHash','entityKey','revision']);expect(row.body).not.toContain('markdown');expect(row.body).not.toContain('ancestor');}expect((await store.readCandidate(entityKey(idKey,scope.repoId,'note','n00000'))).state.payload.markdown).toBe('latest local value');}finally{db.close();}});
+
+test('verified candidate cache retains fixed-size hashes for large inline ciphertext',async()=>{
+ const db=new SqlFixture();
+ try{
+  const store=db.store();await store.initialize();await store.beginScan(binding);
+  const value={...noteValue(),markdown:'x'.repeat(24*1024)};
+  await store.scanPage({page:async()=>({rows:[{kind:'note',logicalId:value.noteId,value}],after:'done',done:true}),changed:async()=>[]});
+  const key=store.entityKeyFor('note',value.noteId);
+  const body=String((await db.query('SELECT body FROM syncv2_candidates WHERE entity_key=?',[key]))[0]!.body);
+  expect(body.length).toBeGreaterThan(24*1024);
+  const candidate=await store.readCandidate(key);
+  expect(store['verifiedCandidates'].get(key)).toEqual({bodyHash:digest(body),digest:digest(candidate),deletedNote:false});
+ }finally{db.close();}
+});

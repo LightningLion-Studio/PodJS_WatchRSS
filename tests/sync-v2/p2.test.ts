@@ -14,6 +14,7 @@ import * as notes from '../../src/sync-v2/notes-conflict';
 import {WatchServiceKeyPin,SERVICE_KEY_CHANGED} from '../../src/sync-v2/service-key';
 import {SyncV2Http,parseNetwork,P2_CLOSED_GATES} from '../../src/sync-v2/http';
 import {watchMaterializer} from '../../src/sync-v2/materializer';
+import {initializeMemoSchema} from '../../src/notes/repository';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {WatchCloudIndex} from '../../src/sync-v2/cloud-index';
 import {WatchIndexPublisher} from '../../src/sync-v2/publisher';
@@ -263,5 +264,31 @@ test('C29 relay result poll leaves unknown journals intact and accepts cloud suc
  try{await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));const before=canonical(await f.store.readState());
   expect(await f.publisher.reconcileRelayResult()).toBeNull();expect(canonical(await f.store.readState())).toBe(before);expect(server.calls['/objects/reserve']??0).toBe(0);expect(server.calls['/account/publish']??0).toBe(0);
   server.losePublish=true;await expect(f.publisher.flush()).rejects.toThrow('synthetic_response_lost');const calls={...server.calls},result=await f.publisher.reconcileRelayResult();expect(result.account.commitOid).toBe(server.account.commitOid);expect(server.calls['/account/publish']).toBe(calls['/account/publish']);expect(server.calls['/objects/reserve']).toBe(calls['/objects/reserve']);expect((await f.store.readState()).cloud.pendingPublish).toBeNull();
+ }finally{f.db.close();}
+});
+
+test('P2 expired unknown publication can retire after a local save during refresh',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);
+ try{
+  await initializeMemoSchema(f.db);
+  await f.store.initialize();
+  await f.store.beginScan({...binding,schema:binding.schema+'-memo'});
+  await f.store.scanPage({page:async()=>({rows:[],after:'done',done:true}),changed:async()=>[]});
+  const requestId='c'.repeat(32);
+  await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},requestId);
+  const before=await f.store.readState(),candidates=await f.store.candidatePage();
+  const resumed=new WatchIndexPublisher(f.store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>400101);
+  await expect(resumed.flush()).rejects.toThrow('publication_expired');
+  await resumed.retryExpired(async()=>{
+   await f.db.execute("INSERT INTO memo_notes VALUES('new-note',NULL,'saved','text','text','hash','hash','',0,1,2,'watch',0,0)");
+  });
+  const after=await f.store.readState();
+  expect(after.localChangeRevision).toBe(nextD64(before.localChangeRevision));
+  expect(after.hasUnsentEdits).toBe(true);
+  expect(after.cloud.pendingPublish).toBe(null);
+  expect(after.cloud.deviceSequence).toBe(before.cloud.deviceSequence);
+  expect(after.editBase).toEqual(before.editBase);
+  expect(await f.store.candidatePage()).toEqual(candidates);
+  expect(await f.db.query("SELECT title FROM memo_notes WHERE note_id='new-note'")).toEqual([{title:'saved'}]);
  }finally{f.db.close();}
 });

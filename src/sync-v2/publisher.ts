@@ -135,7 +135,8 @@ export class WatchIndexPublisher {
   };
   const visited=new Set<string>();
   if(Number.isFinite(maxRows)||Number.isFinite(maxPrepMs)){
-   for(const group of [['note','folder','asset','source','rss-state'],['book']] as const){
+   // Publish closure dependencies before the rows that reference them.
+   for(const group of [['folder','asset','source'],['note','rss-state'],['book']] as const){
     if(budgetReached)break;
     const priority=await this.store.priorityCandidateKeys(group);
     for(let at=0;at<priority.length&&!budgetReached;at+=16){
@@ -360,7 +361,7 @@ export class WatchIndexPublisher {
   if(!plan||this.now()<=plan.request.account.body.expiresAtMillis+30000)throw Error('publication_pending');
   let known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   await refresh();const before=await this.store.readState();
-  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||before.localChangeRevision!==plan.capturedLocalRevision||before.pendingChoice)throw Error('choice_stale');
+  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||(plan.explicit&&before.localChangeRevision!==plan.capturedLocalRevision)||before.pendingChoice)throw Error('choice_stale');
   if(before.account&&before.cloud?.pins?.accountOid!==before.account.oid||before.editBase.generation!==before.rollbackGeneration||plan.request.account.body.scope.contentGeneration!==this.http.scope.contentGeneration)throw Error('rollback_conflict');
   known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')throw Error('choice_stale');if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   const next=copy(before);next.cloud.pendingPublish=null;await this.store.finishUpload(before,next,plan.requestId);
