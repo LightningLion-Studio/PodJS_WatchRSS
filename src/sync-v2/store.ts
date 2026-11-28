@@ -9,12 +9,13 @@ import {chargedReplayBytes} from './resume';
 import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixNode,type RadixRow} from '@podjs/framework/radix-index';
 import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
-import {sha256Hex} from '@podjs/framework/crypto';
+import {sha256Hex,hmacSha256Bytes,hex} from '@podjs/framework/crypto';
 import {CHUNKED_AEAD_BLOCK_BYTES,CHUNKED_REF_KEY,SQL_CHUNKED_VALUE_SCHEMA,SqlChunkedValues,chunkedRef,type AeadBlockPort,type ChunkedValueRef} from '@podjs/framework/chunked-aead';
 import {readBoundedKeysetBatch,commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {bytes as utf8Bytes,canonical,canonicalLegacy,jsonBytes,parseCanonicalJson,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
 import {candidates,toWire} from './business';
 import {carrierBodyRevision} from './body-channel-codec';
+import {DiskIndexObjects,INDEX_OBJECT_SCHEMA} from './index-object-cache';
 import {ProjectionGate} from './gate';
 import {UNOPENABLE_NOTES_SCHEMA,unopenableNotesStatements} from './note-rows';
 import {followPages,FOLLOW_PAGES_SCHEMA,type FollowPages} from './follow-pages';
@@ -43,7 +44,8 @@ export interface SourceReader {
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
 const CLOUD_ROWS_SCHEMA=`CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`;
-export const PROJECTION_SCHEMA=[...FOLLOW_PAGES_SCHEMA,SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
+export const PROJECTION_SCHEMA=[INDEX_OBJECT_SCHEMA,
+ "CREATE TABLE IF NOT EXISTS syncv2_cloud_wire(scope TEXT NOT NULL,id TEXT NOT NULL,wire TEXT NOT NULL,tag TEXT NOT NULL,PRIMARY KEY(scope,id))",...FOLLOW_PAGES_SCHEMA,SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_apply_tree_v2(scope TEXT NOT NULL,plan_id TEXT NOT NULL,step INTEGER NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,plan_id,prefix,step))`,
  ...sqlProgramRelationGuards('syncv2_apply_tree_v2','scope','plan_id','wrss_apply_tree_ready'),
  `CREATE TABLE IF NOT EXISTS syncv2_apply_work(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id))`,
@@ -412,9 +414,16 @@ export class WatchProjectionStore {
   const marker=await program.statement(ref);return [marker,...cleanup];
  }
  async resumeAccountProjection(before:SyncState,ref:SqlProgramRef,validateOnly=false){
-  if(ref.binding!==this.scopeKey)throw Error('choice_stale');const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!saved)throw Error('sql_program_incomplete');const work=await this.cipher.open(this.aad('apply-work',ref.id),String(saved.body));if(work.membershipVersion!==1||work.phase!=='ready'||canonical(work.ref)!==canonical(Object.fromEntries(['binding','id','pages','fragments','operations','bytes','root'].map(k=>[k,(ref as any)[k]]))))throw Error('sql_program_incomplete');const cp=await this.checkpoint(),tail:Statement[]=[];
+  if(ref.binding!==this.scopeKey)throw Error('choice_stale');const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!saved)throw Error('sql_program_incomplete');const work=await this.cipher.open(this.aad('apply-work',ref.id),String(saved.body));if(work.membershipVersion!==1||work.phase!=='ready'||canonical(work.ref)!==canonical(Object.fromEntries(['binding','id','pages','fragments','operations','bytes','root'].map(k=>[k,(ref as any)[k]]))))throw Error('sql_program_incomplete');return [await this.applyProgram(ref.id).statement(ref,validateOnly),...await this.accountProjectionTail(before)];
+ }
+ async prepareFollowDelta(before:SyncState,records:SourceRecord[],business:Statement[]){
+  const rows=await this.prepareRows(records,before.localChangeRevision,nextD64(before.stateVersion));
+  return [...business,...rows.statements,...await this.accountProjectionTail(before)];
+ }
+ private async accountProjectionTail(before:SyncState){
+  const cp=await this.checkpoint(),tail:Statement[]=[];
   if(cp?.phase==='complete'){const next={...cp,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};delete next.publishRebuild;tail.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
-  return [await this.applyProgram(ref.id).statement(ref,validateOnly),...tail,
+  return [...tail,
    {sql:'DELETE FROM syncv2_dirty'},
    {sql:'UPDATE syncv2_dirty_window SET floor=(SELECT revision FROM business_sync_revision WHERE id=1),size=0 WHERE id=1'},
    captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
@@ -515,12 +524,62 @@ export class WatchProjectionStore {
   const rows=await this.db.query(`SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key IN (${entityKeys.map(()=>'?').join(',')}) ORDER BY entity_key`,[this.scopeKey,...entityKeys]);
   const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.openCandidate(String(row.entity_key),row.body)});return out;
  }
+ async candidateKeys(after:string,limit=128){
+  this.gate.require();
+  return (await this.db.query('SELECT entity_key FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit])).map(row=>String(row.entity_key));
+ }
+ async editCandidateKeys(root:string,after:string,limit=128){
+  this.gate.require();
+  return this.db.query(`SELECT c.entity_key, (EXISTS(SELECT 1 FROM podjs_sql_cache_refs r WHERE r.binding=c.scope AND r.snapshot=? AND r.key=c.entity_key)
+   OR EXISTS(SELECT 1 FROM syncv2_cloud_rows r WHERE r.scope=c.scope AND r.root=? AND r.entity_key=c.entity_key)) AS in_cloud
+   FROM syncv2_candidates c WHERE c.scope=? AND c.entity_key>? ORDER BY c.entity_key LIMIT ?`,[root,root,this.scopeKey,after,limit]);
+ }
+ indexObjects(){return new DiskIndexObjects(this.db,this.scopeKey);}
+ private cloudCacheMac(parts:unknown[]){return hex(hmacSha256Bytes(this.key,jsonBytes(['podjs/sql-authenticated-cache',this.scopeKey,...parts])));}
+ private cloudWireMac(id:string,wire:string){return this.cloudCacheMac(['watch-cloud-wire-v1',id,wire]);}
+ /** A witness binds the authenticated wire row to its sealed cache value.
+  * Reused values keep their ciphertext and only acquire a new root reference. */
+ async cloudWitnesses(root:string,keys:string[]){
+  this.gate.require();if(!keys.length)return new Map<string,{id:string;wire:string|null}>();
+  const rows=await this.db.query(`SELECT r.key,r.id,r.tag,w.wire,w.tag AS wire_tag
+   FROM podjs_sql_cache_refs r JOIN podjs_sql_cache_values v ON v.binding=r.binding AND v.id=r.id
+   LEFT JOIN syncv2_cloud_wire w ON w.scope=r.binding AND w.id=r.id
+   WHERE r.binding=? AND r.snapshot=? AND r.key IN (${keys.map(()=>'?').join(',')})`,[this.scopeKey,root,...keys]);
+  const out=new Map<string,{id:string;wire:string|null}>();
+  for(const row of rows){
+   const key=String(row.key),id=String(row.id),wire=row.wire==null?null:String(row.wire);
+   if(this.cloudCacheMac(['ref',root,key,id])!==row.tag||wire!==null&&this.cloudWireMac(id,wire)!==row.wire_tag)throw Error('cache_authentication_failed');
+   out.set(key,{id,wire});
+  }
+  return out;
+ }
+ private cloudRefs(root:string,refs:{key:string;id:string}[]):Statement[]{
+  if(!refs.length)return [];
+  return [{sql:`INSERT INTO podjs_sql_cache_refs VALUES ${refs.map(()=>'(?,?,?,?,?)').join(',')}
+   ON CONFLICT(binding,snapshot,key) DO UPDATE SET id=excluded.id,tag=excluded.tag WHERE id IS NOT excluded.id OR tag IS NOT excluded.tag`,
+   params:refs.flatMap(({key,id})=>[this.scopeKey,root,key,id,this.cloudCacheMac(['ref',root,key,id])])}];
+ }
  /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
- async stageCloudRows(root:string,rows:any[],baseline:SyncState,observation=false){
+ async stageCloudRows(root:string,rows:any[],baseline:SyncState,observation=false,refs:{key:string;id:string}[]=[],witnessed=false){
   this.gate.require();const db=observation?this.observationSql(baseline):this.db;
   let state=await this.readState();if(observation&&queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
   const cache=observation?new SqlAuthenticatedCache<any>(db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:chunkedValues(db,this.cipher,this.scopeKey+'#cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined):this.cloudCache;
-  for(let at=0;at<rows.length;at+=32){const statements=await cache.prepare(root,rows.slice(at,at+32).map(value=>({key:value.row.entityKey,value})));if(!statements.length)continue;const next={...state};await (observation?this.observationUpdate(state,next,statements):this.controlUpdate(state,next,statements));state=next;}
+  const apply=async(statements:Statement[])=>{
+   if(!statements.length)return;
+   const next={...state};await (observation?this.observationUpdate(state,next,statements):this.controlUpdate(state,next,statements));state=next;
+  };
+  for(let at=0;at<rows.length;at+=32){
+   const page=rows.slice(at,at+32),statements=await cache.prepare(root,page.map(value=>({key:value.row.entityKey,value})));
+   if(witnessed){
+    for(const value of page){
+     if(value.unopenable||value.segments||value.meta.kind==='note'&&value.row.deleted)continue;
+     const id=this.cloudCacheMac(['value',value]),wire=digest(value.row);
+     statements.push({sql:'INSERT OR IGNORE INTO syncv2_cloud_wire VALUES(?,?,?,?)',params:[this.scopeKey,id,wire,this.cloudWireMac(id,wire)]});
+    }
+   }
+   await apply([...statements,...(at===0?this.cloudRefs(root,refs):[])]);
+  }
+  if(!rows.length)await apply(this.cloudRefs(root,refs));
   return state;
  }
  async cloudRowCount(root:string){this.gate.require();return Math.max(await this.cloudCache.count(root),Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0));}
@@ -587,7 +646,8 @@ export class WatchProjectionStore {
    // The publisher uses the acknowledged note rows to distinguish edits from
    // native rows that lag behind an observed cloud head.
    if(before.hasUnsentEdits&&before.editBase.accountOid&&before.editBase.accountOid!==before.account?.oid)return;
-   const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},this.cloudCache.dropExcept(root));return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
+   const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},[...this.cloudCache.dropExcept(root),
+    {sql:'DELETE FROM syncv2_cloud_wire WHERE scope=? AND NOT EXISTS(SELECT 1 FROM podjs_sql_cache_values v WHERE v.binding=syncv2_cloud_wire.scope AND v.id=syncv2_cloud_wire.id)',params:[this.scopeKey]}]);return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */

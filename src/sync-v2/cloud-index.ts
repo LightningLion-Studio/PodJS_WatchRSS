@@ -1,5 +1,5 @@
 import type {IndexObjectCache} from './index-object-cache';
-import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
+import {canonical,digest,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
 import {sameScope,features,b64,unb64,indexRow} from './wire';
 import {authenticatePath,type ApprovedKey,type Pins} from './head-pins';
 import {openV2,objectOid,type EnvelopeCrypto,sealV2} from './sealed';
@@ -67,18 +67,40 @@ export class WatchCloudIndex {
   const historyGap=compareD64(saved.cursor,window.historyFloorRevision)<0;
   if(a.commitOid===null){if(a.revision!=='0'||a.rollbackGeneration!=='0'||saved.pins.accountOid!==null)throw Error('replay_detected');return {empty:true};}
   oid(a.commitOid,'commit');if(a.revision==='0')throw Error('invalid_schema');if(saved.pins.accountOid===null)await this.bootstrap(window);
-  const signingChanged=signingFingerprint!==undefined&&saved.current?.signingFingerprint!==signingFingerprint;
+  const headerCache=new Map<string,any>();
+  const readHeader=async(id:string)=>{
+   const retained=await this.store.readHeader(id);if(retained)return retained;if(headerCache.has(id))return headerCache.get(id);if(saved.headers?.[id])return saved.headers[id];
+   const stop=saved.pins.accountOid;
+   if(id===stop)return parseCanonicalJson(await this.http.object(id,undefined,window.windowId));
+   const page=await this.http.json('GET','/account/ancestry?head='+encodeURIComponent(id)+'&stop='+encodeURIComponent(stop??'null')+'&limit=64');
+   exact(page,['version','scope','head','stop','headers','nextOid','complete']);sameScope(page.scope,this.scope);
+   if(page.head!==id||page.stop!==stop||!Array.isArray(page.headers)||page.headers.length<1||page.headers.length>64||jsonBytes(page).length>262144)throw Error('ref_continuity_unavailable');let cursor:string|null=id;
+   for(const entry of page.headers){exact(entry,['commitOid','headerOid','body','signature']);if(entry.commitOid!==cursor)throw Error('ref_continuity_unavailable');oid(entry.commitOid,'commit');oid(entry.headerOid,'commit-header');if(objectOid('commit-header',jsonBytes({body:entry.body,signature:entry.signature}))!==entry.headerOid)throw Error('hash_mismatch');headerCache.set(entry.commitOid,entry);cursor=entry.body.accountParent;}
+   if(page.nextOid!==cursor||page.complete!==(cursor===stop))throw Error('ref_continuity_unavailable');return headerCache.get(id);
+  };
+  const priorFingerprint=saved.current?.signingFingerprint;
+  const signingChanged=signingFingerprint!==undefined&&priorFingerprint!==signingFingerprint;
+  const migrating=signingChanged&&priorFingerprint===undefined&&saved.current?.commitOid===saved.pins.accountOid&&saved.current?.commitOid===before.account?.oid;
+  const reverifyHead=async(commitOid:string,generation:string)=>{
+   const envelope=await readHeader(commitOid),author=await this.approved(envelope?.body?.authorDeviceId),prior=saved.pins.authors[author.deviceId];
+   if(!prior||author.deviceId!==envelope.body.authorDeviceId||prior.keyId!==author.keyId||prior.publicKey!==author.publicKey)throw Error('signature_invalid');
+   const head=await verifyCommit(this.crypto,author.publicKey,{body:envelope.body,signature:envelope.signature},commitOid,this.scope);
+   if(head.treeRoot!==saved.current?.treeRoot||head.rollbackGeneration!==generation)throw Error('replay_detected');
+   if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
+   return head;
+  };
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
-   if(!signingChanged&&saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
+   if((!signingChanged||migrating)&&saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
+    if(migrating)await reverifyHead(a.commitOid,a.rollbackGeneration);
     if(!readOnly){
      // A local edit to a quarantined note must be kept even when the cloud
      // head stays the same. The authenticated cached rows are sufficient.
      const entities=before.hasUnsentEdits?Object.values<UnopenableNotes[string]>(saved.unopenableNotes??{}).map(note=>note.entityKey):[];
      const kept=entities.length?await this.keepQuarantinedEdits(entities,before,saved):null;
-     if(window.serverRevision!==saved.cursor||kept&&canonical(kept.baselines)!==canonical(saved.unopenableBaselines??{})){
+     if(migrating||window.serverRevision!==saved.cursor||kept&&canonical(kept.baselines)!==canonical(saved.unopenableBaselines??{})){
       const next=copy(before);
-      next.cloud={...saved,cursor:window.serverRevision,...(kept?{unopenableBaselines:kept.baselines}:{})};
+      next.cloud={...saved,cursor:window.serverRevision,...(migrating?{current:{...saved.current,signingFingerprint}}:{}),...(kept?{unopenableBaselines:kept.baselines}:{})};
       if(this.now()>window.expiresAtMillis)throw Error('window_expired');
       await this.store.observationUpdate(before,next,kept?.statements??[]);
      }
@@ -89,7 +111,7 @@ export class WatchCloudIndex {
   this.options.progress?.()?.stage('download');
   // Observe queued explicit actions through the current network window.
   const cache=readOnly||signingChanged&&saved.current?.commitOid===a.commitOid||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
-  const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
+  const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[],save?:(values:Map<string,Uint8Array>)=>Promise<void>)=>this.http.objects(window.windowId,ids,save,this.options.readConcurrency);
   const get=async(id:string)=>{
    const existing=objects.get(id);if(existing)return existing;
    const raw=await (cache?.read(id,fetch)??fetch(id));objects.set(id,raw);return raw;
@@ -99,21 +121,13 @@ export class WatchCloudIndex {
    for(const [id,raw]of values)objects.set(id,raw);
    return values;
   };
-  const headerCache=new Map<string,any>();
-  const readHeader=async(id:string)=>{
-   const retained=await this.store.readHeader(id);if(retained)return retained;if(headerCache.has(id))return headerCache.get(id);if(saved.headers?.[id])return saved.headers[id];
-   const stop=saved.pins.accountOid;const page=await this.http.json('GET','/account/ancestry?head='+encodeURIComponent(id)+'&stop='+encodeURIComponent(stop??'null')+'&limit=64');
-   exact(page,['version','scope','head','stop','headers','nextOid','complete']);sameScope(page.scope,this.scope);
-   if(page.head!==id||page.stop!==stop||!Array.isArray(page.headers)||page.headers.length<1||page.headers.length>64||jsonBytes(page).length>262144)throw Error('ref_continuity_unavailable');let cursor:string|null=id;
-   for(const entry of page.headers){exact(entry,['commitOid','headerOid','body','signature']);if(entry.commitOid!==cursor)throw Error('ref_continuity_unavailable');oid(entry.commitOid,'commit');oid(entry.headerOid,'commit-header');if(objectOid('commit-header',jsonBytes({body:entry.body,signature:entry.signature}))!==entry.headerOid)throw Error('hash_mismatch');headerCache.set(entry.commitOid,entry);cursor=entry.body.accountParent;}
-   if(page.nextOid!==cursor||page.complete!==(cursor===stop))throw Error('ref_continuity_unavailable');return headerCache.get(id);
-  };
-  const path=await authenticatePath(this.crypto,this.scope,a.commitOid,saved.pins,readHeader,this.approved),head=path.head??(await this.store.readHeader(a.commitOid))?.body??saved.headers?.[a.commitOid]?.body;
-  if(!path.head&&signingChanged){
-   const envelope=await readHeader(a.commitOid),author=await this.approved(envelope.body.authorDeviceId),prior=saved.pins.authors[author.deviceId];
-   if(!prior||prior.keyId!==author.keyId||prior.publicKey!==author.publicKey)throw Error('signature_invalid');
-   await verifyCommit(this.crypto,author.publicKey,{body:envelope.body,signature:envelope.signature},a.commitOid,this.scope);
+  const path=await authenticatePath(this.crypto,this.scope,a.commitOid,saved.pins,readHeader,this.approved);
+  let head=path.head;
+  if(!head){
+   if(!signingChanged)head=(await this.store.readHeader(a.commitOid))?.body??saved.headers?.[a.commitOid]?.body;
+   head??=await reverifyHead(a.commitOid,a.rollbackGeneration);
   }
+  else if(migrating)await reverifyHead(saved.current.commitOid,before.account!.generation);
   for(const entry of path.path)objects.set(entry.oid,jsonBytes({body:entry.body,signature:entry.signature}));
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
   // A closed explicit-action gate permits authentication and decoding only.
@@ -124,20 +138,68 @@ export class WatchCloudIndex {
   // only at the final CAS below.
   // Nothing is written before the first decoded batch, so an early failure
   // leaves the local state byte-identical.
-  let staged:SyncState|null=null,count=0;const pending:any[]=[],seen:ObservedRow[]=[];
-  const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
-  const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
-  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,!signingChanged&&saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink,!signingChanged&&saved.auditBinding===auditBinding);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
+  let staged:SyncState|null=null,count=0,previousMatches=0;
+  const pending:any[]=[],seen:ObservedRow[]=[],refs:{key:string;id:string}[]=[],changed:string[]=[];
+  const oldRoot=saved.current?.treeRoot;
+  const reuse=!!oldRoot&&(!signingChanged||migrating)&&saved.auditBinding===auditBinding;
+  const flush=async()=>{
+   staged??=await this.store.stageHeaders(path.path,before,true);
+   if(pending.length||refs.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true,refs.splice(0),true);
+   return staged;
+  };
+  const sink=async(r:any)=>{
+   count++;if(r.prior)previousMatches++;
+   if(r.reusedId){
+    if(head.treeRoot!==oldRoot)refs.push({key:r.row.entityKey,id:r.reusedId});
+   }else{
+    if(!r.priorSame)changed.push(r.row.entityKey);
+    const {prior,priorSame,...decoded}=r;
+    seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});
+    pending.push(decoded);
+   }
+   if(pending.length+refs.length>=32||r.segments||r.unopenable)await flush();
+  };
+  try{
+   await this.snapshot(head.treeRoot,window.windowId,get,batch,(!signingChanged||migrating)&&oldRoot?id=>this.store.cloudRow(oldRoot,id):undefined,sink,reuse,
+    reuse?keys=>this.store.cloudWitnesses(oldRoot,keys):undefined,cache?id=>cache.read(id,fetch):undefined);
+   staged=await flush();
+  }catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   this.options.progress?.()?.stage('write');
-  const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
-  if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
+  const editBases=copy(saved.editBases??{});let editCreates:string[]=[...saved.editCreates??[]];const baseWrites:Statement[]=[];
+  if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid&&saved.current.commitOid!==a.commitOid){
+   let after='';const creates=new Set(editCreates);
+   for(;;){
+    const keys=await this.store.editCandidateKeys(saved.current.treeRoot,after);
+    if(!keys.length)break;
+    for(const key of keys)if(!Number(key.in_cloud))creates.add(String(key.entity_key));
+    const overlap=keys.filter(key=>Number(key.in_cloud)).map(key=>String(key.entity_key));
+    for(let at=0;at<overlap.length;at+=32)for(const entry of await this.store.candidateBatch(overlap.slice(at,at+32))){
+     const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);
+     if(!old)throw Error('closure_incomplete');
+     if(old.unopenable)continue;
+     const model=(r:{meta:any;state:any})=>({identity:r.meta.logicalId,...r.meta.payload,...conflictNeutral(r.state).payload});
+     if(canonical(model(entry.candidate))===canonical(model(old)))continue;
+     const base={identity:old.meta.logicalId,...old.meta.payload,...old.state.payload};
+     const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);
+    }
+    after=String(keys.at(-1)!.entity_key);
+   }
+   editCreates=[...creates];
+  }
   const next=observeAccount(staged,{oid:a.commitOid,revision:a.revision,generation:a.rollbackGeneration});path.pins.seenOids=[];
   // The only content snapshot retained is the current authenticated index.
   next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count,...(signingFingerprint?{signingFingerprint}:{})},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
+  // This delta applies only to the complete native snapshot of the old head.
+  // Obsolete/removed rows and cross-entity operations use full reconciliation.
+  const delta=reuse&&a.commitOid!==saved.current.commitOid&&!historyGap&&before.activeGeneration===saved.current.commitOid&&before.editBase.accountOid===before.activeGeneration&&
+   !before.hasUnsentEdits&&!before.pendingChoice&&head.rollbackGeneration===before.rollbackGeneration&&
+   previousMatches===saved.current.rowCount&&changed.length<=32&&
+   seen.every(row=>!row.unopenable)&&!Object.keys(saved.unopenableNotes??{}).length;
+  next.cloud.followDelta=delta?{from:before.activeGeneration,to:a.commitOid,keys:changed,businessRevision:before.businessRevision}:null;
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision&&saved.lastPublication.heldEdits!==true){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
   next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen.filter(r=>r.note&&r.unopenable).map(r=>r.entityKey),staged,saved);next.cloud.unopenableBaselines=kept.baselines;
-  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);if(!delta)await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
   * An unsent edit when the note enters quarantine, or any later local change of
@@ -206,18 +268,26 @@ export class WatchCloudIndex {
  }
  /** Authenticated decoded rows. With `sink`, each row is handed over as soon as
   * it is decoded and nothing is accumulated (F2); otherwise rows are returned. */
-  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>,reuseVerifiedRows=false){
-   const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
-   const concurrency=Math.max(1,Math.floor(this.options.readConcurrency??1));
+  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>,reuseVerifiedRows=false,witnesses?:(keys:string[])=>Promise<Map<string,{id:string;wire:string|null}>>,closureGet?:(id:string)=>Promise<Uint8Array>){
+   const read=get??(id=>this.http.object(id,undefined,windowId)),direct=closureGet??((id:string)=>this.http.object(id,undefined,windowId)),rows=await readTree(this.scope,treeRoot,read,(this.options.readConcurrency??1)>1?batch:undefined),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
+   const concurrency=Math.min(6,Math.max(1,Math.floor(this.options.readConcurrency??1)));
    progress?.plan('items',rows.length);
    for(let at=0;at<rows.length;){
     const chunk=concurrency>1?rows.slice(at,at+16):rows.slice(at,at+1);
     at+=chunk.length;
-    const reused=new Map<number,any>(),pending:any[]=[];
+    const reused=new Map<number,any>(),pending:any[]=[],priorKeys=new Set<string>();
+    const known=await witnesses?.(chunk.map(r=>r.entityKey));
     if(reuseVerifiedRows&&previous){
      for(let i=0;i<chunk.length;i++){
-      const row=chunk[i]!,prev=await previous(row.entityKey);
-      if(prev&&!prev.unopenable&&!prev.segments&&canonical(prev.row)===canonical(row))reused.set(i,prev);
+      const row=chunk[i]!,witness=known?.get(row.entityKey);
+      if(witness?.wire){
+       if(witness.wire===digest(row))reused.set(i,{row,reusedId:witness.id,prior:true});
+       else pending.push(row);
+       continue;
+      }
+      const prev=await previous(row.entityKey);
+      if(prev)priorKeys.add(row.entityKey);
+      if(prev&&!prev.unopenable&&!prev.segments&&canonical(prev.row)===canonical(row))reused.set(i,sink?{...prev,prior:true,priorSame:true}:prev);
       else pending.push(row);
      }
     }else pending.push(...chunk);
@@ -238,9 +308,15 @@ export class WatchCloudIndex {
      }
     }
     const readPrefetched=async(id:string)=>prefetchedObjects.get(id)??read(id);
+    const stateRefs=async(window:string,id:string)=>{
+     const prefetched=prefetchedRefs.get(id);
+     if(prefetched?.error)throw prefetched.error;
+     return prefetched?prefetched.value:this.http.stateRefs(window,id);
+    };
     for(let i=0;i<chunk.length;i++){
      const cached=reused.get(i);if(cached){await emit(cached);continue;}
      const row=chunk[i]!;
+     const output=(decoded:any)=>emit(sink&&reuseVerifiedRows?{...decoded,prior:!!(known?.has(row.entityKey)||priorKeys.has(row.entityKey))}:decoded);
      const pair=prefetchedObjects.has(row.metaOid)&&prefetchedObjects.has(row.stateOid)?new Map([[row.metaOid,prefetchedObjects.get(row.metaOid)!],[row.stateOid,prefetchedObjects.get(row.stateOid)!]]):batch?await batch([row.metaOid,row.stateOid]):!get?await this.http.objects(windowId,[row.metaOid,row.stateOid]):new Map([[row.metaOid,await read(row.metaOid)],[row.stateOid,await read(row.stateOid)]]);
      const meta=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);
      if(!this.keys.readContentKey&&(meta.header.keyVersion!==this.keys.version||state.header.keyVersion!==this.keys.version))throw Error('unsupported_feature');
@@ -248,10 +324,10 @@ export class WatchCloudIndex {
      if(m.version!==2||s.version!==2||m.entityKey!==row.entityKey||s.entityKey!==row.entityKey||entityKey(this.keys.id,this.scope.repoId,m.kind,m.logicalId)!==row.entityKey||!['original','unknown'].includes(m.addedAtSource))throw Error('invalid_schema');features(m.requiredFeatures);features(s.requiredFeatures);features(row.requiredFeatures);if(m.requiredFeatures.length||row.requiredFeatures.some((f:string)=>f!==NOTE_SEGMENTS_FEATURE||!this.supported.includes(f)))throw Error('unsupported_feature');if(!Array.isArray(s.noteSegments))throw Error('invalid_schema');
      const segmented=s.noteSegments.length>0||s.requiredFeatures.includes(NOTE_SEGMENTS_FEATURE)||s.payload?.segmentedNote!==undefined;let segments:any=null,s0=s;
      if(segmented){if(m.kind!=='note')throw Error('invalid_schema');const old=await previous?.(row.entityKey);
-      const quarantined=()=>{if(!!s.payload?.metadata?.deleted!==row.deleted)throw Error('invalid_schema');return emit({row,meta:m,state:s,unopenable:{code:'storage_pressure'},placeholder:placeholder(row),placeholderText:placeholderText(row)});};
+      const quarantined=()=>{if(!!s.payload?.metadata?.deleted!==row.deleted)throw Error('invalid_schema');return output({row,meta:m,state:s,unopenable:{code:'storage_pressure'},placeholder:placeholder(row),placeholderText:placeholderText(row)});};
       if(old?.row.stateOid===row.stateOid&&old.unopenable){await quarantined();continue;}
       if(old?.row.stateOid===row.stateOid&&old.segments){s0=old.state;segments=old.segments;}
-      else{let out;try{out=await readSegmentedNote(row.stateOid,s,noteClosurePorts(this.http,direct,this.crypto,this.keys,this.approved,windowId),{entityKey:row.entityKey,supported:this.supported,budget:this.options.noteTextBudget??NOTE_TEXT_BUDGET});}
+      else{let out;try{out=await readSegmentedNote(row.stateOid,s,noteClosurePorts({scope:this.scope,stateRefs},id=>Promise.resolve(prefetchedObjects.get(id)??direct(id)),this.crypto,this.keys,this.approved,windowId),{entityKey:row.entityKey,supported:this.supported,budget:this.options.noteTextBudget??NOTE_TEXT_BUDGET});}
        catch(error){if((error as Error).message!=='storage_pressure')throw error;
         // F1/W3: this entity is quarantined like an unsupported row: not reassembled,
         // not applied; the authenticated row and parent travel back unchanged.
@@ -259,11 +335,9 @@ export class WatchCloudIndex {
        s0=out.state;segments=storedSegments(out.segments);}}
      const conflicts=m.kind==='note'?readConflicts(s0,{entityKey:row.entityKey,noteId:m.logicalId},['note-conflicts.v1']):null;if(m.kind!=='note'&&s0.requiredFeatures.length)throw Error('unsupported_feature');
      const payload={...s0.payload};if(conflicts)delete payload.noteConflicts;const value=fromWire(m.kind,m.payload,payload),logicalId=m.kind==='article'?value.articleId:m.kind==='book'?value.bookId:m.kind==='book-reading'?value.bookId+':'+value.chapterIndex:m.kind==='rss-state'?value.sourceId+':'+value.articleIdHash:m.kind==='source'?value.url:m.kind==='note'?value.noteId:m.kind==='folder'?value.folderId:value.assetId;if(logicalId!==m.logicalId)throw Error('invalid_schema');if(!!value.deleted!==row.deleted)throw Error('invalid_schema');
-     if(segmented){await emit({row,meta:m,state:s0,segments,placeholder:placeholder(row),placeholderText:placeholderText(row)});continue;}
-     const prefetchedRef=prefetchedRefs.get(row.stateOid);
-     if(prefetchedRef?.error)throw prefetchedRef.error;
-     const mapping=prefetchedRef?prefetchedRef.value:await this.http.stateRefs(windowId,row.stateOid);exact(mapping,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);sameScope(mapping.scope,this.scope);if(mapping.parentOid!==row.stateOid)throw Error('invalid_schema');oid(mapping.refsOid,'state-refs');const raw=await readPrefetched(mapping.refsOid);if(raw.length!==mapping.totalBytes||objectOid('state-refs',raw)!==mapping.refsOid)throw Error('hash_mismatch');const refs=parseCanonicalJson(raw);exact(refs,['body','signature']);exact(refs.body,['scope','stateOid','segmentOids']);sameScope(refs.body.scope,this.scope);if(refs.body.stateOid!==row.stateOid||canonical(refs.body.segmentOids)!==canonical(s.noteSegments))throw Error('closure_incomplete');const signer=await this.approved(mapping.authorDeviceId);if(signer.keyId!==mapping.keyId)throw Error('signature_invalid');await verifySigned(this.crypto,signer.publicKey,'wrss.sync.v2/state-refs-sign',refs.body,refs.signature);
-     await emit({row,meta:m,state:s,placeholder:placeholder(row),placeholderText:placeholderText(row)});
+     if(segmented){await output({row,meta:m,state:s0,segments,placeholder:placeholder(row),placeholderText:placeholderText(row)});continue;}
+     const mapping=await stateRefs(windowId,row.stateOid);exact(mapping,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);sameScope(mapping.scope,this.scope);if(mapping.parentOid!==row.stateOid)throw Error('invalid_schema');oid(mapping.refsOid,'state-refs');const raw=await readPrefetched(mapping.refsOid);if(raw.length!==mapping.totalBytes||objectOid('state-refs',raw)!==mapping.refsOid)throw Error('hash_mismatch');const refs=parseCanonicalJson(raw);exact(refs,['body','signature']);exact(refs.body,['scope','stateOid','segmentOids']);sameScope(refs.body.scope,this.scope);if(refs.body.stateOid!==row.stateOid||canonical(refs.body.segmentOids)!==canonical(s.noteSegments))throw Error('closure_incomplete');const signer=await this.approved(mapping.authorDeviceId);if(signer.keyId!==mapping.keyId)throw Error('signature_invalid');await verifySigned(this.crypto,signer.publicKey,'wrss.sync.v2/state-refs-sign',refs.body,refs.signature);
+     await output({row,meta:m,state:s,placeholder:placeholder(row),placeholderText:placeholderText(row)});
     }
    }
    return decoded;

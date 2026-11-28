@@ -19,7 +19,6 @@ import {articleProjectionSignature} from '../sync/article-register-store';
 import {rssSourceKey,rssArticleId} from '../cloud/rss-identity';
 import {noteUpsert,upsert} from './note-rows';
 import {arrayRecordFeed,feedPages,wireDigest,type RecordFeed,type StatementFeed} from './record-feed';
-import {PAGE_BYTES} from './store';
 export {noteUpsert};
 export class WatchAccountBusinessSql implements AccountBusinessPort {
  constructor(private readonly db:ProjectionSql,private readonly projection:WatchProjectionStore,private readonly scope:Scope,private readonly idKey:Uint8Array,private readonly closures:Pick<WatchBusinessClosure,'recoveryValue'>,readonly verifyBody:AccountBusinessPort['verifyBody'],readonly reserve:AccountBusinessPort['reserve'],private readonly articleLocalRevision?:(id:string,entity:string)=>Promise<string|undefined>){}
@@ -33,8 +32,20 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
   * the records twice and the candidates once; across records it keeps only
   * identities and the small source/article/reading facts later steps need. */
  prepareFeed(feed:RecordFeed,before:SyncState):StatementFeed{return {run:()=>this.statements(feed,before)};}
- private async *statements(feed:RecordFeed,before:SyncState):AsyncGenerator<Statement[]>{
-  const statements:Statement[]=[],ids=new Set<string>(),unchanged=new Set<string>(),facts=feed.facts,count=facts.length;
+ /** The old native snapshot is already applied. Sources with cascading deletes
+  * and RSS state that resolves across articles still use the complete feed. */
+ async prepareDelta(records:SourceRecord[],before:SyncState){
+  if(records.some(r=>r.kind==='rss-state'||r.kind==='source'&&r.value.deleted))return null;
+  const retired=new Set<string>();
+  for(const url of new Set(records.filter(r=>r.kind==='article'&&r.value.rssSourceUrl).map(r=>r.value.rssSourceUrl as string))){
+   if((await this.db.query('SELECT 1 FROM sync_source_states WHERE url=? AND deleted=1',[url])).length)retired.add(url);
+  }
+  const feed=arrayRecordFeed(records,r=>entityKey(this.idKey,this.scope.repoId,r.kind,r.logicalId)),out:Statement[]=[];
+  for await(const page of this.statements(feed,before,retired))out.push(...page);
+  return out;
+ }
+ private async *statements(feed:RecordFeed,before:SyncState,deltaRetired?:ReadonlySet<string>):AsyncGenerator<Statement[]>{
+  const statements:Statement[]=[],unchanged=new Set<string>(),facts=feed.facts,count=facts.length;
   let keepsArticleBody=false;
   const sources=facts.flatMap(f=>f.source?[f.source]:[]),articles=facts.filter(f=>f.kind==='article'),readings=facts.filter(f=>f.kind==='book-reading');
   const current=before.cloud?.current,unchangedArticleRecipes=new Map<string,string>();
@@ -44,7 +55,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    if(cloud?.meta.kind==='article'&&cloud.meta.logicalId===id&&cloud.meta.payload.contentHash===contentHash&&!cloud.row.deleted&&cloud.row.recipeOid)return cloud.row.bodyRevision;
   };
   for(const f of facts){
-   const id=f.kind+'\0'+f.logicalId,entity=entityKey(this.idKey,this.scope.repoId,f.kind,f.logicalId);ids.add(id);
+   const id=f.kind+'\0'+f.logicalId,entity=entityKey(this.idKey,this.scope.repoId,f.kind,f.logicalId);
    const c=await this.projection.readCandidate(entity);
    if(!c||c.meta.kind!==f.kind||c.meta.logicalId!==f.logicalId||wireDigest(f.kind,{meta:c.meta.payload,state:c.state.payload})!==f.wire)continue;
    unchanged.add(id);
@@ -53,12 +64,24 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
     if(revision)unchangedArticleRecipes.set(f.logicalId,revision);
    }
   }
-  const removed:SourceRecord[]=[];let after='';
-  for(;;){const page=await this.projection.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const c=r.candidate;if(ids.has(c.meta.kind+'\0'+c.meta.logicalId))continue;const v=fromWire(c.meta.kind,c.meta.payload,c.state.payload);removed.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:c.meta.kind==='book-reading'?{bookId:v.bookId,chapterIndex:v.chapterIndex}:{}});}after=page.at(-1)!.entityKey;}
+  const removed:SourceRecord[]=[];
+  if(!deltaRetired){
+   const incoming=new Set(feed.keys);let after='';
+   for(;;){
+    const keys=await this.projection.candidateKeys(after);
+    if(!keys.length)break;
+    const missing=keys.filter(key=>!incoming.has(key));
+    for(let at=0;at<missing.length;at+=32)for(const r of await this.projection.candidateBatch(missing.slice(at,at+32))){
+     const c=r.candidate,v=c.meta.kind==='book-reading'?fromWire(c.meta.kind,c.meta.payload,c.state.payload):null;
+     removed.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:v?{bookId:v.bookId,chapterIndex:v.chapterIndex}:{}});
+    }
+    after=keys.at(-1)!;
+   }
+  }
   if(!removed.length&&unchanged.size===count&&!unchangedArticleRecipes.size)return;
   const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   const requireTable=(table:string)=>{if(!tables.has(table))throw Error('unsupported_feature');};
-  const retiredSources=new Set([...removed.filter(r=>r.kind==='source').map(r=>r.logicalId),...sources.filter(r=>r.value.deleted).map(r=>r.logicalId)]);
+  const retiredSources=new Set(deltaRetired??[...removed.filter(r=>r.kind==='source').map(r=>r.logicalId),...sources.filter(r=>r.value.deleted).map(r=>r.logicalId)]);
   // Detach retained articles before a source's FK cascade. Their physical IDs,
   // body receipts and reading rows must survive either record input order.
   for(const r of articles.filter(r=>retiredSources.has(r.rssSourceUrl as string))){requireTable('channels');requireTable('articles');statements.push({sql:"INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) VALUES('watchrss://phone-imports','',0,0)"},{sql:"UPDATE articles SET channel_id=(SELECT id FROM channels WHERE url='watchrss://phone-imports') WHERE id=COALESCE((SELECT item_id FROM article_register_state WHERE article_id=?),(SELECT item_id FROM sync_article_ids WHERE article_id=?))",params:[r.logicalId,r.logicalId]});}

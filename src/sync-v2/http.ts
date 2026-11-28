@@ -73,11 +73,24 @@ export class SyncV2Http {
  async requestResult(requestId:string){hexId(requestId,32);return this.json('GET','/requests/'+requestId);}
  async events(after:string,waitMillis=25000){checkD64(after);uint(waitMillis,25000);return this.json('GET','/events?after='+after+'&waitMillis='+waitMillis);}
  async batch(windowId:string,oids:string[]){hexId(windowId,32);return this.json('POST','/objects/batch-get',{scope:this.scope,windowId,oids});}
- async objects(windowId:string,ids:string[]){
+ async objects(windowId:string,ids:string[],onVerified?:(objects:Map<string,Uint8Array>)=>Promise<void>,concurrency=4){
   if(!ids.length||ids.length>32||ids.some(id=>!/^(meta|state|state-refs|tree):sha256:[a-f0-9]{64}$/.test(id)))throw Error('invalid_oid');
+  concurrency=Math.min(6,Math.max(1,Math.floor(concurrency)||1));
   const value=await this.batch(windowId,ids);exact(value,['version','scope','objects','nextOids']);if(jsonBytes(value).length>262144)throw Error('object_too_large');
   const result=decodeObjectBatch(ids,value,unb64,(id,raw)=>{if(raw.length>266264||id!==id.split(':')[0]+':sha256:'+sha256Hex(raw))throw Error('hash_mismatch');});
-  for(const id of result.nextOids)result.objects.set(id,await this.object(id,undefined,windowId));return result.objects;
+  if(result.objects.size)await onVerified?.(result.objects);
+  for(let at=0;at<result.nextOids.length;at+=concurrency){
+   const completed=new Map<string,Uint8Array>();
+   const outcomes=await Promise.allSettled(result.nextOids.slice(at,at+concurrency).map(async id=>{
+    const raw=await this.object(id,undefined,windowId);
+    if(id!==id.split(':')[0]+':sha256:'+sha256Hex(raw))throw Error('hash_mismatch');
+    completed.set(id,raw);
+   }));
+   if(completed.size)await onVerified?.(completed);
+   for(const outcome of outcomes)if(outcome.status==='rejected')throw outcome.reason;
+   for(const [id,raw] of completed)result.objects.set(id,raw);
+  }
+  return result.objects;
  }
  async object(id:string,range?:{start:number;end:number;totalBytes:number},windowId?:string){if(!/^[a-z-]+:sha256:[a-f0-9]{64}$/.test(id))throw Error('invalid_oid');if(/^(blob|recipe):/.test(id)&&!this.contentWrite)throw Error('feature_disabled');if(range){uint(range.start);uint(range.end);uint(range.totalBytes,266264);if(range.start>range.end||range.end>=range.totalBytes)throw Error('invalid_range');}
   if(windowId!==undefined)hexId(windowId,32);const r=await this.send('GET','/objects/'+encodeURIComponent(id)+(windowId===undefined?'':'?windowId='+windowId),undefined,range?{Range:'bytes='+range.start+'-'+range.end}:{});if(r.status===416)throw new SyncV2Error('invalid_range');if(r.status!==(range?206:200))throw new SyncV2Error(r.status===404?'object_missing':'transport_error');if(r.body.length>266264||r.headers['etag']!==id&&r.headers['ETag']!==id||String(r.body.length)!==(r.headers['content-length']??r.headers['Content-Length']))throw Error('invalid_encoding');if(range&&(r.body.length!==range.end-range.start+1||(r.headers['Content-Range']??r.headers['content-range'])!=='bytes '+range.start+'-'+range.end+'/'+range.totalBytes))throw Error('invalid_range');return r.body;}

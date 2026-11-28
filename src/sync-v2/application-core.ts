@@ -151,7 +151,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    return prepared?.manifest.bodyAvailable?articleBodyBytes(prepared.article):undefined;
   };
   const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:readArticlePlain}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
-  runtimeFactory=watchSyncV2({...authOptions,enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bodyResolver:resolveBody,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:3});
+  runtimeFactory=watchSyncV2({...authOptions,enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bodyResolver:resolveBody,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:6});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.

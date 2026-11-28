@@ -33,6 +33,7 @@ export interface AccountBusinessPort {
  prepare(records:SourceRecord[],before:SyncState):Promise<Statement[]>;
  /** R4: the same statements as a replayable feed over a replayable record feed. */
  prepareFeed?(records:RecordFeed,before:SyncState):StatementFeed;
+ prepareDelta?(records:SourceRecord[],before:SyncState):Promise<Statement[]|null>;
  /** Authenticated complete local recovery closure, including note attachments. */
  recoveryValue(entityKey:string):Promise<RecoveryValue>;
  /** Verify the complete target recipe/blob closure without changing the DB. */
@@ -421,7 +422,7 @@ export class WatchAccountControl {
  }
 
  private applied(s:SyncState,commitOid:string,revision:string,generation:string,requestId:string){
-  const next=clone(s);next.pendingChoice=s.pendingChoice?.inboxKeys.length?s.pendingChoice:null;next.activeGeneration=commitOid;next.hasUnsentEdits=false;next.acknowledgedLocalChangeRevision=s.localChangeRevision;next.editBase={accountOid:commitOid,generation};next.cloud={...next.cloud,editBases:{},editCreates:[],publicationHeld:[],publicationScan:null,pendingApplied:{requestId:digest(['applied',requestId,commitOid,revision]).slice(0,32),commitOid,refRevision:revision,rollbackGeneration:generation}};return next;
+  const next=clone(s);next.pendingChoice=s.pendingChoice?.inboxKeys.length?s.pendingChoice:null;next.activeGeneration=commitOid;next.hasUnsentEdits=false;next.acknowledgedLocalChangeRevision=s.localChangeRevision;next.editBase={accountOid:commitOid,generation};next.cloud={...next.cloud,followDelta:null,editBases:{},editCreates:[],publicationHeld:[],publicationScan:null,pendingApplied:{requestId:digest(['applied',requestId,commitOid,revision]).slice(0,32),commitOid,refRevision:revision,rollbackGeneration:generation}};return next;
  }
  async chooseLocal(proof:object,requestId:string){return this.choose(proof,requestId,false);}
  async chooseMerge(proof:object,requestId:string){return this.choose(proof,requestId,true);}
@@ -525,7 +526,9 @@ export class WatchAccountControl {
   const published=before.cloud?.lastPublication?.result?.account;
   if(before.activeGeneration===null&&published&&(!before.account||compareD64(before.account.revision,published.revision)<0))throw Error('first_follow_pending');
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};this.o.progress?.()?.stage('write');const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
-  try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
+  try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();
+  if(before.cloud?.followDelta)await this.o.store.dropInactiveCloudRows(before.cloud.current.treeRoot);
+  return {applied:true};
  }
  /** R4: follow reads the current tree one entity (or one bounded page) at a
   * time for every pass; the peak is one long note, whatever the row count. */
@@ -558,6 +561,27 @@ export class WatchAccountControl {
   return {applied:true};
  }
  private async followStatements(before:SyncState,retained?:ReadonlyMap<string,SourceRecord>){
+  const delta=before.cloud?.followDelta,current=before.cloud?.current;
+  if(!retained&&this.o.business.prepareDelta&&delta&&current&&delta.from===before.activeGeneration&&delta.to===before.account?.oid&&
+   current.commitOid===delta.to&&sameBusinessRevision(before.businessRevision,delta.businessRevision)){
+   const checkpoint=await this.o.store.checkpoint();
+   if(checkpoint?.phase==='complete'&&sameBusinessRevision(checkpoint.businessRevision,before.businessRevision)){
+    const records:SourceRecord[]=[];
+    for(const key of delta.keys){
+     const row=await this.o.store.cloudRow(current.treeRoot,key);
+     if(!row||row.unopenable)throw Error('closure_incomplete');
+     records.push(...this.records([(await this.openable(row))!]));
+    }
+    // Bounded inline apply. Larger note bodies retain the native paged journal.
+    if(bytes(JSON.stringify(records)).length<=PAGE_BYTES/4){
+     const business=await this.o.business.prepareDelta(records,before);
+     if(business)try{
+      const statements=await this.o.store.prepareFollowDelta(before,records,business);
+      if(bytes(JSON.stringify(statements)).length<=PAGE_BYTES)return statements;
+     }catch(error){if((error as Error).message!=='page_too_large')throw error;}
+    }
+   }
+  }
   if(!this.o.business.prepareFeed){const records=[...this.records(await this.cloud(before)),...(retained?.values()??[])];return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
   return this.o.store.preparePagedProjection(before,async()=>{
    const records=await this.cloudFeed(before,retained);return {records,business:this.o.business.prepareFeed!(records,before)};

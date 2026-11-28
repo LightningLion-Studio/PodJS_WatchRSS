@@ -1,4 +1,4 @@
-import {canonical,jsonBytes,parseCanonicalJson,type Scope} from './protocol';
+import {canonical,jsonBytes,parseCanonicalJson,oid,type Scope} from './protocol';
 import {sameScope,indexRow} from './wire';
 import {objectOid} from './sealed';
 /** Canonical wire tree. The P1 local radix cache is not a wire tree. */
@@ -9,11 +9,14 @@ export function buildTree(scope:Scope,rows:any[],prefix=''): {oid:string;bytes:U
  const id=objectOid('tree',raw);nodes.set(id,raw);return {oid:id,bytes:raw,nodes};
 }
 /** Verify the complete signed-root closure, including canonical split decisions. */
-export async function readTree(scope:Scope,root:string,get:(oid:string)=>Promise<Uint8Array>){
- const seen=new Set<string>();let total=0;const walk=async(id:string,prefix:string):Promise<any[]>=>{
-  if(seen.has(id)||seen.size>=1000000)throw Error('invalid_schema');seen.add(id);const raw=await get(id);if(objectOid('tree',raw)!==id)throw Error('hash_mismatch');const node=parseCanonicalJson(raw);sameScope(node.scope,scope);if(node.version!==2||node.prefix!==prefix)throw Error('invalid_schema');
+export async function readTree(scope:Scope,root:string,get:(oid:string)=>Promise<Uint8Array>,prefetch?:(oids:string[])=>Promise<Map<string,Uint8Array>>){
+ const seen=new Set<string>();let total=0;const walk=async(id:string,prefix:string,loaded?:Uint8Array):Promise<any[]>=>{
+  if(seen.has(id)||seen.size>=1000000)throw Error('invalid_schema');seen.add(id);const raw=loaded??await get(id);if(objectOid('tree',raw)!==id)throw Error('hash_mismatch');const node=parseCanonicalJson(raw);sameScope(node.scope,scope);if(node.version!==2||node.prefix!==prefix)throw Error('invalid_schema');
   if(node.form==='leaf'){if(canonical(Object.keys(node).sort())!==canonical(['form','prefix','rows','scope','version']))throw Error('invalid_schema');if(!Array.isArray(node.rows)||node.rows.length>256)throw Error('invalid_schema');total+=node.rows.length;if(total>1000000)throw Error('object_too_large');if(raw.length>262144)throw Error('object_too_large');for(const row of node.rows)indexRow(row);if(node.rows.some((r:any,i:number)=>!r.entityKey.startsWith(prefix)||i>0&&node.rows[i-1].entityKey>=r.entityKey))throw Error('invalid_schema');return node.rows;}
-  if(node.form!=='node'||prefix.length>=64||canonical(Object.keys(node).sort())!==canonical(['children','form','prefix','scope','version'])||!Array.isArray(node.children)||node.children.length===0||node.children.length>16)throw Error('invalid_schema');const rows:any[]=[];let prior='';for(const child of node.children){if(canonical(Object.keys(child).sort())!==canonical(['count','digit','oid'])||!/[0-9a-f]/.test(child.digit)||child.digit.length!==1||child.digit<=prior)throw Error('invalid_schema');prior=child.digit;const part=await walk(child.oid,prefix+child.digit);if(child.count!==part.length)throw Error('invalid_schema');rows.push(...part);}if(rows.length<=256&&jsonBytes({version:2,scope,form:'leaf',prefix,rows}).length<=262144)throw Error('invalid_schema');return rows;
+  if(node.form!=='node'||prefix.length>=64||canonical(Object.keys(node).sort())!==canonical(['children','form','prefix','scope','version'])||!Array.isArray(node.children)||node.children.length===0||node.children.length>16)throw Error('invalid_schema');const rows:any[]=[];let prior='';
+  for(const child of node.children){if(canonical(Object.keys(child).sort())!==canonical(['count','digit','oid'])||!/[0-9a-f]/.test(child.digit)||child.digit.length!==1||child.digit<=prior)throw Error('invalid_schema');oid(child.oid,'tree');prior=child.digit;}
+  const loadedChildren=await prefetch?.(node.children.map((child:any)=>child.oid));
+  for(const child of node.children){const part=await walk(child.oid,prefix+child.digit,loadedChildren?.get(child.oid));if(child.count!==part.length)throw Error('invalid_schema');rows.push(...part);}if(rows.length<=256&&jsonBytes({version:2,scope,form:'leaf',prefix,rows}).length<=262144)throw Error('invalid_schema');return rows;
  };return walk(root,'');
 }
 
