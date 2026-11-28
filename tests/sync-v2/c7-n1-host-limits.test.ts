@@ -75,7 +75,7 @@ async function watch(server:C7Backend,o:{readerBudget?:number;publisherBudget?:n
   write(id:string,text:string,updatedAt:number){db.raw.query('INSERT INTO memo_notes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(note_id) DO UPDATE SET markdown=excluded.markdown,plain_text=excluded.plain_text,base_markdown=excluded.base_markdown,content_hash=excluded.content_hash,updated_at=excluded.updated_at').run(id,null,'title '+id,text,text,'h'+updatedAt,'base-h',text,0,1,updatedAt,'watch',0,0);},
   /** Foreground editor replacement of one field only (long unsent edit shape). */
   writeEdit(id:string,markdown:string,updatedAt:number){db.raw.query('UPDATE memo_notes SET markdown=?,plain_text=?,base_markdown=?,content_hash=?,base_content_hash=?,updated_at=? WHERE note_id=?').run(markdown,'','small v1','h'+updatedAt,'base-h',updatedAt,id);},
-  async publish(){await scan();const plan=await publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));await publisher.flush();await reader.pull(server.window());return plan;},
+  async publish(){await scan();const plan=await publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));if(!plan.skipped)await publisher.flush();await reader.pull(server.window());return plan;},
   async follow(){const r=await control.follow(server.window());await scan();return r;},
   note:async(id:string)=>(await db.query('SELECT length(markdown) AS n,substr(markdown,1,16) AS head,substr(markdown,-16) AS tail FROM memo_notes WHERE note_id=?',[id]))[0]??null,
   notes:async()=>db.raw.query('SELECT note_id,markdown,base_markdown,deleted FROM memo_notes ORDER BY note_id').all() as any[],

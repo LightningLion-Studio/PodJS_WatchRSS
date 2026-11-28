@@ -1,10 +1,11 @@
 import {expect, test} from 'bun:test';
+import type {SyncV2RoundResult} from '../../src/sync-v2/product-start';
 import {WatchCloudSyncService} from '../../src/cloud/service';
 import {cloudSyncView} from '../../src/ui/cloud-sync-view';
 import {crypto, enabled} from './k2-crypto';
 import {fixture} from './service-fixture';
 
-async function setup(syncV2: () => Promise<void | {completionError:string|null} | null>, announced = true, online = true) {
+async function setup(syncV2: () => Promise<void | SyncV2RoundResult | null>, announced = true, online = true) {
  const f = await fixture();
  const bootstrap = f.client.bootstrap.bind(f.client);
  if (announced) f.client.bootstrap = async () => ({
@@ -125,4 +126,17 @@ test.each(['projection_preparing','first_follow_pending'])('v2 %s schedules a co
  const service=await setup(async()=>{throw Error(code);});
  expect(await service.syncNowResult()).toMatchObject({ok:false,retryable:true,retryAtMillis:11_000});
  expect(service.status).toMatchObject({phase:'idle',v2Attention:'cloud_v2_pending',lastCompletedAt:0});
+});
+
+test.each(['cloud_v2_pending','cloud_v2_read_only','replay_detected'])('v2 %s ends the foreground attempt without a timed retry',async completionError=>{
+ const service=await setup(async()=>({completionError}));
+ const result=await service.syncNowResult();
+ expect(result).toMatchObject({ok:false,retryable:false});
+ expect(result.retryAtMillis).toBeUndefined();
+ expect(result.continuationReady).toBe(false);
+});
+
+test('v2 chunking schedules continuation even though the attempt is incomplete',async()=>{
+ const service=await setup(async()=>({completionError:'cloud_v2_pending',chunked:true}));
+ expect(await service.syncNowResult()).toMatchObject({ok:false,retryable:true,retryAtMillis:11_000,continuationReady:true});
 });

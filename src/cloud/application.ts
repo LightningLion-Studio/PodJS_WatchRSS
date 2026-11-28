@@ -158,7 +158,12 @@ function start(){
    if(!initialized||!cloudGate.allowed||!accountReady||!accountId||v2Writers||!scheduler?.headPollIdle||
      !syncV2Ready?.syncV2||!heldKeys.size)return false;
    const status=runtime!.service.status;
-   return status.member?.readable===true&&status.phase!=='waiting-approval'&&!status.ownerChoiceRequired&&status.retryable!==false;
+   // Pending local work may be terminal for this attempt while the account
+   // can still receive an independent head change.
+   const attention=status.v2Attention;
+   const canFollow=attention==='cloud_v2_pending'||attention==='cloud_v2_read_only'||
+    attention==='body_channel_source_missing'||attention==='body_channel_capacity_pending';
+   return status.member?.readable===true&&status.phase!=='waiting-approval'&&!status.ownerChoiceRequired&&(status.retryable!==false||canFollow);
   };
   headPoll=new WatchHeadPoll({
    eligible:pollEligible,

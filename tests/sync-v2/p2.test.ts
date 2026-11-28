@@ -224,7 +224,7 @@ test('P2 stronger business audit invalidates old checkpoint and does not publish
 test('P2 pre-upgrade encrypted candidates cannot bypass book identity validation at publication',async()=>{
  const server=new SyntheticIndexBackend(),f=await publishingFixture(server);try{const old=await f.store.candidatePage(),candidate=structuredClone(old[0].candidate),book=structuredClone(vector('book-merge').cases[0].expected),entity=entityKey(idKey,scope.repoId,'book',book.bookId),invalid=candidates('book',book.bookId,entity,book,50);invalid.meta.payload.fingerprint='f'.repeat(64);
   const aad=canonical({domain:'wrss.sync.v2/local-projection',version:2,scope,libraryId,purpose:'candidate',id:entity});await f.db.execute('DELETE FROM syncv2_candidates');await f.db.execute('INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?)',[canonical(scope),entity,await cipher.seal(aad,invalid),invalid.metaBytes,invalid.stateBytes,50,'1']);
-  const before=await f.store.candidatePage();await expect(f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'e'.repeat(32))).rejects.toThrow('book_sync_invalid');expect(await f.store.candidatePage()).toEqual(before);expect((await f.store.readState()).cloud.pendingPublish).toBe(null);expect(server.calls['/account/publish']??0).toBe(0);
+  const before=await f.store.candidatePage(),state=await f.store.readState();await expect(f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'e'.repeat(32))).rejects.toThrow('book_sync_invalid');expect(await f.store.candidatePage()).toEqual(before);expect(await f.store.readState()).toEqual(state);expect(server.calls['/account/publish']??0).toBe(0);
  }finally{f.db.close();}
 });
 

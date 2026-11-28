@@ -75,7 +75,7 @@ async function watchDevice(server:Server,budget:number){
  return {db,projection,publisher,reader,control,scan,memo:new MemoRepository(db as any,'watch-device',()=>randomBytes(16).toString('hex'),()=>server.clock),
   async follow(){const r=await control.follow(server.window());await scan();return r;},
   async prepare(){await scan();return publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));},
-  async publish(){const plan=await this.prepare();await publisher.flush();await reader.pull(server.window());return plan;},
+  async publish(){const plan=await this.prepare();if(!plan.skipped)await publisher.flush();await reader.pull(server.window());return plan;},
   note:async(id:string)=>(await db.query('SELECT * FROM memo_notes WHERE note_id=?',[id]))[0] as any??null,
   notes:async()=>(await db.query('SELECT note_id,markdown,deleted FROM memo_notes ORDER BY note_id')) as any[],
   close(){db.close();rmSync(root,{recursive:true,force:true});},
@@ -142,7 +142,10 @@ test('R2 (probe A): a quarantined note changed outside the edit entries is kept 
  const server=new C7P5Backend(),phone=await client(server),watch=await watchDevice(server,300000);try{
   const {ex,remoteX}=await quarantine(server,phone,watch);expect(await watch.follow()).toEqual({applied:true});
   await watch.db.execute('UPDATE memo_notes SET markdown=?,updated_at=updated_at+1 WHERE note_id=?',['WATCH EDIT OF X','x']);
-  await watch.publish();expect((await serverRow(server,ex))!.row.stateOid).toBe(remoteX.stateOid);
+  const revision=server.account.revision;
+  expect(await watch.publish()).toMatchObject({skipped:true,changedRows:0});
+  expect(server.account.revision).toBe(revision);
+  expect((await serverRow(server,ex))!.row.stateOid).toBe(remoteX.stateOid);
   const [kept]=await copies(watch);expect(kept?.markdown).toBe('WATCH EDIT OF X');expect((await watch.projection.readState()).hasUnsentEdits).toBe(true);
   await watch.publish();expect((await watch.projection.readState()).hasUnsentEdits).toBe(false);
   const ek=await entityOf({store:watch.projection},kept.note_id);expect(markdownOf(await serverRow(server,ek))).toBe('WATCH EDIT OF X');

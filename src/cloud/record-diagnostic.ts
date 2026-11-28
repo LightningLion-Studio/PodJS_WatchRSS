@@ -4,7 +4,7 @@ const syncV2Codes=new Set([
  'body_channel_source_missing','body_channel_capacity_pending','body_channel_pending',
  'body_channel_waiting_wifi','body_channel_write_disabled','body_channel_source_pending','body_channel_bluetooth_pending',
  'body_revision_changed','choice_stale','invalid_schema','ref_conflict','page_too_large','ref_continuity_unavailable',
- 'hash_mismatch','object_missing','projection_incomplete','publication_expired','too_many_temporary_files','window_expired',
+ 'hash_mismatch','replay_detected','object_missing','projection_incomplete','publication_expired','too_many_temporary_files','window_expired',
 ]);
 /** No exception text, request identifiers, URLs or credentials enter diagnostics. */
 export function recordFailureDiagnostic(error:unknown,stage?:RecordFailureStage,durationMillis?:number):string{

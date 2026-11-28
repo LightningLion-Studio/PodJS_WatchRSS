@@ -67,8 +67,22 @@ export class WatchIndexPublisher {
   let before=await this.store.readState();if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
   const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish||saved.preparingPublication)throw Error('publication_pending');
   const checkpoint=await this.store.checkpoint();if(checkpoint?.phase!=='complete'||!sameBusinessRevision(checkpoint.businessRevision,before.businessRevision))throw Error('projection_incomplete');
-  let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
-  sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
+  let reservedSequence:string|undefined;
+  const reserveSequence=async()=>{
+   if(reservedSequence!==undefined)return reservedSequence;
+   let sequence=saved.deviceSequence??'0';
+   if(own.commitOid){
+    const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));
+    const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);
+    if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');
+    if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;
+   }
+   const nextSequence=nextD64(sequence),reserved=copy(before);
+   reserved.cloud={...saved,deviceSequence:nextSequence};
+   await this.store.controlUpdate(before,reserved);
+   before=reserved;
+   return reservedSequence=nextSequence;
+  };
   // The authenticated root supplies unchanged rows to updateTree. Open cache
   // entries only for candidates being compared, within their bounded pages.
   const objects=new Map<string,Uint8Array>(),changedRows:any[]=[],bindings:Statement[]=[],root=saved.current?.treeRoot??null;this.segmentStats={uploaded:0,reused:0};
@@ -141,6 +155,7 @@ export class WatchIndexPublisher {
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)return true;
    if(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs)){heldEdits=true;budgetReached=true;return false;}
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
+   await reserveSequence();
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
    const hasBody=!isBodyTombstone(c)&&['article','book','asset'].includes(c.meta.kind),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
@@ -170,6 +185,7 @@ export class WatchIndexPublisher {
    skipped:true as const,heldEdits:true as const,changedRows:0,segments:{...this.segmentStats},
    heldCreates:heldOther?[]:heldCreates,stateVersion:before.stateVersion,localRevision:before.localChangeRevision,
   };
+  const sequence=await reserveSequence();
   const fetch=(id:string)=>this.http.object(id);
   const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,changedRows);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);

@@ -71,7 +71,18 @@ export class WatchCloudIndex {
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
    if(!signingChanged&&saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
-    if(!readOnly&&window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.observationUpdate(before,next);}
+    if(!readOnly){
+     // A local edit to a quarantined note must be kept even when the cloud
+     // head stays the same. The authenticated cached rows are sufficient.
+     const entities=before.hasUnsentEdits?Object.values<UnopenableNotes[string]>(saved.unopenableNotes??{}).map(note=>note.entityKey):[];
+     const kept=entities.length?await this.keepQuarantinedEdits(entities,before,saved):null;
+     if(window.serverRevision!==saved.cursor||kept&&canonical(kept.baselines)!==canonical(saved.unopenableBaselines??{})){
+      const next=copy(before);
+      next.cloud={...saved,cursor:window.serverRevision,...(kept?{unopenableBaselines:kept.baselines}:{})};
+      if(this.now()>window.expiresAtMillis)throw Error('window_expired');
+      await this.store.observationUpdate(before,next,kept?.statements??[]);
+     }
+    }
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
@@ -125,7 +136,7 @@ export class WatchCloudIndex {
   next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count,...(signingFingerprint?{signingFingerprint}:{})},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision&&saved.lastPublication.heldEdits!==true){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
-  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,staged,saved);next.cloud.unopenableBaselines=kept.baselines;
+  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen.filter(r=>r.note&&r.unopenable).map(r=>r.entityKey),staged,saved);next.cloud.unopenableBaselines=kept.baselines;
   if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
@@ -138,15 +149,15 @@ export class WatchCloudIndex {
   * a crash re-run recreates the same single note; WatchProjectionStore
   * .prepareQuarantineCopies moves every statement through bounded encrypted
   * pages and the CAS carries only the small program marker. */
- private async keepQuarantinedEdits(seen:readonly ObservedRow[],before:SyncState,saved:any){
+ private async keepQuarantinedEdits(entities:readonly string[],before:SyncState,saved:any){
   const baselines:Record<string,string|null>={},prior:Record<string,string|null>=saved.unopenableBaselines??{},root=saved.current?.treeRoot??null,sameBase=saved.current?.commitOid===before.editBase.accountOid;
   const copies:{entityKey:string;digest:string;noteId:string}[]=[];
-  for(const r of seen){if(!r.note||!r.unopenable)continue;
-   const candidate=await this.store.readCandidate(r.entityKey),local=candidate?noteEditDigest(candidate):null;baselines[r.entityKey]=local;if(!candidate)continue;
-   const old=root?await this.store.cloudRow(root,r.entityKey):null;
-   const edited=old?.unopenable?Object.hasOwn(prior,r.entityKey)&&prior[r.entityKey]!==local:before.hasUnsentEdits&&(sameBase?!old||noteEditDigest(old)!==local:Object.hasOwn(saved.editBases??{},r.entityKey)||(saved.editCreates??[]).includes(r.entityKey));
+  for(const entityKey of entities){
+   const candidate=await this.store.readCandidate(entityKey),local=candidate?noteEditDigest(candidate):null;baselines[entityKey]=local;if(!candidate)continue;
+   const old=root?await this.store.cloudRow(root,entityKey):null;
+   const edited=old?.unopenable?Object.hasOwn(prior,entityKey)&&prior[entityKey]!==local:before.hasUnsentEdits&&(sameBase?!old||noteEditDigest(old)!==local:Object.hasOwn(saved.editBases??{},entityKey)||(saved.editCreates??[]).includes(entityKey));
    const value=edited?fromWire('note',candidate.meta.payload,candidate.state.payload):null;if(!value||value.deleted)continue;
-   copies.push({entityKey:r.entityKey,digest:local!,noteId:copyNoteId(this.scope,this.keys.id,r.entityKey,local!)});
+   copies.push({entityKey,digest:local!,noteId:copyNoteId(this.scope,this.keys.id,entityKey,local!)});
   }
   if(!copies.length)return {baselines,statements:[] as Statement[]};
   const store=this.store;

@@ -27,7 +27,7 @@ export async function rememberSettledRound(store:WatchProjectionStore,state:Sync
  catch(error){if((error as Error).message!=='choice_stale')throw error;}
 }
 
-export function assertRoundHeadMonotonic(state:SyncState,window:Awaited<ReturnType<ReturnType<typeof watchIndexAuthentication>['checkpoint']>>){
+function assertRoundHeadMonotonic(state:SyncState,window:Awaited<ReturnType<ReturnType<typeof watchIndexAuthentication>['checkpoint']>>){
  const remote=window.account,account=state.account;
  if(compareD64(remote.revision,state.lastSeenAccountRevision)<0||
   compareD64(remote.rollbackGeneration,state.rollbackGeneration)<0||
