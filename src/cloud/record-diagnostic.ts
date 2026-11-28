@@ -1,10 +1,16 @@
 import {cloudDiagnosticHostMethod} from './host-capability';
 export type RecordFailureStage='open'|'pull'|'interactions'|'reapply'|'flush'|'confirm';
+const syncV2Codes=new Set([
+ 'body_channel_source_missing','body_channel_capacity_pending','body_channel_pending',
+ 'body_channel_waiting_wifi','body_channel_write_disabled','body_channel_source_pending','body_channel_bluetooth_pending',
+ 'body_revision_changed','choice_stale','invalid_schema','ref_conflict','page_too_large','ref_continuity_unavailable',
+ 'hash_mismatch','object_missing','projection_incomplete','publication_expired','too_many_temporary_files','window_expired',
+]);
 /** No exception text, request identifiers, URLs or credentials enter diagnostics. */
 export function recordFailureDiagnostic(error:unknown,stage?:RecordFailureStage,durationMillis?:number):string{
  const value=error&&typeof error==='object'?error as {message?:unknown;code?:unknown;status?:unknown;name?:unknown;method?:unknown}:{};
  const message=typeof value.message==='string'?value.message:'';
- const allowed=(v:unknown)=>typeof v==='string'&&v.length<=80&&(/^(?:cloud_|book_|library_|raw_json_)[a-z_]+$/.test(v)||['request_too_large','secure_quota','secure_store_too_large','secure_read_failed','secure_store_corrupt','snapshot_content_layout_unsupported','r48_write_feature_disabled','upload_reservation_not_found','snapshot_not_found','reservation_expired','account_switch_rejected','account_missing','device_key_conflict','rotation_proof_invalid','device_attestation_invalid','missing_key_version','client_upgrade_required','device_session_revoked','invalid_session','missing_device_authorization','service_maintenance'].includes(v));
+ const allowed=(v:unknown)=>typeof v==='string'&&v.length<=80&&(/^(?:cloud_|book_|library_|raw_json_)[a-z_]+$/.test(v)||syncV2Codes.has(v)||['request_too_large','secure_quota','secure_store_too_large','secure_read_failed','secure_store_corrupt','snapshot_content_layout_unsupported','r48_write_feature_disabled','upload_reservation_not_found','snapshot_not_found','reservation_expired','account_switch_rejected','account_missing','device_key_conflict','rotation_proof_invalid','device_attestation_invalid','missing_key_version','client_upgrade_required','device_session_revoked','invalid_session','missing_device_authorization','service_maintenance'].includes(v));
  const legacyTrust=/^Cloud HTTP [1-5][0-9]{2} (device_key_conflict|rotation_proof_invalid|device_attestation_invalid)$/.exec(message)?.[1];
  const code=value.code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(message)?'cloud_local_storage_full':legacyTrust??(message==='Cloud lease already owned'?'cloud_writer_busy':/^account_busy(?::|$)/.test(message)?'cloud_account_busy':/^library_owner_mismatch(?::|$)/.test(message)?'library_owner_mismatch':/setTimeout is not defined|Can't find variable: setTimeout/.test(message)?'host_timer_unavailable':/SQLite|SQLITE_/.test(message)?'host_sqlite_failure':/Local library changed/.test(message)?'library_busy':/Query exceeds 1000 rows; use LIMIT and pagination/.test(message)?'host_query_row_limit':/Query result too large; use paging/.test(message)?'host_query_bytes_limit':allowed(value.code)?value.code:allowed(message)?message:stage?'cloud_records_'+stage+'_failed':'unclassified');
  const status=Number.isInteger(value.status)&&Number(value.status)>=100&&Number(value.status)<=599?Number(value.status):undefined;

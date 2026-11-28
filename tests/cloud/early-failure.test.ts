@@ -55,6 +55,12 @@ test('release failure cannot replace the primary failure and its diagnostic expo
  const events:any[]=[];const runtime=createCloudRuntime(async<T>(method:string)=>{if(method==='cloud.acquire')return {acquired:true} as T;if(method==='cloud.release')throw Error(secret);if(method==='file.list')throw Error('account_busy: '+secret);throw Error('unexpected');},async()=>{throw Error('unused');},enabled,undefined,undefined,undefined,{formatDiagnostic:v=>events.push(JSON.parse(v))});
  expect(await runtime.service.syncNow()).toBe(false);expect(events.at(-1)).toMatchObject({code:'cloud_account_busy',cleanupCode:'cloud_sync_lease_release_failed',outcome:'deferred',category:'busy'});expect(JSON.stringify(events)).not.toMatch(/PRIVATE|private.invalid|secret/);
 });
+test('sync v2 diagnostics keep allowlisted body errors and redact arbitrary messages',()=>{
+ const code='body_channel_source_missing';
+ expect(JSON.parse(recordFailureDiagnostic(Error(code))).code).toBe(code);
+ expect(JSON.parse(recordFailureDiagnostic(Error(code+' '+secret))).code).toBe('unclassified');
+ expect(recordFailureDiagnostic(Object.assign(Error(secret),{code}))).not.toContain(secret);
+});
 test('foreground suspension and exhausted budget before session open have fixed codes and never open an account',async()=>{
  for(const suspended of [true,false]){const events:any[]=[],execution=new CloudForegroundExecution(!suspended);let now=0,opened=0;
  const service=new WatchCloudSyncService({open:async()=>{execution.begin();opened++;return undefined;},network:async()=>{if(!suspended)now=CLOUD_SYNC_BUDGET_MILLIS;return {active:true,validated:true,wifi:true,metered:false};},hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async run=>run(),now:()=>now,formatDiagnostic:v=>events.push(JSON.parse(v))},enabled);
