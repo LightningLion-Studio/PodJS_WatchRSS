@@ -2,6 +2,8 @@ import {expect,test,spyOn} from 'bun:test';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {bookIdInput} from '../../src/books/protocol';
 import {initializeSchema} from '../../src/core/schema';
+import {WatchRssRepository} from '../../src/core/repository';
+import {rssDedupKey} from '../../src/core/rss-dedup-key';
 import {SqlReadingProgressStore} from '../../src/reader/sql-progress';
 import {LocalArticleManifestStore} from '../../src/sync/local-manifest';
 import {DIRTY_LIMIT,businessRevision,installBusinessRevision} from '../../src/sync-v2/business-revision';
@@ -127,30 +129,62 @@ for(const size of [320,640])test(`one native edit in ${size} cold candidates tou
  }finally{f.db.close();}
 },120_000);
 
-test('article fetch clocks agree between incremental and full projection',async()=>{
- const f=await fixture(3);
+test('article clocks agree between incremental and full projection for RSS and both import channels',async()=>{
+ const f=await fixture(5);
  try{
+  const published='Fri, 27 Nov 2026 12:00:00 GMT';
+  const article=(id:number)=>'https://example.invalid/'+id;
   await f.db.transaction([
    {sql:"INSERT INTO channels(id,url,title,created_at) VALUES(3,'https://watchrss.local/import-content/example','Local',10)"},
+   {sql:"INSERT INTO channels(id,url,title,created_at) VALUES(4,'http://example.invalid/feed','HTTP feed',11)"},
    {sql:'UPDATE articles SET channel_id=3 WHERE id=2'},
-   {sql:'UPDATE articles SET channel_id=2,is_read=1 WHERE id=3'},
+   {sql:'UPDATE articles SET channel_id=2,is_read=1,pub_date=? WHERE id=3',params:[published]},
+   {sql:'UPDATE articles SET channel_id=2,is_read=1 WHERE id=4'},
+   {sql:"UPDATE articles SET channel_id=4,is_read=1,pub_date='invalid' WHERE id=5"},
   ]);
+  for(const id of [3,4,5])await f.db.execute('UPDATE articles SET dedup_key=? WHERE id=?',[rssDedupKey(null,article(id),'Article '+id),id]);
+  const rss=new WatchRssRepository(f.db,async()=>{throw Error('network not expected');});
+  const feed=(title:string,items:[number,string?][])=>`<rss><channel><title>${title}</title>${items.map(([id,date])=>
+   `<item><title>Article ${id}</title><link>${article(id)}</link>${date?`<pubDate>${date}</pubDate>`:''}</item>`).join('')}</channel></rss>`;
+  const httpsFeed=feed('Feed',[[3,published],[4]]),httpFeed=feed('HTTP feed',[[5,'invalid']]);
+  await rss.refreshChannel(2,httpsFeed);await rss.refreshChannel(4,httpFeed);
   await f.scan();
   const candidates=async()=>new Map((await f.store.candidatePage())
    .filter(({candidate})=>candidate.meta.kind==='article')
    .map(({candidate})=>[candidate.meta.payload.url,candidate]));
-  const before=await candidates(),revision=await businessRevision(f.db);
-  await f.db.execute('UPDATE articles SET fetched_at=30 WHERE id=3');
+  const before=await candidates();
+  expect(before.get(article(3))?.state.payload.updatedAt).toBe(Date.parse(published));
+  expect(before.get(article(4))?.state.payload.updatedAt).toBe(10);
+  expect(before.get(article(5))?.state.payload.updatedAt).toBe(11);
+  const revision=await businessRevision(f.db);
+  const fetchTime=spyOn(Date,'now');
+  try{
+   for(const fetchedAt of [30,45]){
+    fetchTime.mockReturnValue(fetchedAt);
+    await rss.refreshChannel(2,httpsFeed);await rss.refreshChannel(4,httpFeed);
+   }
+  }finally{fetchTime.mockRestore();}
+  expect(await f.db.query('SELECT DISTINCT fetched_at FROM articles WHERE id IN (3,4,5)')).toEqual([{fetched_at:45}]);
   expect(await businessRevision(f.db)).toEqual(revision);
+  const corrected='2026-11-28T12:00:00.000Z';
+  await f.db.execute('UPDATE articles SET pub_date=? WHERE id=3',[corrected]);
   await f.db.execute('UPDATE articles SET fetched_at=25 WHERE id IN (1,2)');
   f.reset();await f.scan();
   const incremental=await candidates();
-  expect(f.counts()).toMatchObject({fullPages:0,projected:2});
-  expect(incremental.get('https://example.invalid/1')?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:25});
-  expect(incremental.get('https://example.invalid/2')?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:0});
-  expect(incremental.get('https://example.invalid/3')).toEqual(before.get('https://example.invalid/3'));
+  expect(f.counts()).toMatchObject({fullPages:0,projected:3});
+  expect(incremental.get(article(1))?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:25});
+  expect(incremental.get(article(2))?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:0});
+  expect(incremental.get(article(3))?.state.payload.updatedAt).toBe(Date.parse(corrected));
+  expect(incremental.get(article(4))).toEqual(before.get(article(4)));
+  expect(incremental.get(article(5))).toEqual(before.get(article(5)));
   await f.store.restartScan();await f.scan();
   expect(await candidates()).toEqual(incremental);
+  await f.db.execute('UPDATE channels SET created_at=20 WHERE id=4');
+  await f.scan();
+  const moved=await candidates();
+  expect(moved.get(article(5))?.state.payload.updatedAt).toBe(20);
+  await f.store.restartScan();await f.scan();
+  expect(await candidates()).toEqual(moved);
  }finally{f.db.close();}
 });
 

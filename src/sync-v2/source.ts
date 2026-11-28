@@ -2,6 +2,7 @@ import {unhex,hex} from '@podjs/framework/crypto';
 import {decodeUtf8Chunk,encodeUtf8} from '@podjs/framework/bytes';
 import {readSqlKeysetPage,readSqlTextPieces,type ProjectionSql} from '@podjs/framework/sql-projection';
 import {canonical,type Kind} from './protocol';
+import {publicRssChannel} from './business-revision';
 import type {SourceReader,SourceRecord} from './store';
 /** A materializer consumes one existing business row plus its stable key. It
  * must return the complete frozen business record. It may not change the DB.
@@ -40,7 +41,7 @@ export class SqlBusinessSource implements SourceReader {
   if(existing.has('article_register_state'))filters.push('NOT EXISTS(SELECT 1 FROM article_register_state r WHERE r.item_id=articles.id)');
   if(existing.has('sync_book_aliases'))filters.push('NOT EXISTS(SELECT 1 FROM sync_book_aliases b WHERE b.item_id=articles.id)');
   if(existing.has('channels')){
-   const relevant=['EXISTS(SELECT 1 FROM channels ch WHERE ch.id=articles.channel_id AND ((ch.url NOT LIKE \'http://%\' AND ch.url NOT LIKE \'https://%\') OR ch.url LIKE \'https://watchrss.local/import-%\'))','articles.is_read!=0','articles.is_saved!=0','articles.reading_progress>0'];
+   const relevant=[`EXISTS(SELECT 1 FROM channels ch WHERE ch.id=articles.channel_id AND NOT ${publicRssChannel('ch.url')})`,'articles.is_read!=0','articles.is_saved!=0','articles.reading_progress>0'];
    if(existing.has('article_saved_states'))relevant.push('EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=articles.id)');
    if(existing.has('sync_saved_states'))relevant.push('EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=articles.id)');
    if(existing.has('article_reading_state'))relevant.push('EXISTS(SELECT 1 FROM article_reading_state rs WHERE rs.article_id=articles.id AND (rs.progress>0 OR rs.changed_at>0 OR rs.position_bytes>0))');

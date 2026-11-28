@@ -4,6 +4,7 @@ import {conflictSet} from './note-conflict-set';
 import {importLegacy} from './notes-conflict';
 import {uint,type Kind} from './protocol';
 import {BUSINESS_FIELDS,fromWire} from './business';
+import {publicRssChannel} from './business-revision';
 import {decodeLocator,materializeFrozen,type Materialize} from './source';
 import type {SourceRecord} from './store';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
@@ -22,12 +23,15 @@ async function pendingBookReading(db:ProjectionSql,bookId:string,chapter:number,
  }return result;
 }
 type ArticleMetadata=Awaited<ReturnType<LocalArticleManifestStore['cloudRestoreMetadata']>>['articles'][number];
-function nativeArticleRecord(record:ArticleMetadata,addedAt:number):SourceRecord{
+type RssArticleClock={pub_date:unknown;created_at:unknown};
+function nativeArticleRecord(record:ArticleMetadata,addedAt:number,rssClock:RssArticleClock|undefined):SourceRecord{
  const value=Object.fromEntries(Object.entries(record).filter(([key])=>BUSINESS_FIELDS.article.includes(key)));
- const source=record.rssSourceUrl;
- // For public RSS, fetched_at is a cache timestamp, not a business clock.
- // Registered metadata has its own clock and never goes through this path.
- if(source&&/^https?:\/\//i.test(source)&&!/^https:\/\/watchrss\.local\/import-/i.test(source))value.updatedAt=0;
+ if(rssClock){
+  const published=Date.parse(String(rssClock.pub_date??''));
+  // RSS refreshes rewrite fetched_at. For undated rows, use the import
+  // witness or channel creation time. Legacy channels can lack both clocks.
+  value.updatedAt=published>0?published:addedAt||Math.max(1,Number(rssClock.created_at));
+ }
  // Only an explicit import witness proves first admission to the library.
  value.importedAt=addedAt;
  return {kind:'article',logicalId:record.articleId,value,...(addedAt>0?{addedAtMillis:addedAt}:{})};
@@ -35,6 +39,12 @@ function nativeArticleRecord(record:ArticleMetadata,addedAt:number):SourceRecord
 /** Uses the frozen legacy reader in its explicit read-only mode: no lookup
  * initialization, body scan, recipe computation, old cursor, or business writes. */
 export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>,previousBatchById?:(kind:Kind,logicalIds:string[])=>Promise<Map<string,any>>,bookReferenced?:(id:string)=>Promise<boolean>):Materialize {
+ const rssArticleClocks=async(ids:number[])=>{
+  const rows=await db.query(`SELECT a.id,substr(a.pub_date,1,128) AS pub_date,ch.created_at
+   FROM articles a JOIN channels ch ON ch.id=a.channel_id
+   WHERE a.id IN (${ids.map(()=>'?').join(',')}) AND ${publicRssChannel('ch.url')}`,ids);
+  return new Map(rows.map(row=>[Number(row.id),{pub_date:row.pub_date,created_at:row.created_at}]));
+ };
  const sourceOptions=async(value:any)=>{
   const previous=await previousById?.('source',value.url),tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_preferences','source_media_preferences')")).map(r=>String(r.name)));
   if(previous?.meta.payload.sourceId!==undefined)value.sourceId=previous.meta.payload.sourceId;
@@ -155,7 +165,8 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    const page=await metadata.cloudRestoreMetadata({itemIds:[Number(row.id)],limit:1},undefined,true);
    if(page.articles.length!==1)throw Error('source_identity_missing');
    const historical=(await db.query('SELECT imported_at FROM article_sync_encoding_cache WHERE item_id=? AND imported_at>0',[row.id]))[0];
-   return [nativeArticleRecord(page.articles[0]!,Number(historical?.imported_at??0))];
+   const clocks=await rssArticleClocks([Number(row.id)]);
+   return [nativeArticleRecord(page.articles[0]!,Number(historical?.imported_at??0),clocks.get(Number(row.id)))];
   }
   if(table==='sync_article_deletions'){
    const previous=await previousById?.('article',String(row.article_id));if(!previous)return materializeFrozen(table,row);
@@ -194,10 +205,11 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
     const neededMarks=needed.map(()=>'?').join(',');
     for(const r of await db.query(`SELECT item_id,imported_at FROM article_sync_encoding_cache WHERE item_id IN (${neededMarks}) AND imported_at>0`,needed))importedAt.set(Number(r.item_id),Number(r.imported_at));
    }
+   const clocks=await rssArticleClocks(needed);
    return ids.map(id=>{
     if(registered.has(id)||aliased.has(id))return [];
     const record=byItem.get(id);if(!record)throw Error('source_identity_missing');
-    return [nativeArticleRecord(record,importedAt.get(id)??0)];
+    return [nativeArticleRecord(record,importedAt.get(id)??0,clocks.get(id))];
    });
   }
   if(table==='sync_book_reading'){

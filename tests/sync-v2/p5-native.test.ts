@@ -16,6 +16,45 @@ test('P5 native article apply keeps logical binding and forces older chosen read
  await apply(article);const first=(await f.db.query('SELECT item_id FROM article_register_state'))[0]!.item_id;expect((await f.db.query('SELECT progress FROM article_reading_state'))[0]!.progress).toBe(.125);
  await apply({...article,title:'older',readingProgress:.25,readingPositionChangedAt:1,favoriteSaved:false,favoriteChangedAt:1,favoriteSortOrder:-9});expect((await f.db.query('SELECT item_id FROM article_register_state'))[0]!.item_id).toBe(first);expect(await f.db.query('SELECT id FROM articles')).toHaveLength(1);expect((await f.db.query('SELECT changed_at,progress FROM article_reading_state'))[0]).toEqual({changed_at:1,progress:.25});expect((await f.db.query('SELECT saved,changed_at,sort_order FROM sync_saved_states'))[0]).toEqual({saved:0,changed_at:1,sort_order:-9});
  }finally{f.close();}});
+
+test('native account apply preserves public RSS fetch times and repairs zero clocks',async()=>{
+ const f=await p5Fixture();
+ try{
+  await initializeSchema(f.db);await f.projection.initialize();
+  const rssSourceUrl='https://synthetic.invalid/feed';
+  const value=(articleId:string,updatedAt:number,importedAt=0)=>({
+   articleId,url:'https://synthetic.invalid/'+articleId,rssSourceUrl,title:articleId+' '+updatedAt,
+   sourceDeviceId:'phone',contentHash:'version',updatedAt,importedAt,
+  });
+  const apply=async(values:ReturnType<typeof value>[],refresh?:()=>Promise<void>)=>{
+   const before=await f.projection.readState();
+   const records:SourceRecord[]=values.map(v=>({kind:'article',logicalId:v.articleId,value:v}));
+   const native=await f.native.prepare(records,before);
+   await refresh?.();
+   await f.projection.controlUpdate(before,{...before,hasUnsentEdits:false},await f.projection.prepareAccountProjection(before,records,native));
+  };
+  const row=async(id:string)=>(await f.db.query(`SELECT a.id,a.fetched_at,r.materialized_json
+   FROM articles a JOIN article_register_state r ON r.item_id=a.id WHERE r.article_id=?`,[id]))[0]!;
+  await f.db.execute('INSERT INTO channels(id,url,title,created_at) VALUES(1,?,?,1)',[rssSourceUrl,'Feed']);
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,dedup_key,fetched_at) VALUES(1,1,'Local','local',500)");
+  const imported=value('imported',0,100),withoutTime=value('undated',0);
+  await apply([value('local',0,700),imported,withoutTime]);
+  expect(await row('local')).toMatchObject({id:1,fetched_at:500});
+  expect((await row('imported')).fetched_at).toBe(100);
+  const undated=Number((await row('undated')).fetched_at);
+  expect(undated).toBeGreaterThan(0);
+
+  await apply([value('local',200),imported,withoutTime],()=>f.db.execute('UPDATE articles SET fetched_at=550 WHERE id=1'));
+  const retained=await row('local');
+  expect(retained).toMatchObject({id:1,fetched_at:550});
+  expect(JSON.parse(String(retained.materialized_json))[7]).toBe(550);
+  expect((await row('undated')).fetched_at).toBe(undated);
+  await apply([value('local',0),imported,withoutTime]);
+  expect((await row('local')).fetched_at).toBe(550);
+  await apply([value('local',600),imported,withoutTime]);
+  expect((await row('local')).fetched_at).toBe(600);
+ }finally{f.close();}
+});
 test('P5 pure book source captures unnormalized deletion and reading edits without business writes',async()=>{const db=new SqlFixture();try{await initializeSchema(db);await db.transaction(BOOK_SCHEMA.map(sql=>({sql})));const book=structuredClone(vector('book-merge').cases[0].expected);book.deleted=false;book.deletedAt=0;book.deletedChapters=[];book.deletionClock=0;await db.execute('INSERT INTO sync_local_identity VALUES(1,?,?)',['watch','watch']);await db.execute('INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json,registration_complete) VALUES(?,?,?,?,1)',[book.bookId,book.fingerprint,book.chapterCount,JSON.stringify(book)]);await db.execute('INSERT INTO channels(url,title,created_at,sort_order) VALUES(?,?,1,0)',['https://synthetic.invalid/book','book']);await db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at,is_read,reading_progress) VALUES(1,1,'chapter','https://synthetic.invalid/chapter','chapter',1,1,.125)");await db.execute('INSERT INTO sync_book_aliases VALUES(?,1,?,1,?,?,1)',[book.bookId,'chapter','https://synthetic.invalid/chapter','https://synthetic.invalid/book']);await db.execute('INSERT INTO article_reading_state VALUES(1,.125,90,7,?,NULL)',['body']);await db.execute('INSERT OR REPLACE INTO sync_book_reading_dirty VALUES(1,1)');await db.execute('INSERT INTO sync_book_events VALUES(?,0,?)',[book.bookId,Math.max(100,book.lifecycle?.startedAt??0)+1]);
  const materialize=watchMaterializer(db,{cloudRestoreMetadata:async()=>{throw Error('body scan forbidden');}} as any),raw=(await db.query('SELECT * FROM sync_books'))[0]!,before=JSON.stringify(await db.query('SELECT * FROM sync_book_events')),captured=await materialize('sync_books',raw);expect(captured[0]!.value.deleted).toBe(true);const records=await materialize('sync_book_reading_dirty',{item_id:1});expect(records[0]!.value.readingProgress).toBe(.125);expect(JSON.stringify(await db.query('SELECT * FROM sync_book_events'))).toBe(before);expect((await db.query('SELECT state_json FROM sync_books'))[0]!.state_json).toBe(raw.state_json);
  }finally{db.close();}});
