@@ -64,7 +64,7 @@ interface HeadPollPorts {
  now():number;
  delay(ms:number,callback:()=>void):()=>void;
  read(kind:'config'|'head',lifetime:SyncV2Lifetime):Promise<HttpResponse|HeadPollConfig|undefined>;
- sync():Promise<boolean>;
+ observeHead():Promise<boolean>;
  onPolicyChanged?():void;
 }
 
@@ -135,7 +135,7 @@ export class WatchHeadPoll {
 
  private pollDelay(){
   // Keep the cold start and explicit server overrides on their original
-  // cadence. Only a successfully synchronized head enables the steady cadence.
+  // cadence. An observed head enables the steady cadence.
   const interval=this.etag&&this.interval===DEFAULT_INTERVAL?STEADY_INTERVAL:this.interval;
   return Math.max(MIN_HEAD_INTERVAL,this.jitter(interval));
  }
@@ -197,7 +197,7 @@ export class WatchHeadPoll {
     const data=json(result);
     if(typeof data.etag!=='string'||!data.etag||data.etag.length>512)throw Error('invalid_head_etag');
     this.interval=positiveMillis(data.pollAfterMs)??DEFAULT_INTERVAL;
-    if(data.etag!==this.etag&&await this.ports.sync()&&current())this.etag=data.etag;
+    if(data.etag!==this.etag&&await this.ports.observeHead()&&current())this.etag=data.etag;
    }
    if(current()){
     this.failures=0;

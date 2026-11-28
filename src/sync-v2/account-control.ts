@@ -45,6 +45,7 @@ export interface AccountControlOptions {
  store:WatchProjectionStore;http:SyncV2Http;reader:WatchCloudIndex;publisher:WatchIndexPublisher;
  crypto:EnvelopeCrypto&SigningPort;approved:(id:string)=>Promise<ApprovedKey>;
  author:()=>Promise<{deviceId:string;alias:string;own:{commitOid:string|null;revision:string}}>;
+ authenticateWindow?:()=>Promise<{window:Awaited<ReturnType<SyncV2Http['negotiate']>>;fingerprint:string}>;
  business:AccountBusinessPort;recovery:WatchRecovery;resolveBody?:BodyResolver;
  /** Trusted server UTC only. Unknown/backwards time fails closed. */
  trustedNow:()=>number|null;rebuildProjection?:()=>Promise<void>;historyRestore?:boolean;choiceApply?:boolean;
@@ -278,7 +279,11 @@ export class WatchAccountControl {
  private async resumeCloudChoiceOnce(){
   await this.gate('choice');const s=await this.o.store.readState(),intent=s.cloud?.pendingCloudChoice;if(!intent){await this.flushApplied();return {applied:false,commit:null};}
   const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
-  const window=await this.o.http.negotiate([],[]),current=await this.o.store.readState();if(!choiceCurrent({...current,account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},capture)){await this.o.reader.pull(window);throw Error('choice_stale');}
+  const {window,fingerprint}=await this.observationWindow(),current=await this.o.store.readState();
+  if(!choiceCurrent({...current,account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},capture)){
+   await this.o.reader.pull(window,false,fingerprint);
+   throw Error('choice_stale');
+  }
   const reply=intent.phase==='accepted'?intent.result:await this.request('/choices/cloud',{scope:this.o.http.scope,requestId:intent.requestId,choiceId:intent.choiceId,expectedAccountRevision:capture.accountRevision,expectedRollbackGeneration:capture.generation,selectedLocalChangeRevision:capture.localChangeRevision});
   if(reply.choiceId!==intent.choiceId||canonical(reply.confirmedAccount)!==canonical({commitOid:capture.accountOid,revision:capture.accountRevision,rollbackGeneration:capture.generation})||canonical(reply.account)!==canonical(reply.confirmedAccount))throw Error('choice_stale');
   await this.acceptCloudChoice(intent.requestId,reply);
@@ -456,22 +461,30 @@ export class WatchAccountControl {
   // Every success must authenticate the current head, even if this device
   // previously observed the accepted head. A newer
   // head or real edit still fences this original apply journal.
-  await this.o.reader.pull(await this.o.http.negotiate([],[]));await this.gate(plan.kind==='rollback'?'history':'choice');before=await this.o.store.readStableState();plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');
+  await this.pullObserved();await this.gate(plan.kind==='rollback'?'history':'choice');before=await this.o.store.readStableState();plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');
   // An authenticated read may have observed this very publication while its
   // result lookup was unavailable. It cannot invalidate unchanged local edits.
-  if(!publicationCurrent(before,plan)){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
+  if(!publicationCurrent(before,plan)){await this.pullObserved();const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
   const result=plan.result,rows:any[]=[];let after='';for(;;){const page=await this.o.store.cloudRows(plan.treeRoot,after,32);if(!page.length)break;rows.push(...page);after=page.at(-1).row.entityKey;}if(rows.length!==plan.rowCount)throw Error('closure_incomplete');
   const selected:RecordRow[]=[];for(const r of rows){const row=await this.openable(r);if(row)selected.push(row);}const records=this.records(selected),statements=plan.applyPlan?await this.o.store.resumeAccountProjection(before,plan.applyPlan):await this.prepareRecordPlan(before,records),next=observeAccount(before,{oid:plan.commitOid,revision:result.account.revision,generation:result.account.rollbackGeneration}),applied=this.applied(next,plan.commitOid,result.account.revision,result.account.rollbackGeneration,plan.requestId);
-  applied.cloud={...applied.cloud,pendingPublish:null,current:{commitOid:plan.commitOid,treeRoot:plan.treeRoot,rowCount:plan.rowCount},lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result},pins:{...before.cloud.pins,accountOid:plan.commitOid,authors:{...before.cloud.pins.authors,[plan.commit.body.authorDeviceId]:{...await this.o.approved(plan.commit.body.authorDeviceId),sequence:plan.commit.body.deviceSequence,oid:plan.commitOid}}}};
+  const observed=before.cloud.current;
+  const signingFingerprint=observed?.commitOid===plan.commitOid?observed.signingFingerprint:undefined;
+  applied.cloud={...applied.cloud,pendingPublish:null,current:{commitOid:plan.commitOid,treeRoot:plan.treeRoot,rowCount:plan.rowCount,...(signingFingerprint?{signingFingerprint}:{})},lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result},pins:{...before.cloud.pins,accountOid:plan.commitOid,authors:{...before.cloud.pins.authors,[plan.commit.body.authorDeviceId]:{...await this.o.approved(plan.commit.body.authorDeviceId),sequence:plan.commit.body.deviceSequence,oid:plan.commitOid}}}};
   if(plan.legacyKey){const decision=await this.o.store.prepareLegacyDecision(before,plan.legacyKey,'resolve-local');applied.pendingChoice=decision.next.pendingChoice?.inboxKeys.length?decision.next.pendingChoice:null;applied.applied=decision.next.applied;statements.push(...decision.statements);}
   statements.push(...await this.o.store.preparePublicationFinish(plan));const persistent=plan.applyPlan?await this.o.store.existingPlanReservation(plan.applyPlan):null,release=persistent??await this.reserveProjection(statements);try{await this.o.store.observationUpdate(before,applied,statements);}finally{if(!plan.applyPlan||!await this.o.store.planOwned(plan.applyPlan.id))await release();}
   await this.flushApplied();await this.o.store.dropInactiveCloudRows(plan.treeRoot);return result;
  }
+ private async observationWindow(){
+  return this.o.authenticateWindow?this.o.authenticateWindow():{window:await this.o.http.negotiate([],[]),fingerprint:undefined};
+ }
+ private async pullObserved(){
+  const {window,fingerprint}=await this.observationWindow();
+  return this.o.reader.pull(window,false,fingerprint);
+ }
  /** A clean device follows the authenticated current account. A dirty device
   * retains its native DB and pending choice, including after event expiry. */
  async follow(window?:any,signingFingerprint?:string){
-  const observed=window??await this.o.http.negotiate([],[]);
-  return this.observeAndFollow(()=>this.o.reader.pull(observed,false,signingFingerprint));
+  return this.observeAndFollow(()=>window?this.o.reader.pull(window,false,signingFingerprint):this.pullObserved());
  }
  async poll(){return this.observeAndFollow(()=>this.o.reader.poll());}
  private async observeAndFollow(pull:()=>ReturnType<WatchCloudIndex['pull']>){

@@ -92,7 +92,9 @@ export class WatchCloudScheduler {
    this.retryAt!==undefined&&this.ports.now()<this.retryAt)return false;
   this.cancelTimer?.();
   this.cancelTimer=undefined;
-  return this.run(false).task;
+  const {task,state}=this.run(false);
+  const success=await task;
+  return !this.disposed&&state.accountRevision===this.accountRevision&&(success||state.result?.headObserved===true);
  }
  private run(manual:boolean,mode:'all'|'recent128'='recent128',intent?:ManualIntent,afterApproval=false){
   idleHit(42);this.guard.require();this.dirty=false;this.retryOnWake=undefined;this.retryAt=undefined;

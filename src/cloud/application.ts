@@ -35,7 +35,7 @@ import {createCloudTransport} from './transport';
 import {requestAccountHead,requestHeadPollConfig,WatchHeadPoll} from './head-poll';
 import {syncV2Origin} from '../sync-v2/http';
 import config from '../../pod.config.json';
-import type {CloudSyncResult} from './service';
+import {followsV2Head,type CloudSyncResult} from './service';
 import type {WatchAccountIdentity} from '../account/store';
 let owner:ReturnType<typeof start>|undefined;let approvalPageActive=false;
 let nextAccountGeneration=0;
@@ -160,16 +160,14 @@ function start(){
    const status=runtime!.service.status;
    // Pending local work may be terminal for this attempt while the account
    // can still receive an independent head change.
-   const attention=status.v2Attention;
-   const canFollow=attention==='cloud_v2_pending'||attention==='cloud_v2_read_only'||
-    attention==='body_channel_source_missing'||attention==='body_channel_capacity_pending';
+   const canFollow=followsV2Head(status.v2Attention);
    return status.member?.readable===true&&status.phase!=='waiting-approval'&&!status.ownerChoiceRequired&&(status.retryable!==false||canFollow);
   };
   headPoll=new WatchHeadPoll({
    eligible:pollEligible,
    now:Date.now,
    delay:schedule,
-   sync:()=>scheduler!.syncFromHead(),
+   observeHead:()=>scheduler!.syncFromHead(),
    onPolicyChanged:()=>scheduler?.headPolicyChanged(),
    async read(kind,lifetime){
     const ready=syncV2Ready,scope=identity;

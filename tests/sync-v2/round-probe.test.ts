@@ -2,10 +2,12 @@ import {expect,test} from 'bun:test';
 import {readCloudSecure} from '../../src/cloud/secure-read';
 import {BOOK_SCHEMA} from '../../src/books/schema';
 import book from '../fixtures/cli-single-txt-book.json' with {type:'json'};
+import {NOTE_ASSET_FILES_SCHEMA,noteAssetVersionPath} from '../../src/notes/asset-files';
 import {MemoRepository} from '../../src/notes/repository';
 import {openApplicationSyncV2Core} from '../../src/sync-v2/application-core';
 import {openApplicationSyncV2} from '../../src/sync-v2/application-open';
 import {watchLocalProjection} from '../../src/sync-v2/index';
+import {sha256Hex} from '@podjs/framework/crypto';
 import {canonical} from '../../src/sync-v2/protocol';
 import {accountIdFromUserId} from '../../src/sync-v2/signing';
 import {fixture,f as identity,scope} from './p6-fix-fixture';
@@ -14,16 +16,18 @@ const probes=['/capabilities','/checkpoint','/devices/signing-keys'];
 
 async function settledFixture(){
  const f=await fixture();
+ await f.db.execute(NOTE_ASSET_FILES_SCHEMA);
  const routes:string[]=[],hostCalls:string[]=[];
  const transport=f.options.transport,host=f.options.host;
  let beforeSigning: (()=>Promise<void>)|undefined;
+ let stat:((path:unknown)=>{exists:boolean;file:boolean;size:number}|undefined)|undefined;
  f.options.transport={async request(request){
   const route=new URL(request.url).pathname.replace('/functions/v1/sync/v2','');
   routes.push(route);
   if(route==='/devices/signing-keys'&&beforeSigning){const next=beforeSigning;beforeSigning=undefined;await next();}
   return transport.request(request);
  }};
- f.options.host=async(method:string,args:Record<string,unknown>)=>{hostCalls.push(method);return host(method,args);};
+ f.options.host=async(method:string,args:Record<string,unknown>)=>{hostCalls.push(method);return (method==='file.stat'?stat?.(args.path):undefined)??host(method,args);};
  const open=()=>openApplicationSyncV2(f.options);
  const first=await open();
  if(!first)throw Error('fixture expected a repository');
@@ -38,7 +42,7 @@ async function settledFixture(){
  }).inspect();
  if(!projection)throw Error('fixture expected a projection');
  reset();
- return {...f,first,open,projection,routes,hostCalls,reset,whenSigning:(fn:()=>Promise<void>)=>{beforeSigning=fn;}};
+ return {...f,first,open,projection,routes,hostCalls,reset,setStat:(fn:typeof stat)=>{stat=fn;},whenSigning:(fn:()=>Promise<void>)=>{beforeSigning=fn;}};
 }
 
 test('settled watch round only probes and performs no database or secure writes',async()=>{
@@ -172,20 +176,52 @@ for(const kind of ['book','asset'] as const)test(`an orphan ${kind} stays local 
  const f=await settledFixture(),remote=await fixture();let peer:Awaited<ReturnType<typeof openApplicationSyncV2>>=null;
  try{
   const id=kind==='book'?book.bookId:'orphan.png';
+  const raw=kind==='book'?new TextEncoder().encode(book.packageUtf8):new Uint8Array([1,2,3]);
+  const path=kind==='book'?'books/original':noteAssetVersionPath(id,sha256Hex(raw));
+  let present=false;
+  f.setStat(target=>target===path?{exists:present,file:present,size:present?raw.length:0}:undefined);
   if(kind==='book'){
    // Reopen to discover the book source created after the original projection.
    await f.first.close();
    await f.db.transaction(BOOK_SCHEMA.map(sql=>({sql})));
    const value={bookId:id,fingerprint:book.fingerprint,title:'Orphan book',chapterCount:1,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:5,sourceDeviceId:'watch',sourceUrl:book.sourceUrl,kind:'txt'};
-   await f.db.execute('INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json,registration_complete) VALUES(?,?,?,?,1)',[id,book.fingerprint,1,JSON.stringify(value)]);
+   await f.db.execute('INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json,package_path,package_sha256,package_bytes,registration_complete) VALUES(?,?,?,?,?,?,?,1)',[id,book.fingerprint,1,JSON.stringify(value),path,sha256Hex(raw),raw.length]);
+   f.options.repository.cloudBookWitness=async()=>present?{size:raw.length,sha256:sha256Hex(raw)}:undefined;
+   f.options.repository.cloudBookBody=async()=>present?raw:undefined;
    f.first=(await f.open())!;
   }else{
-   f.options.repository.cloudNoteAsset=async()=>{throw Error('cloud_note_asset_missing');};
+   await f.db.execute('INSERT INTO note_asset_files VALUES(?,?,?)',[id,sha256Hex(raw),raw.length]);
+   f.options.repository.cloudNoteAsset=async()=>{if(!present)throw Error('cloud_note_asset_missing');return raw;};
    await f.db.execute("INSERT INTO memo_assets VALUES('orphan.png','image/png','orphan.png',5,'watch',0,0,'')");
   }
   const revision=f.server.account.revision;
   expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
   expect(f.server.account.revision).toBe(revision);
+  const expectOnlyProbe=(cold=false)=>{
+   expect(f.routes).toEqual(cold?['/repo/descriptor',...probes]:probes);
+   expect(f.hostCalls.filter(name=>/^(sql\.(transaction|execute|notify)|secure\.(compareAndSet|set)|file\.(read|hash))$/.test(name))).toEqual([]);
+   expect(f.db.sql.filter(sql=>/memo_notes|syncv2_cloud_rows|syncv2_candidates|article_register_state/.test(sql))).toEqual([]);
+   expect(f.db.sql.filter(sql=>/sync_books/.test(sql))).toHaveLength(kind==='book'?1:0);
+  };
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expectOnlyProbe();
+  await f.first.close();
+  f.reset();
+  const cold=await openApplicationSyncV2Core({...f.options,singleRound:true,prepareLibrary:async()=>{throw Error('library initialized');}});
+  expect(cold?.initialResult).toEqual({completionError:'body_channel_source_missing'});
+  await cold?.close();
+  expectOnlyProbe(true);
+  f.first=(await f.open())!;
+  // Reject a replay even when the only dirty records are held creations.
+  const savedServerRevision=f.server.serverRevision;
+  f.server.serverRevision='0';
+  f.reset();
+  await expect(f.first.sync()).rejects.toThrow('replay_detected');
+  expect(f.routes).toEqual(probes.slice(0,2));
+  expect(f.hostCalls).not.toContain('sql.transaction');
+  f.server.serverRevision=savedServerRevision;
+
   peer=await openApplicationSyncV2({...remote.options,transport:f.server});
   const memo=new MemoRepository(remote.db,remote.options.legacyDeviceId,undefined,()=>300);
   await memo.save({noteId:'n',title:'Cloud edit while original is missing',markdown:'local\ntext'});
@@ -193,6 +229,8 @@ for(const kind of ['book','asset'] as const)test(`an orphan ${kind} stays local 
   const current={...f.server.account};
   f.reset();
   expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expect(f.routes.slice(0,3)).toEqual(probes);
+  expect(f.routes).toContain('/objects/batch-get');
   expect(f.routes).not.toContain('/account/publish');
   expect(f.server.account).toEqual(current);
   expect(await f.db.query('SELECT title FROM memo_notes')).toEqual([{title:'Cloud edit while original is missing'}]);
@@ -200,6 +238,35 @@ for(const kind of ['book','asset'] as const)test(`an orphan ${kind} stays local 
   const state=await f.projection.readStableState();
   expect(state.activeGeneration).toBe(current.commitOid);
   expect(state.hasUnsentEdits).toBe(true);
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expectOnlyProbe();
+
+  const localMemo=new MemoRepository(f.db,f.options.legacyDeviceId,undefined,()=>400);
+  await localMemo.save({title:'New local note',markdown:'Local content'});
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expect(f.routes[0]).toBe('/checkpoint');
+  expect(f.routes).toContain('/account/publish');
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expectOnlyProbe();
+
+  f.whenSigning(async()=>{await localMemo.save({noteId:'n',title:'Edited during held probe',markdown:'local\ntext'});});
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expect(f.routes.slice(0,3)).toEqual(probes);
+  expect(f.routes).toContain('/account/publish');
+  f.reset();
+  expect(await f.first.sync()).toEqual({completionError:'body_channel_source_missing'});
+  expectOnlyProbe();
+
+  // Simulate a file-only repair during the probe. SQL and its revision stay untouched.
+  f.whenSigning(async()=>{present=true;});
+  f.reset();
+  await f.first.sync();
+  expect(f.routes.slice(0,3)).toEqual(probes);
+  expect(f.routes).toContain('/account/publish');
  }finally{await peer?.close();await f.first.close();f.db.close();remote.db.close();}
 });
 

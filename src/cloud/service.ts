@@ -27,7 +27,11 @@ import type {WatchCloudLibraryAdapter} from './library';
 import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type CloudSnapshotHead,type RssInventory} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
-export interface CloudSyncResult {readonly ok:boolean; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
+export interface CloudSyncResult {readonly ok:boolean; readonly headObserved?:true; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
+export function followsV2Head(code:string|null|undefined){
+ return code==='cloud_v2_pending'||code==='cloud_v2_read_only'||
+  code==='body_channel_source_missing'||code==='body_channel_capacity_pending';
+}
 export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'body_channel_source_missing'|'body_channel_capacity_pending'|'cloud_v2_pending'|'cloud_v2_repo_missing'|'feature_disabled';
 export interface WatchCloudStatus {v2Failure?:true;v2Attention?:WatchV2Attention;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
@@ -149,7 +153,7 @@ export class WatchCloudSyncService {
   this.set(attention?'idle':'error',message,member);
  }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string,note?:NoteSyncTimes):Promise<CloudSyncResult>{
-  try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,v2Chunked=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(async()=>{
+  try{this.guard.require();}catch(error){throw cloudSyncFailure(error,'guard');}const started=(this.ports.now??Date.now)(),epoch=this.statusEpoch;let confirmed=false,v2Chunked=false,headObserved=false,failure:CloudFormatFailure='none',failureCode:string|undefined,failureMethod:string|undefined,cleanupCode:string|undefined;const run=this.tail.then(async()=>{
    if(epoch!==this.statusEpoch)return false;
    this.ports.progress?.start(note);
    this.runEpoch=epoch;this.completion=undefined;this.networkFailure=false;this.durableProgress=false;this.continuationExpected=false;this.transportFailed=false;this.failureStage='lease_acquire';
@@ -170,6 +174,8 @@ export class WatchCloudSyncService {
    if(!result)throw Error('cloud_v2_start_unavailable');
    if(result.completionError){
     v2Chunked=result.chunked===true;
+    // A returned terminal round observed the head. A thrown failure may not have.
+    headObserved=!v2Chunked&&followsV2Head(result.completionError);
     throw Error(result.completionError);
    }
    this.set('complete','云同步完成');
@@ -185,6 +191,7 @@ export class WatchCloudSyncService {
   if(epoch!==this.statusEpoch)return {ok:false};
   const {continuationReady,retryable,retryAtMillis}=this.value;
   const outcome:CloudSyncResult={ok:result,resultSequence:++this.resultSequence,continuationReady,retryable,retryAtMillis,
+   ...(headObserved?{headObserved:true}:{}),
    ...(!result&&this.networkFailure?{networkFailure:true}:{})};
   const completed=result?this.completion:undefined;
   this.value={...this.value,resultSequence:outcome.resultSequence,

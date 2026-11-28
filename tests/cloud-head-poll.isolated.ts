@@ -206,7 +206,7 @@ test('changed 200 immediately uses the writer; unchanged 200 and 304 do no sync,
 
 test('failed full sync does not record etag',async()=>{
  await start();
- v2Result='cloud_v2_pending';
+ v2Result='transport_error';
  await clock.advance(20_000);
  v2Result=null;
  await clock.advance(30_000);
@@ -216,6 +216,27 @@ test('failed full sync does not record etag',async()=>{
  await clock.advance(20_000);
  expect(syncTimes).toEqual([1000,21_000,51_000,71_000]);
 });
+
+for(const terminal of ['body_channel_source_missing','cloud_v2_read_only','cloud_v2_pending','body_channel_capacity_pending'] as const){
+ test(terminal+' remembers the observed head without completing the sync',async()=>{
+  await start();
+  v2Result=terminal;
+  await clock.advance(20_000);
+  expect(syncTimes).toEqual([1000,21_000]);
+  expect(readCloudAccountStatus()?.v2Attention).toBe(terminal);
+  const previousCalls=calls.length,previousMessages=messages.length;
+  await clock.advance(12_500*3);
+  expect(heads()).toHaveLength(4);
+  expect(calls.slice(previousCalls).some(call=>call.method.startsWith('sql.'))).toBe(false);
+  expect(messages).toHaveLength(previousMessages);
+  expect(syncTimes).toEqual([1000,21_000]);
+  etag='head-2';
+  await clock.advance(12_500);
+  expect(syncTimes).toEqual([1000,21_000,71_000]);
+  await clock.advance(12_500);
+  expect(syncTimes).toHaveLength(3);
+ });
+}
 
 for(const [status,code] of [[404,undefined],[405,undefined],[400,'invalid_schema']] as const){
 test(status+' on every head GET keeps legacy sync results and emits no extra notices',async()=>{

@@ -1,3 +1,4 @@
+import {NoteAssetFileIndex} from '../notes/asset-files';
 import {LocalBodyClaims} from './local-body-claims';
 import {createCloudHostPorts} from '../cloud/host-ports';
 import {BodyChannelHttp} from './body-channel-http';
@@ -34,7 +35,7 @@ export async function receiveApplicationIdentity(options:{host:CloudHostRequest;
 import type {SqlLibrarySessionRepository} from '../sync/library-repository';
 import {watchLocalProjection} from './index';
 import {watchSyncV2,watchIndexAuthentication} from './runtime';
-import {readUnchangedRound,rememberSettledRound} from './round-probe';
+import {readUnchangedRound,rememberSettledRound,type MissingOriginal} from './round-probe';
 import type {SyncV2RoundResult} from './product-start';
 import {PublicationLookupUnavailable} from './publisher';
 import {ensureR0Scan} from './product';
@@ -90,6 +91,17 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  const identity={installed:async(descriptor:unknown)=>{await assertCurrent();if(digest(descriptor)!==digest(fetched.descriptor))throw Error('identity_conflict');return installed;}};
  const projection=watchLocalProjection({enabled:true,host:guardedHost,identity,descriptor:fetched.descriptor,scope:fetched.scope,libraryId,accountScope,metadata:repository});
  const session=async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};};
+ const sourceSql=projectionSql(guardedHost),assetFiles=new NoteAssetFileIndex(sourceSql);
+ const originalMissing:MissingOriginal=async(kind,id)=>{
+  // Resolve the current path by key, including versioned note assets. Book
+  // package registration changes are covered by the SQL business revision.
+  const path=kind==='book'
+   ? (await sourceSql.query('SELECT package_path FROM sync_books WHERE book_id=?',[id]))[0]?.package_path
+   : await assetFiles.path(id);
+  if(path===null||path==='')return true;
+  if(typeof path!=='string')return false;
+  return (await guardedHost<{exists:boolean}>('file.stat',{path})).exists===false;
+ };
  const authOptions={host:guardedHost,transport,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},bootstrap:options.bootstrap,session,clock,now:options.now};
  if(options.singleRound){
   const saved=await projection.inspect();
@@ -97,9 +109,8 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    const id=unhex(installed.idKeyHex);
    try{
     const auth=watchIndexAuthentication(authOptions,await session(),id);
-    if(await readUnchangedRound(saved,auth,await options.keys.currentKeyVersion(account.userId),options.now??Date.now)){
-     return {ui:undefined as unknown as Ui,initialResult:{completionError:null},bodyError:()=>null,close,sync:async()=>{throw Error('feature_disabled');}};
-    }
+    const unchanged=await readUnchangedRound(saved,auth,await options.keys.currentKeyVersion(account.userId),options.now??Date.now,originalMissing);
+    if(unchanged)return {ui:undefined as unknown as Ui,initialResult:unchanged,bodyError:()=>unchanged.completionError,close,sync:async()=>{throw Error('feature_disabled');}};
    }finally{id.fill(0);}
   }
  }
@@ -173,7 +184,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   };
   const flushPublication=async()=>{
    await control.recoverPreparation();
-   const state=await local.store.readState();if(state.cloud?.pendingCloudChoice){try{await runtime.authenticate();await control.resumeCloudChoice();}catch(error){if((error as Error).message==='choice_stale')await control.retireStaleCloudChoice();throw error;}return;}const pending=state.cloud?.pendingPublish;if(!pending)return false;
+   const state=await local.store.readState();if(state.cloud?.pendingCloudChoice){try{await control.resumeCloudChoice();}catch(error){if((error as Error).message==='choice_stale')await control.retireStaleCloudChoice();throw error;}return;}const pending=state.cloud?.pendingPublish;if(!pending)return false;
    if(pending.phase==='conflicted'&&!pending.explicit&&pending.capturedLocalRevision===state.localChangeRevision){await recoverConflict();return;}
    try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else await runtime.publisher.flush();}catch(error){
     if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
@@ -242,7 +253,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
     if(pubResult?.skipped){
      const followed=pubResult.heldCreates?.length?await control.followWithHeldCreates(pubResult.stateVersion,pubResult.heldCreates):undefined;
-     return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,...(publishedAny||followed?.applied?{refreshBodies:true}:{})};
+     return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,heldCreates:pubResult.heldCreates,...(publishedAny||followed?.applied?{refreshBodies:true}:{})};
     }
     if(!pubResult?.chunked&&pubResult?.heldEdits&&Date.now()-roundStart<150_000)continue;
     if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
@@ -257,7 +268,11 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const bodyRound=async(expiresAtMillis:number)=>{if(!channel)return;try{if(!await channel.hasWork())return;const allowed=options.allowBodies?await options.allowBodies():(await guardedHost<{wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{}));if(allowed!==true&&!(typeof allowed==='object'&&allowed.wifi&&allowed.metered===false)){bodyError=bodyError??'body_channel_waiting_wifi';return;}options.progress?.()?.stage('bodies');const result=await channel.sync(expiresAtMillis);bodyError=bodyError??result.errors[0]??null;}catch(error){bodyError=String((error as Error).message);}};
   const sync=async()=>{
    bodyError=null;
-   if(await runtime.readUnchanged())return {unchanged:true};
+   const unchanged=await runtime.readUnchanged(originalMissing);
+   if(unchanged){
+    bodyError=unchanged.completionError;
+    return {unchanged:true,completionError:unchanged.completionError};
+   }
    const result=await round();
    let bodyWork=false;
    if(!result?.readOnly){
@@ -279,7 +294,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   };
   const synchronize=async():Promise<SyncV2RoundResult>=>{
    const result=await sync();
-   if(result?.unchanged)return {completionError:null};
+   if(result?.unchanged)return {completionError:result.completionError};
    let completionError:string|null=null;
    const state=await local.store.readState();
    if(state.pendingChoice)completionError='choice_pending';
@@ -289,7 +304,14 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     state.hasUnsentEdits&&result?.heldLocalRevision!==state.localChangeRevision)completionError='cloud_v2_pending';
    else if(bodyError)completionError=bodyError;
    else if(state.hasUnsentEdits)completionError='cloud_v2_pending';
-   if(!completionError&&!result?.bodyWork&&!missingNoteAssets.size)await rememberSettledRound(local.store,state,roundSchemaVersion);
+   if(!result?.bodyWork){
+    if(!completionError&&!missingNoteAssets.size)await rememberSettledRound(local.store,state,roundSchemaVersion);
+    else if(completionError==='body_channel_source_missing'&&result?.heldCreates?.length){
+     await rememberSettledRound(local.store,state,roundSchemaVersion,{
+      keys:result.heldCreates,localRevision:result.heldLocalRevision,missing:originalMissing,missingNoteAssets,
+     });
+    }
+   }
    return {completionError};
   };
   const initialResult=await synchronize();

@@ -334,7 +334,7 @@ function memoHeadPoll(clock:Clock) {
   eligible:()=>true,now:()=>clock.now,
   delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
   read:async()=>({enabled:true,ttlMs:CLOUD_INTERVAL}),
-  sync:async()=>false,
+  observeHead:async()=>false,
  });
 }
 
