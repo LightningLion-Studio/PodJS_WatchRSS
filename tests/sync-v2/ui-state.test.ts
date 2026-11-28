@@ -63,6 +63,16 @@ test('write gates all closed: runtime not open gives enabled=false and an entire
  expect(await ui.snapshot()).toEqual(s);// failures while closed keep the inert contract
 });
 
+test('ordinary status reads never scan the conflict sides',async()=>{
+ const {projection}=fakeProjection({state:baseState({hasUnsentEdits:true})});
+ const {control}=fakeControl();
+ projection.candidatePage=async()=>{throw Error('unexpected local side scan');};
+ projection.cloudRows=async()=>{throw Error('unexpected cloud side scan');};
+ projection.editBases=async()=>{throw Error('unexpected edit base scan');};
+ const ui=adapter({...fakeRuntime(),control,projection});
+ expect(await ui.snapshot()).toMatchObject({phase:'idle',choice:null});
+});
+
 test('phase idle -> syncing -> idle; syncNow pulls and acks; lastSyncedAtMillis only from the trusted clock',async()=>{
  let releasePull:((v:unknown)=>void)=()=>{};
  let firstPull=true;

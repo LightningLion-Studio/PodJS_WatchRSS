@@ -179,9 +179,8 @@ export class WatchSyncV2UiState {
   const state=await projection.readState();
   const settings=await control.settings();
   const gates={historyRestore:settings.history_restore===true,choiceApply:settings.choice_apply===true,noteSegments:projection.segmentOptions().noteSegments===true};
-  const side=await this.collectSides(state);
   const unopenableNotes=await this.unopenable(state);
-  const choice=state.pendingChoice?await this.choiceState(state,side):null;
+  const choice=state.pendingChoice?await this.choiceState(state,await this.collectSides(state)):null;
   const recoveryCopies=(await control.recoveryCopies()).map(c=>({copyId:c.copyId,createdAtMillis:c.createdAtMillis,expiresAtMillis:c.expiresAtMillis}));
   const publication=this.publication(state),signingUnavailable=await this.o.runtime?.signingStatus?.()==='signing_state_unavailable';
   const errorCode=this.lastErrorCode??this.o.bodyError?.()??null;
