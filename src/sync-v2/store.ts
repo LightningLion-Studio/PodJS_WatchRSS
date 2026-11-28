@@ -445,10 +445,10 @@ export class WatchProjectionStore {
   const plan=before.cloud?.pendingPublish;if(plan&&!publicationCurrent(before,plan))throw Error('choice_stale');
   await this.observationUpdate(before,next,statements);
  }
- async preparePublicationFinish(plan:any){
+ async preparePublicationFinish(plan:any,keepObjects=false){
   const header=await this.cipher.seal(this.aad('commit-header',plan.commitOid),plan.commit);
   return [{sql:'INSERT OR IGNORE INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,plan.commitOid,header]},
-   {sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,plan.requestId]},
+   ...(keepObjects?[]:[this.uploadCleanup(plan.requestId)]),
    {sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,plan.requestId]}];
  }
  async legacyChoiceEntry(key:string){
@@ -599,16 +599,25 @@ export class WatchProjectionStore {
  }
  /** Abandoned preparation only: removes this plan's staged objects. */
  async dropUpload(planId:string){this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_upload_objects'")).length)return;const before=await this.readState();if(before.cloud?.pendingPublish?.requestId===planId)return;await this.controlUpdate(before,{...before},[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ uploadCleanup(planId:string):Statement{
+  return {sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]};
+ }
+ async uploadObject(planId:string,id:string){
+  this.gate.require();
+  const row=(await this.db.query('SELECT body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid=?',[this.scopeKey,planId,id]))[0];
+  return row?base64ToBytes(await this.cipher.open(this.aad('upload',planId+id),String(row.body))):undefined;
+ }
  async uploadCount(planId:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',[this.scopeKey,planId]))[0]?.n??0);}
- async uploadPage(planId:string,after='',limit=1){
-  this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
+ async uploadPage(planId:string,after='',limit=1,includeStateRefs=true){
+  this.gate.require();const rows=await this.db.query(`SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>?
+   ${includeStateRefs?'':"AND oid NOT LIKE 'state-refs:%'"} ORDER BY oid LIMIT ?`,[this.scopeKey,planId,after,limit]),out=[];
   for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
  }
  async uploadStateRefsPage(planId:string,after='',limit=16){
   this.gate.require();const rows=await this.db.query("SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid LIKE 'state-refs:%' AND oid>? ORDER BY oid LIMIT ?",[this.scopeKey,planId,after,limit]),out=[];
   for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
  }
- async uploadBatch(planId:string,after=''){return readBoundedKeysetBatch(async key=>(await this.uploadPage(planId,key,1))[0],after,item=>item.oid,item=>item.bytes.length,16,65536);}
+ async uploadBatch(planId:string,after='',includeStateRefs=true){return readBoundedKeysetBatch(async key=>(await this.uploadPage(planId,key,1,includeStateRefs))[0],after,item=>item.oid,item=>item.bytes.length,16,65536);}
  async uploadReceipt(planId:string,id:string){
   this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_upload_receipts WHERE scope=? AND plan_id=? AND oid=?',[this.scopeKey,planId,id]))[0];
   return row?this.cipher.open(this.aad('upload-receipt',planId+id),String(row.body)):null;
@@ -631,7 +640,13 @@ export class WatchProjectionStore {
   for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),encodeBase64(raw)),next={...state};await this.observationUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
   const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await this.observationUpdate(state,next);
  }
- async finishUpload(before:SyncState,next:SyncState,planId:string,plan?:any){await this.observationUpdate(before,next,plan?await this.preparePublicationFinish(plan):[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]},{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ async finishUpload(before:SyncState,next:SyncState,planId:string,plan?:any){
+  const keep=next.cloud?.lastPublication?.uploadId===planId;
+  const statements=plan?await this.preparePublicationFinish(plan,keep):[this.uploadCleanup(planId),{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}];
+  const previous=before.cloud?.lastPublication?.uploadId;
+  if(previous&&previous!==next.cloud?.lastPublication?.uploadId)statements.push(this.uploadCleanup(previous));
+  await this.observationUpdate(before,next,statements);
+ }
  async readHeader(id:string){
   this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_commit_headers'")).length)return null;
   const row=(await this.db.query('SELECT body FROM syncv2_commit_headers WHERE scope=? AND oid=?',[this.scopeKey,id]))[0];return row?this.cipher.open(this.aad('commit-header',id),String(row.body)):null;

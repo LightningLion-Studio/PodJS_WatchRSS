@@ -44,7 +44,7 @@ export function watchIndexAuthentication(options:IndexAuthenticationOptions,sess
 
 /** `noteSegments` (default off) lets this client read and, when the backend
  * also advertises note-segments.v1, write rc7 segmented notes (25.8). */
-export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;indexWrite?:boolean;historyRestore?:boolean;choiceApply?:boolean;bodyResolver?:BodyResolver;origin:string;local:ReturnType<typeof watchLocalProjection>;host:CloudHostRequest;transport:HttpTransport;session:()=>Promise<Session>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:ApprovedLegacyDevice[]}>;identity:()=>Promise<{idKeyHex:string;scope:any}>;contentKey:()=>Promise<{key:Uint8Array;version:number}>;contentKeyAt?:import('./sealed').ContentKeyResolver;now?:()=>number;originPolicy?:OriginPolicy;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;maxChangedRows?:number;maxPrepareMillis?:number;uploadConcurrency?:number;readConcurrency?:number}){
+export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;indexWrite?:boolean;historyRestore?:boolean;choiceApply?:boolean;bodyResolver?:BodyResolver;origin:string;local:ReturnType<typeof watchLocalProjection>;host:CloudHostRequest;transport:HttpTransport;session:()=>Promise<Session>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:ApprovedLegacyDevice[]}>;identity:()=>Promise<{idKeyHex:string;scope:any}>;contentKey:()=>Promise<{key:Uint8Array;version:number}>;contentKeyAt?:import('./sealed').ContentKeyResolver;now?:()=>number;originPolicy?:OriginPolicy;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;maxChangedRows?:number;maxPrepareMillis?:number;uploadConcurrency?:number;shouldPauseUpload?:()=>boolean;readConcurrency?:number}){
  let opened:Promise<any>|undefined,ownedKeys:ObjectKeys|undefined;let destroyed=false;let indexObjects:IndexObjectCache|undefined;const destroy=()=>{destroyed=true;indexObjects?.clear();opened=undefined;ownedKeys?.id.fill(0);ownedKeys?.content.fill(0);ownedKeys=undefined;};const now=options.now??Date.now,segments=options.noteSegments===true;
  return {destroy,async open(){if(destroyed)throw Error('feature_disabled');if(options.enabled!==true)return null;return opened??=(async()=>{
   const local=await options.local.open();if(!local)throw Error('feature_disabled');const session=await options.session(),accountId=accountIdFromUserId(session.userId),identity=await options.identity();sameScope(identity.scope,session.scope);const content=await options.contentKey(),keys={id:unhex(identity.idKeyHex),content:content.key,version:content.version,readContentKey:options.contentKeyAt};
@@ -52,7 +52,7 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
   const authentication=watchIndexAuthentication(options,session,keys.id),{http,authors,crypto,secure,checkpoint}=authentication,pin=http.servicePin!;
   const signer=new WatchSigningIdentity(secure,crypto,accountId,session.scope,keys.id);
   http.requestGuard=()=>{if(destroyed)throw Error('feature_disabled');};
-  await http.capabilities();indexObjects=new IndexObjectCache(local.store.indexObjects());const reader=new WatchCloudIndex(local.store,http,crypto,keys,async deviceId=>authors.get(deviceId),async window=>{await checkpoint(window);},now,()=>local.rebuild(),{noteSegments:segments,indexObjects,progress:options.progress,readConcurrency:options.readConcurrency}),publisher=new WatchIndexPublisher(local.store,http,crypto,keys,now,options.bodyResolver,{noteSegments:segments,indexObjects,progress:options.progress,maxChangedRows:options.maxChangedRows,maxPrepareMillis:options.maxPrepareMillis,uploadConcurrency:options.uploadConcurrency});
+  await http.capabilities();indexObjects=new IndexObjectCache(local.store.indexObjects());const reader=new WatchCloudIndex(local.store,http,crypto,keys,async deviceId=>authors.get(deviceId),async window=>{await checkpoint(window);},now,()=>local.rebuild(),{noteSegments:segments,indexObjects,progress:options.progress,readConcurrency:options.readConcurrency}),publisher=new WatchIndexPublisher(local.store,http,crypto,keys,now,options.bodyResolver,{noteSegments:segments,indexObjects,progress:options.progress,maxChangedRows:options.maxChangedRows,maxPrepareMillis:options.maxPrepareMillis,uploadConcurrency:options.uploadConcurrency,shouldPauseUpload:options.shouldPauseUpload});
   const authenticateWithRevision=async()=>{
    const registrationRevision=signer.registrationRevision;
    const window=await http.negotiate([],segments?['note-conflicts.v1','note-segments.v1']:['note-conflicts.v1']);
@@ -85,12 +85,14 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
    if(!result?.readOnly)observed=authenticated;
    return {...result,expiresAtMillis:window.expiresAtMillis};
   },async publish(useObservedWindow=false,recheckKeys:readonly string[]=[]){
+   if(options.shouldPauseUpload?.())return {chunked:true,uploadPaused:true};
    options.progress?.()?.stage('upload');
    const proof=useObservedWindow?observed:undefined;observed=undefined;
    const current=await local.store.readState();if(current.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(current.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(current.pendingChoice)throw Error('choice_pending');
    const bound=proof&&proof.registrationRevision===signer.registrationRevision&&now()<=proof.window.expiresAtMillis&&proof.window.account.commitOid===(current.account?.oid??null)&&
     proof.window.account.revision===(current.account?.revision??'0')&&proof.window.account.rollbackGeneration===current.rollbackGeneration;
    const author=await registerAuthor(bound?proof:await authenticateWithRevision(),now());
+   if(options.shouldPauseUpload?.())return {chunked:true,uploadPaused:true};
    const requestId=hex(await crypto.random(16));
    let prepared;
    try{

@@ -64,7 +64,7 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   const stored=await accounts.read();if(!stored)return 'success';
   progress.start();
   const network=await host<{active:boolean;validated:boolean;wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{});if(!network.active||!network.validated)return 'retry';
-  const transport=createCloudTransport(host,guard,{progress:()=>progress}),account=stored.watchRefreshToken?await new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion}).freshAccount():stored;
+  const transport=createCloudTransport(host,guard,{progress:()=>progress,reuseInputName:true}),account=stored.watchRefreshToken?await new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion}).freshAccount():stored;
   progress.stage('keys');
   const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion},{sha256:async()=>{throw Error('unused');}},guard),bootstrap=await client.bootstrap();
   if(!bootstrap.syncV2)return 'success'; // No announcement never licenses v1.
@@ -99,7 +99,7 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
    if(ready!=='ready'){await complete();return 'failure';}
    const cleanup:CloudHostRequest=(method,args)=>window.cleanup(()=>raw(method,args));
    progress.stage('compare');
-   const opened=await openApplicationSyncV2Core({singleRound:true,prepareLibrary:initialize,progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
+   const opened=await openApplicationSyncV2Core({singleRound:true,prepareLibrary:initialize,progress:()=>progress,remainingMillis:()=>window.remainingMillis(),host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
    try{
     const result=opened?.initialResult??{completionError:'cloud_v2_repo_missing'};
     if(result.completionError&&!result.chunked)diagnostic.report(recordFailureDiagnostic(Error(result.completionError)));

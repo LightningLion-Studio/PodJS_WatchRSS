@@ -75,7 +75,7 @@ function start(){
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
   const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete'&&method!=='file.closeText'&&method!=='crypto.closeSealedGzip')guard.require();return hostOperation<T>(method,args).result;};
   // 26.4 P6-10: off by default. Off => no keysReady hook, no v2 request, no UI port.
-  let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined;
+  let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined,v2Budget:CloudSyncBudget|undefined;
   const v2Guard={require(){guard.require();if(!v2Current)throw Error('feature_disabled');v2Current();}};
   const v2Exclusive=<T>(work:()=>Promise<T>)=>{
    v2Writers++;
@@ -86,14 +86,14 @@ function start(){
     guard.require();
     const current=execution.begin(),budget=new CloudSyncBudget();
     if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)throw Error('cloud_account_busy');
-    v2Current=()=>{current();budget.check();};
+    v2Budget=budget;v2Current=()=>{current();budget.check();};
     try {
      v2Current();
      const result=await work();
      v2Current();
      return result;
     } finally {
-     v2Current=undefined;
+     v2Current=undefined;v2Budget=undefined;
      await host('cloud.release',{});
     }
    }).finally(()=>{v2Writers--;headPoll?.update();});
@@ -113,7 +113,7 @@ function start(){
    const ready=syncV2Ready,account=await summaryAccountStore.read();
    if(!ready||!account||account.userId!==ready.userId)throw Error('cloud_v2_start_unavailable');
    const {accountBoundCasHost}=await import('../sync-v2/product'),accountHost=accountBoundCasHost(v2Host,account,()=>summaryAccountStore.read());
-   const transport=createCloudTransport(accountHost,v2Guard,{progress:()=>v2Progress}),tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
+   const transport=createCloudTransport(accountHost,v2Guard,{progress:()=>v2Progress,callTimeoutMs:45_000,reuseInputName:true}),tokens=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport});
    let cachedSession:{account:Awaited<ReturnType<typeof tokens.freshAccount>>;at:number}|undefined;
    const offSession=summaryAccountStore.subscribe(()=>{cachedSession=undefined;});
    lifetime.onCancel(()=>{cachedSession=undefined;offSession();});
@@ -129,7 +129,7 @@ function start(){
     v2Progress=progress;
     try{return await work();}finally{v2Progress=undefined;}
    };
-   const opened=await v2Exclusive(()=>trackV2(async()=>openApplicationSyncV2({progress:()=>v2Progress,lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedAsset:(key,archive)=>prepareArchivedNoteAsset(new NoteAssetFileIndex(projectionSql(accountHost)),fileChunks,key,archive,()=>v2Guard.require()),prepareArchivedBook:async(book,archive)=>{
+   const opened=await v2Exclusive(()=>trackV2(async()=>openApplicationSyncV2({progress:()=>v2Progress,remainingMillis:()=>v2Budget?.remainingMillis()??0,lifetime,host:accountHost,cleanupHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,transport,account,session,legacyDeviceId:ready.deviceId,keys:{currentKeyVersion:async()=>Math.max(0,...heldKeys.keys()),accountKey:async(_u,v)=>{const key=heldKeys.get(v??Math.max(0,...heldKeys.keys()));return key?new Uint8Array(key):undefined;}},repository:await getLibrarySyncRepository(),prepareArchivedAsset:(key,archive)=>prepareArchivedNoteAsset(new NoteAssetFileIndex(projectionSql(accountHost)),fileChunks,key,archive,()=>v2Guard.require()),prepareArchivedBook:async(book,archive)=>{
     const books=(await getLibrarySyncRepository()).books;
     if(!books)throw Error('book_storage_unavailable');
     const check=()=>v2Guard.require(),work=bookFileWork(fileChunks,hostOperation,check);

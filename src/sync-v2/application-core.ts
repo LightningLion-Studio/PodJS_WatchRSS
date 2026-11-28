@@ -6,6 +6,7 @@ import {WatchBodyChannel,independentBodyResolver} from './body-channel';
 import {bodyChannelRepository,type BodyRepository} from './body-channel-repository';
 import {refreshNoteAssets} from './note-assets';
 import {SyncV2Lifetime} from './lifetime';
+import {CLOUD_SYNC_BUDGET_MILLIS} from '../cloud/execution';
 /** 26.4 P6-10 application opener. Runs only when SYNC_V2_PRODUCT.syncV2 is on,
  * the bootstrap announces syncV2 and the v1 account keys are ready. */
 import {createSyncV2Crypto} from '@podjs/framework/crypto';
@@ -55,9 +56,12 @@ import {contentHostPorts} from '@podjs/framework/content-host';
 import {localProjectionCipher,projectionSql} from './host';
 import {watchSpaceV2} from './space-runtime';
 
+const UPLOAD_RESERVE_MILLIS=80_000;
+const NEXT_CHUNK_RESERVE_MILLIS=180_000;
+
 /** Product assembly over the original v1 library and authenticated account.
  * The caller serializes this opener after v1 releases its writer lease. */
-export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{singleRound?:true;prepareLibrary?:()=>Promise<void>;lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedAsset?:import('./account-control').AccountControlOptions['prepareArchivedAsset'];prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined}){
+export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{singleRound?:true;prepareLibrary?:()=>Promise<void>;lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedAsset?:import('./account-control').AccountControlOptions['prepareArchivedAsset'];prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;remainingMillis?:()=>number;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined}){
  const {account,repository}=options,lifetime=options.lifetime??new SyncV2Lifetime();
  // Retain the writer lease through SQL. Read/crypto/network waits can unwind
  // immediately; their late results cannot cross another guarded IO boundary.
@@ -151,7 +155,10 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    return prepared?.manifest.bodyAvailable?articleBodyBytes(prepared.article):undefined;
   };
   const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:readArticlePlain}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
-  runtimeFactory=watchSyncV2({...authOptions,enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bodyResolver:resolveBody,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:6});
+  let uploadReserve=0,roundDeadline=0;
+  const remaining=()=>options.remainingMillis?.()??(roundDeadline-Date.now());
+  const shouldPauseUpload=()=>roundDeadline!==0&&remaining()<=uploadReserve;
+  runtimeFactory=watchSyncV2({...authOptions,enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bodyResolver:resolveBody,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:6,shouldPauseUpload,readConcurrency:6});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.
@@ -185,7 +192,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    await control.recoverPreparation();
    const state=await local.store.readState();if(state.cloud?.pendingCloudChoice){try{await control.resumeCloudChoice();}catch(error){if((error as Error).message==='choice_stale')await control.retireStaleCloudChoice();throw error;}return;}const pending=state.cloud?.pendingPublish;if(!pending)return false;
    if(pending.phase==='conflicted'&&!pending.explicit&&pending.capturedLocalRevision===state.localChangeRevision){await recoverConflict();return;}
-   try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else await runtime.publisher.flush();}catch(error){
+   try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else return await runtime.publisher.flush();}catch(error){
     if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
      if(!(await local.store.readState()).cloud?.pendingPublish||await reconcileStalePublication())return;
      throw error;
@@ -193,12 +200,10 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     if(pending.explicit)throw error;
     const latest=await local.store.readState();
     if((error as Error).message==='choice_stale'&&latest.cloud?.pendingPublish?.requestId===pending.requestId&&latest.localChangeRevision!==pending.capturedLocalRevision){
-     await runtime.publisher.flush();
-     return;
+     return runtime.publisher.flush();
     }
     if((error as Error).message==='publication_expired'&&latest.cloud?.pendingPublish?.requestId===pending.requestId){
-     await runtime.publisher.retryExpired(async()=>{await runtime.refreshAccount();});
-     return;
+     return runtime.publisher.retryExpired(async()=>{await runtime.refreshAccount();});
     }
     if((error as Error).message!=='ref_conflict'||latest.cloud?.pendingPublish?.phase!=='conflicted')throw error;
     await recoverConflict();
@@ -221,13 +226,14 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    if(checkpoint.phase==='tail')await ensureR0Scan(local);
   };
   let roundSchemaVersion=-1;
-  const round=async()=>{
+  const round=async(continuationReserve:number)=>{
    await assertCurrent();
    options.progress?.()?.stage('compare');
    await runtime.http.refreshClosedReadGate();
    await refreshAssets();roundSchemaVersion=await local.refreshSource();
-   await runtime.refreshTrustedTime();const deferred=await flush();
-   if(deferred){
+   await runtime.refreshTrustedTime();const resumed=await flush();
+   if(resumed?.uploadPaused)return {chunked:true};
+   if(resumed===true){
     options.progress?.()?.stage('compare');
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish,settings=await control.settings();
     if(state.cloud?.pendingCloudChoice&&!settings.choice_apply||pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
@@ -235,21 +241,26 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    }
    options.progress?.()?.stage('compare');
    await scanLocalChanges();
-   const roundStart=Date.now();
-   let pulled:any,publishedAny=false;
+   let pulled:any,publishedAny=!!resumed?.account,chunked=!!resumed?.chunked;
+   const yieldAfterChunk=()=>chunked&&remaining()<=continuationReserve;
    for(;;){
+    if(shouldPauseUpload())return {chunked:true};
     pulled=await runtime.pull();
     if(pulled?.readOnly)return pulled;
+    if(yieldAfterChunk()||shouldPauseUpload())return {...pulled,chunked:true};
     const state=await local.store.readState();
     let pubResult:any;
-    if(state.cloud?.pendingPublish){await flush();publishedAny=true;}
+    if(state.cloud?.pendingPublish){pubResult=await flush();publishedAny=true;}
     else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
      try{pubResult=await runtime.publish(true);publishedAny ||= !pubResult?.skipped;}catch(error){
       if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
       await recoverConflict();
      }
     }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
-    if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
+    if(pubResult?.uploadPaused)return {...pulled,chunked:true};
+    chunked=!!pubResult?.chunked;
+    if(chunked&&!yieldAfterChunk())continue;
+    if(chunked&&shouldPauseUpload())return {...pulled,chunked:true};
     if(pubResult?.skipped&&!pubResult.chunked){
      const followed=pubResult.heldCreates?.length?await control.followWithHeldCreates(pubResult.stateVersion,pubResult.heldCreates):undefined;
      return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,heldCreates:pubResult.heldCreates,...(publishedAny||followed?.applied?{refreshBodies:true}:{})};
@@ -273,13 +284,21 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const channel=bodyRepository?new WatchBodyChannel({http:new BodyChannelHttp({enabled:true,origin,policy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},scope:fetched.scope,transport,progress:options.progress,check:async()=>{await assertCurrent();await runtime.bodyCheck();},session:async()=>{const a=await assertCurrent(),b=await options.bootstrap();if(!b.libraryEpoch||!b.contentGeneration)throw Error('scope_mismatch');return {accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,legacyEpoch:b.libraryEpoch,legacyGeneration:b.contentGeneration};}}),scope:fetched.scope,projection:local.store,crypto:bodyPorts.crypto,signer:crypto,author:runtime.bodyAuthor,approved:runtime.approved,key:async v=>(await content.at(v)).key,currentKey:content.current,files:bodyPorts.files,root:'watch-cloud-cache/'+digest([origin,account.userId]).slice(0,32)+'/body-v1',repository:bodyRepository,localReceiving:binding=>bluetoothBodies.has(canonical(fetched.scope),binding),receivedFromPeer:(binding,sha256)=>bluetoothBodies.received(canonical(fetched.scope),binding,sha256),now:options.now,check:async()=>{await assertCurrent();},yieldControl:async()=>{await guardedHost('runtime.delay',{milliseconds:1});}}):undefined;
   const bodyRound=async(expiresAtMillis:number)=>{if(!channel)return;try{if(!await channel.hasWork())return;const allowed=options.allowBodies?await options.allowBodies():(await guardedHost<{wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{}));if(allowed!==true&&!(typeof allowed==='object'&&allowed.wifi&&allowed.metered===false)){bodyError=bodyError??'body_channel_waiting_wifi';return;}options.progress?.()?.stage('bodies');const result=await channel.sync(expiresAtMillis);bodyError=bodyError??result.errors[0]??null;}catch(error){bodyError=String((error as Error).message);}};
   const sync=async()=>{
+   const available=options.remainingMillis?.()??CLOUD_SYNC_BUDGET_MILLIS;
+   roundDeadline=Date.now()+available;
+   // Leave time for already-issued requests to settle and checkpoint.
+   uploadReserve=options.singleRound?Math.min(UPLOAD_RESERVE_MILLIS,available/3):UPLOAD_RESERVE_MILLIS;
+   const continuationReserve=options.singleRound?Math.min(NEXT_CHUNK_RESERVE_MILLIS,available*0.6):NEXT_CHUNK_RESERVE_MILLIS;
+   try{return await syncWithinBudget(continuationReserve);}finally{roundDeadline=0;}
+  };
+  const syncWithinBudget=async(continuationReserve:number)=>{
    bodyError=null;
    const unchanged=await runtime.readUnchanged(originalMissing);
    if(unchanged){
     bodyError=unchanged.completionError;
     return {unchanged:true,completionError:unchanged.completionError};
    }
-   const result=await round();
+   const result=await round(continuationReserve);
    let bodyWork=false;
    if(!result?.readOnly){
     bodyWork=!!channel&&!result?.chunked&&await channel.hasWork();
@@ -288,6 +307,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
      const recheck=await channel.publicationKey();
      if(recheck){
       const publication=await runtime.publish(false,[recheck]);
+      if(publication?.uploadPaused||publication?.chunked&&shouldPauseUpload())return {...result,chunked:true};
       if(!publication?.skipped)observation=await runtime.refreshAccount();
      }
      await bodyRound(observation.expiresAtMillis);

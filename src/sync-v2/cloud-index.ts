@@ -89,6 +89,13 @@ export class WatchCloudIndex {
    if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
    return head;
   };
+  const publication=saved.lastPublication;
+  const uploadId=!readOnly&&!before.cloud?.pendingPublish?.explicit&&!before.cloud?.pendingCloudChoice&&
+   a.commitOid===publication?.commitOid?publication.uploadId:undefined;
+  if(uploadId){
+   if(canonical(a)!==canonical(publication.result.account)||
+      compareD64(window.serverRevision,publication.result.serverRevision)<0)throw Error('replay_detected');
+  }
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
    if((!signingChanged||migrating)&&saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
@@ -98,26 +105,68 @@ export class WatchCloudIndex {
      // head stays the same. The authenticated cached rows are sufficient.
      const entities=before.hasUnsentEdits?Object.values<UnopenableNotes[string]>(saved.unopenableNotes??{}).map(note=>note.entityKey):[];
      const kept=entities.length?await this.keepQuarantinedEdits(entities,before,saved):null;
-     if(migrating||window.serverRevision!==saved.cursor||kept&&canonical(kept.baselines)!==canonical(saved.unopenableBaselines??{})){
+     if(uploadId||migrating||window.serverRevision!==saved.cursor||kept&&canonical(kept.baselines)!==canonical(saved.unopenableBaselines??{})){
       const next=copy(before);
       next.cloud={...saved,cursor:window.serverRevision,...(migrating?{current:{...saved.current,signingFingerprint}}:{}),...(kept?{unopenableBaselines:kept.baselines}:{})};
       if(this.now()>window.expiresAtMillis)throw Error('window_expired');
-      await this.store.observationUpdate(before,next,kept?.statements??[]);
+      const statements=kept?.statements??[];
+      if(uploadId){
+       next.cloud.lastPublication={...publication};
+       delete next.cloud.lastPublication.uploadId;
+       statements.push(this.store.uploadCleanup(uploadId));
+      }
+      await this.store.observationUpdate(before,next,statements);
      }
     }
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
-  this.options.progress?.()?.stage('download');
+  if(!uploadId)this.options.progress?.()?.stage('download');
   // Observe queued explicit actions through the current network window.
   const cache=readOnly||signingChanged&&saved.current?.commitOid===a.commitOid||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
-  const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[],save?:(values:Map<string,Uint8Array>)=>Promise<void>)=>this.http.objects(window.windowId,ids,save,this.options.readConcurrency);
+  const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId);
+  const fetchBatch=(ids:string[],save?:(values:Map<string,Uint8Array>)=>Promise<void>)=>this.http.objects(window.windowId,ids,save,this.options.readConcurrency);
+  let priorTree:Promise<Map<string,Uint8Array>|undefined>|undefined;
+  const rebuildPriorTree=async()=>{
+   const prior=saved.current;
+   if(!prior||await this.store.cloudRowCount(prior.treeRoot)!==prior.rowCount)return;
+   const rows=[];
+   let after='';
+   for(;;){
+    const page=await this.store.cloudRows(prior.treeRoot,after,32,PAGE_BYTES);
+    if(!page.length)break;
+    rows.push(...page.map(entry=>entry.row));
+    after=page.at(-1)!.row.entityKey;
+   }
+   const tree=buildTree(this.scope,rows);
+   if(tree.oid!==prior.treeRoot)throw Error('hash_mismatch');
+   return tree.nodes;
+  };
+  const stagedObject=async(id:string)=>{
+   if(!uploadId)return;
+   const raw=await this.store.uploadObject(uploadId,id);
+   if(raw||!id.startsWith('tree:'))return raw;
+   // A cold object cache can reconstruct unchanged nodes from the already
+   // authenticated prior rows. Verify the reconstructed root before reuse.
+   return (await (priorTree??=rebuildPriorTree()))?.get(id);
+  };
+  const load=async(ids:string[],save:(entries:Map<string,Uint8Array>)=>Promise<void>)=>{
+   const local=new Map<string,Uint8Array>(),remote:string[]=[];
+   for(const id of ids){
+    const raw=await stagedObject(id);
+    if(raw)local.set(id,raw);
+    else remote.push(id);
+   }
+   if(local.size)await save(local);
+   if(remote.length)await fetchBatch(remote,save);
+  };
+  const readObject=(id:string)=>cache?.read(id,async key=>await stagedObject(key)??fetch(key))??fetch(id);
   const get=async(id:string)=>{
    const existing=objects.get(id);if(existing)return existing;
-   const raw=await (cache?.read(id,fetch)??fetch(id));objects.set(id,raw);return raw;
+   const raw=await readObject(id);objects.set(id,raw);return raw;
   };
   const batch=async(ids:string[])=>{
-   const values=await (cache?.batch(ids,fetchBatch)??fetchBatch(ids));
+   const values=await (cache?.batch(ids,uploadId?load:fetchBatch)??fetchBatch(ids));
    for(const [id,raw]of values)objects.set(id,raw);
    return values;
   };
@@ -130,6 +179,24 @@ export class WatchCloudIndex {
   else if(migrating)await reverifyHead(saved.current.commitOid,before.account!.generation);
   for(const entry of path.path)objects.set(entry.oid,jsonBytes({body:entry.body,signature:entry.signature}));
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
+  // An accepted local publication supplies the immutable mapping inputs.
+  // Snapshot still authenticates the table bytes against the current signer.
+  const ownRefs=new Map<string,any>();
+  if(uploadId){
+   const author=await this.approved(head.authorDeviceId);
+   let after='';
+   for(;;){
+    const page=await this.store.uploadStateRefsPage(uploadId,after);
+    if(!page.length)break;
+    for(const {oid:refsOid,bytes:raw} of page){
+     if(objectOid('state-refs',raw)!==refsOid)throw Error('hash_mismatch');
+     const parentOid=oid(parseCanonicalJson(raw)?.body?.stateOid,'state');
+     if(ownRefs.has(parentOid))throw Error('closure_incomplete');
+     ownRefs.set(parentOid,{version:2,scope:this.scope,parentOid,refsOid,authorDeviceId:author.deviceId,keyId:author.keyId,totalBytes:raw.length});
+    }
+    after=page.at(-1)!.oid;
+   }
+  }
   // A closed explicit-action gate permits authentication and decoding only.
   // Keep the original persistent version, pins and choice fence untouched.
   if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,batch,undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,readOnly:true,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
@@ -161,7 +228,8 @@ export class WatchCloudIndex {
   };
   try{
    await this.snapshot(head.treeRoot,window.windowId,get,batch,(!signingChanged||migrating)&&oldRoot?id=>this.store.cloudRow(oldRoot,id):undefined,sink,reuse,
-    reuse?keys=>this.store.cloudWitnesses(oldRoot,keys):undefined,cache?id=>cache.read(id,fetch):undefined);
+    reuse?keys=>this.store.cloudWitnesses(oldRoot,keys):undefined,cache?readObject:undefined,
+    uploadId?(id=>ownRefs.get(id)):undefined);
    staged=await flush();
   }catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   this.options.progress?.()?.stage('write');
@@ -199,7 +267,13 @@ export class WatchCloudIndex {
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision&&saved.lastPublication.heldEdits!==true){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
   next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen.filter(r=>r.note&&r.unopenable).map(r=>r.entityKey),staged,saved);next.cloud.unopenableBaselines=kept.baselines;
-  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);if(!delta)await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+  const uploadCleanup:Statement[]=[];
+  if(publication?.uploadId){
+   next.cloud.lastPublication={...publication};
+   delete next.cloud.lastPublication.uploadId;
+   uploadCleanup.push(this.store.uploadCleanup(publication.uploadId));
+  }
+  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes)),...uploadCleanup]);this.options.progress?.()?.advance(count);await this.store.sweepEditBases(next);if(!delta)await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
   * An unsent edit when the note enters quarantine, or any later local change of
@@ -268,10 +342,11 @@ export class WatchCloudIndex {
  }
  /** Authenticated decoded rows. With `sink`, each row is handed over as soon as
   * it is decoded and nothing is accumulated (F2); otherwise rows are returned. */
-  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>,reuseVerifiedRows=false,witnesses?:(keys:string[])=>Promise<Map<string,{id:string;wire:string|null}>>,closureGet?:(id:string)=>Promise<Uint8Array>){
+  async snapshot(treeRoot:string,windowId:string,get?:(id:string)=>Promise<Uint8Array>,batch?:(ids:string[])=>Promise<Map<string,Uint8Array>>,previous?:(entityKey:string)=>Promise<any>,sink?:(row:any)=>Promise<void>,reuseVerifiedRows=false,witnesses?:(keys:string[])=>Promise<Map<string,{id:string;wire:string|null}>>,closureGet?:(id:string)=>Promise<Uint8Array>,localRefs?:(id:string)=>any){
    const read=get??(id=>this.http.object(id,undefined,windowId)),direct=closureGet??((id:string)=>this.http.object(id,undefined,windowId)),rows=await readTree(this.scope,treeRoot,read,(this.options.readConcurrency??1)>1?batch:undefined),decoded:any[]=[],progress=this.options.progress?.(),emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);progress?.advance(1);};
    const concurrency=Math.min(6,Math.max(1,Math.floor(this.options.readConcurrency??1)));
    progress?.plan('items',rows.length);
+   const fetchRefs=(window:string,id:string)=>Promise.resolve(localRefs?.(id)??this.http.stateRefs(window,id));
    for(let at=0;at<rows.length;){
     const chunk=concurrency>1?rows.slice(at,at+16):rows.slice(at,at+1);
     at+=chunk.length;
@@ -299,7 +374,7 @@ export class WatchCloudIndex {
      if(loaded)for(const [id,raw]of loaded)prefetchedObjects.set(id,raw);
      const stateOids=[...new Set(pending.map(r=>r.stateOid))];
      let next=0;
-     const worker=async()=>{while(true){const idx=next++;if(idx>=stateOids.length)return;const sid=stateOids[idx]!;try{prefetchedRefs.set(sid,{value:await this.http.stateRefs(windowId,sid)});}catch(error){prefetchedRefs.set(sid,{error});}}};
+     const worker=async()=>{while(true){const idx=next++;if(idx>=stateOids.length)return;const sid=stateOids[idx]!;try{prefetchedRefs.set(sid,{value:await fetchRefs(windowId,sid)});}catch(error){prefetchedRefs.set(sid,{error});}}};
      await Promise.all(Array.from({length:Math.min(concurrency,stateOids.length)},worker));
      const refOids=[...new Set([...prefetchedRefs.values()].map(r=>r.value?.refsOid).filter((id):id is string=>typeof id==='string'&&/^state-refs:sha256:[a-f0-9]{64}$/.test(id)))];
      if(refOids.length){
@@ -311,7 +386,7 @@ export class WatchCloudIndex {
     const stateRefs=async(window:string,id:string)=>{
      const prefetched=prefetchedRefs.get(id);
      if(prefetched?.error)throw prefetched.error;
-     return prefetched?prefetched.value:this.http.stateRefs(window,id);
+     return prefetched?prefetched.value:fetchRefs(window,id);
     };
     for(let i=0;i<chunk.length;i++){
      const cached=reused.get(i);if(cached){await emit(cached);continue;}

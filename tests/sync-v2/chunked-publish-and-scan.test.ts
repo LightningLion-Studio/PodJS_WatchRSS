@@ -11,6 +11,8 @@ import {SyncV2Http} from '../../src/sync-v2/http';
 import {SqlFixture,binding,noteValue,scope,idKey} from './fixture';
 import {SyntheticIndexBackend,crypto,publicBytes,serverPin} from './p2-fixture';
 import {b64} from '../../src/sync-v2/wire';
+import {jsonBytes,nextD64,parseCanonicalJson} from '../../src/sync-v2/protocol';
+import {signCommit} from '../../src/sync-v2/signing';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {bookIdInput} from '../../src/books/protocol';
 import {createCloudTransport} from '../../src/cloud/transport';
@@ -77,9 +79,10 @@ test('WatchIndexPublisher priority-first chunked publish commits notes before ba
   expect((await store.readState()).hasUnsentEdits).toBe(true);
 
   const objectReadsBefore=Object.entries(server.calls).filter(([p])=>p==='/objects/batch'||p.startsWith('/objects/')).reduce((s,[,n])=>s+n,0);
+  indexObjects.clear();
   await reader.pull(server.window());
   const objectReadsAfter=Object.entries(server.calls).filter(([p])=>p==='/objects/batch'||p.startsWith('/objects/')).reduce((s,[,n])=>s+n,0);
-  // Freshly uploaded meta/state/tree/state-refs bytes hit IndexObjectCache (0 extra object GET/batch calls!).
+  // The journal is sufficient even when the in-memory object cache is cold.
   expect(objectReadsAfter-objectReadsBefore).toBe(0);
   const cloudAfter1=await store.cloudRows((await store.readState()).cloud!.current!.treeRoot,'',32);
   expect(cloudAfter1.length).toBe(2);
@@ -96,9 +99,12 @@ test('WatchIndexPublisher priority-first chunked publish commits notes before ba
   expect(prep2.rows).toBe(4);
   expect(prep2.chunked).toBe(true);
   await publisher.flush();
+  const wrongRevision=server.window();
+  wrongRevision.account.revision=nextD64(wrongRevision.account.revision);
+  await expect(reader.pull(wrongRevision)).rejects.toThrow('replay_detected');
   await reader.pull(server.window());
   const stateRefsAfter=Object.entries(server.calls).filter(([p])=>p.startsWith('/state-refs/')).reduce((s,[,n])=>s+n,0);
-  expect(stateRefsAfter-stateRefsBefore).toBe(2);
+  expect(stateRefsAfter-stateRefsBefore).toBe(0);
 
   // Commit #3: final deletion (5 rows total), chunked=false, hasUnsentEdits=false!
   const prep3=await publisher.prepare('a'.repeat(32),'key',{commitOid:server.device.commitOid,revision:server.device.revision},'3'.repeat(32));
@@ -106,8 +112,19 @@ test('WatchIndexPublisher priority-first chunked publish commits notes before ba
   expect(prep3.chunked).toBe(false);
   const res3=await publisher.flush();
   expect(res3.chunked).toBeUndefined();
+  // The service advanced the account before the device could observe its own head.
+  const own=server.account.commitOid,body=parseCanonicalJson(server.objects.get(own)!).body;
+  const winner=await signCommit(crypto,'key',{...body,accountParent:own,previousOwnCommit:own,deviceSequence:nextD64(body.deviceSequence)});
+  server.objects.set(winner.oid,jsonBytes({body:winner.body,signature:winner.signature}));
+  server.account={...server.account,commitOid:winner.oid,revision:nextD64(server.account.revision)};
+  server.serverRevision=nextD64(server.serverRevision);
+  server.calls={};
   await reader.pull(server.window());
-  expect((await store.readState()).hasUnsentEdits).toBe(false);
+  expect(Object.keys(server.calls).some(path=>path.startsWith('/state-refs/'))).toBe(true);
+  const final=await store.readState();
+  expect(final.account?.oid).toBe(winner.oid);
+  expect(final.cloud.lastPublication.uploadId).toBeUndefined();
+  expect(final.hasUnsentEdits).toBe(false);
  }finally{db.close();}
 });
 

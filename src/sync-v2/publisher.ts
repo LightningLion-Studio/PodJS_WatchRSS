@@ -25,9 +25,10 @@ export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 /** Authenticated segment objects retained with a decoded cloud row (25.7). */
 export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
 const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
-export interface PublisherOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache;maxChangedRows?:number;maxPrepareMillis?:number;uploadConcurrency?:number}
+export interface PublisherOptions {progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;noteSegments?:boolean;noteTextBudget?:number;indexObjects?:IndexObjectCache;maxChangedRows?:number;maxPrepareMillis?:number;uploadConcurrency?:number;shouldPauseUpload?:()=>boolean}
 /** A failed original-result lookup preserves the immutable pending request. */
 export class PublicationLookupUnavailable extends Error {constructor(readonly cause:unknown){super((cause as Error).message);}}
+const uploadPaused=Symbol('upload_paused');
 export class WatchIndexPublisher {
  private flushing?:Promise<any>;
  private preparing?:string;
@@ -304,10 +305,19 @@ export class WatchIndexPublisher {
  }
  private async resumeResult(requestId:string){try{return await this.http.requestResult(requestId);}catch(error){throw new PublicationLookupUnavailable(error);}}
  private async flushOnce(){
+  try{return await this.uploadPublication();}catch(error){
+   if(error!==uploadPaused)throw error;
+   return {chunked:true,uploadPaused:true};
+  }
+ }
+ private async uploadPublication(){
   const timing=this.options.progress?.();timing?.stage('upload');
+  const checkBudget=()=>{if(this.options.shouldPauseUpload?.())throw uploadPaused;};
+  checkBudget();
   await this.http.capabilities();const state=await this.store.readState(),queued=state.cloud?.pendingPublish;
   if(!queued)throw Error('publication_missing');
   if(queued.explicit&&queued.phase==='confirmed')return queued.result;
+  checkBudget();
   const known=await this.resumeResult(queued.requestId);
   if(known.status==='succeeded')return this.accept(queued,known.response);
   if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
@@ -328,34 +338,44 @@ export class WatchIndexPublisher {
   if(plan.explicit){
    // A previously delivered choice can commit after the first unknown reply.
    // Recover that result before the head check can classify the choice as stale.
+   checkBudget();
    const latest=await this.resumeResult(plan.requestId);
    if(latest.status==='succeeded')return this.accept(plan,latest.response);
    if(latest.status!=='unknown'||latest.response!==null)throw Error('invalid_schema');
   }
   if(plan.phase==='conflicted')throw new SyncV2Error('ref_conflict',true);
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
-  const concurrency=Math.max(1,Math.floor(this.options.uploadConcurrency??1));
+  const concurrency=Math.min(6,Math.max(1,Math.floor(this.options.uploadConcurrency??1)||1));
   let dbChain=Promise.resolve();
   const withDb=<T>(fn:()=>Promise<T>):Promise<T>=>{const next=dbChain.then(fn,fn);dbChain=next.then(()=>{},()=>{});return next;};
   const runConcurrent=async<T>(items:readonly T[],worker:(item:T)=>Promise<void>)=>{
-   if(concurrency<=1||items.length<=1){for(const item of items)await worker(item);return;}
-   let next=0,failed:unknown=null;
-   const run=async()=>{while(!failed){const idx=next++;if(idx>=items.length)return;try{await worker(items[idx]!);}catch(error){failed=failed??error;return;}}};
-   await Promise.all(Array.from({length:Math.min(concurrency,items.length)},run));
-   if(failed)throw failed;
+   let next=0,stopped=false;
+   const run=async()=>{
+    try{
+     while(!stopped&&next<items.length){
+      checkBudget();
+      await worker(items[next++]!);
+     }
+    }catch(error){stopped=true;throw error;}
+   };
+   const results=await Promise.allSettled(Array.from({length:Math.min(concurrency,items.length)},run));
+   for(const result of results)if(result.status==='rejected'&&result.reason!==uploadPaused)throw result.reason;
+   if(stopped)throw uploadPaused;
   };
-  const window=await this.http.negotiate([],[]);if(plan.explicit&&!publicationCurrent({...await this.store.readState(),account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},plan))throw Error('choice_stale');let after='';for(;;){const page=await this.store.uploadBatch(plan.requestId,after);if(!page.length)break;const upload=page.filter(o=>!o.oid.startsWith('state-refs:'));
-  if(!upload.length){after=page.at(-1)!.oid;continue;}
+  checkBudget();
+  const window=await this.http.negotiate([],[]);if(plan.explicit&&!publicationCurrent({...await this.store.readState(),account:{oid:window.account.commitOid,revision:window.account.revision,generation:window.account.rollbackGeneration}},plan))throw Error('choice_stale');let after='';for(;;){checkBudget();const upload=await this.store.uploadBatch(plan.requestId,after,false);if(!upload.length)break;
+  checkBudget();
   const have=await this.http.json('POST','/objects/have-want',{scope:this.http.scope,windowId:window.windowId,oids:upload.map(o=>o.oid)});
   if(have.windowId!==window.windowId||!Array.isArray(have.objects)||have.objects.length!==upload.length||have.objects.some((s:any,i:number)=>s.oid!==upload[i]!.oid))throw Error('invalid_schema');
   const progress: {savedReceipt:any;offset:number}[]=[];
   for(let index=0;index<upload.length;index++){const object=upload[index]!,status=have.objects[index],savedReceipt=await this.store.uploadReceipt(plan.requestId,object.oid);if(savedReceipt&&savedReceipt.totalBytes!==object.bytes.length)throw Error('hash_mismatch');let offset=0;
-   if(status.status==='present'||status.status==='partial'){if(status.totalBytes!==object.bytes.length)throw Error('hash_mismatch');await this.http.servicePin!.receipt(this.crypto,status.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),status.status==='present');offset=status.durableOffset;if(offset!==status.receipt.body.durableOffset||status.status==='partial'&&offset>=object.bytes.length)throw Error('invalid_schema');checkedResumeOffset(savedReceipt?.durableOffset??0,offset,object.bytes.length);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,status.receipt);if(status.status==='present')this.options.indexObjects?.put(object.oid,object.bytes);}
+   // The final PUT may have settled before this round had room for complete.
+   if(status.status==='present'||status.status==='partial'){if(status.totalBytes!==object.bytes.length)throw Error('hash_mismatch');await this.http.servicePin!.receipt(this.crypto,status.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),status.status==='present');offset=status.durableOffset;if(offset!==status.receipt.body.durableOffset)throw Error('invalid_schema');checkedResumeOffset(savedReceipt?.durableOffset??0,offset,object.bytes.length);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,status.receipt);if(status.status==='present')this.options.indexObjects?.put(object.oid,object.bytes);}
    else if(status.status!=='missing'||status.totalBytes!==null||status.durableOffset!==0||status.receipt!==null)throw Error('invalid_schema');
    checkedResumeOffset(savedReceipt?.durableOffset??0,offset,object.bytes.length);progress.push({savedReceipt,offset});
   }
   const wanted=upload.filter((o,i)=>have.objects[i].status!=='present'),reservationObjects=wanted.map(o=>({oid:o.oid,totalBytes:o.bytes.length}));
-  const reserve=async(requestId:string)=>this.http.json('POST','/objects/reserve',{scope:this.http.scope,requestId,channel:'control',objects:reservationObjects,leaseMillis:600000});
+  const reserve=async(requestId:string)=>{checkBudget();return this.http.json('POST','/objects/reserve',{scope:this.http.scope,requestId,channel:'control',objects:reservationObjects,leaseMillis:600000});};
   let reservation:any;if(wanted.length){reservation=await reserve(digest([plan.requestId,'reserve-batch',reservationObjects]).slice(0,32));uint(reservation.expiresAtMillis);if(reservation.expiresAtMillis<=this.now())reservation=await reserve(hex(await this.crypto.random(16)));uint(reservation.expiresAtMillis);if(reservation.expiresAtMillis<=this.now())throw Error('reservation_expired');hexId(reservation.reservationId,32);if(!Array.isArray(reservation.objects)||reservation.objects.length!==wanted.length||reservation.objects.some((r:any,i:number)=>r.oid!==wanted[i]!.oid||r.totalBytes!==wanted[i]!.bytes.length))throw Error('offset_conflict');}
   const pendingIndices:number[]=[];
   for(let index=0;index<upload.length;index++)if(have.objects[index].status!=='present')pendingIndices.push(index);
@@ -363,24 +383,48 @@ export class WatchIndexPublisher {
    const object=upload[index]!,savedReceipt=progress[index]!.savedReceipt;let offset=progress[index]!.offset;
    for(;offset<object.bytes.length;){
     const part=object.bytes.subarray(offset,offset+65536);
-    await withDb(async()=>{await this.pending();this.http.requestGuard?.();await this.store.consumeUploadReplay(object.oid,object.bytes.length,savedReceipt?.durableOffset??0,offset,part.length);});
-    this.http.requestGuard?.();
+    await withDb(async()=>{checkBudget();await this.pending();await this.http.requestGuard?.();await this.store.consumeUploadReplay(object.oid,object.bytes.length,savedReceipt?.durableOffset??0,offset,part.length);});
+    await this.http.requestGuard?.();
     const r=await this.http.putPart(object.oid,offset,reservation.reservationId,digest([plan.requestId,object.oid,offset]).slice(0,32),part);
     await this.http.servicePin!.receipt(this.crypto,r.receipt,this.http.scope,object.oid,object.bytes.length,this.now());
     if(r.durableOffset!==offset+part.length||r.receipt.body.durableOffset!==r.durableOffset)throw Error('offset_conflict');
     offset=r.durableOffset;
     await withDb(()=>this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,r.receipt));
    }
-   this.http.requestGuard?.();
+   checkBudget();
+   await this.http.requestGuard?.();
    const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});
    await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);
    await withDb(()=>this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,complete.receipt));
    this.options.indexObjects?.put(object.oid,object.bytes);
    timing?.advance(1);
-  });after=page.at(-1)!.oid;}
-  // 25.9: every segment table is registered before any parent that lists it.
-  for(const parents of [false,true]){let refsAfter='';for(;;){const page=await this.store.uploadStateRefsPage(plan.requestId,refsAfter,16);if(!page.length)break;const batch=page.map(item=>({item,refs:parseCanonicalJson(item.bytes)})).filter(({refs})=>(refs?.body?.segmentOids?.length>0)===parents);await runConcurrent(batch,async({item,refs})=>{await this.pending();this.http.requestGuard?.();await this.http.json('POST','/state-refs',refs);this.options.indexObjects?.put(item.oid,item.bytes);});refsAfter=page.at(-1)!.oid;}}
-  await this.pending();let result;try{result=await this.http.publish(plan.request);}catch(error){
+  });after=upload.at(-1)!.oid;}
+  // 25.9: finish registering child tables before any parent lists them.
+  for(const phase of [0,1]){
+   if(plan.stateRefsProgress?.phase>phase)continue;
+   let refsAfter=plan.stateRefsProgress?.phase===phase?plan.stateRefsProgress.after:'';
+   for(;;){
+    checkBudget();
+    const page=await this.store.uploadStateRefsPage(plan.requestId,refsAfter);
+    if(!page.length)break;
+    const batch=page.map(item=>({item,refs:parseCanonicalJson(item.bytes)}))
+     .filter(({refs})=>(refs?.body?.segmentOids?.length>0)===(phase===1));
+    await runConcurrent(batch,async({item,refs})=>{
+     await this.pending();checkBudget();await this.http.requestGuard?.();
+     const accepted=await this.http.json('POST','/state-refs',refs);
+     if(accepted.accepted!==true||accepted.parentOid!==refs.body.stateOid||
+        accepted.refsOid!==item.oid||accepted.totalBytes!==item.bytes.length)throw Error('invalid_schema');
+     this.options.indexObjects?.put(item.oid,item.bytes);
+    });
+    refsAfter=page.at(-1)!.oid;
+    if(this.options.shouldPauseUpload&&batch.length){
+     const {before}=await this.pending(),next=copy(before);
+     next.cloud.pendingPublish.stateRefsProgress={phase,after:refsAfter};
+     await this.store.publicationUpdate(before,next);
+    }
+   }
+  }
+  await this.pending();checkBudget();let result;try{result=await this.http.publish(plan.request);}catch(error){
    if(error instanceof SyncV2Error&&error.code==='ref_conflict'){const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId===plan.requestId){const next=copy(before);next.cloud.pendingPublish.phase='conflicted';await this.store.publicationUpdate(before,next);}}throw error;
   }return this.accept(plan,result);
  }
@@ -466,6 +510,8 @@ export class WatchIndexPublisher {
   if(!plan.chunked||!plan.publicationProgress)next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;
   next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};
   next.cloud={...next.cloud,...plan.publicationProgress,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};
+  // Keep the immutable upload bytes until the account head is observed.
+  if(plan.commit&&this.options.indexObjects)next.cloud.lastPublication.uploadId=plan.requestId;
   await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);
   return plan.chunked||plan.heldEdits?{...result,...(plan.chunked?{chunked:true}:{}),...(plan.heldEdits?{heldEdits:true,heldCreates:plan.heldCreates??[],localRevision:plan.capturedLocalRevision}:{})}:result;
  }
