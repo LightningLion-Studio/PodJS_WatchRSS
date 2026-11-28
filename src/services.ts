@@ -428,7 +428,6 @@ export const services: AppServices = {
   async toggleSaved(id,saved) { await init(); if(saved === undefined) { const rows=await db.query("SELECT is_saved FROM articles WHERE id=?",[Number(id)]); saved=!rows[0]?.is_saved; } await repo.setSaved(Number(id),saved); },
   async setSaveState(id,type,saved) { await init(); await repo.setSaveState(Number(id),type,saved); },
   async reorderSavedArticles(type,orderedIds) { await init();await repo.reorderSavedItems(type,orderedIds.map(Number)); },
-  async listNotes(articleId) { await init(); return (await db.query(`SELECT n.*,a.title FROM notes n JOIN articles a ON a.id=n.article_id ${articleId ? "WHERE article_id=?":""} ORDER BY n.updated_at DESC LIMIT 100`,articleId?[Number(articleId)]:[])).map(mapNote); },
   async saveNote(note) { await init(); if(!note.articleId) throw new Error("请从文章页面创建笔记"); await repo.saveNote(Number(note.articleId),note.body); const rows=await db.query("SELECT n.*,a.title FROM notes n JOIN articles a ON a.id=n.article_id WHERE n.article_id=? ORDER BY n.id DESC LIMIT 1",[Number(note.articleId)]); return mapNote(rows[0]); },
   async speak(text: string, rate=1, started?:()=>void, progress?:(event:import("./reader/speech-highlight.ts").SpeechProgress)=>void) { await readerSpeech.speak(text,rate,started,progress); },
   async stopSpeech() { await readerSpeech.stop(); },

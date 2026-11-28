@@ -14,7 +14,7 @@ export interface ResumePorts {
  authorize<T>(run:()=>Promise<T>):Promise<T>;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};
  check():void;randomId():Promise<string>;
- freeze():Promise<{witness:Snapshot;inventory:unknown}>;
+ freeze(peer?:Capability):Promise<{witness:Snapshot;inventory:unknown}>;
  source(witness:Snapshot,selection:Selection):Promise<ResumeSourcePlan>;
  apply(job:Job,object:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>;
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor):Promise<VerifiedPublication>;
@@ -95,7 +95,7 @@ export class LibraryResumeConnection {
    if(this.offers.size>=4)fail('LIMIT_EXCEEDED');
    if(p.accountScope!==this.ports.accountScope)fail('ACCOUNT_MISMATCH');if(p.phoneDeviceId!==this.ports.phoneDeviceId||p.watchDeviceId!==this.ports.watchDeviceId)fail('PEER_MISMATCH');const phone=capability(p.phoneCapabilities);await this.ports.store.budget(0,Math.min(phone.limits.maxJournalBytes,this.ports.capability.limits.maxJournalBytes));
    let witness:Snapshot;
-   if(p.watchSnapshot===null){const frozen=await this.ports.freeze();witness=frozen.witness;await this.ports.store.saveSnapshot(this.scope,witness,frozen.inventory);}
+   if(p.watchSnapshot===null){const frozen=await this.ports.freeze(phone);witness=frozen.witness;await this.ports.store.saveSnapshot(this.scope,witness,frozen.inventory);}
    else{witness=p.watchSnapshot as unknown as Snapshot;const old=await this.ports.store.snapshot(this.scope,witness.snapshotId);if(old&&!sameSnapshot(old.witness,witness))fail('PLAN_CONFLICT');}
    const digest=offerDigest(p,this.ports.capability,witness),result={step:'offer',watchCapabilities:this.ports.capability,watchSnapshot:witness,offerDigest:digest};
    this.offers.set(r.requestId,{request:r,payload:p,watchSnapshot:witness,digest,result});return {result:result as unknown as Row,epoch:null};
@@ -204,7 +204,7 @@ export class LibraryResumeConnection {
    const pageBytes=Math.min(b.selection.limits.maxManifestPageBytes,b.selection.limits.maxFrameBytes);for(const object of source.objects){const n=utf8(JSON.stringify(object)).length;if(n+4096>pageBytes)fail('LIMIT_EXCEEDED');if(count&&(bytes+n+4096>pageBytes||count===b.selection.limits.maxManifestPageEntries)){counts.push(count);count=0;bytes=0;}count++;bytes+=n;}if(count)counts.push(count);
    p={intent:'create',accountScope:this.ports.accountScope,phoneDeviceId:this.ports.phoneDeviceId,watchDeviceId:this.ports.watchDeviceId,direction:'watchToPhone',phoneSnapshot:o.payload.phoneSnapshot as unknown as Snapshot,watchSnapshot:o.watchSnapshot,selection:b.selection,selectionDigest:selectionDigest(b.selection),objectCount:source.objects.length,objectsRoot:objectsRoot(source.objects.map(v=>v.objectId)),pageObjectCounts:counts};
   }
-  this.sourcePlans.set(b.jobId,p);const plan=planDigest(p),beginId=D('wrss.library-resume.v1/source-request',[b.jobId,requestDigest(b.jobId,plan,'begin',p as unknown as Row)]).slice(0,32);
+  this.sourcePlans.set(b.jobId,p);if(source)this.sourceDescriptions.set(b.jobId,source.objects);const plan=planDigest(p),beginId=D('wrss.library-resume.v1/source-request',[b.jobId,requestDigest(b.jobId,plan,'begin',p as unknown as Row)]).slice(0,32);
   const fake:Envelope={action:ACTION,version:1,phase:'begin',type:'request',jobId:b.jobId,planDigest:plan,epoch:null,requestId:beginId,requestDigest:requestDigest(b.jobId,plan,'begin',p as unknown as Row),payload:p as unknown as Row};
   // Persist source intent BEFORE sending a begin that the receiver may commit.
   let local=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.begin(this.scope,fake,p,this.ports.connectionId,old?.epoch??1,null,'source')));
@@ -221,7 +221,8 @@ export class LibraryResumeConnection {
   }
   // Re-query the receiver on every recovery. Bytes sent are never receipts.
   const observed=new Map<string,{descriptor:ObjectDescriptor;state:string;missing:number[][];receipt:AppliedReceipt|null}>();let cursor:Row={afterObjectId:null,afterChunkIndex:null,limit:b.selection.limits.maxResultsPerPage};
-  for(;;){const result=(await this.request('missing',b.jobId,plan,epoch,cursor,false)).result!;for(const raw of result.items as Row[]){const d=source.objects.find(v=>v.objectId===raw.objectId);if(!d)fail('RECEIPT_CONFLICT');const item=observed.get(d.objectId)??{descriptor:d,state:String(raw.state),missing:[],receipt:null};item.missing.push(...raw.missingRanges as number[][]);item.receipt=raw.receipt as unknown as AppliedReceipt|null;observed.set(d.objectId,item);}if(result.done===true)break;cursor={...row(result.next),limit:b.selection.limits.maxResultsPerPage};}
+  const byObjectId=new Map(source.objects.map(v=>[v.objectId,v]));
+  for(;;){const result=(await this.request('missing',b.jobId,plan,epoch,cursor,false)).result!;for(const raw of result.items as Row[]){const d=byObjectId.get(String(raw.objectId));if(!d)fail('RECEIPT_CONFLICT');const item=observed.get(d.objectId)??{descriptor:d,state:String(raw.state),missing:[],receipt:null};item.missing.push(...raw.missingRanges as number[][]);item.receipt=raw.receipt as unknown as AppliedReceipt|null;observed.set(d.objectId,item);}if(result.done===true)break;cursor={...row(result.next),limit:b.selection.limits.maxResultsPerPage};}
   const applied=new Map<string,AppliedReceipt>();for(const [id,v]of observed)if(v.receipt){this.validateReceipt(v.receipt,b.jobId,plan,id);applied.set(id,v.receipt);}
   while(applied.size<source.objects.length){
    const ready=source.objects.filter(d=>!applied.has(d.objectId)&&d.dependsOn.every(id=>applied.has(id))).sort((a,b)=>a.objectId<b.objectId?-1:1);if(!ready.length)fail('PLAN_CONFLICT');
@@ -256,5 +257,5 @@ export class LibraryResumeConnection {
   }
  }
  private validateReceipt(r:AppliedReceipt,job:string,plan:string,id:string){exact(r,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);if(r.jobId!==job||r.planDigest!==plan||r.objectId!==id||r.receiverDeviceId!==this.ports.phoneDeviceId||!['merged','retainedLocal','alreadyPresent'].includes(r.outcome)||r.resultDigest!==D('wrss.library-resume.v1/applied',[r.jobId,r.planDigest,r.objectId,hex(r.applyRequestId,32),hex(r.applyRequestDigest),r.receiverDeviceId,r.outcome]))fail('RECEIPT_CONFLICT');}
- private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_resume_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}));}
+ private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const descriptors=this.sourceDescriptions.get(j.jobId)??await this.ports.store.preparationSourceObjects(j.scope,j.jobId)??[];await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_resume_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]},...this.ports.store.sourceAckStatements(j.scope,descriptors),...this.ports.store.cleanupCompletedSourceStatements(j)]);}));}
 }

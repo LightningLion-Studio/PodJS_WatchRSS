@@ -299,7 +299,7 @@ describe("application services adapter", () => {
 
     const note = await services.services.saveNote({ articleId: article!.id, title: article!.title, body: "稍后复读" });
     expect(note).toMatchObject({ articleId: article!.id, title: article!.title, body: "稍后复读" });
-    expect(await services.services.listNotes(article!.id)).toEqual([note]);
+    expect(await sqlite.query("SELECT id,article_id,body FROM notes WHERE article_id=?", [Number(article!.id)])).toEqual([{ id: Number(note.id), article_id: Number(article!.id), body: "稍后复读" }]);
   });
 });
 
@@ -420,10 +420,10 @@ test("empty original is retryable and never replaces the RSS content",async()=>{
   expect((await services.services.listArticles({channelId:a.id})).every(a=>a.read)).toBe(true);
   expect((await services.services.listArticles({channelId:b.id})).every(a=>!a.read)).toBe(true);
   expect((await services.services.getArticle(article.id))?.saved).toBe(true);
-  expect((await services.services.listNotes(article.id))).toHaveLength(1);
+  expect(database.query("SELECT count(*) n FROM notes WHERE article_id=?").get(Number(article.id))).toEqual({n:1});
   await services.services.deleteChannel(a.id);
   expect(await services.services.listArticles({channelId:a.id})).toHaveLength(0);
-  expect(await services.services.listNotes(article.id)).toHaveLength(0);
+  expect(database.query("SELECT count(*) n FROM notes WHERE article_id=?").get(Number(article.id))).toEqual({n:0});
   expect(database.query("SELECT count(*) n FROM source_preferences WHERE channel_id=?").get(Number(a.id))).toEqual({n:0});
   expect(database.query("SELECT count(*) n FROM article_saved_states WHERE article_id=?").get(Number(article.id))).toEqual({n:0});
   expect(await services.services.listArticles({channelId:b.id})).toHaveLength(2);

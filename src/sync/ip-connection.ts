@@ -15,7 +15,7 @@ export class IpConnectionProbe {
  async connect(descriptor:IpDescriptor,endpoint:IpEndpoint,watchDeviceId:string,resumeSessionId:string|null,lastAckSeq:number):Promise<OpenIpRoute>{
   if(this.used)throw new Error('IP probe already started');this.used=true;this.check();
   const hello=await buildIpHello(descriptor,watchDeviceId,await this.ports.crypto.nonce(),resumeSessionId,lastAckSeq,this.ports.crypto);this.check();
-  const timeoutMs=endpoint.transportKind==='wifiLan'?1000:4000,timer=this.ports.delay(timeoutMs);
+  const timeoutMs=endpoint.transportKind==='wifiLan'?2000:4000,timer=this.ports.delay(timeoutMs);
   const open=async()=>{
    const opened=await this.operation(this.ports.sockets.connect(`ws://${endpoint.address}:${descriptor.port}/sync`,{headers:{'X-WatchRSS-Protocol':'2'},timeoutMs,bindLocalWifi:true,initialTextHandshake:true}),value=>{this.streamId=value.id;});this.check();
    await this.operation(this.ports.sockets.writeText(opened.id,JSON.stringify(hello)));

@@ -396,3 +396,39 @@ test('memo dispatch respects the fault retry deadline and keeps the original sav
  expect(calls).toEqual([undefined,40,40]);
  scheduler.dispose();
 });
+
+test('non-note local changes coalesce within ten seconds when head poll is active and keep legacy interval without head poll',async()=>{
+ const clock=new Clock(),calls:{at:number;savedAt?:number;manual:boolean}[]=[];
+ const headPoll=memoHeadPoll(clock);
+ headPoll.update();
+ await clock.advance(0);
+ expect(headPoll.expediteMemos).toBe(true);
+ const scheduler=new WatchCloudScheduler({
+  headPoll,
+  now:()=>clock.now,delay:(ms,fn)=>{const timer=clock.delay(ms);void timer.result.then(fn,()=>{});return ()=>timer.cancel();},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+  async sync(manual,_mode,run){run.bindIntent(undefined);calls.push({at:clock.now,savedAt:run.note?.savedAt,manual});return true;},
+ },enabled);
+ scheduler.foreground(true);
+ await clock.advance(100);
+ scheduler.trigger('library');
+ await clock.advance(4000);
+ scheduler.trigger('channel');
+ await clock.advance(5999);
+ expect(calls).toHaveLength(1);
+ await clock.advance(1);
+ expect(calls[1]).toEqual({at:10_100,savedAt:undefined,manual:false});
+ // A subsequent memo save still uses the 3-second deadline.
+ scheduler.noteSaved();
+ await clock.advance(2999);
+ expect(calls).toHaveLength(2);
+ await clock.advance(1);
+ expect(calls[2]).toEqual({at:13_100,savedAt:10_100,manual:false});
+ // Non-local triggers (network/foreground) remain on the 5-minute interval.
+ scheduler.trigger('network');
+ await clock.advance(20_000);
+ expect(calls).toHaveLength(3);
+ await clock.advance(CLOUD_INTERVAL-20_000);
+ expect(calls).toHaveLength(4);
+ scheduler.dispose();
+});

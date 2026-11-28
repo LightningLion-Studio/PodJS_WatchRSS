@@ -104,7 +104,6 @@ export interface AppServices {
   toggleSaved(articleId: string, saved?: boolean): Promise<void>;
   setSaveState(articleId: string, type: "favorite" | "watchLater", saved: boolean): Promise<void>;
   reorderSavedArticles(type:"favorite"|"watchLater",orderedIds:string[]):Promise<void>;
-  listNotes(articleId?: string): Promise<Note[]>;
   saveNote(note: { articleId?: string; title: string; body: string }): Promise<Note>;
   /** Native text input (keyboard/IME). Resolves null when cancelled. */
   input(prompt: string, value?: string, options?:ModalInputOptions): Promise<string | null>;

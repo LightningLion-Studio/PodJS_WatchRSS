@@ -5,6 +5,7 @@ import {idleHit} from '../diagnostics/idle-counters';
 import type {WatchHeadPoll} from './head-poll';
 import {cloudDisabled,type CloudGuard} from './guard';
 export const CLOUD_INTERVAL=5*60*1000;
+export const LOCAL_CHANGE_INTERVAL=10_000;
 const NOTE_INTERVAL=3000;
 export type CloudResultObserver=(result:CloudSyncResult)=>void;
 export interface CloudScheduledRun {
@@ -23,6 +24,8 @@ export class WatchCloudScheduler {
  private pendingNote?:NoteSyncTimes;
  private noteDue?:number;
  private lastNoteStart=-Infinity;
+ private localChangeDue?:number;
+ private lastLocalChangeStart=-Infinity;
  private upgradeRequired=false;private approvalPending?:{immediate:boolean};
  private wakeRequested=false;private retryOnWake?:{mode?:'all'|'recent128'};
  private retryAt?:number;private last=-Infinity;private active=false;private disposed=false;private dirty=false;private running:Promise<boolean>|undefined;private cancelTimer?:()=>void;
@@ -31,7 +34,16 @@ export class WatchCloudScheduler {
  async start(enabled:boolean){if(!enabled){await this.ports.cancelWorker();return;}this.guard.require();await this.ports.scheduleWorker();}
  foreground(active:boolean){this.guard.require();if(this.active===active)return;this.active=active;if(active)this.trigger("foreground");else{this.cancelTimer?.();this.cancelTimer=undefined;}this.ports.headPoll?.update();}
  hold(held:boolean){this.guard.require();if(this.held===held)return;this.held=held;if(held){this.cancelTimer?.();this.cancelTimer=undefined;if(this.runState)this.runState.held=true;}else this.wakePending();this.ports.headPoll?.update();}
- trigger(reason:"foreground"|"account"|"library"|"channel"|"network"="library"){idleHit({foreground:65,account:66,library:67,channel:68,network:69}[reason]);this.guard.require();if(this.disposed||this.upgradeRequired)return;this.dirty=true;this.wakePending();}
+ trigger(reason:"foreground"|"account"|"library"|"channel"|"network"="library"){
+  idleHit({foreground:65,account:66,library:67,channel:68,network:69}[reason]);
+  this.guard.require();
+  if(this.disposed||this.upgradeRequired)return;
+  if((reason==='library'||reason==='channel')&&this.ports.headPoll?.expediteMemos&&this.localChangeDue===undefined){
+   this.localChangeDue=this.ports.now()+LOCAL_CHANGE_INTERVAL;
+   this.cancelTimer?.();this.cancelTimer=undefined;
+  }
+  this.dirty=true;this.wakePending();
+ }
  noteSaved(){
   this.guard.require();
   if(this.disposed||this.upgradeRequired)return;
@@ -43,8 +55,9 @@ export class WatchCloudScheduler {
   this.trigger('library');
  }
  headPolicyChanged(){
-  if(this.ports.headPoll?.expediteMemos||this.noteDue===undefined)return;
+  if(this.ports.headPoll?.expediteMemos||this.noteDue===undefined&&this.localChangeDue===undefined)return;
   this.noteDue=undefined;
+  this.localChangeDue=undefined;
   this.cancelTimer?.();this.cancelTimer=undefined;
   this.wakePending();
  }
@@ -65,14 +78,17 @@ export class WatchCloudScheduler {
   const approval=this.approvalPending;
   const retry=wake?this.retryOnWake:undefined;
   const manual=this.pendingManual??retry?.mode;
-  const checkIntent=wake&&this.noteDue===undefined&&!this.dirty&&!retry&&!manual&&this.ports.mayHavePendingIntent?.();
-  if(!approval?.immediate&&!(wake&&(approval||this.noteDue!==undefined))&&!this.dirty&&!manual&&!retry&&!checkIntent)return;
+  const checkIntent=wake&&this.noteDue===undefined&&this.localChangeDue===undefined&&!this.dirty&&!retry&&!manual&&this.ports.mayHavePendingIntent?.();
+  if(!approval?.immediate&&!(wake&&(approval||this.noteDue!==undefined||this.localChangeDue!==undefined))&&!this.dirty&&!manual&&!retry&&!checkIntent)return;
   // Finding a durable grant or a parked retry does not make it eligible early.
   const bypassInterval=approval?.immediate||this.pendingManual!==undefined;
-  // Memo saves can shorten the normal interval. A service retry is still a lower bound.
+  // Memo saves (3s) and local library/channel changes (10s) shorten the normal
+  // interval when head poll is active. A service retry is still a lower bound.
   const noteEligible=this.noteDue===undefined?undefined:Math.max(this.noteDue,this.lastNoteStart+NOTE_INTERVAL);
-  const eligibleAt=this.retryAt===undefined?(bypassInterval?-Infinity:noteEligible??this.last+CLOUD_INTERVAL):
-   Math.max(this.retryAt,bypassInterval?-Infinity:noteEligible??-Infinity);
+  const localEligible=this.localChangeDue===undefined?undefined:Math.max(this.localChangeDue,this.lastLocalChangeStart+LOCAL_CHANGE_INTERVAL);
+  const expedited=noteEligible!==undefined&&localEligible!==undefined?Math.min(noteEligible,localEligible):noteEligible??localEligible;
+  const eligibleAt=this.retryAt===undefined?(bypassInterval?-Infinity:expedited??this.last+CLOUD_INTERVAL):
+   Math.max(this.retryAt,bypassInterval?-Infinity:expedited??-Infinity);
   const remaining=eligibleAt-this.ports.now();
   if(remaining>0){this.cancelTimer=this.ports.delay(remaining,()=>{this.cancelTimer=undefined;this.wakePending();});return;}
   this.pendingManual=undefined;
@@ -116,7 +132,10 @@ export class WatchCloudScheduler {
     started=true;
     if(!current())return;
     this.noteDue=undefined;
+    const hadLocalChange=this.localChangeDue!==undefined;
+    this.localChangeDue=undefined;
     attemptedAt=this.last=this.ports.now();
+    if(hadLocalChange)this.lastLocalChangeStart=attemptedAt;
     if(this.pendingNote){
      note=this.pendingNote;this.pendingNote=undefined;
      this.lastNoteStart=attemptedAt;
@@ -160,7 +179,10 @@ export class WatchCloudScheduler {
   const task=work.then(success=>{
    idleHit(success?85:86);
    if(!success)failed();
-   else if(approvalAtStart&&current()&&this.approvalPending===approvalAtStart)this.approvalPending=undefined;
+   else{
+    if(dispatched&&!started&&current()&&this.localChangeDue!==undefined){this.localChangeDue=undefined;this.lastLocalChangeStart=attemptedAt;}
+    if(approvalAtStart&&current()&&this.approvalPending===approvalAtStart)this.approvalPending=undefined;
+   }
    return success;
   },error=>{idleHit(87);failed(true);throw error;}).finally(()=>{
    this.running=undefined;this.runState=undefined;
@@ -203,7 +225,7 @@ export class WatchCloudScheduler {
   return deliver(task,state);
  }
  /** Fence old results immediately, while keeping wakeups from the existing schedule. */
- fenceAccount(){this.guard.require();this.accountRevision++;this.ports.headPoll?.resetAccount();this.approvalPending=undefined;this.pendingNote=undefined;this.noteDue=undefined;this.lastNoteStart=-Infinity;this.retryOnWake=undefined;}
+ fenceAccount(){this.guard.require();this.accountRevision++;this.ports.headPoll?.resetAccount();this.approvalPending=undefined;this.pendingNote=undefined;this.noteDue=undefined;this.lastNoteStart=-Infinity;this.localChangeDue=undefined;this.lastLocalChangeStart=-Infinity;this.retryOnWake=undefined;}
  accountChanged(){this.fenceAccount();this.scheduleAccount();}
  scheduleAccount(){this.guard.require();this.scheduleRevision++;this.pendingManual=undefined;void this.setUpgradeRequired(false).catch(()=>{});this.cancelTimer?.();this.cancelTimer=undefined;this.last=-Infinity;this.retryAt=undefined;this.trigger("account");}
  dispose(){this.disposed=true;this.ports.headPoll?.update();this.cancelTimer?.();this.cancelTimer=undefined;}

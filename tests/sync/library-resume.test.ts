@@ -254,3 +254,149 @@ test('source-change cancellation persists the local source tombstone and frees t
  }finally{f.sql.close();}});
 
 test('prepare request bindings use the bounded same-database journal and reject changed digests',async()=>{const f=await fixture();try{await f.store.initialize();const scope='a'.repeat(64),connection=nonce(),id=nonce();await f.store.bindPreparation(scope,connection,id,'b'.repeat(64));await f.store.bindPreparation(scope,connection,id,'b'.repeat(64));expect(await f.db.query('SELECT request_id FROM library_resume_prepare_requests')).toHaveLength(1);await expect(f.store.bindPreparation(scope,connection,id,'c'.repeat(64))).rejects.toThrow('REQUEST_CONFLICT');await f.db.execute('UPDATE library_resume_prepare_requests SET expires_at=0');await f.store.collect(scope,async()=>{});expect(await f.db.query('SELECT request_id FROM library_resume_prepare_requests')).toEqual([]);}finally{f.sql.close();}});
+
+test('sourcePlan bounds >4096-object inventories to <=4096 deterministically and prioritizes active items over tombstones',async()=>{
+ const {sourcePlan,resumeInventoryDigest}=await import('../../src/sync/library-resume/repository');
+ const f=await fixture();
+ try{
+  const scope='d'.repeat(64),sel=vectors.selection as Selection;
+  const zeroHash='0'.repeat(64),bodyHash='a'.repeat(64),chunkHash='b'.repeat(64);
+  const sources=Array.from({length:10},(_,i)=>({url:'https://resume.invalid/feed/'+i,sourceDeviceId:vectors.watchDeviceId,title:'Feed '+i,description:'',siteUrl:null,imageUrl:null,createdAt:1000,updatedAt:2000+i,sortOrder:i,isPinned:false,deleted:false,deletedAt:0}));
+  const activeArticles=Array.from({length:200},(_,i)=>({
+   prepared:{
+    article:{articleId:'a'+String(i).padStart(63,'0'),sourceDeviceId:vectors.watchDeviceId,url:'https://resume.invalid/a/'+i,title:'Active '+i,siteName:'Site',excerpt:'',contentHtml:null,contentText:'',imageUrl:null,contentHash:zeroHash,importedAt:1000,updatedAt:5000+i,independentSaved:true,independentChangedAt:5000+i,independentSortOrder:i,rssSourceUrl:null,rssSourceTitle:null,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false},
+    manifest:{articleId:'a'+String(i).padStart(63,'0'),sourceDeviceId:vectors.watchDeviceId,url:'https://resume.invalid/a/'+i,contentHash:zeroHash,metadataHash:zeroHash,bodyHash,bodyByteCount:32,chunkSize:131072,chunkHashes:[chunkHash],bodyAvailable:true,bodySyncMode:'chunked',updatedAt:5000+i,independentSaved:true,independentChangedAt:5000+i,independentSortOrder:i,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false},
+    encodedBody:null,
+   },
+   binding:i+1,
+   chunkHashes:[chunkHash],
+  }));
+  const tombstones=Array.from({length:4290},(_,i)=>({
+   prepared:{
+    article:{articleId:'d'+String(i).padStart(63,'0'),sourceDeviceId:vectors.watchDeviceId,url:'https://resume.invalid/d/'+i,title:'https://resume.invalid/d/'+i,siteName:'resume.invalid',excerpt:'',contentHtml:null,contentText:'',imageUrl:null,contentHash:zeroHash,importedAt:1000,updatedAt:1000+i,independentSaved:false,independentChangedAt:1000+i,independentSortOrder:0,rssSourceUrl:null,rssSourceTitle:null,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:true,deletedAt:1000+i,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false},
+    manifest:{articleId:'d'+String(i).padStart(63,'0'),sourceDeviceId:vectors.watchDeviceId,url:'https://resume.invalid/d/'+i,contentHash:zeroHash,metadataHash:zeroHash,bodyHash:'',bodyByteCount:0,chunkSize:0,chunkHashes:[],bodyAvailable:false,bodySyncMode:'none',updatedAt:1000+i,independentSaved:false,independentChangedAt:1000+i,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:true,deletedAt:1000+i,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false},
+    encodedBody:null,
+   },
+   binding:null,
+   chunkHashes:[],
+  }));
+  const inventory={articles:[...tombstones,...activeArticles],sources};
+  const witness={snapshotId:nonce(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0};
+  await f.store.initialize();
+  await f.store.saveSnapshot(scope,witness,inventory);
+  const first=await sourcePlan(f.repository,f.store,scope,witness,sel);
+  const second=await sourcePlan(f.repository,f.store,scope,witness,sel);
+  expect(first.objects).toHaveLength(4096);
+  expect(first.objects.map(o=>o.objectId)).toEqual(second.objects.map(o=>o.objectId));
+  expect(first.objects.filter(o=>o.kind==='rssSource')).toHaveLength(10);
+  expect(first.objects.filter(o=>o.kind==='articleBody')).toHaveLength(200);
+  expect(first.objects.filter(o=>o.kind==='articleMetadata')).toHaveLength(4096-210);
+  expect(first.objects.reduce((n,o)=>n+Buffer.byteLength(JSON.stringify(o)),0)).toBeLessThanOrEqual(sel.limits.maxManifestBytes);
+ }finally{f.sql.close();}
+},30000);
+
+test('ResumeApplicationService transfers >4096 local objects across sequential <=4096 batches without LIMIT_EXCEEDED',async()=>{
+ const {ResumeApplicationService}=await import('../../src/sync/library-resume/host');
+ const {WatchAccountStore}=await import('../../src/account/store');
+ const {Peer,frames}=await import('../helpers/library-resume-fixture');
+ const {offerDigest,preparationDigest,objectsRoot}=await import('../../src/sync/library-resume/digests');
+ const {HARD_LIMITS}=await import('../../src/sync/library-resume/wire');
+ const f=await fixture();
+ try{
+  // Seed 5 RSS channels + 15 live saved articles + 4,180 deletion tombstones = 4,200 objects (> 4,096).
+  const seed:Parameters<typeof f.db.transaction>[0]=[];
+  for(let i=0;i<5;i++)seed.push({sql:'INSERT INTO channels(id,url,title,description,created_at) VALUES(?,?,?,?,?)',params:[i+1,'https://batch.invalid/feed/'+i,'Feed '+i,'',1000+i]});
+  for(let i=0;i<15;i++){
+   seed.push({sql:'INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at,is_saved) VALUES(?,?,?,?,?,?,?,1)',params:[i+1,1,'Article '+i,'<p>Body '+i+'</p>','https://batch.invalid/article/'+i,'a-'+i,5000+i]});
+   seed.push({sql:"INSERT INTO article_saved_states(article_id,save_type,saved,changed_at,sort_order) VALUES(?,'favorite',1,?,?)",params:[i+1,5000+i,i]});
+  }
+  for(let i=0;i<4180;i++){
+   const id='e'+String(i).padStart(63,'0');
+   seed.push({sql:'INSERT INTO sync_article_deletions(article_id,url,changed_at,source_device_id,source_order) VALUES(?,?,?,?,?)',params:[id,'https://batch.invalid/deleted/'+i,2000+i,vectors.watchDeviceId,vectors.watchDeviceId]});
+  }
+  await f.db.transaction(seed);
+
+  const values=new Map<string,string>(),account=new WatchAccountStore({get:k=>values.get(k)??null,set:(k,v)=>{values.set(k,v);},remove:k=>{values.delete(k);}});
+  await account.save({...vectors.account,phoneMasked:'',installId:'BATCH',watchDeviceToken:'SYNTHETIC',tokenExpiresAtMillis:0,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:false,diagnosticsEnabled:false,sampleRate:0},updatedAtMillis:0});
+  const service=new ResumeApplicationService({store:f.store,chunks:f.chunks,account,repository:async()=>f.repository,randomId:async()=>nonce(),localPermission:()=>true,readFile:async()=>new Uint8Array()});
+
+  const runBatch=async()=>{
+   const context={session:{}},pair=frames();
+   const probe=await service.probe({deviceId:vectors.phoneDeviceId,supportedLibraryResumeVersions:[1]},context);
+   await service.accountConfirmed({account:{userId:vectors.account.userId}},context);
+   const watchCap=probe.libraryResume as unknown as Capability;
+   const running=pair.watch.readFrame(30000).then(first=>service.run(first,pair.watch,context));
+   const phone=new Peer(pair.phone,watchCap),job=nonce();
+   const offerPayload={step:'offer',accountScope:vectors.accountScope,phoneDeviceId:vectors.phoneDeviceId,watchDeviceId:vectors.watchDeviceId,phoneCapabilities:vectors.capability,phoneSnapshot:vectors.phoneSnapshot,watchSnapshot:null};
+   const offered=await phone.request('prepare',offerPayload);expect(offered.success).toBe(true);
+   const watchSnap=offered.result!.watchSnapshot as unknown as import('../../src/sync/library-resume/wire').Snapshot;
+   const selection:Selection={kinds:[{kind:'articleBody',schemaVersion:1},{kind:'articleMetadata',schemaVersion:1},{kind:'rssSource',schemaVersion:1}],limits:{...HARD_LIMITS}};
+   const bs=[{direction:'watchToPhone' as const,jobId:job,intent:'create' as const,selection}];
+   const confirmed=await phone.request('prepare',{step:'confirm',offerRequestId:offered.requestId,bindings:bs,preparationDigest:preparationDigest(offerDigest(offerPayload,watchCap,watchSnap),bs)});
+   expect(confirmed.success).toBe(true);
+   const received:ObjectDescriptor[]=[],receipts=new Map<string,AppliedReceipt>();
+   let expectedPages=0,declaredCount=-1;
+   for(;;){
+    const r=envelope(await pair.phone.readFrame(30000)),p=r.payload!;let result:Row;
+    switch(r.phase){
+     case 'begin':
+      declaredCount=Number(p.objectCount);
+      expect(declaredCount).toBeLessThanOrEqual(4096);
+      expectedPages=(p.pageObjectCounts as number[]).length;
+      result={disposition:'CREATED',selectionDigest:p.selectionDigest,state:declaredCount===0?'READY':'PLANNING',expiresAtMillis:86401000,nextManifestPage:0,completion:null};
+      break;
+     case 'manifestPage':{
+      const entries=p.entries as ObjectDescriptor[];received.push(...entries);
+      const next=Number(p.pageIndex)+1,verified=next===expectedPages;
+      result={pageIndex:p.pageIndex,pageDigest:p.pageDigest,nextManifestPage:next,manifestVerified:verified,state:verified?'READY':'PLANNING'};
+      break;
+     }
+     case 'missing':{
+      const after=p.afterObjectId as string|null,limit=Number(p.limit);
+      const start=after===null?0:received.findIndex(o=>o.objectId===after)+1;
+      const slice=received.slice(start,start+limit),done=start+slice.length>=received.length;
+      result={state:'READY',nextManifestPage:expectedPages,expiresAtMillis:86401000,items:slice.map(o=>({objectId:o.objectId,state:'PENDING',missingRanges:o.chunkHashes.length?[[0,o.chunkHashes.length]]:[],receipt:null})),next:done?null:{afterObjectId:slice.at(-1)!.objectId,afterChunkIndex:null},done,completion:null};
+      break;
+     }
+     case 'putChunk':result={objectId:p.objectId,chunkIndex:p.chunkIndex,chunkState:'STAGED',objectState:'STAGED',receipt:null};break;
+     case 'apply':{
+      const receipt=appliedReceipt(r,String(p.objectId),vectors.phoneDeviceId,'merged');
+      receipts.set(String(p.objectId),receipt);
+      result={state:'APPLIED',receipt};
+      break;
+     }
+     case 'complete':{
+      const root=receiptsRoot(received.map(o=>receipts.get(o.objectId)!));
+      expect(p.objectCount).toBe(received.length);expect(p.receiptsRoot).toBe(root);
+      result=completion(job,r.planDigest!,received.length,root,0) as unknown as Row;
+      break;
+     }
+     default:throw Error('Unexpected phase '+r.phase);
+    }
+    const {payload,...head}=r;
+    await pair.phone.writeFrame({...head,type:'response',success:true,epoch:1,result} as unknown as Row);
+    if(r.phase==='complete')break;
+   }
+   await running;await pair.close();
+   expect(received).toHaveLength(declaredCount);
+   expect(objectsRoot(received.map(o=>o.objectId))).toBeDefined();
+   return received;
+  };
+
+  const batch1=await runBatch();
+  expect(batch1).toHaveLength(4096);
+  expect(batch1.filter(o=>o.kind==='rssSource')).toHaveLength(5);
+  expect(batch1.filter(o=>o.kind==='articleBody')).toHaveLength(15);
+  const batch2=await runBatch();
+  expect(batch2).toHaveLength(4200-4096);
+  const allDelivered=new Set([...batch1,...batch2].map(o=>o.kind+':'+o.businessId));
+  expect(allDelivered.size).toBe(4200);
+  const batch3=await runBatch();
+  expect(batch3).toHaveLength(0);
+  // Editing an already-delivered article causes only that updated article to be resent.
+  await f.db.execute("UPDATE articles SET title='Edited Article 0',content='<p>Updated Body 0</p>' WHERE id=1");
+  const batch4=await runBatch();
+  expect(batch4).toHaveLength(1);
+  expect(batch4[0]!.kind).toBe('articleBody');
+ }finally{f.sql.close();}
+},60000);

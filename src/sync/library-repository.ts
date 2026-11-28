@@ -2,8 +2,8 @@ import {cancellableSql} from '../core/sql-cancellation';
 import type {SqlCancellationCheck} from '../core/types';
 import {playbackWork} from '../core/playback-work';
 import type {ReceiptBoundary} from './library-resume/store';
-import type {FrozenResumeInventory,FrozenResumeArticle} from './library-resume/repository';
-import {hash as resumeHash,CHUNK_BYTES as RESUME_CHUNK_BYTES} from './library-resume/wire';
+import {compareResumeArticles,compareResumeSources,resumeArticleDescriptor,resumeArticleVersion,resumeObjectKey,resumeSourceDescriptor,resumeSourceVersion,type FrozenResumeInventory,type FrozenResumeArticle} from './library-resume/repository';
+import {hash as resumeHash,utf8 as resumeUtf8,CHUNK_BYTES as RESUME_CHUNK_BYTES,HARD_LIMITS as RESUME_HARD_LIMITS} from './library-resume/wire';
 import {idleHit} from '../diagnostics/idle-counters';
 import type {FileCheckpoint} from '@podjs/framework/work-window';
 import {mergeLegacyBookReading,legacyBookReadingArticle} from '../books/legacy-cloud-reading';
@@ -50,16 +50,49 @@ const libraryProjectionScope=(canonical:boolean,books:boolean)=>(canonical?':can
 export class SqlLibraryCloudRepository extends SqlLibraryBodyRepository implements LibrarySessionRepository {
  /** Read-only C export: no RSS merge, cursor repair, reading migration or cache
   * publication. Each body's exact encoding is checked and discarded after its
-  * bounded descriptor is captured; source reads later revalidate the version. */
- resumeFreeze(check:()=>void=()=>{}):Promise<FrozenResumeInventory>{return this.run(async()=>{
+  * bounded descriptor is captured; source reads later revalidate the version.
+  * Batches strictly within maxPlanObjects / manifest / snapshot budgets and
+  * skips versions already acknowledged by the peer so >4,096-object libraries
+  * complete across sequential B2 resume plans instead of failing LIMIT_EXCEEDED. */
+ resumeFreeze(check:()=>void=()=>{},options:{maxObjects?:number;maxManifestBytes?:number;maxSnapshotBytes?:number;ackedVersions?:ReadonlyMap<string,string>;includeArticleBody?:boolean;includeArticleMetadata?:boolean;includeRssSource?:boolean}={}):Promise<FrozenResumeInventory>{return this.run(async()=>{
   const id=await this.identity(),revision=await libraryRevision(this.db);
-  const local=new LocalArticleManifestStore(this.db,this.ports.codec,this.ports.text,this.ports.files,async()=>{throw Error('resume_read_only');});
-  const prepared=await local.snapshot(true,false,!!this.books,check,undefined,true),bindings=local.projectionBindings(),articles:FrozenResumeArticle[]=[];
-  for(const p of prepared){check();const full=p.manifest.bodyAvailable?await local.materializeRequested(p,undefined,true):p,bytes=full.encodedBody;
-   const hashes:string[]=[];if(bytes)for(let at=0;at<bytes.length;at+=RESUME_CHUNK_BYTES)hashes.push(resumeHash(bytes.subarray(at,at+RESUME_CHUNK_BYTES)));
-   articles.push({prepared:{article:{...full.article,contentHtml:null,contentText:''},manifest:full.manifest,encodedBody:null},binding:bindings.get(p.article.articleId)??null,chunkHashes:hashes});
+  const maxObjects=Math.max(0,Math.min(RESUME_HARD_LIMITS.maxPlanObjects,options.maxObjects??RESUME_HARD_LIMITS.maxPlanObjects));
+  const maxManifestBytes=Math.max(0,Math.min(RESUME_HARD_LIMITS.maxManifestBytes,options.maxManifestBytes??RESUME_HARD_LIMITS.maxManifestBytes));
+  const maxSnapshotBytes=Math.max(0,Math.min(RESUME_HARD_LIMITS.maxManifestBytes,options.maxSnapshotBytes??Math.min(RESUME_HARD_LIMITS.maxManifestBytes,12*1024*1024)));
+  const acked=options.ackedVersions,includeBody=options.includeArticleBody??true,includeMetadata=options.includeArticleMetadata??true,includeSource=options.includeRssSource??true;
+  const articles:FrozenResumeArticle[]=[],sources:SyncedSource[]=[];
+  let objectCount=0,snapshotBytes=64,manifestBytes=0;
+  if(maxObjects>0&&includeSource){
+   const exported=[...await this.sources.export(id,undefined,true)].sort(compareResumeSources);
+   for(const source of exported){
+    check();
+    if(objectCount>=maxObjects)break;
+    if(acked?.get(resumeObjectKey('rssSource',source.url))===resumeSourceVersion(source))continue;
+    const sBytes=resumeUtf8(JSON.stringify(source)).length+1,dBytes=resumeUtf8(JSON.stringify(resumeSourceDescriptor(source))).length;
+    if(objectCount>0&&(snapshotBytes+sBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes))break;
+    sources.push(source);objectCount++;snapshotBytes+=sBytes;manifestBytes+=dBytes;
+   }
   }
-  const sources=await this.sources.export(id,undefined,true);check();if(await libraryRevision(this.db)!==revision)throw Error('SOURCE_CHANGED');
+  if(objectCount<maxObjects&&(includeBody||includeMetadata)){
+   const local=new LocalArticleManifestStore(this.db,this.ports.codec,this.ports.text,this.ports.files,async()=>{throw Error('resume_read_only');});
+   const prepared=(await local.snapshot(true,false,!!this.books,check,undefined,true)).filter(p=>p.manifest.bodyAvailable||p.manifest.deleted).sort(compareResumeArticles),bindings=local.projectionBindings();
+   for(const p of prepared){
+    check();
+    if(objectCount>=maxObjects)break;
+    const body=includeBody&&p.manifest.bodyAvailable&&!p.manifest.deleted,kind=body?'articleBody':'articleMetadata';
+    if(kind==='articleBody'?!includeBody:!includeMetadata)continue;
+    if(acked?.get(resumeObjectKey(kind,p.article.articleId))===resumeArticleVersion(p.manifest))continue;
+    const full=body?await local.materializeRequested(p,undefined,true):p;
+    if(acked?.get(resumeObjectKey(kind,full.article.articleId))===resumeArticleVersion(full.manifest))continue;
+    const bytes=body?full.encodedBody:null,hashes:string[]=[];
+    if(bytes)for(let at=0;at<bytes.length;at+=RESUME_CHUNK_BYTES)hashes.push(resumeHash(bytes.subarray(at,at+RESUME_CHUNK_BYTES)));
+    const frozen:FrozenResumeArticle={prepared:{article:{...full.article,contentHtml:null,contentText:''},manifest:full.manifest,encodedBody:null},binding:bindings.get(p.article.articleId)??null,chunkHashes:hashes};
+    const fBytes=resumeUtf8(JSON.stringify(frozen)).length+1,dBytes=resumeUtf8(JSON.stringify(resumeArticleDescriptor(frozen,body))).length;
+    if(objectCount>0&&(snapshotBytes+fBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes))break;
+    articles.push(frozen);objectCount++;snapshotBytes+=fBytes;manifestBytes+=dBytes;
+   }
+  }
+  check();if(await libraryRevision(this.db)!==revision)throw Error('SOURCE_CHANGED');
   return {articles,sources};
  });}
  resumeReadBody(item:FrozenResumeArticle):Promise<Uint8Array>{return this.run(async()=>{

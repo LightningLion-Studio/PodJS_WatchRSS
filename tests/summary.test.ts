@@ -48,7 +48,7 @@ test("usage recording failures do not discard a successful summary; invalid pres
  const f=fixture({source:async()=>({title:"t",content:"",contentHash:"bad"}),recordUsage:async()=>{throw new Error("disk");}},()=>8);await f.session.start();const body=JSON.parse(utf8Decode(f.requests[0].body!));expect(body).toEqual({title:"t",content:"",promptPreset:1,stream:false});expect(f.session.state.status).toBe("done");
 });
 test("native summary source scan is bounded, preserves plain markup, collapses whitespace",()=>{
- expect(summarySourceText(" <p>A&nbsp;B &amp; &#x4e2d; &#25991; &unknown;</p><p>C</p> ")).toBe("A B & 中 文 C");expect(summarySourceText(" a <b>  c ",true)).toBe("a <b> c");expect(summarySourceText("文".repeat(540000)).length).toBe(3000);expect(summarySourceText(" ".repeat(64000)+"after")).toBe("");expect(summarySourceText("<"+"x".repeat(64000)+">after")).toBe("");
+ expect(summarySourceText(" <p>A&nbsp;B &amp; &#x4e2d; &#25991; &unknown;</p><p>C</p> ")).toBe("A B & 中 文 C");expect(summarySourceText(" a <b>  c ",true)).toBe("a <b> c");expect(summarySourceText("文".repeat(540000)).length).toBe(12000);expect(summarySourceText(" ".repeat(64000)+"after")).toBe("");expect(summarySourceText("<"+"x".repeat(64000)+">after")).toBe("");
 });
 test("summary database source prefers cached original independent of reader mode and protects saved rows",async()=>{
  const sql=new Database(":memory:");for(const query of SCHEMA)sql.run(query);

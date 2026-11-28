@@ -10,7 +10,7 @@ import {ResumeAssets,type AssetHost} from './assets';
 import {D} from './digests';
 import {applyResumeObject,sourcePlan,resumeInventoryDigest} from './repository';
 import {noteAssetIntake,type LocalTransferIntake} from '../../sync-v2/local-transfer-intake';
-import {HARD_LIMITS,capability,text,fail,envelope,ResumeError,resumeError,type Capability,type Row} from './wire';
+import {HARD_LIMITS,capability,text,fail,envelope,utf8,ResumeError,resumeError,type Capability,type Row} from './wire';
 
 export interface ResumeSessionPort {
  probe(request:Row,context:SyncActionContext):Promise<Row>;
@@ -61,7 +61,28 @@ export class ResumeApplicationService implements ResumeSessionPort {
     }};
     return protectAsset({cursor:job.jobId+':'+object.objectId,logicalId:object.businessId,body},apply);
    }:undefined,
-   freeze:async()=>{check();const inventory=await repository.resumeFreeze(check);if(assets)inventory.assets=await assets.freeze();return {witness:{snapshotId:await this.ports.randomId(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0},inventory};},
+   freeze:async(peer)=>{
+    check();
+    const maxObjects=Math.min(n.capability.limits.maxPlanObjects,peer?.limits.maxPlanObjects??HARD_LIMITS.maxPlanObjects);
+    const maxManifestBytes=Math.min(n.capability.limits.maxManifestBytes,peer?.limits.maxManifestBytes??HARD_LIMITS.maxManifestBytes);
+    const maxJournalBytes=Math.min(n.capability.limits.maxJournalBytes,peer?.limits.maxJournalBytes??HARD_LIMITS.maxJournalBytes);
+    const peerReceive=peer?new Set(peer.kinds.filter(k=>k.receive).map(k=>k.kind)):undefined;
+    const acked=await this.ports.store.ackedSourceVersions(scope);
+    const frozenAssets=assets&&(!peerReceive||peerReceive.has('noteAsset'))?await assets.freeze(acked,maxObjects):undefined;
+    const assetBytes=frozenAssets?utf8(JSON.stringify(frozenAssets)).length:0;
+    const budgetCap=Math.max(256*1024,Math.floor(Math.min(32*1024*1024,maxJournalBytes-16*1024*1024)/3));
+    const inventory=await repository.resumeFreeze(check,{
+     maxObjects:Math.max(0,maxObjects-(frozenAssets?.length??0)),
+     maxManifestBytes,
+     maxSnapshotBytes:Math.max(0,Math.min(maxManifestBytes,budgetCap)-assetBytes),
+     ackedVersions:acked,
+     includeArticleBody:!peerReceive||peerReceive.has('articleBody'),
+     includeArticleMetadata:!peerReceive||peerReceive.has('articleMetadata'),
+     includeRssSource:!peerReceive||peerReceive.has('rssSource'),
+    });
+    if(frozenAssets)inventory.assets=frozenAssets;
+    return {witness:{snapshotId:await this.ports.randomId(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0},inventory};
+   },
    source:(w,s)=>sourcePlan(repository,this.ports.store,scope,w,s,assets?.read.bind(assets)),
    publish:(lease,object,d)=>d.kind==='noteAsset'&&assets?assets.publish(lease,object,d):this.ports.chunks.finalize(lease,object),
    apply:(job,object,path,boundary)=>{

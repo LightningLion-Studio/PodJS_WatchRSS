@@ -19,8 +19,8 @@ export interface SummaryDependencies {
 export function summarySourceText(source:string,plainText=false):string {
  const html=!plainText&&source.slice(0,4096).includes("<");
  const limit=Math.min(source.length,64000);let out="",pending=false,inTag=false;
- const append=(ch:string)=>{if(/\s/u.test(ch)){if(out)pending=true;}else{if(pending&&out&&out.length<3000)out+=" ";out+=ch;pending=false;}};
- for(let index=0;index<limit&&out.length<3000;index++){
+ const append=(ch:string)=>{if(/\s/u.test(ch)){if(out)pending=true;}else{if(pending&&out&&out.length<12000)out+=" ";out+=ch;pending=false;}};
+ for(let index=0;index<limit&&out.length<12000;index++){
   const ch=source[index];
   if(html&&inTag){if(ch===">"){inTag=false;if(out)pending=true;}continue;}
   if(html&&ch==="<"){inTag=true;if(out)pending=true;continue;}

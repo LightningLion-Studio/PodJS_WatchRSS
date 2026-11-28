@@ -34,6 +34,7 @@ export class ResumeStore {
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_prepare_requests(scope TEXT NOT NULL,connection_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,expires_at INTEGER NOT NULL,PRIMARY KEY(scope,connection_id,request_id))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_preparations(scope TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,expires_at INTEGER NOT NULL,PRIMARY KEY(scope,digest))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_peer_ack(scope TEXT NOT NULL,job_id TEXT NOT NULL,completion TEXT NOT NULL,PRIMARY KEY(scope,job_id))'},
+   {sql:'CREATE TABLE IF NOT EXISTS library_resume_source_acked(scope TEXT NOT NULL,kind TEXT NOT NULL,business_id TEXT NOT NULL,content_version TEXT NOT NULL,acked_at INTEGER NOT NULL,PRIMARY KEY(scope,kind,business_id))'},
   ]);
   const clock=(await this.db.query('SELECT logical FROM library_resume_clock WHERE id=1'))[0];if(clock&&!this.injectedClock)this.logical=Number(clock.logical);
  })().catch(e=>{this.ready=undefined;throw e;});}
@@ -83,12 +84,13 @@ export class ResumeStore {
    (SELECT COALESCE(SUM(length(CAST(body AS BLOB))+2048),0) FROM library_resume_preparations) AS bytes`))[0];
   if(used+Number(shared?.bytes??0)+extra>Math.min(32*1024*1024,limit-16*1024*1024))fail('STORAGE_PRESSURE');
  }
- private planReservation(p:BeginPayload):number{
+ private planReservation(p:BeginPayload,role:Job['role']='receiver'):number{
+  if(role==='source')return utf8(JSON.stringify(p)).length+8192;
   const descriptorBound=p.selection.limits.maxMetadataBytes*4/3+256*68+6144;
   return utf8(JSON.stringify(p)).length+4096+p.objectCount*4096+Math.min(p.selection.limits.maxManifestBytes,Math.ceil(p.objectCount*descriptorBound))+p.pageObjectCounts.length*1024;
  }
- async preflightBegin(scope:string,id:string,p:BeginPayload):Promise<void>{
-  if(!await this.job(scope,id))await this.budget(0,p.selection.limits.maxJournalBytes,{scope,jobId:id,bytes:this.planReservation(p)});
+ async preflightBegin(scope:string,id:string,p:BeginPayload,role:Job['role']='receiver'):Promise<void>{
+  if(!await this.job(scope,id))await this.budget(0,p.selection.limits.maxJournalBytes,{scope,jobId:id,bytes:this.planReservation(p,role)});
   else await this.budget(0,p.selection.limits.maxJournalBytes);
  }
  async begin(scope:string,r:Envelope,p:BeginPayload,connectionId:string,epoch:number,lease:Row|null,role:Job['role']='receiver'):Promise<Job>{
@@ -104,12 +106,12 @@ export class ResumeStore {
    const count=(await this.db.query("SELECT COUNT(*) AS n FROM library_resume_jobs WHERE state NOT IN ('COMPLETE','CANCELLED') AND expires_at>=?",[this.now()]))[0];
    if(Number(count?.n)>=p.selection.limits.maxActiveJobs)fail('WINDOW_FULL');
    // Reserve all descriptor, per-chunk bind and application-receipt overhead.
-   await this.preflightBegin(scope,r.jobId!,p);
+   await this.preflightBegin(scope,r.jobId!,p,role);
   }
   const state=old?.state??(p.objectCount===0?'READY':'PLANNING'),expiration=Math.max(old?.expiresAt??0,this.now()+RETENTION);
   const statement={sql:`INSERT INTO library_resume_jobs(scope,job_id,plan_digest,description,state,connection_id,epoch,expires_at,next_page,completion,lease,role) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
    ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,params:[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]};
-  await this.db.transaction([statement,...(!old?[{sql:'INSERT INTO library_resume_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
+  await this.db.transaction([statement,...(!old?[{sql:'INSERT INTO library_resume_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p,role)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
  }
  async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{return (await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_resume_objects WHERE scope=? AND job_id=? ORDER BY ordinal',[job.scope,job.jobId])).map(r=>({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:Number(r.ordinal)}));}
  async object(job:Job,id:string){const r=(await this.db.query('SELECT object_id,description,receipt FROM library_resume_objects WHERE scope=? AND job_id=? AND object_id=?',[job.scope,job.jobId,id]))[0];if(!r)fail();return {descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,id,r.receipt)};}
@@ -152,7 +154,39 @@ export class ResumeStore {
  }
  async cancel(job:Job,r?:Envelope,peer?:string):Promise<Row>{
   const result={state:job.state==='COMPLETE'?'COMPLETE':'CANCELLED',alreadyComplete:job.state==='COMPLETE'};
-  await this.db.transaction([this.guard(job,true),...(r?this.bind(job,peer!,r,result):[]),{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[job.scope,job.jobId]},{sql:"UPDATE library_resume_jobs SET state=CASE WHEN state='COMPLETE' THEN state ELSE 'CANCELLED' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[this.now()+RETENTION,job.scope,job.jobId]}]);return result;
+  await this.db.transaction([this.guard(job,true),...(r?this.bind(job,peer!,r,result):[]),{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[job.scope,job.jobId]},{sql:"UPDATE library_resume_jobs SET state=CASE WHEN state='COMPLETE' THEN state ELSE 'CANCELLED' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[this.now()+RETENTION,job.scope,job.jobId]},...this.cleanupCompletedSourceStatements(job)]);return result;
+ }
+ async ackedSourceVersions(scope:string):Promise<Map<string,string>>{
+  await this.initialize();
+  const rows=await this.db.query('SELECT kind,business_id,content_version FROM library_resume_source_acked WHERE scope=?',[scope]);
+  return new Map(rows.map(r=>[String(r.kind)+'\0'+String(r.business_id),String(r.content_version)]));
+ }
+ sourceAckStatements(scope:string,descriptors:readonly ObjectDescriptor[]):Statement[]{
+  const statements:Statement[]=[],at=this.now();
+  for(let start=0;start<descriptors.length;start+=100){
+   const part=descriptors.slice(start,start+100),params:(string|number)[]=[];
+   for(const d of part)params.push(scope,d.kind,d.businessId,d.contentVersion,at);
+   statements.push({sql:`INSERT INTO library_resume_source_acked(scope,kind,business_id,content_version,acked_at) VALUES ${part.map(()=>'(?,?,?,?,?)').join(',')} ON CONFLICT(scope,kind,business_id) DO UPDATE SET content_version=excluded.content_version,acked_at=excluded.acked_at`,params});
+  }
+  return statements;
+ }
+ cleanupCompletedSourceStatements(job:Job):Statement[]{
+  if(job.role!=='source')return [];
+  return [
+   {sql:"DELETE FROM library_resume_snapshots WHERE scope=? AND snapshot_id=? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=? AND j.job_id!=? AND j.state NOT IN ('COMPLETE','CANCELLED'))",params:[job.scope,job.description.watchSnapshot.snapshotId,job.scope,job.jobId]},
+   {sql:"DELETE FROM library_resume_preparations WHERE scope=? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=? AND j.job_id!=? AND j.state NOT IN ('COMPLETE','CANCELLED'))",params:[job.scope,job.scope,job.jobId]},
+  ];
+ }
+ async preparationSourceObjects(scope:string,jobId:string):Promise<ObjectDescriptor[]|undefined>{
+  await this.initialize();
+  const rows=await this.db.query('SELECT body FROM library_resume_preparations WHERE scope=?',[scope]);
+  for(const row of rows){
+   try{
+    const parsed=parse<{bindings?:{jobId?:string}[];sourceObjects?:ObjectDescriptor[]}>(row.body);
+    if(parsed.bindings?.some(b=>b.jobId===jobId)&&Array.isArray(parsed.sourceObjects))return parsed.sourceObjects;
+   }catch{}
+  }
+  return undefined;
  }
  async touch(job:Job){const until=this.now()+RETENTION;await this.db.transaction([{sql:'UPDATE library_resume_jobs SET expires_at=max(expires_at,?) WHERE scope=? AND job_id=?',params:[until,job.scope,job.jobId]},{sql:'UPDATE library_resume_snapshots SET expires_at=max(expires_at,?) WHERE scope=? AND snapshot_id IN (?,?)',params:[until,job.scope,job.description.phoneSnapshot.snapshotId,job.description.watchSnapshot.snapshotId]},{sql:'UPDATE library_resume_connections SET expires_at=max(expires_at,?) WHERE connection_id=?',params:[until,job.connectionId]},{sql:'UPDATE library_resume_preparations SET expires_at=max(expires_at,?) WHERE scope=?',params:[until,job.scope]},{sql:'UPDATE library_resume_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',params:[until,job.scope,job.connectionId]}]);}
  async savePeerAck(job:Job,result:Completion){await this.db.execute('INSERT INTO library_resume_peer_ack VALUES(?,?,?) ON CONFLICT(scope,job_id) DO UPDATE SET completion=excluded.completion',[job.scope,job.jobId,JSON.stringify(result)]);}

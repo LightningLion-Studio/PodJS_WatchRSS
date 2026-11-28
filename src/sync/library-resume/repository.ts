@@ -15,6 +15,21 @@ import type {LocalTransferWrite} from '../../sync-v2/local-transfer-intake';
 export interface FrozenResumeArticle {prepared:PreparedArticle;binding:number|null;chunkHashes:string[]}
 export interface FrozenResumeInventory {articles:FrozenResumeArticle[];sources:readonly SyncedSource[];assets?:FrozenAsset[]}
 const ARTICLE_KEYS=['articleId','legacyArticleIds','sourceDeviceId','url','title','siteName','excerpt','imageUrl','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','rssSourceUrl','rssSourceTitle','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','isRead'] as const;
+export function resumeObjectKey(kind:ObjectDescriptor['kind'],businessId:string):string{return kind+'\0'+businessId;}
+export function resumeArticleVersion(m:PreparedArticle['manifest']):string{return D('wrss.library-resume.v1/article-version',[m.contentHash,m.metadataHash,m.bodyHash,String(m.updatedAt),String(m.deletedAt)]);}
+export function resumeSourceVersion(source:SyncedSource):string{return D('wrss.library-resume.v1/source-version',[source.sourceDeviceId,String(source.updatedAt),String(source.deletedAt)]);}
+export function compareResumeSources(a:SyncedSource,b:SyncedSource):number{
+ if(a.deleted!==b.deleted)return a.deleted?1:-1;
+ const ta=Math.max(a.updatedAt,a.deletedAt),tb=Math.max(b.updatedAt,b.deletedAt);
+ if(ta!==tb)return tb-ta;
+ return a.url<b.url?-1:a.url>b.url?1:0;
+}
+export function compareResumeArticles(a:PreparedArticle,b:PreparedArticle):number{
+ if(a.manifest.deleted!==b.manifest.deleted)return a.manifest.deleted?1:-1;
+ const ta=Math.max(a.manifest.updatedAt,a.manifest.deletedAt),tb=Math.max(b.manifest.updatedAt,b.manifest.deletedAt);
+ if(ta!==tb)return tb-ta;
+ return a.article.articleId<b.article.articleId?-1:a.article.articleId>b.article.articleId?1:0;
+}
 function articleMetadata(p:PreparedArticle,metadataOnly:boolean):Row {
  const a=p.article,m=p.manifest;
  return {...Object.fromEntries(ARTICLE_KEYS.filter(k=>a[k]!==undefined).map(k=>[k,a[k]])),body:{bodyHash:m.bodyHash,bodyByteCount:m.bodyByteCount,chunkSize:m.chunkSize,chunkHashes:m.chunkHashes,metadataOnly}};
@@ -22,18 +37,38 @@ function articleMetadata(p:PreparedArticle,metadataOnly:boolean):Row {
 function make(kind:ObjectDescriptor['kind'],businessId:string,contentVersion:string,encoding:ObjectDescriptor['encoding'],size:number,sha256:string,chunkHashes:string[],metadata:Row):ObjectDescriptor{
  const bytes=utf8(JSON.stringify(metadata)),o={kind,schemaVersion:1 as const,businessId,contentVersion,encoding,size,sha256,chunkHashes,metadataBase64:encodeBase64(bytes),metadataSha256:hash(bytes),dependsOn:[] as string[]};return {objectId:objectId(o),...o};
 }
+const EMPTY_HASH=hash(new Uint8Array());
+export function resumeArticleDescriptor(frozen:FrozenResumeArticle,body:boolean):ObjectDescriptor{
+ const p=frozen.prepared,m=p.manifest,kind=body?'articleBody':'articleMetadata';
+ return make(kind,p.article.articleId,resumeArticleVersion(m),body?'article-v14':'none',body?m.bodyByteCount:0,body?m.bodyHash:EMPTY_HASH,body?frozen.chunkHashes:[],articleMetadata(p,!body));
+}
+export function resumeSourceDescriptor(source:SyncedSource):ObjectDescriptor{
+ return make('rssSource',source.url,resumeSourceVersion(source),'none',0,EMPTY_HASH,[],source as unknown as Row);
+}
+export function resumeAssetDescriptor(a:FrozenAsset):ObjectDescriptor{
+ return make('noteAsset',a.storageKey,a.sha256,'raw',a.size,a.sha256,a.chunkHashes,{storageKey:a.storageKey,sha256:a.sha256,size:a.size});
+}
 export function resumeInventoryDigest(inventory:FrozenResumeInventory):string{return hash(utf8(JSON.stringify(inventory)));}
 export async function sourcePlan(repository:SqlLibrarySessionRepository,store:ResumeStore,scope:string,witness:Snapshot,selection:Selection,readAsset?:(key:string)=>Promise<Uint8Array>):Promise<ResumeSourcePlan>{
  const saved=await store.snapshot(scope,witness.snapshotId);if(!saved||resumeInventoryDigest(saved.inventory as FrozenResumeInventory)!==witness.manifestDigest)fail('SOURCE_CHANGED');
  const inventory=saved.inventory as FrozenResumeInventory,selected=new Set(selection.kinds.map(k=>k.kind)),objects:ObjectDescriptor[]=[],articles=new Map<string,FrozenResumeArticle>();
- for(const frozen of inventory.articles){const p=frozen.prepared,m=p.manifest;if(!m.bodyAvailable&&!m.deleted)continue;
+ let manifestBytes=0;
+ const admit=(d:ObjectDescriptor,frozen?:FrozenResumeArticle):boolean=>{
+  descriptor(d,selection.limits);
+  const bytes=utf8(JSON.stringify(d)).length;
+  if(objects.length>=selection.limits.maxPlanObjects)return false;
+  if(manifestBytes+bytes>selection.limits.maxManifestBytes){if(!objects.length)fail('LIMIT_EXCEEDED');return false;}
+  objects.push(d);manifestBytes+=bytes;if(frozen)articles.set(d.objectId,frozen);return true;
+ };
+ let full=false;
+ if(selected.has('rssSource'))for(const source of [...inventory.sources].sort(compareResumeSources)){if(!admit(resumeSourceDescriptor(source))){full=true;break;}}
+ if(!full&&selected.has('noteAsset'))for(const a of [...(inventory.assets??[])].sort((x,y)=>x.storageKey<y.storageKey?-1:x.storageKey>y.storageKey?1:0)){if(!admit(resumeAssetDescriptor(a))){full=true;break;}}
+ if(!full)for(const frozen of [...inventory.articles].sort((a,b)=>compareResumeArticles(a.prepared,b.prepared))){
+  const p=frozen.prepared,m=p.manifest;if(!m.bodyAvailable&&!m.deleted)continue;
   const body=selected.has('articleBody')&&m.bodyAvailable&&!m.deleted,kind=body?'articleBody':'articleMetadata';if(!selected.has(kind))continue;
-  const d=make(kind,p.article.articleId,D('wrss.library-resume.v1/article-version',[m.contentHash,m.metadataHash,m.bodyHash,String(m.updatedAt),String(m.deletedAt)]),body?'article-v14':'none',body?m.bodyByteCount:0,body?m.bodyHash:hash(new Uint8Array()),body?frozen.chunkHashes:[],articleMetadata(p,!body));
-  descriptor(d,selection.limits);objects.push(d);articles.set(d.objectId,frozen);
+  if(!admit(resumeArticleDescriptor(frozen,body),frozen))break;
  }
- if(selected.has('rssSource'))for(const source of inventory.sources){const d=make('rssSource',source.url,D('wrss.library-resume.v1/source-version',[source.sourceDeviceId,String(source.updatedAt),String(source.deletedAt)]),'none',0,hash(new Uint8Array()),[],source as unknown as Row);descriptor(d,selection.limits);objects.push(d);}
- if(selected.has('noteAsset'))for(const a of inventory.assets??[]){const metadata={storageKey:a.storageKey,sha256:a.sha256,size:a.size};objects.push(make('noteAsset',a.storageKey,a.sha256,'raw',a.size,a.sha256,a.chunkHashes,metadata));}
- objects.sort((a,b)=>a.objectId<b.objectId?-1:1);if(objects.length>selection.limits.maxPlanObjects||objects.reduce((n,o)=>n+utf8(JSON.stringify(o)).length,0)>selection.limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
+ objects.sort((a,b)=>a.objectId<b.objectId?-1:1);
  let cachedId:string|undefined,cached:Uint8Array|undefined;
  return {objects,read:async(d,index)=>{if(d.kind==='noteAsset'){if(!readAsset)fail('SOURCE_CHANGED');const bytes=await readAsset(d.businessId);if(bytes.length!==d.size||hash(bytes)!==d.sha256)fail('SOURCE_CHANGED');return bytes.slice(index*CHUNK_BYTES,(index+1)*CHUNK_BYTES);}if(d.kind!=='articleBody')fail();if(cachedId!==d.objectId){const frozen=articles.get(d.objectId);if(!frozen)fail('SOURCE_CHANGED');cached=await repository.resumeReadBody(frozen);if(cached.length!==d.size||hash(cached)!==d.sha256)fail('SOURCE_CHANGED');cachedId=d.objectId;}const bytes=cached!.slice(index*CHUNK_BYTES,Math.min(d.size,(index+1)*CHUNK_BYTES));if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');return bytes;}};
 }
