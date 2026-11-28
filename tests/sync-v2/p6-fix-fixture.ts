@@ -12,6 +12,7 @@ const user=f.context.accountId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$
 export const account={userId:user,backendBaseUrl:'http://127.0.0.1:18991',watchDeviceToken:'synthetic-only'};
 export class ProductBackend extends SyntheticIndexBackend {
  applied:any[]=[];onApplied?:()=>Promise<void>;
+ revocationRevision='0';approvalRevision='0';
  present=true;devices=new Map<string,any>();registrations:any[]=[];publishedBodies:string[]=[];failBeforePublishOnce=false;
  override window():any{const w:any=super.window();w.refs=[...this.devices.values()].filter(d=>d.commitOid).map(d=>({deviceId:d.ref.split('/')[2],commitOid:d.commitOid,refRevision:d.revision})).sort((a,b)=>a.deviceId.localeCompare(b.deviceId));return w;}
  override async request(r:any):Promise<any>{
@@ -21,7 +22,7 @@ export class ProductBackend extends SyntheticIndexBackend {
   if(path.startsWith('/repo/id-key-recovery/'))return {status:200,headers:{},body:jsonBytes(f.capsule)};
   if(path==='/checkpoint'){const w=this.window(),cp=await signControl(crypto,'','wrss.sync.v2/checkpoint-sign',{scope,checkpointId:'c'.repeat(32),serverRevision:this.serverRevision,refs:w.refs,account:this.account,historyFloorRevision:'0',historyFloorMillis:0,windowId:w.windowId,issuedAtMillis:100,expiresAtMillis:300000});return json(cp);}
   if(path==='/devices/signing-key'){const v=parseCanonicalJson(r.body);this.registrations=this.registrations.filter(x=>x.body.deviceId!==v.body.deviceId);this.registrations.push(v);return json({deviceId:v.body.deviceId,keyId:v.body.keyId,registered:true});}
-  if(path==='/devices/signing-keys'){const bindings=[];for(const v of [...this.registrations].sort((a,b)=>(a.body.deviceId+a.body.keyId).localeCompare(b.body.deviceId+b.body.keyId)))bindings.push({...v,deviceMapping:await signControl(crypto,'','wrss.sync.v2/device-mapping',{scope,deviceId:v.body.deviceId,keyId:v.body.keyId,legacyDeviceId:legacy,approvalRevision:'0'})});return json({bindings,revocationRevision:'0'});}
+  if(path==='/devices/signing-keys'){const bindings=[];for(const v of [...this.registrations].sort((a,b)=>(a.body.deviceId+a.body.keyId).localeCompare(b.body.deviceId+b.body.keyId)))bindings.push({...v,deviceMapping:await signControl(crypto,'','wrss.sync.v2/device-mapping',{scope,deviceId:v.body.deviceId,keyId:v.body.keyId,legacyDeviceId:legacy,approvalRevision:this.approvalRevision})});return json({bindings,revocationRevision:this.revocationRevision});}
   if(path==='/account/publish'){const ref=parseCanonicalJson(r.body).device.body.ref;this.device=this.devices.get(ref)??{ref,commitOid:null,revision:'0'};this.publishedBodies.push(Buffer.from(r.body).toString('base64'));if(this.failBeforePublishOnce){this.failBeforePublishOnce=false;throw Error('synthetic_request_lost');}}
   const result=await super.request(r);if(path==='/account/publish'&&result.status===200)this.devices.set(this.device.ref,{...this.device});
   if(path==='/state-refs'){const v=parseCanonicalJson(r.body),t=this.tables.get(v.body.stateOid),registered=this.registrations[0];Object.assign(t,{authorDeviceId:registered.body.deviceId,keyId:registered.body.keyId});}

@@ -73,9 +73,9 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
   if(intent){const epoch=await cloudStatePort(host).get(manualEpochKey(account));if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch||intent.version===1&&!epoch)return 'success';}
   if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return 'busy';cloudLease=true;
-  const {db,libraryPorts}=await createBackgroundLibraryPorts(host,async key=>{const v=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return v.exists?v.value:undefined;},guard);
+  const {db,libraryPorts,initialize}=await createBackgroundLibraryPorts(host,async key=>{const v=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return v.exists?v.value:undefined;},guard,true);
   const library=new SqlLibraryBodyRepository(db,libraryPorts);
-  await accounts.ensureLibraryOwner(account,()=>library.hasLocalPrivateContent());
+  await accounts.ensureLibraryOwner(account,async()=>{await initialize();return library.hasLocalPrivateContent();});
   // The worker keeps one bounded account transaction through crypto/network.
   // Logout/refresh cannot clear or replace the account between a file check and
   // publication. All exits release both native leases in cleanup time.
@@ -88,13 +88,18 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
     cachedSession={account:now,at:Date.now()};
     return now;
    };
-   await session();const deviceId=await library.deviceId(),ports=createCloudHostPorts(host,guard),foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent:async()=>{await session();}}),device=bootstrap.devices.find(d=>d.deviceId===deviceId);
+   await session();
+   const tables=await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_local_identity','library_clear_journal')");
+   if(tables.some(t=>t.name==='library_clear_journal')&&(await db.query('SELECT 1 FROM library_clear_journal WHERE id=1')).length)throw Error('cloud_sync_suspended');
+   const installedDevice=tables.some(t=>t.name==='sync_local_identity')?(await db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id:undefined;
+   const deviceId=typeof installedDevice==='string'&&installedDevice?installedDevice:await initialize().then(()=>library.deviceId());
+   const ports=createCloudHostPorts(host,guard),foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent:async()=>{await session();}}),device=bootstrap.devices.find(d=>d.deviceId===deviceId);
    if(!device||device.revokedAt){await complete();return 'failure';}
    const ready=await foundation.keys.acceptBootstrap(account.userId,deviceId,bootstrap.keyEnvelopes,bootstrap,device.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);
    if(ready!=='ready'){await complete();return 'failure';}
    const cleanup:CloudHostRequest=(method,args)=>window.cleanup(()=>raw(method,args));
    progress.stage('compare');
-   const opened=await openApplicationSyncV2Core({progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
+   const opened=await openApplicationSyncV2Core({singleRound:true,prepareLibrary:initialize,progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
    try{
     const result=opened?.initialResult??{completionError:'cloud_v2_repo_missing'};
     if(result.completionError&&!result.chunked)diagnostic.report(recordFailureDiagnostic(Error(result.completionError)));

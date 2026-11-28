@@ -14,13 +14,21 @@ import {digest,type Scope} from './protocol';
 export function watchLocalProjection(options:{enabled?:boolean;noteSegments?:boolean;host:CloudHostRequest;identity:Pick<WatchIdentityStore,'installed'>;descriptor:unknown;scope:Scope;libraryId:string;accountScope:string;metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>}){
  const gate=new ProjectionGate(options.enabled??false);let opened:Promise<{store:WatchProjectionStore;source:SqlBusinessSource;rebuild:()=>Promise<void>}>|undefined;
  gate.onClose(()=>stopExistingProjection(projectionSql(options.host)));
+ const db=projectionSql(options.host);
+ const projection=async()=>{
+  const installed=await options.identity.installed(options.descriptor),key=unhex(installed.idKeyHex);
+  try{return new WatchProjectionStore(db,localProjectionCipher(options.host,options.accountScope),gate,options.scope,options.libraryId,key,async()=>{await options.identity.installed(options.descriptor);},{noteSegments:options.noteSegments===true});}
+  finally{key.fill(0);}
+ };
  return {
   gate,
+  async inspect(){
+   if(!gate.isEnabled||!(await db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_state'")).length)return null;
+   return projection();
+  },
   open(){if(!gate.isEnabled)return stopExistingProjection(projectionSql(options.host)).then(()=>null);return opened??=(async()=>{
    // Approved identity access ends before any SQL writer or content work starts.
-   const installed=await options.identity.installed(options.descriptor),db=projectionSql(options.host),key=unhex(installed.idKeyHex);
-   const store=new WatchProjectionStore(db,localProjectionCipher(options.host,options.accountScope),gate,options.scope,options.libraryId,key,async()=>{await options.identity.installed(options.descriptor);},{noteSegments:options.noteSegments===true});
-   key.fill(0);
+   const store=await projection();
    await store.initialize();const source=await SqlBusinessSource.open(db,watchMaterializer(db,options.metadata,(table,locator)=>store.readCandidateBySource(table,locator),(kind,id)=>store.readCandidate(store.entityKeyFor(kind,id)),(kind,ids)=>store.readCandidates(kind,ids)));return {store,source,async rebuild(){const saved=await store.checkpoint();if(saved?.phase==='complete')await store.restartScan();else if(!saved)await store.beginScan({schema:'v2-rc6c-business-2',descriptorPin:digest(options.descriptor),accountScope:options.accountScope,capability:'p5-history-rebuild'});for(;;){const cp=await store.checkpoint();if(cp!.phase==='complete')break;if(cp!.phase==='tail')await store.catchUpPage(source);else await store.scanPage(source);}}};
   })().catch(error=>{opened=undefined;throw error;});},
  };

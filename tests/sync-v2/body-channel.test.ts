@@ -471,7 +471,7 @@ test('RVPODNOTES-02 missing new original holds only that entity and never invent
   const state=await f.store.readState();expect(await f.store.cloudRow(state.cloud.current.treeRoot,entity)).toBeNull();expect(await f.store.readCandidate(entity)).not.toBeNull();expect(state.hasUnsentEdits).toBe(true);expect(pending).toEqual(['body_channel_source_missing']);expect(await f.store.cloudRow(state.cloud.current.treeRoot,entityKey(idKey,scope.repoId,'note','n'))).not.toBeNull();
   const head={...server.account};
   for(const request of ['a','d']){
-   expect(await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},request.repeat(32))).toEqual({skipped:true,heldEdits:true,changedRows:0});
+   expect(await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},request.repeat(32))).toMatchObject({skipped:true,heldEdits:true,changedRows:0});
    expect((await f.store.readState()).cloud.pendingPublish).toBeNull();
    expect(server.account).toEqual(head);
   }

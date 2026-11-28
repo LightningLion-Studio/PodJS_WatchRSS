@@ -3,7 +3,7 @@ import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,co
 import {sameScope,features,b64,unb64,indexRow} from './wire';
 import {authenticatePath,type ApprovedKey,type Pins} from './head-pins';
 import {openV2,objectOid,type EnvelopeCrypto,sealV2} from './sealed';
-import {signCommit,signControl,verifySigned,type SigningPort} from './signing';
+import {signCommit,signControl,verifyCommit,verifySigned,type SigningPort} from './signing';
 import {readTree,buildTree} from './merkle';
 import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
 import {businessAuditBinding,fromWire} from './business';
@@ -57,26 +57,27 @@ export class WatchCloudIndex {
  private get supported(){return this.options.noteSegments===true?['note-conflicts.v1',NOTE_SEGMENTS_FEATURE]:['note-conflicts.v1'];}
  private get scope(){return this.http.scope;}
  private current(state:SyncState){return {pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',current:null,deviceSequence:'0',pendingPublish:null,...state.cloud};}
- async pull(window:any,readOnly=false):Promise<CloudPullResult>{
-  try{return await this.pullOnce(window,readOnly);}catch(error){if(error instanceof ObservationReadOnly)return this.pullOnce(window,true);throw error;}
+ async pull(window:any,readOnly=false,signingFingerprint?:string):Promise<CloudPullResult>{
+  try{return await this.pullOnce(window,readOnly,signingFingerprint);}catch(error){if(error instanceof ObservationReadOnly)return this.pullOnce(window,true,signingFingerprint);throw error;}
  }
- private async pullOnce(window:any,readOnly:boolean):Promise<CloudPullResult>{
+ private async pullOnce(window:any,readOnly:boolean,signingFingerprint?:string):Promise<CloudPullResult>{
   if((await this.store.readStableState()).cloud?.witnessConflict)throw Error('ref_continuity_unavailable');
   const capabilities=await this.http.capabilities();sameScope(window.scope,this.scope);if(window.version!==2)throw Error('upgrade_required');exact(window.account,['commitOid','revision','rollbackGeneration']);const a=window.account;checkD64(a.revision);checkD64(a.rollbackGeneration);checkD64(window.serverRevision);checkD64(window.historyFloorRevision);hexId(window.windowId,32);uint(window.expiresAtMillis);if(this.now()>window.expiresAtMillis)throw Error('window_expired');if(compareD64(window.historyFloorRevision,window.serverRevision)>0)throw Error('invalid_schema');
   const before=await this.store.readState();readOnly ||= queuedReadOnly(before)||!!before.cloud?.pendingPublish?.explicit&&before.cloud.pendingPublish.kind==='rollback'&&!this.http.historyRestoreOpen();const saved=this.current(before),auditBinding=businessAuditBinding(this.scope,this.keys.version,capabilities.features);if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
   const historyGap=compareD64(saved.cursor,window.historyFloorRevision)<0;
   if(a.commitOid===null){if(a.revision!=='0'||a.rollbackGeneration!=='0'||saved.pins.accountOid!==null)throw Error('replay_detected');return {empty:true};}
   oid(a.commitOid,'commit');if(a.revision==='0')throw Error('invalid_schema');if(saved.pins.accountOid===null)await this.bootstrap(window);
+  const signingChanged=signingFingerprint!==undefined&&saved.current?.signingFingerprint!==signingFingerprint;
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
-   if(saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
+   if(!signingChanged&&saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
     if(!readOnly&&window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.observationUpdate(before,next);}
     if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
   this.options.progress?.()?.stage('download');
   // Observe queued explicit actions through the current network window.
-  const cache=readOnly||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
+  const cache=readOnly||signingChanged&&saved.current?.commitOid===a.commitOid||before.cloud?.pendingPublish?.explicit||before.cloud?.pendingCloudChoice?undefined:this.options.indexObjects;
   const objects=new Map<string,Uint8Array>(),fetch=(id:string)=>this.http.object(id,undefined,window.windowId),fetchBatch=(ids:string[])=>this.http.objects(window.windowId,ids);
   const get=async(id:string)=>{
    const existing=objects.get(id);if(existing)return existing;
@@ -97,6 +98,11 @@ export class WatchCloudIndex {
    if(page.nextOid!==cursor||page.complete!==(cursor===stop))throw Error('ref_continuity_unavailable');return headerCache.get(id);
   };
   const path=await authenticatePath(this.crypto,this.scope,a.commitOid,saved.pins,readHeader,this.approved),head=path.head??(await this.store.readHeader(a.commitOid))?.body??saved.headers?.[a.commitOid]?.body;
+  if(!path.head&&signingChanged){
+   const envelope=await readHeader(a.commitOid),author=await this.approved(envelope.body.authorDeviceId),prior=saved.pins.authors[author.deviceId];
+   if(!prior||prior.keyId!==author.keyId||prior.publicKey!==author.publicKey)throw Error('signature_invalid');
+   await verifyCommit(this.crypto,author.publicKey,{body:envelope.body,signature:envelope.signature},a.commitOid,this.scope);
+  }
   for(const entry of path.path)objects.set(entry.oid,jsonBytes({body:entry.body,signature:entry.signature}));
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
   // A closed explicit-action gate permits authentication and decoding only.
@@ -110,13 +116,13 @@ export class WatchCloudIndex {
   let staged:SyncState|null=null,count=0;const pending:any[]=[],seen:ObservedRow[]=[];
   const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
   const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
-  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink,saved.auditBinding===auditBinding);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
+  try{await this.snapshot(head.treeRoot,window.windowId,get,batch,!signingChanged&&saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink,!signingChanged&&saved.auditBinding===auditBinding);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   this.options.progress?.()?.stage('write');
   const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
   if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
   const next=observeAccount(staged,{oid:a.commitOid,revision:a.revision,generation:a.rollbackGeneration});path.pins.seenOids=[];
   // The only content snapshot retained is the current authenticated index.
-  next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
+  next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count,...(signingFingerprint?{signingFingerprint}:{})},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision&&saved.lastPublication.heldEdits!==true){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
   next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,staged,saved);next.cloud.unopenableBaselines=kept.baselines;

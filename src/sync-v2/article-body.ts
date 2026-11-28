@@ -29,6 +29,7 @@ export function articleBodyResolver(options:{crypto:EnvelopeCrypto;keys:ObjectKe
   const plain=await options.read(entry.candidate.meta.logicalId);
   const prior=existing?.manifest??existing?.row;
   const revision=plain?articleBodyRevision(entry.entityKey,plain):null;
+  if(prior?.bodyRevision!=null&&!plain&&(existing.candidate??existing).meta?.payload?.contentHash!==entry.candidate.meta.payload.contentHash)throw Error('body_channel_source_missing');
   if(prior?.bodyRevision!=null&&(!plain||prior.bodyRevision===revision))return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,prior[k]])) as unknown as BodyManifest;
   if(!plain||revision===null)return null;
   if(!plain.length)throw Error('invalid_schema');

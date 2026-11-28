@@ -14,14 +14,14 @@ import type {CloudHostRequest} from '../cloud/host-ports';
 import type {HttpTransport} from '../cloud/types';
 import {accountIdFromUserId} from './signing';
 import {syncV2Origin} from './http';
-import {accountContentKey,accountKeyPrefix,accountScopedStorage,fetchRepoIdentity,identityCryptoPort,receiveRepoIdentity,type AccountKeyring} from './product';
+import {accountContentKey,accountKeyPrefix,accountScopedStorage,probeRepoIdentity,identityCryptoPort,receiveRepoIdentity,type AccountKeyring} from './product';
 
 export interface ApplicationSyncV2Account {userId:string;backendBaseUrl:string;watchDeviceToken:string}
 /** Receiver K_id step of the opener (P6-4/P6-5). Returns the installed record,
  * or null while the account has no repo yet (phone/mini creates it). */
 export async function receiveApplicationIdentity(options:{host:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;allowLoopback?:boolean}){
  const {account}=options,base=account.backendBaseUrl.replace(/\/+$/,''),origin=syncV2Origin(base,{accountBaseUrl:base,allowLoopback:options.allowLoopback===true});
- const fetched=await fetchRepoIdentity(options.transport,origin,{accessToken:account.watchDeviceToken,legacyDeviceId:options.legacyDeviceId});if(!fetched)return null;
+ const fetched=await probeRepoIdentity(options.transport,origin,{accessToken:account.watchDeviceToken,legacyDeviceId:options.legacyDeviceId});if(!fetched)return null;
  const crypto=createSyncV2Crypto(options.host),accountId=accountIdFromUserId(account.userId),content=accountContentKey(options.keys,account.userId);
  const secure={get:(key:string)=>readCloudSecure(options.host,key),async compareAndSet(key:string,expected:string|null,value:string){const r=await options.host<{updated:boolean}>('secure.compareAndSet',{key,expected,value});if(typeof r.updated!=='boolean')throw Error('secure_store_corrupt');return r.updated;}};
  // The 18.1 recipient deviceId is H32; the v1 device UUID maps exactly like accountIdFromUserId.
@@ -33,7 +33,8 @@ export async function receiveApplicationIdentity(options:{host:CloudHostRequest;
 
 import type {SqlLibrarySessionRepository} from '../sync/library-repository';
 import {watchLocalProjection} from './index';
-import {watchSyncV2} from './runtime';
+import {watchSyncV2,watchIndexAuthentication} from './runtime';
+import {readUnchangedRound,rememberSettledRound} from './round-probe';
 import type {SyncV2RoundResult} from './product-start';
 import {PublicationLookupUnavailable} from './publisher';
 import {ensureR0Scan} from './product';
@@ -56,7 +57,7 @@ import {watchSpaceV2} from './space-runtime';
 
 /** Product assembly over the original v1 library and authenticated account.
  * The caller serializes this opener after v1 releases its writer lease. */
-export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedAsset?:import('./account-control').AccountControlOptions['prepareArchivedAsset'];prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined}){
+export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(options:{singleRound?:true;prepareLibrary?:()=>Promise<void>;lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>&Partial<BodyRepository&Pick<SqlLibrarySessionRepository,'cloudArticlePlain'>>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[];libraryEpoch?:string;contentGeneration?:string}>;createUi?:(ports:SyncV2UiStateOptions)=>Ui;allowLoopback?:boolean;bodyInstall?:<T>(work:()=>Promise<T>)=>Promise<T>;allowBodies?:()=>Promise<boolean>;prepareArchivedAsset?:import('./account-control').AccountControlOptions['prepareArchivedAsset'];prepareArchivedBook?:import('./account-control').AccountControlOptions['prepareArchivedBook'];now?:()=>number;clock?:TrustedClock;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined}){
  const {account,repository}=options,lifetime=options.lifetime??new SyncV2Lifetime();
  // Retain the writer lease through SQL. Read/crypto/network waits can unwind
  // immediately; their late results cannot cross another guarded IO boundary.
@@ -87,6 +88,22 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  const assertCurrent=async()=>{if(closed)throw Error('feature_disabled');const current=await options.session();if(canonical([current.backendBaseUrl.replace(/\/+$/,''),current.userId])!==accountScope)throw Error('cloud_account_busy');return current;};
  const guardedHost:CloudHostRequest=async<T>(method:string,args:Record<string,unknown>)=>{await assertCurrent();if(method==='secure.get'&&args.offset===undefined)return await readCloudSecure(host,String(args.key)) as T;return host<T>(method,args);};
  const identity={installed:async(descriptor:unknown)=>{await assertCurrent();if(digest(descriptor)!==digest(fetched.descriptor))throw Error('identity_conflict');return installed;}};
+ const projection=watchLocalProjection({enabled:true,host:guardedHost,identity,descriptor:fetched.descriptor,scope:fetched.scope,libraryId,accountScope,metadata:repository});
+ const session=async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};};
+ const authOptions={host:guardedHost,transport,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},bootstrap:options.bootstrap,session,clock,now:options.now};
+ if(options.singleRound){
+  const saved=await projection.inspect();
+  if(saved){
+   const id=unhex(installed.idKeyHex);
+   try{
+    const auth=watchIndexAuthentication(authOptions,await session(),id);
+    if(await readUnchangedRound(saved,auth,await options.keys.currentKeyVersion(account.userId),options.now??Date.now)){
+     return {ui:undefined as unknown as Ui,initialResult:{completionError:null},bodyError:()=>null,close,sync:async()=>{throw Error('feature_disabled');}};
+    }
+   }finally{id.fill(0);}
+  }
+ }
+ await options.prepareLibrary?.();
  // v1 initializes its metadata tables before the SQL source enumerates them.
  await repository.cloudRestoreMetadata({ids:[],limit:1});
  await WatchAccountBusinessSql.initializeSchema(projectionSql(guardedHost));
@@ -100,7 +117,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   if(args[0]==='asset')missingNoteAssets.delete(args[1]);
  }}:undefined;
  let bodyError:string|null=null;
- localFactory=watchLocalProjection({enabled:true,host:guardedHost,identity,descriptor:fetched.descriptor,scope:fetched.scope,libraryId,accountScope,metadata:repository});
+ localFactory=projection;
   const local=await localFactory.open();if(!local)throw Error('feature_disabled');
   const refreshAssets=async()=>{
    if(!repository.cloudNotes||!repository.cloudNoteAsset)return;
@@ -124,7 +141,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    return prepared?.manifest.bodyAvailable?articleBodyBytes(prepared.article):undefined;
   };
   const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:readArticlePlain}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
-  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:3});
+  runtimeFactory=watchSyncV2({...authOptions,enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bodyResolver:resolveBody,progress:options.progress,maxChangedRows:64,maxPrepareMillis:38_000,uploadConcurrency:3,readConcurrency:3});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.
@@ -193,11 +210,14 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    const checkpoint=await local.store.beginTailWindow();
    if(checkpoint.phase==='tail')await ensureR0Scan(local);
   };
+  let roundSchemaVersion=-1;
   const round=async()=>{
    await assertCurrent();
    options.progress?.()?.stage('compare');
    await runtime.http.refreshClosedReadGate();
-   await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));await runtime.refreshTrustedTime();const deferred=await flush();
+   await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));
+   roundSchemaVersion=await local.store.roundSchemaVersion();
+   await runtime.refreshTrustedTime();const deferred=await flush();
    if(deferred){
     options.progress?.()?.stage('compare');
     const state=await local.store.readState(),pending=state.cloud?.pendingPublish,settings=await control.settings();
@@ -220,7 +240,11 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
       await recoverConflict();
      }
     }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
-    if(pubResult?.skipped)return publishedAny?{...pulled,refreshBodies:true}:pulled;
+    if(pubResult?.skipped){
+     const followed=pubResult.heldCreates?.length?await control.followWithHeldCreates(pubResult.stateVersion,pubResult.heldCreates):undefined;
+     return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,...(publishedAny||followed?.applied?{refreshBodies:true}:{})};
+    }
+    if(!pubResult?.chunked&&pubResult?.heldEdits&&Date.now()-roundStart<150_000)continue;
     if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
     // First-follow publication leaves the merged head unapplied locally.
     const followed=state.account&&state.activeGeneration===null||pubResult?.chunked?await runtime.pull():pulled;
@@ -233,30 +257,39 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const bodyRound=async(expiresAtMillis:number)=>{if(!channel)return;try{if(!await channel.hasWork())return;const allowed=options.allowBodies?await options.allowBodies():(await guardedHost<{wifi:boolean;metered:boolean}>('discovery.networkSnapshot',{}));if(allowed!==true&&!(typeof allowed==='object'&&allowed.wifi&&allowed.metered===false)){bodyError=bodyError??'body_channel_waiting_wifi';return;}options.progress?.()?.stage('bodies');const result=await channel.sync(expiresAtMillis);bodyError=bodyError??result.errors[0]??null;}catch(error){bodyError=String((error as Error).message);}};
   const sync=async()=>{
    bodyError=null;
+   if(await runtime.readUnchanged())return {unchanged:true};
    const result=await round();
+   let bodyWork=false;
    if(!result?.readOnly){
-    if(channel&&!result?.chunked&&(result?.refreshBodies||await channel.hasWork())){
+    bodyWork=!!channel&&!result?.chunked&&await channel.hasWork();
+    if(channel&&!result?.chunked&&(result?.refreshBodies||bodyWork)){
      let observation=result?.refreshBodies||result?.expiresAtMillis===undefined?await runtime.refreshAccount():result;
      if(await channel.needsPublication()){
       const publication=await runtime.publish();
       if(!publication?.skipped)observation=await runtime.refreshAccount();
      }
      await bodyRound(observation.expiresAtMillis);
+     bodyWork ||= await channel.hasWork();
     }
     if(bodyRepository)try{await guardedHost('sql.notify',{topic:'watchrss-library'});}catch{await assertCurrent();}
    }
-   return result;
+   // Carrier-managed rows require rechecking the original even after a ready
+   // receipt: file loss or repair does not always bump the SQL business witness.
+   return {...result,bodyWork};
   };
   const synchronize=async():Promise<SyncV2RoundResult>=>{
    const result=await sync();
+   if(result?.unchanged)return {completionError:null};
    let completionError:string|null=null;
    const state=await local.store.readState();
    if(state.pendingChoice)completionError='choice_pending';
    else if(result?.readOnly||state.cloud?.blockedCommitOid||result?.applyDisabled&&state.account&&state.activeGeneration!==state.account.oid)completionError='cloud_v2_read_only';
    else if(result?.chunked)return {completionError:'cloud_v2_pending',chunked:true};
-   else if(state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
+   else if(state.cloud?.pendingPublish||state.cloud?.pendingApplied||
+    state.hasUnsentEdits&&result?.heldLocalRevision!==state.localChangeRevision)completionError='cloud_v2_pending';
    else if(bodyError)completionError=bodyError;
    else if(state.hasUnsentEdits)completionError='cloud_v2_pending';
+   if(!completionError&&!result?.bodyWork&&!missingNoteAssets.size)await rememberSettledRound(local.store,state,roundSchemaVersion);
    return {completionError};
   };
   const initialResult=await synchronize();

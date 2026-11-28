@@ -469,9 +469,9 @@ export class WatchAccountControl {
  }
  /** A clean device follows the authenticated current account. A dirty device
   * retains its native DB and pending choice, including after event expiry. */
- async follow(window?:any){
+ async follow(window?:any,signingFingerprint?:string){
   const observed=window??await this.o.http.negotiate([],[]);
-  return this.observeAndFollow(()=>this.o.reader.pull(observed));
+  return this.observeAndFollow(()=>this.o.reader.pull(observed,false,signingFingerprint));
  }
  async poll(){return this.observeAndFollow(()=>this.o.reader.poll());}
  private async observeAndFollow(pull:()=>ReturnType<WatchCloudIndex['pull']>){
@@ -512,11 +512,38 @@ export class WatchAccountControl {
  }
  /** R4: follow reads the current tree one entity (or one bounded page) at a
   * time for every pass; the peak is one long note, whatever the row count. */
- private async followStatements(before:SyncState){
-  if(!this.o.business.prepareFeed){const records=this.records(await this.cloud(before));return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
+ /** The publisher has compared the complete candidate set. Only cloud-absent
+  * body creations remain unsent. Keep those records in both native SQL and the
+  * candidate index while applying the authenticated account. */
+ async followWithHeldCreates(stateVersion:string,keys:readonly string[]){
+  const before=await this.o.store.readStableState();
+  if(before.stateVersion!==stateVersion||before.pendingChoice||!before.hasUnsentEdits)throw Error('choice_stale');
+  if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};
+  if(before.cloud?.pendingApplied)await this.flushApplied();
+  const account=before.account,current=before.cloud?.current;
+  if(!account||before.activeGeneration===account.oid||current?.commitOid!==account.oid||before.cloud?.pendingApplied)return;
+  if(before.editBase.generation!==account.generation||before.cloud.pendingPublish||before.cloud.pendingCloudChoice)throw Error('choice_stale');
+  const retained=new Map<string,SourceRecord>();
+  for(const key of keys){
+   const candidate=await this.o.store.readCandidate(key);
+   if(!candidate||!['asset','book'].includes(candidate.meta.kind)||candidate.state.payload.deleted||
+    await this.o.store.cloudRow(current.treeRoot,key))throw Error('choice_stale');
+   retained.set(key,this.records([{entityKey:key,rowSequence:'1',candidate}])[0]!);
+  }
+  const statements=await this.followStatements(before,retained);
+  const requestId=digest(['follow',account]).slice(0,32),next=this.applied(before,account.oid,account.revision,account.generation,requestId);
+  next.hasUnsentEdits=true;
+  next.cloud.editCreates=keys;
+  const release=await this.reserveProjection(statements);
+  try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}
+  await this.flushApplied();
+  return {applied:true};
+ }
+ private async followStatements(before:SyncState,retained?:ReadonlyMap<string,SourceRecord>){
+  if(!this.o.business.prepareFeed){const records=[...this.records(await this.cloud(before)),...(retained?.values()??[])];return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
   return this.o.store.preparePagedProjection(before,async()=>{
-   const records=await this.cloudFeed(before);return {records,business:this.o.business.prepareFeed!(records,before)};
-  },keys=>this.readCloudKeys(before.cloud.current.treeRoot,keys));
+   const records=await this.cloudFeed(before,retained);return {records,business:this.o.business.prepareFeed!(records,before)};
+  },keys=>this.readCloudKeys(before.cloud.current.treeRoot,keys,retained),{},retained?digest([...retained.keys()]):'follow');
  }
  /** Without a common base, overlapping first-sync edits need a choice. The
   * normal publisher can carry non-overlapping notes onto the remote tree. */
@@ -537,15 +564,19 @@ export class WatchAccountControl {
    after=page.at(-1)!.entityKey;
   }
  }
- private async cloudFeed(s:SyncState):Promise<RecordFeed>{
+ private async cloudFeed(s:SyncState,retained?:ReadonlyMap<string,SourceRecord>):Promise<RecordFeed>{
   if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const root=s.cloud.current.treeRoot,keys:string[]=[],facts:RecordFact[]=[],input=this.o.store.inputHasher();let after='';
   // One decoding pass yields the keys, the small facts and the input digest.
   for(;;){const page=await this.o.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const row=await this.openable(r);if(!row)continue;const [record]=this.records([row]);keys.push(r.row.entityKey);facts.push(recordFact(record!));input.add(record!);}after=page.at(-1)!.row.entityKey;}
-  return {keys,facts,inputHash:input.finish(),read:(from,limit)=>this.readCloudKeys(root,keys.slice(from,from+limit))};
+  for(const [key,record] of retained??[]){keys.push(key);facts.push(recordFact(record));input.add(record);}
+  return {keys,facts,inputHash:input.finish(),read:(from,limit)=>this.readCloudKeys(root,keys.slice(from,from+limit),retained)};
  }
- private async readCloudKeys(root:string,keys:readonly string[]){
+ private async readCloudKeys(root:string,keys:readonly string[],retained?:ReadonlyMap<string,SourceRecord>){
   const out:SourceRecord[]=[];let size=0;
-  for(const key of keys){const r=await this.o.store.cloudRow(root,key),row=r?await this.openable(r):null;if(!row)throw Error('choice_stale');const n=r.segments?PAGE_BYTES:JSON.stringify(r.state).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(...this.records([row]));size+=n;}
+  for(const key of keys){
+   const record=retained?.get(key);
+   if(record){const n=JSON.stringify(record.value).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(record);size+=n;continue;}
+   const r=await this.o.store.cloudRow(root,key),row=r?await this.openable(r):null;if(!row)throw Error('choice_stale');const n=r.segments?PAGE_BYTES:JSON.stringify(r.state).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(...this.records([row]));size+=n;}
   return out;
  }
  /** Durable post-commit ACK. Failure retries the same request and never reapplies. */

@@ -19,15 +19,19 @@ import type {SyncTextPort} from '../sync/local-manifest';
 import {createCloudHostPorts,type CloudHostRequest} from './host-ports';
 import {utf8Decode} from './types';
 import type {CloudGuard} from './guard';
-export async function createBackgroundLibraryPorts(host:CloudHostRequest,readKv:(key:string)=>Promise<unknown>,guard:CloudGuard){
+export async function createBackgroundLibraryPorts(host:CloudHostRequest,readKv:(key:string)=>Promise<unknown>,guard:CloudGuard,deferInitialization=false){
  const metadata=restoreRequestMetadata('projection'),rawHost=host;host=<T>(method:string,args:Record<string,unknown>)=>rawHost<T>(method,typeof args.callsiteId==='number'?args:metadata.args(method,args));
  const publicationHost=(op:number):CloudHostRequest=><T>(method:string,args:Record<string,unknown>)=>rawHost<T>(method,metadata.args(method,args,['file.write','file.commit','file.compose','file.publishUtf8','file.syncDirectory'].includes(method)?op:undefined));
  const bookHost=publicationHost(13),articleHost=publicationHost(15);
  guard.require();const ports=createCloudHostPorts(host,guard);
  const db:SqlDatabase={query:(sql,params=[])=>host('sql.query',{sql,params}),execute:async(sql,params=[])=>{await host('sql.execute',{sql,params});},transaction:async statements=>{await host('sql.transaction',{statements});},transactionChanges:statements=>host('sql.transaction',{statements,reportChanges:true})};
- await initializeSchema(db,{seedBuiltinChannels:false});
- if((await db.query('SELECT id FROM library_clear_journal WHERE id=1')).length)throw Error(CLOUD_SYNC_SUSPENDED);
- await ensureSyncDevice(db,()=>ports.crypto.random(16));
+ let initialization:Promise<void>|undefined;
+ const initialize=()=>initialization??=(async()=>{
+  await initializeSchema(db,{seedBuiltinChannels:false});
+  if((await db.query('SELECT id FROM library_clear_journal WHERE id=1')).length)throw Error(CLOUD_SYNC_SUSPENDED);
+  await ensureSyncDevice(db,()=>ports.crypto.random(16));
+ })();
+ if(!deferInitialization)await initialize();
  const reading=new SqlReadingProgressStore(db,new ReadingProgressStore({get:async key=>{const value=await readKv(key);return typeof value==='string'?value:null;},set:async()=>{throw Error('Background legacy progress is read only');}}));
  const append=async(path:string,bytes:Uint8Array,offset:number)=>{
   for(let at=0;at<bytes.length;at+=32768){const part=bytes.subarray(at,at+32768);const r=await articleHost<{size:number}>('file.write',{path,append:true,expectedOffset:offset,dataBase64:bytesToBase64(part)});offset+=part.length;if(r.size!==offset)throw Error('后台正文写入不完整');}return {size:offset};
@@ -53,5 +57,5 @@ export async function createBackgroundLibraryPorts(host:CloudHostRequest,readKv:
   storeText:(key,value,checkpoint)=>writer.storeText(key,value,()=>false,checkpoint)},migrateReading:id=>reading.migrate(id),prepareReadingMigration:ids=>reading.migrationStatements(ids),migrateReadingMany:ids=>reading.migrateMany(ids),cleanupRemovedContent:async({itemIds})=>{
   for(const id of itemIds){const directory=`offline/rss/${id}`;const listing=await host<{entries:{file:boolean;path:string}[]}>('file.list',{path:directory}).catch(()=>undefined);for(const e of listing?.entries??[])if(e.file&&e.path.startsWith(directory+'/')&&!e.path.slice(directory.length+1).includes('/'))await host('file.delete',{path:e.path});}
  }};
- return {db,libraryPorts};
+ return {db,libraryPorts,initialize};
 }

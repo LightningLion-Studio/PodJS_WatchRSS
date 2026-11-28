@@ -1,4 +1,6 @@
 import {test,expect} from 'bun:test';
+import {completeManualIntent,MANUAL_INTENT_KEY,type ManualIntent} from '../../src/cloud/manual-handoff';
+import type {CloudHostRequest} from '../../src/cloud/host-ports';
 import {finishSyncV2Background} from '../../src/cloud/background-v2';
 import {readFileSync,mkdtempSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
@@ -52,4 +54,23 @@ test.each([
 
 test('headless v2 continues a durable chunk as progress without retiring the grant',async()=>{
  expect(await finishSyncV2Background({completionError:'cloud_v2_pending',chunked:true},async()=>{throw Error('grant retired');})).toEqual({status:'retry',progress:true});
+});
+
+test('terminal headless outcome retires the matching grant without discarding its replacement',async()=>{
+ const grant:ManualIntent={version:2,token:'fixture',scope:'account',mode:'all',createdAt:1,epoch:'epoch'};
+ let stored:string|null=JSON.stringify(grant);
+ const host:CloudHostRequest=async<T>(method:string,args:Record<string,unknown>)=>{
+  expect(args.key).toBe(MANUAL_INTENT_KEY);
+  if(method==='secure.get')return {exists:stored!==null,value:stored} as T;
+  expect(method).toBe('secure.compareAndSet');
+  const updated=stored===args.expected;
+  if(updated)stored=args.value as string|null;
+  return {updated} as T;
+ };
+ const finish=()=>finishSyncV2Background({completionError:'cloud_v2_pending'},()=>completeManualIntent(host,grant));
+ expect(await finish()).toBe('failure');
+ expect(stored).toBeNull();
+ stored=JSON.stringify({...grant,token:'replacement'});
+ expect(await finish()).toBe('failure');
+ expect(JSON.parse(stored).token).toBe('replacement');
 });

@@ -214,6 +214,18 @@ export class WatchProjectionStore {
   if(!row||!sameBusinessRevision(state.businessRevision,{epoch:String(row.epoch),revision:String(row.revision)}))throw Error('choice_stale');
   return state;
  }
+ /** Check the SQL witnesses together after network IO. No reconciliation or
+  * business-table enumeration is permitted on the unchanged path. */
+ async matchesRoundState(state:SyncState,schemaVersion:number){
+  this.gate.require();await this.checkIdentity();
+  return (await this.db.query(`SELECT 1 FROM syncv2_state s JOIN business_sync_revision b ON b.id=1
+   WHERE s.scope=? AND s.state_version=? AND b.epoch=? AND CAST(b.revision AS TEXT)=?
+   AND (SELECT schema_version FROM pragma_schema_version)=?`,
+   [this.scopeKey,state.stateVersion,state.businessRevision?.epoch,state.businessRevision?.revision,schemaVersion])).length===1;
+ }
+ async roundSchemaVersion(){
+  this.gate.require();return Number((await this.db.query('PRAGMA schema_version'))[0]?.schema_version ?? -1);
+ }
  async readState():Promise<SyncState>{
   const state=await this.persistedState();
   const current=await businessRevision(this.db);

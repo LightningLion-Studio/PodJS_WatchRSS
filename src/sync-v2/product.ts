@@ -32,12 +32,14 @@ export function identityCryptoPort(v2:{hkdf(key:Uint8Array,salt:Uint8Array,info:
  return {hkdf:(k,s,i)=>v2.hkdf(k,s,i),decrypt:(k,aad,nonce,c)=>v2.decrypt(k,nonce,c,aad),verify:(spki,m,s)=>{if(spki.length<65)return Promise.resolve(false);return v2.verify(spki.subarray(spki.length-65),m,s);}};
 }
 
-export type RepoIdentityFetch={scope:Scope;descriptor:any;descriptorOid:string;capsule:any};
+type RepoIdentityDescriptor={scope:Scope;descriptor:any;descriptorOid:string};
+export type RepoIdentityFetch=RepoIdentityDescriptor&{capsule:any};
+type RepoIdentityProbe=RepoIdentityDescriptor&{loadCapsule:()=>Promise<any>};
 /** P6-4: GET /repo/descriptor and its immutable recovery capsule. The server
  * derives scope for these two reads; every byte is checked here and the K_wrap
  * proof/signature/AEAD are verified later by WatchIdentityStore. Returns null
  * when the account has no repo yet (the watch waits for phone/mini). */
-export async function fetchRepoIdentity(transport:HttpTransport,origin:string,session:{accessToken:string;legacyDeviceId:string}):Promise<RepoIdentityFetch|null>{
+export async function probeRepoIdentity(transport:HttpTransport,origin:string,session:{accessToken:string;legacyDeviceId:string}):Promise<RepoIdentityProbe|null>{
  if(!session.accessToken||!session.legacyDeviceId)throw Error('authorization_required');
  const prefix=origin+'/functions/v1/sync/v2',headers={Authorization:'Bearer '+session.accessToken,'x-watchrss-cloud-device-id':session.legacyDeviceId};
  const get=(path:string)=>transport.request({method:'GET',url:prefix+path,headers,timeoutMs:10000,readTimeoutMs:10000,acceptHttpErrors:true});
@@ -45,17 +47,27 @@ export async function fetchRepoIdentity(transport:HttpTransport,origin:string,se
  const value=parseNetwork(r.body);if(r.status>=400){const code=value?.error?.code;if(code==='object_missing')return null;throw new SyncV2Error(typeof code==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(code)?code:'transport_error');}
  exact(value,['version','scope','descriptorOid','descriptor','recoveryOid']);if(value.version!==2)throw new SyncV2Error('upgrade_required');validateScope(value.scope);oid(value.descriptorOid,'repo-descriptor');oid(value.recoveryOid,'id-key-recovery');
  if(descriptorOid(value.descriptor)!==value.descriptorOid||canonical(value.descriptor?.body?.scope)!==canonical(value.scope))throw Error('authentication_required');
- const c=await get('/repo/id-key-recovery/'+encodeURIComponent(value.recoveryOid));if(c.status!==200)throw new SyncV2Error(c.status===404?'object_missing':'transport_error');
- if(c.body.length>8192||'id-key-recovery:sha256:'+sha256Hex(c.body)!==value.recoveryOid)throw Error('hash_mismatch');
- return {scope:value.scope,descriptor:value.descriptor,descriptorOid:value.descriptorOid,capsule:parseNetwork(c.body)};
+ const loadCapsule=async()=>{
+  const c=await get('/repo/id-key-recovery/'+encodeURIComponent(value.recoveryOid));if(c.status!==200)throw new SyncV2Error(c.status===404?'object_missing':'transport_error');
+  if(c.body.length>8192||'id-key-recovery:sha256:'+sha256Hex(c.body)!==value.recoveryOid)throw Error('hash_mismatch');
+  return parseNetwork(c.body);
+ };
+ return {scope:value.scope,descriptor:value.descriptor,descriptorOid:value.descriptorOid,loadCapsule};
+}
+export async function fetchRepoIdentity(...args:Parameters<typeof probeRepoIdentity>):Promise<RepoIdentityFetch|null>{
+ const descriptor=await probeRepoIdentity(...args);
+ if(!descriptor)return null;
+ const {loadCapsule,...header}=descriptor;
+ return {...header,capsule:await loadCapsule()};
 }
 /** P6-4/P6-5: install (or re-confirm) K_id from the capsule with every 18.1
  * check. A known pin that differs stops with `identity_conflict`. */
-export async function receiveRepoIdentity(options:{fetched:RepoIdentityFetch;storage:IdentityStorage;crypto:IdentityCrypto;random:(n:number)=>Promise<Uint8Array>;member:()=>Promise<WatchRecipient>;accountId:string;root:(version:number)=>Promise<Uint8Array>}){
+export async function receiveRepoIdentity(options:{fetched:RepoIdentityFetch|RepoIdentityProbe;storage:IdentityStorage;crypto:IdentityCrypto;random:(n:number)=>Promise<Uint8Array>;member:()=>Promise<WatchRecipient>;accountId:string;root:(version:number)=>Promise<Uint8Array>}){
  const {fetched}=options,store=new WatchIdentityStore(options.storage,options.random,options.crypto,options.member,fetched.scope,options.accountId);
  try{return await store.installed(fetched.descriptor);}catch(error){if((error as Error)?.message!=='identity_not_installed')throw error;}
+ const capsule='loadCapsule' in fetched?await fetched.loadCapsule():fetched.capsule;
  const root=await options.root(fetched.descriptor.body.wrappingKeyVersion);
- return store.installRecovery(fetched.capsule,fetched.descriptor,root,fetched.descriptorOid);
+ return store.installRecovery(capsule,fetched.descriptor,root,fetched.descriptorOid);
 }
 
 /** 26.3 P6-8: first enable runs the R0 full scan; an unfinished scan resumes

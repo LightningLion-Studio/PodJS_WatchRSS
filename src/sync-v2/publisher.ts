@@ -75,7 +75,8 @@ export class WatchIndexPublisher {
   let rowCount=root?await this.store.cloudRowCount(root):0;
   const baseOid=before.editBase.accountOid;
   const baseRoot=baseOid&&baseOid!==before.account?.oid?(await this.store.readHeader(baseOid))?.body.treeRoot:null;
-  let staged=false,heldEdits=false,budgetReached=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
+  const heldCreates:string[]=[];
+  let staged=false,heldEdits=false,heldOther=false,budgetReached=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
   const prepStarted=Date.now(),maxRows=this.options.maxChangedRows??Number.POSITIVE_INFINITY,maxPrepMs=this.options.maxPrepareMillis??Number.POSITIVE_INFINITY;
   try{
   if(root&&(saved.auditBinding!==businessAuditBinding(this.http.scope,this.keys.version,capabilities.features)||rowCount!==saved.current?.rowCount)){
@@ -91,7 +92,7 @@ export class WatchIndexPublisher {
    const existing=root?await this.store.cloudRow(root,entry.entityKey):null;
    // F1: a row this device cannot open is carried back unchanged (same OIDs);
    // R2: a local change against its quarantine baseline is held as unsent.
-   if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate))heldEdits=true;return true;}
+   if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate)){heldEdits=true;heldOther=true;}return true;}
    const c=copy(entry.candidate);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
    let mergeNoteClock=false;
    if(baseRoot&&c.meta.kind==='note'){
@@ -128,7 +129,15 @@ export class WatchIndexPublisher {
     c.state={...existing.state,payload:{...existing.state.payload,updatedAt:clock.updatedAt,modifiedBy:clock.modifiedBy}};
    }
    if(!existing&&(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs))){heldEdits=true;budgetReached=true;return false;}
-   let body;try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}catch(error){if((error as Error).message!=='body_channel_source_missing')throw error;heldEdits=true;return true;}
+   let body;
+   try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}
+   catch(error){
+    if((error as Error).message!=='body_channel_source_missing')throw error;
+    heldEdits=true;
+    if(!existing&&(c.meta.kind==='book'||c.meta.kind==='asset'))heldCreates.push(entry.entityKey);
+    else heldOther=true;
+    return true;
+   }
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)return true;
    if(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs)){heldEdits=true;budgetReached=true;return false;}
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
@@ -157,7 +166,10 @@ export class WatchIndexPublisher {
   let after='';while(!budgetReached){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){if(visited.has(entry.entityKey))continue;if(!await processEntry(entry))break;}after=page.at(-1)!.entityKey;}
   // A held candidate stays local until its original or baseline is available.
   // Without publishable rows there is no new account state to commit.
-  if(heldEdits&&!changedRows.length&&!budgetReached)return {skipped:true as const,heldEdits:true as const,changedRows:0};
+  if(heldEdits&&!changedRows.length&&!budgetReached)return {
+   skipped:true as const,heldEdits:true as const,changedRows:0,segments:{...this.segmentStats},
+   heldCreates:heldOther?[]:heldCreates,stateVersion:before.stateVersion,localRevision:before.localChangeRevision,
+  };
   const fetch=(id:string)=>this.http.object(id);
   const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,changedRows);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);
@@ -394,6 +406,6 @@ export class WatchIndexPublisher {
   next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};
   next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};
   await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);
-  return plan.chunked?{...result,chunked:true}:result;
+  return plan.chunked||plan.heldEdits?{...result,...(plan.chunked?{chunked:true}:{}),...(plan.heldEdits?{heldEdits:true}:{})}:result;
  }
 }
