@@ -1,12 +1,12 @@
 import type {IndexObjectCache} from './index-object-cache';
-import {canonical,jsonBytes,parseCanonicalJson,digest,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
+import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
 import {sameScope,features,b64,unb64,indexRow} from './wire';
 import {authenticatePath,type ApprovedKey,type Pins} from './head-pins';
 import {openV2,objectOid,type EnvelopeCrypto,sealV2} from './sealed';
 import {signCommit,signControl,verifySigned,type SigningPort} from './signing';
 import {readTree,buildTree} from './merkle';
 import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
-import {fromWire} from './business';
+import {businessAuditBinding,fromWire} from './business';
 import {observeAccount,queuedReadOnly,type SyncState} from './state';
 import {PAGE_BYTES,ObservationReadOnly,type WatchProjectionStore} from './store';
 import {SyncV2Http,SyncV2Error} from './http';
@@ -63,7 +63,7 @@ export class WatchCloudIndex {
  private async pullOnce(window:any,readOnly:boolean):Promise<CloudPullResult>{
   if((await this.store.readStableState()).cloud?.witnessConflict)throw Error('ref_continuity_unavailable');
   const capabilities=await this.http.capabilities();sameScope(window.scope,this.scope);if(window.version!==2)throw Error('upgrade_required');exact(window.account,['commitOid','revision','rollbackGeneration']);const a=window.account;checkD64(a.revision);checkD64(a.rollbackGeneration);checkD64(window.serverRevision);checkD64(window.historyFloorRevision);hexId(window.windowId,32);uint(window.expiresAtMillis);if(this.now()>window.expiresAtMillis)throw Error('window_expired');if(compareD64(window.historyFloorRevision,window.serverRevision)>0)throw Error('invalid_schema');
-  const before=await this.store.readState();readOnly ||= queuedReadOnly(before)||!!before.cloud?.pendingPublish?.explicit&&before.cloud.pendingPublish.kind==='rollback'&&!this.http.historyRestoreOpen();const saved=this.current(before),auditBinding=digest({scope:this.scope,keyVersion:this.keys.version,features:capabilities.features,schema:'v2-rc6c-business-2'});if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
+  const before=await this.store.readState();readOnly ||= queuedReadOnly(before)||!!before.cloud?.pendingPublish?.explicit&&before.cloud.pendingPublish.kind==='rollback'&&!this.http.historyRestoreOpen();const saved=this.current(before),auditBinding=businessAuditBinding(this.scope,this.keys.version,capabilities.features);if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
   const historyGap=compareD64(saved.cursor,window.historyFloorRevision)<0;
   if(a.commitOid===null){if(a.revision!=='0'||a.rollbackGeneration!=='0'||saved.pins.accountOid!==null)throw Error('replay_detected');return {empty:true};}
   oid(a.commitOid,'commit');if(a.revision==='0')throw Error('invalid_schema');if(saved.pins.accountOid===null)await this.bootstrap(window);

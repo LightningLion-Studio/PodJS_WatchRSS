@@ -87,7 +87,12 @@ test('WatchIndexPublisher priority-first chunked publish commits notes before ba
 
   // Commit #2: next 2 deletions (4 rows total), chunked=true; pull reuses the 2 verified rows from Commit #1.
   const stateRefsBefore=Object.entries(server.calls).filter(([p])=>p.startsWith('/state-refs/')).reduce((s,[,n])=>s+n,0);
+  const cloudRows=store.cloudRows.bind(store);
+  let fullIndexPages=0;
+  store.cloudRows=(...args)=>{fullIndexPages++;return cloudRows(...args);};
   const prep2=await publisher.prepare('a'.repeat(32),'key',{commitOid:server.device.commitOid,revision:server.device.revision},'2'.repeat(32));
+  expect(fullIndexPages).toBe(0);
+  store.cloudRows=cloudRows;
   expect(prep2.rows).toBe(4);
   expect(prep2.chunked).toBe(true);
   await publisher.flush();

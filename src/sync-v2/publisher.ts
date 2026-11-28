@@ -8,7 +8,7 @@ import {hex} from '@podjs/framework/crypto';
 import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
-import {fromWire,sameFolderContent} from './business';
+import {businessAuditBinding,fromWire,sameFolderContent} from './business';
 import {readConflicts,conflictNeutral,noteEditDigest,sameLiveNoteContent} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
@@ -63,21 +63,30 @@ export class WatchIndexPublisher {
  }
  /** Reserve the author sequence before any signing. Crashes may leave gaps. */
  async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
-  if(!this.http.indexWrite)throw Error('feature_disabled');await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
+  if(!this.http.indexWrite)throw Error('feature_disabled');const capabilities=await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
   let before=await this.store.readState();if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
   const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish||saved.preparingPublication)throw Error('publication_pending');
   const checkpoint=await this.store.checkpoint();if(checkpoint?.phase!=='complete'||!sameBusinessRevision(checkpoint.businessRevision,before.businessRevision))throw Error('projection_incomplete');
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
-  // F2: only index rows are kept across entities. Decoded rows, candidates and
-  // sealed objects are read or staged one bounded page/entity at a time.
-  const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),changedRows:any[]=[],bindings:Statement[]=[],root=saved.current?.treeRoot??null;this.segmentStats={uploaded:0,reused:0};
+  // The authenticated root supplies unchanged rows to updateTree. Open cache
+  // entries only for candidates being compared, within their bounded pages.
+  const objects=new Map<string,Uint8Array>(),changedRows:any[]=[],bindings:Statement[]=[],root=saved.current?.treeRoot??null;this.segmentStats={uploaded:0,reused:0};
+  let rowCount=root?await this.store.cloudRowCount(root):0;
   const baseOid=before.editBase.accountOid;
   const baseRoot=baseOid&&baseOid!==before.account?.oid?(await this.store.readHeader(baseOid))?.body.treeRoot:null;
   let staged=false,heldEdits=false,budgetReached=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
   const prepStarted=Date.now(),maxRows=this.options.maxChangedRows??Number.POSITIVE_INFINITY,maxPrepMs=this.options.maxPrepareMillis??Number.POSITIVE_INFINITY;
   try{
-  if(root){let after='';for(;;){const page=await this.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){if(!r.unopenable)fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);}after=page.at(-1).row.entityKey;}}
+  if(root&&(saved.auditBinding!==businessAuditBinding(this.http.scope,this.keys.version,capabilities.features)||rowCount!==saved.current?.rowCount)){
+   let after='';
+   for(;;){
+    const page=await this.store.cloudRows(root,after,32,PAGE_BYTES);
+    if(!page.length)break;
+    for(const row of page)if(!row.unopenable)fromWire(row.meta.kind,row.meta.payload,row.state.payload);
+    after=page.at(-1).row.entityKey;
+   }
+  }
   const processEntry=async(entry:any):Promise<boolean>=>{
    const existing=root?await this.store.cloudRow(root,entry.entityKey):null;
    // F1: a row this device cannot open is carried back unchanged (same OIDs);
@@ -124,12 +133,12 @@ export class WatchIndexPublisher {
    if(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs)){heldEdits=true;budgetReached=true;return false;}
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
-   const hasBody=!isBodyTombstone(c)&&['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
+   const hasBody=!isBodyTombstone(c)&&['article','book','asset'].includes(c.meta.kind),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
    // business adapter before replacing an overlapping authenticated row.
-   if(old&&before.account&&before.editBase.accountOid!==before.account.oid&&!mergeNoteClock&&!mergeFolderClock)throw Error('merge_unavailable');
-   indexRow(row);rows.set(entry.entityKey,row);changedRows.push(row);
+   if(existing&&before.account&&before.editBase.accountOid!==before.account.oid&&!mergeNoteClock&&!mergeFolderClock)throw Error('merge_unavailable');
+   indexRow(row);changedRows.push(row);if(!existing)rowCount++;
    await stage();
    return true;
   };
@@ -147,14 +156,14 @@ export class WatchIndexPublisher {
   }
   let after='';while(!budgetReached){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){if(visited.has(entry.entityKey))continue;if(!await processEntry(entry))break;}after=page.at(-1)!.entityKey;}
   const fetch=(id:string)=>this.http.object(id);
-  const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,[...rows.values()]);for(const [id,raw]of tree.nodes)objects.set(id,raw);
+  const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,changedRows);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);
   objects.set(commit.oid,jsonBytes({body:commit.body,signature:commit.signature}));
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000};
   const account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account?.oid??null,expectedRevision:before.account?.revision??'0'}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   const total=await this.store.stageUpload(requestId,objects).then(()=>this.store.uploadCount(requestId));staged=true;const latest=await this.store.readState();if(!choiceCurrent(latest,{accountOid:before.account?.oid??null,accountRevision:before.account?.revision??'0',localChangeRevision:before.localChangeRevision})||latest.pendingChoice)throw Error('choice_stale');
   const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued',...(heldEdits?{heldEdits:true}:{}),...(budgetReached?{chunked:true}:{})}};
-  await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:total,rows:rows.size,changedRows:changedRows.length,chunked:budgetReached,deviceSequence:sequence,segments:{...this.segmentStats}};
+  await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:total,rows:rowCount,changedRows:changedRows.length,chunked:budgetReached,deviceSequence:sequence,segments:{...this.segmentStats}};
   }catch(error){if(staged)await this.store.dropUpload(requestId).catch(()=>{});throw error;}
  }
  /** Size the FINAL roots, public refs and canonical tree before reserving an
