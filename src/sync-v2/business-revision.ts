@@ -36,7 +36,7 @@ export const PROJECTION_SOURCE_TABLES:Record<string,string[]>={
  cloud_article_state:['article_id'],sync_book_aliases:['book_id','chapter_index','article_id'],syncv2_note_resolutions:['note_id','conflict_id'],
 };
 export const DIRTY_LIMIT=4096;
-const DEFINITION_VERSION=2;
+const DEFINITION_VERSION=3;
 const INSTALLATION_SCHEMA='CREATE TABLE IF NOT EXISTS syncv2_dirty_installation(id INTEGER PRIMARY KEY CHECK(id=1),schema_cookie INTEGER NOT NULL,definition INTEGER NOT NULL)';
 const installs=new WeakMap<ProjectionSql,{schema:number;definition:number}>();
 const schemaVersion=async(db:ProjectionSql)=>Number((await db.query('PRAGMA schema_version'))[0]?.schema_version);
@@ -105,7 +105,13 @@ export async function installBusinessRevision(db:ProjectionSql){
      targets.push(`SELECT 'articles',${locator(['id'])} FROM articles WHERE channel_id=${from('id')} AND (OLD.title IS NOT NEW.title OR OLD.url IS NOT NEW.url)`);
     return targets;
    };
-   const guard=op==='UPDATE'?projected.map(c=>'OLD.'+c+' IS NOT NEW.'+c).join(' OR '):'';
+   const changes=op==='UPDATE'?projected.map(c=>'OLD.'+c+' IS NOT NEW.'+c):[];
+   // Native import clocks live in fetched_at. Public RSS refreshes use it only
+   // as a cache timestamp (see the article record in materializer.ts).
+   if(op==='UPDATE'&&table==='articles'&&existing.has('channels')&&columns.includes('channel_id')&&columns.includes('fetched_at'))
+    changes.push(`(OLD.fetched_at IS NOT NEW.fetched_at AND EXISTS(SELECT 1 FROM channels ch WHERE ch.id=NEW.channel_id
+     AND ((ch.url NOT LIKE 'http://%' AND ch.url NOT LIKE 'https://%') OR ch.url LIKE 'https://watchrss.local/import-%')))`);
+   const guard=changes.join(' OR ');
    const cacheRelevant=table!=='article_sync_encoding_cache'||!columns.includes('imported_at')?'':op==='INSERT'?'NEW.imported_at>0':op==='DELETE'?'OLD.imported_at>0':'COALESCE(OLD.imported_at,0)>0 OR COALESCE(NEW.imported_at,0)>0';
    const when=[guard,cacheRelevant].filter(Boolean).map(expression=>'('+expression+')').join(' AND ');
    const targets=[...(op==='INSERT'?[]:select('OLD')),...(op==='DELETE'?[]:select('NEW'))];

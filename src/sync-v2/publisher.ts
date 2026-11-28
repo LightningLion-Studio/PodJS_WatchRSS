@@ -180,11 +180,12 @@ export class WatchIndexPublisher {
   const extra=new Set<string>([...(saved.publicationHeld??[]),...(saved.editCreates??[]),...recheckKeys]);
   const extraByGroup:string[][]=groups.map(()=>[]);
   for(const key of extra){
-   const {kind}=await this.store.identityForEntity(key);
-   const priority=groups.findIndex(kinds=>kinds.includes(kind));
+   const identity=await this.store.findEntityIdentity(key);
+   const priority=identity?groups.findIndex(kinds=>kinds.includes(identity.kind)):groups.length-1;
    if(priority>=0)extraByGroup[priority]!.push(key);
   }
-  const outOfTime=()=>Date.now()-prepStarted>=maxPrepMs;
+  let advanced=false;
+  const outOfTime=()=>advanced&&Date.now()-prepStarted>=maxPrepMs;
   for(;group<groups.length&&!budgetReached;group++){
    const extras=extraByGroup[group]!.sort();let at=0;
    while(at<extras.length&&extras[at]!<=after)at++;
@@ -202,6 +203,7 @@ export class WatchIndexPublisher {
      held.delete(key);
      if(entry&&!await processEntry(entry))break;
      after=key;
+     advanced=true;
     }
     if(budgetReached||end===undefined)break;
    }

@@ -474,8 +474,14 @@ export class WatchProjectionStore {
  validateEntityIdentity(id:string,kind:Kind,logicalId:string){if(entityKey(this.key,this.scope.repoId,kind,logicalId)!==id)throw Error('identity_conflict');}
  async noteBinding(entity:string):Promise<NoteBinding|null>{this.gate.require();hexId(entity,64);const row=(await this.db.query('SELECT body FROM syncv2_note_bindings WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];if(!row)return null;const value=await this.cipher.open(this.aad('note-binding',entity),String(row.body));if(!value||!['live','deleted'].includes(value.life)||value.revision!==null&&!/^[a-f0-9]{32}$/.test(value.revision))throw Error('invalid_schema');return value;}
  async noteBindingStatement(entity:string,value:NoteBinding|null):Promise<Statement>{hexId(entity,64);if(value===null)return {sql:'DELETE FROM syncv2_note_bindings WHERE scope=? AND entity_key=?',params:[this.scopeKey,entity]};return {sql:'INSERT INTO syncv2_note_bindings VALUES(?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body',params:[this.scopeKey,entity,await this.cipher.seal(this.aad('note-binding',entity),{revision:value.revision,life:value.life})]};}
+ async findEntityIdentity(entity:string){
+  const row=(await this.db.query('SELECT kind,logical_id FROM syncv2_identity_map WHERE local_library=? AND repo=? AND entity_key=?',[this.libraryId,this.scope.repoId,entity]))[0];
+  return row?{kind:String(row.kind) as Kind,logicalId:String(row.logical_id)}:null;
+ }
  async identityForEntity(entity:string){
-  const row=(await this.db.query('SELECT kind,logical_id FROM syncv2_identity_map WHERE local_library=? AND repo=? AND entity_key=?',[this.libraryId,this.scope.repoId,entity]))[0];if(!row)throw Error('source_identity_missing');return {kind:String(row.kind) as Kind,logicalId:String(row.logical_id)};
+  const identity=await this.findEntityIdentity(entity);
+  if(!identity)throw Error('source_identity_missing');
+  return identity;
  }
  /** With `maxBytes`, stops before the stored ciphertext total exceeds it (at
   * least one row), so pages of long notes are decoded one at a time. */

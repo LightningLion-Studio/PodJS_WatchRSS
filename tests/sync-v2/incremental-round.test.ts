@@ -119,13 +119,40 @@ for(const size of [320,640])test(`one native edit in ${size} cold candidates tou
   expect(f.counts().transactions).toBe(0);
   await f.db.transaction([
    {sql:"UPDATE article_reading_state SET state_json=json_set(state_json,'$.updatedAt',33) WHERE article_id=1"},
-   {sql:"UPDATE articles SET fetched_at=33,content='cache only' WHERE id=1"},
+   {sql:"UPDATE articles SET content='cache only' WHERE id=1"},
    {sql:'INSERT INTO article_sync_encoding_cache(item_id,body_hash) VALUES(1,?)',params:['fingerprint']},
   ]);
   expect(await businessRevision(f.db)).toEqual(revision);
   expect(await f.store.matchesRoundState(before,await f.store.roundSchemaVersion())).toBe(true);
  }finally{f.db.close();}
 },120_000);
+
+test('article fetch clocks agree between incremental and full projection',async()=>{
+ const f=await fixture(3);
+ try{
+  await f.db.transaction([
+   {sql:"INSERT INTO channels(id,url,title,created_at) VALUES(3,'https://watchrss.local/import-content/example','Local',10)"},
+   {sql:'UPDATE articles SET channel_id=3 WHERE id=2'},
+   {sql:'UPDATE articles SET channel_id=2,is_read=1 WHERE id=3'},
+  ]);
+  await f.scan();
+  const candidates=async()=>new Map((await f.store.candidatePage())
+   .filter(({candidate})=>candidate.meta.kind==='article')
+   .map(({candidate})=>[candidate.meta.payload.url,candidate]));
+  const before=await candidates(),revision=await businessRevision(f.db);
+  await f.db.execute('UPDATE articles SET fetched_at=30 WHERE id=3');
+  expect(await businessRevision(f.db)).toEqual(revision);
+  await f.db.execute('UPDATE articles SET fetched_at=25 WHERE id IN (1,2)');
+  f.reset();await f.scan();
+  const incremental=await candidates();
+  expect(f.counts()).toMatchObject({fullPages:0,projected:2});
+  expect(incremental.get('https://example.invalid/1')?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:25});
+  expect(incremental.get('https://example.invalid/2')?.state.payload).toMatchObject({updatedAt:25,independentChangedAt:0});
+  expect(incremental.get('https://example.invalid/3')).toEqual(before.get('https://example.invalid/3'));
+  await f.store.restartScan();await f.scan();
+  expect(await candidates()).toEqual(incremental);
+ }finally{f.db.close();}
+});
 
 test('repair and dirty overflow reconcile the full source, including removed books',async()=>{
  const f=await fixture(320);
@@ -192,6 +219,35 @@ test('note asset refresh reads bytes only after the file witness changes',async(
  }finally{db.close();}
 });
 
+test('prepare retries a held legacy candidate without an identity map',async()=>{
+ const f=await fixture(1);
+ try{
+  await f.scan();
+  const entity=(await f.store.candidatePage()).find(({candidate})=>candidate.meta.kind==='article')!.entityKey;
+  await f.db.execute('DELETE FROM syncv2_identity_map WHERE entity_key=?',[entity]);
+  const server=new SyntheticIndexBackend(),keys={id:idKey,content:Buffer.alloc(32,0x22),version:1};
+  const http=new SyncV2Http(server,'http://localhost:3000',scope,async()=>({userId:'00000000-0000-0000-0000-000000000001',accessToken:'t',legacyDeviceId:'d',scope}),true,serverPin());
+  let hasBody=false,attempts=0;
+  const publisher=new WatchIndexPublisher(f.store,http,crypto,keys,()=>100,async entry=>{
+   if(entry.entityKey===entity){
+    attempts++;
+    if(!hasBody)throw Error('body_channel_source_missing');
+   }
+   return null;
+  });
+  const prepare=(i:number)=>publisher.prepare(deviceId,'key',{commitOid:server.device.commitOid,revision:server.device.revision},String(i).repeat(32));
+  const reader=new WatchCloudIndex(f.store,http,crypto,keys,async id=>({deviceId:id,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);
+  await prepare(1);await publisher.flush();await reader.pull(server.window());
+  expect((await f.store.readState()).cloud.publicationHeld).toEqual([entity]);
+  expect(await prepare(2)).toMatchObject({skipped:true,heldEdits:true,changedRows:0});
+  expect(attempts).toBe(2);
+  hasBody=true;
+  expect(await prepare(3)).toMatchObject({changedRows:1});
+  await publisher.flush();
+  expect((await f.store.readState()).cloud.publicationHeld).toEqual([]);
+ }finally{f.db.close();}
+});
+
 test('the prepare time budget pauses and resumes while every compared row is unchanged',async()=>{
  const f=await fixture(12);
  try{
@@ -205,12 +261,9 @@ test('the prepare time budget pauses and resumes while every compared row is unc
   await reader.pull(server.window());
   await f.store.restartScan();await f.scan();
   let millis=0,firstKey='';const clock=spyOn(Date,'now').mockImplementation(()=>millis);
-  const batch=f.store.candidateBatch.bind(f.store);
-  f.store.candidateBatch=async keys=>{
-   const rows=await batch(keys);
-   firstKey=keys[0]!;millis+=10;
-   return rows;
-  };
+  const publicationKeys=f.store.publicationKeys.bind(f.store),batch=f.store.candidateBatch.bind(f.store);
+  f.store.publicationKeys=async (...args)=>{millis+=10;return publicationKeys(...args);};
+  f.store.candidateBatch=async keys=>{firstKey=keys[0]!;return batch(keys);};
   try{
    f.reset();
    const paused=await prepare(publisher(5),2);
@@ -219,6 +272,7 @@ test('the prepare time budget pauses and resumes while every compared row is unc
    expect((await f.store.readState()).cloud.pendingPublish).toBeNull();
    const cursor=(await f.store.readState()).cloud.publicationScan;
    expect(cursor.group>0||cursor.after===firstKey).toBe(true);
+   f.store.publicationKeys=publicationKeys;
    const compared:string[]=[];
    f.store.candidateBatch=async keys=>{compared.push(...keys);return batch(keys);};
    const resumed=await prepare(publisher(5),3);

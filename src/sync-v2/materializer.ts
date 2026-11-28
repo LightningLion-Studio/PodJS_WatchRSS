@@ -21,6 +21,17 @@ async function pendingBookReading(db:ProjectionSql,bookId:string,chapter:number,
   }if(bookInteracted(value))result=mergeWireBookReading(result,value);
  }return result;
 }
+type ArticleMetadata=Awaited<ReturnType<LocalArticleManifestStore['cloudRestoreMetadata']>>['articles'][number];
+function nativeArticleRecord(record:ArticleMetadata,addedAt:number):SourceRecord{
+ const value=Object.fromEntries(Object.entries(record).filter(([key])=>BUSINESS_FIELDS.article.includes(key)));
+ const source=record.rssSourceUrl;
+ // For public RSS, fetched_at is a cache timestamp, not a business clock.
+ // Registered metadata has its own clock and never goes through this path.
+ if(source&&/^https?:\/\//i.test(source)&&!/^https:\/\/watchrss\.local\/import-/i.test(source))value.updatedAt=0;
+ // Only an explicit import witness proves first admission to the library.
+ value.importedAt=addedAt;
+ return {kind:'article',logicalId:record.articleId,value,...(addedAt>0?{addedAtMillis:addedAt}:{})};
+}
 /** Uses the frozen legacy reader in its explicit read-only mode: no lookup
  * initialization, body scan, recipe computation, old cursor, or business writes. */
 export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>,previousBatchById?:(kind:Kind,logicalIds:string[])=>Promise<Map<string,any>>,bookReferenced?:(id:string)=>Promise<boolean>):Materialize {
@@ -143,12 +154,8 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    if((await db.query('SELECT 1 FROM sync_book_aliases WHERE item_id=?',[row.id])).length)return []; // Stable book/chapter identities have their own records.
    const page=await metadata.cloudRestoreMetadata({itemIds:[Number(row.id)],limit:1},undefined,true);
    if(page.articles.length!==1)throw Error('source_identity_missing');
-   const record=page.articles[0]!,value=Object.fromEntries(Object.entries(record).filter(([key])=>BUSINESS_FIELDS.article.includes(key)));
-   // fetched_at is refreshed by RSS acquisition and does not prove first
-   // library admission. Only an existing explicit import witness supplies it.
-   const historical=(await db.query('SELECT imported_at FROM article_sync_encoding_cache WHERE item_id=? AND imported_at>0',[row.id]))[0],addedAt=Number(historical?.imported_at??0);
-   value.importedAt=addedAt;
-   return [{kind:'article',logicalId:record.articleId,value,...(addedAt>0?{addedAtMillis:addedAt}:{})}];
+   const historical=(await db.query('SELECT imported_at FROM article_sync_encoding_cache WHERE item_id=? AND imported_at>0',[row.id]))[0];
+   return [nativeArticleRecord(page.articles[0]!,Number(historical?.imported_at??0))];
   }
   if(table==='sync_article_deletions'){
    const previous=await previousById?.('article',String(row.article_id));if(!previous)return materializeFrozen(table,row);
@@ -176,7 +183,7 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    const aliased=tables.has('sync_book_aliases')?new Set((await db.query(`SELECT item_id FROM sync_book_aliases WHERE item_id IN (${marks})`,ids)).map(r=>Number(r.item_id))):new Set<number>();
    const needed=ids.filter(id=>!registered.has(id)&&!aliased.has(id));
    if(!needed.length)return rows.map(()=>[]);
-   const byItem=new Map<number,Awaited<ReturnType<LocalArticleManifestStore['cloudRestoreMetadata']>>['articles'][number]>();
+   const byItem=new Map<number,ArticleMetadata>();
    for(let at=0;at<needed.length;at+=100){
     const slice=needed.slice(at,at+100);
     const page=await metadata.cloudRestoreMetadata({itemIds:slice,limit:slice.length},undefined,true);
@@ -190,9 +197,7 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    return ids.map(id=>{
     if(registered.has(id)||aliased.has(id))return [];
     const record=byItem.get(id);if(!record)throw Error('source_identity_missing');
-    const value=Object.fromEntries(Object.entries(record).filter(([key])=>BUSINESS_FIELDS.article.includes(key)));
-    const addedAt=importedAt.get(id)??0;value.importedAt=addedAt;
-    return [{kind:'article' as const,logicalId:record.articleId,value,...(addedAt>0?{addedAtMillis:addedAt}:{})}];
+    return [nativeArticleRecord(record,importedAt.get(id)??0)];
    });
   }
   if(table==='sync_book_reading'){
