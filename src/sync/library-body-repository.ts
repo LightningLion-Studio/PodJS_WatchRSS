@@ -114,7 +114,6 @@ export class SqlLibraryBodyRepository {
  private readonly cloudBookProofs=new Map<string,{token:string;sha256:string;size:number}>();
  async cloudBookWitness(id:string,expected:Pick<BookState,'bookId'|'fingerprint'|'chapterCount'|'instanceId'|'lifecycle'>){
   const binding=()=>this.run(async()=>{
-   await this.migrate();
    const file=await this.books?.package(id);if(!file)return;
    const state=await this.books!.transferState(id);
    if(!state||state.deleted||state.bookId!==expected.bookId||state.fingerprint!==expected.fingerprint||state.chapterCount!==expected.chapterCount||state.instanceId!==expected.instanceId||compareLifecycleTokens(state.lifecycle,expected.lifecycle)!==0)throw Error('body_revision_changed');

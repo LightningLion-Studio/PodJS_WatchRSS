@@ -132,7 +132,9 @@ test('FIX1 committed book witness hashes once and invalidates same-size file rep
   const stat=f.files.stat,hash=f.files.hash;
   f.files.stat=async path=>({...await stat(path),changeToken:token});
   f.files.hash=async path=>{hashes++;return hash(path);};
+  await f.db.execute("INSERT INTO local_article_deletions VALUES(1,'https://example.invalid/feed','https://example.invalid/item','item',0,0,100)");
   for(let i=0;i<2;i++)expect(await repo.cloudBookWitness(book!.bookId,book!)).toEqual({size:file!.size,sha256:file!.sha256});
+  expect(await f.db.query('SELECT count(*) n FROM local_article_deletions')).toEqual([{n:1}]);
   expect(hashes).toBe(1);
   const changed=f.data.get(file!.path)!.slice();changed[0]^=1;
   f.data.set(file!.path,changed);token='new inode or ctime';

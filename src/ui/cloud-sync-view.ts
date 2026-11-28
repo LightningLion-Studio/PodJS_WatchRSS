@@ -56,6 +56,9 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     const title = cloud.v2Attention === 'body_channel_waiting_wifi' ? '等待 Wi-Fi' : '还有资料待同步';
     return {...base,title,detail:cloud.message,tone:'attention',button:{label:'立即同步',action:'sync',enabled:!pending}};
   }
+  if (cloud.v2Attention === 'body_channel_source_missing' || cloud.v2Attention === 'body_channel_capacity_pending') {
+    return {...base,title:cloud.v2Attention === 'body_channel_source_missing' ? '缺少正文原件' : '正文超过大小上限',detail:cloud.message,tone:'attention'};
+  }
   const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&cloud.message!=='等待网络连接'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
   // A manual sync that left the foreground: queued is with the system, not finished.
   if (handoff === 'held') return {...base, title: '等待手机同步结束', detail: '蓝牙传输结束后会自动继续云同步。', tone: 'attention', button: {label: '同步中…', action: 'sync', enabled: false}};

@@ -77,7 +77,16 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
    const cleanup:CloudHostRequest=(method,args)=>window.cleanup(()=>raw(method,args));
    progress.stage('compare');
    const opened=await openApplicationSyncV2Core({progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
-   try{if(!opened||opened.bodyError())return 'retry';if(intent)await completeManualIntent(host,intent);}finally{await opened?.close();}
+   try{
+    if(!opened)return 'retry';
+    const code=opened.initialResult.completionError;
+    if(code){
+     diagnostic.report(recordFailureDiagnostic(Error(code)));
+     if(code==='choice_pending'||code==='body_channel_source_missing'||code==='body_channel_capacity_pending')return 'failure';
+     return 'retry';
+    }
+    if(intent)await completeManualIntent(host,intent);
+   }finally{await opened?.close();}
    progress.finish('complete');
    return 'success';
   });

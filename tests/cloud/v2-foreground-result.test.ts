@@ -112,6 +112,15 @@ test('known offline ends this v2 attempt without waiting on a request', async ()
  expect(service.status).toMatchObject({phase:'error',message:'未连接网络，\n请联网后重试'});
 });
 
+test('v2 missing body source reports an incomplete result without a timed retry', async () => {
+ const service = await setup(async () => ({completionError:'body_channel_source_missing'}));
+ expect(await service.syncNowResult()).toMatchObject({ok:false,retryable:false});
+ expect(service.status.retryAtMillis).toBeUndefined();
+ expect(service.status).toMatchObject({phase:'idle',v2Attention:'body_channel_source_missing',lastCompletedAt:0});
+ const status={cloud:service.status,refreshTokenStatus:'valid'} as Parameters<typeof cloudSyncView>[0];
+ expect(cloudSyncView(status,true,false,10_000)).toMatchObject({title:'缺少正文原件',tone:'attention'});
+});
+
 test.each(['projection_preparing','first_follow_pending'])('v2 %s schedules a continuation without marking the round complete',async code=>{
  const service=await setup(async()=>{throw Error(code);});
  expect(await service.syncNowResult()).toMatchObject({ok:false,retryable:true,retryAtMillis:11_000});

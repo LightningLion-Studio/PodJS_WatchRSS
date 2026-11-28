@@ -248,14 +248,14 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const synchronize=async()=>{
    const result=await sync();
    let completionError:string|null=null;
-   // The worker makes its own retry decision directly from bodyError.
-   if(options.createUi){
-    const state=await local.store.readState();
-    if(state.pendingChoice)completionError='choice_pending';
-    else if(result?.readOnly||state.cloud?.blockedCommitOid||result?.applyDisabled&&state.account&&state.activeGeneration!==state.account.oid)completionError='cloud_v2_read_only';
-    else if(bodyError)completionError=bodyError;
-    else if(state.hasUnsentEdits||state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
-   }
+   const state=await local.store.readState();
+   if(state.pendingChoice)completionError='choice_pending';
+   else if(result?.readOnly||state.cloud?.blockedCommitOid||result?.applyDisabled&&state.account&&state.activeGeneration!==state.account.oid)completionError='cloud_v2_read_only';
+   // A held body cannot be repaired by retrying the same publication. Finish
+   // advancing the index before reporting any held body to the caller.
+   else if(result?.chunked)completionError='cloud_v2_pending';
+   else if(bodyError)completionError=bodyError;
+   else if(state.hasUnsentEdits||state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
    return {completionError};
   };
   const initialResult=await synchronize();

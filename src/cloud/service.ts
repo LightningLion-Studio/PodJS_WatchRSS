@@ -28,7 +28,7 @@ import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type 
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface CloudSyncResult {readonly ok:boolean; readonly resultSequence?:number; readonly networkFailure?:boolean; readonly continuationReady?:boolean; readonly retryable?:boolean; readonly retryAtMillis?:number}
-export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'cloud_v2_pending'|'cloud_v2_repo_missing'|'feature_disabled';
+export type WatchV2Attention='choice_pending'|'cloud_v2_read_only'|'body_channel_write_disabled'|'body_channel_waiting_wifi'|'body_channel_source_missing'|'body_channel_capacity_pending'|'cloud_v2_pending'|'cloud_v2_repo_missing'|'feature_disabled';
 export interface WatchCloudStatus {v2Failure?:true;v2Attention?:WatchV2Attention;resultSequence?:number;restoreProgress?:RestoreProgress;/** A soft deadline after a newly persisted restore unit, not begin/cycle counters. */continuationReady?:boolean;yieldedToWriter?:boolean;ownerChoiceRequired?:boolean;errorCode?:typeof SNAPSHOT_DEFER_CODES[number]|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
@@ -122,6 +122,8 @@ export class WatchCloudSyncService {
    case 'choice_pending': attention=code; message='请选择要保留的资料'; break;
    case 'body_channel_waiting_wifi': attention=code; message='正文等待 Wi-Fi，\n也可手动同步'; break;
    case 'body_channel_write_disabled': attention=code; message='正文上传暂未开放，\n本机正文已保留'; break;
+   case 'body_channel_source_missing': attention=code; message='部分资料缺少正文原件，\n本机记录已保留'; break;
+   case 'body_channel_capacity_pending': attention=code; message='部分正文超出同步大小上限，\n本机原件已保留'; break;
    case 'cloud_account_busy':
    case 'library_busy': message='云同步暂忙，\n请稍后重试'; break;
    case 'key_unavailable':
@@ -140,8 +142,9 @@ export class WatchCloudSyncService {
    default: message=this.networkFailure?'无法连接云端，\n请检查网络':'云同步未能完成，\n请重试';
   }
   const fastContinue=code==='projection_preparing'||code==='first_follow_pending'||code==='cloud_v2_pending';
-  const retryAtMillis=code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(fastContinue?1000:30_000);
-  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,continuationReady:fastContinue?true:undefined,retryable:true,retryAtMillis};
+  const heldBody=code==='body_channel_source_missing'||code==='body_channel_capacity_pending';
+  const retryAtMillis=heldBody||code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(fastContinue?1000:30_000);
+  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,continuationReady:fastContinue?true:undefined,retryable:!heldBody,retryAtMillis};
   this.set(attention?'idle':'error',message,member);
  }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string,note?:NoteSyncTimes):Promise<CloudSyncResult>{
