@@ -6,10 +6,11 @@ import {sameScope} from './wire';
 import {parseNetwork,SyncV2Error,syncV2Origin,type OriginPolicy} from './http';
 import {BODY_PURPOSE,validateCarrier,type Carrier} from './body-channel-codec';
 const ALIGNMENT=65536;
+const MAX_PART_SIZE=524288;
 function advertisedPartSize(headers:Record<string,string>){
  const value=Object.entries(headers).find(([key])=>key.toLowerCase()==='x-watchrss-max-body-part-bytes')?.[1]?.trim();
  const size=value&&/^\d+$/.test(value)?Number(value):0;
- return size>=ALIGNMENT&&size<=524288&&size%ALIGNMENT===0?size:ALIGNMENT;
+ return size>=ALIGNMENT&&size<=MAX_PART_SIZE&&size%ALIGNMENT===0?size:ALIGNMENT;
 }
 /** Separate namespace, no legacy snapshots/records calls and no v2 ACK writes. */
 export class BodyChannelHttp {
@@ -86,9 +87,15 @@ export class BodyChannelHttp {
  async download(id:string,hash:string,size:number,files:CloudBlobStore,path:string,check?:()=>Promise<void>){
   hexId(id,32);hexId(hash,64);uint(size,16777216);const old=await files.read(path);if(old?.length===size&&sha256Hex(old)===hash)return old;
   const partial=path+'.part';let data=await files.read(partial)??new Uint8Array();if(data.length>size){data=new Uint8Array();await files.writeAtomic(partial,data);}
-  for(let at=data.length;at<size;){await check?.();const r=await this.request('GET','/carriers/'+id+'/objects/'+hash+'?offset='+at),header=(name:string)=>Object.entries(r.headers).find(([k])=>k.toLowerCase()===name)?.[1];
-   if(header('x-watchrss-body-total-bytes')!==String(size)||header('x-watchrss-body-offset')!==String(at)||r.body.length!==Math.min(65536,size-at))throw Error('invalid_range');
-   if(files.append){await files.append(partial,r.body,at);}else{const next=new Uint8Array(at+r.body.length);next.set(data);next.set(r.body,at);data=next;await files.writeAtomic(partial,data);}at+=r.body.length;
+  for(let at=data.length;at<size;){
+   await check?.();
+   const r=await this.request('GET','/carriers/'+id+'/objects/'+hash+'?offset='+at+'&partSize='+MAX_PART_SIZE);
+   const header=(name:string)=>Object.entries(r.headers).find(([k])=>k.toLowerCase()===name)?.[1];
+   if(header('x-watchrss-body-total-bytes')!==String(size)||header('x-watchrss-body-offset')!==String(at))throw Error('invalid_range');
+   const length=r.body.length,nextOffset=at+length;
+   if(length===0||length>Math.min(MAX_PART_SIZE,size-at)||(nextOffset<size&&length%ALIGNMENT!==0))throw Error('invalid_range');
+   if(files.append){await files.append(partial,r.body,at);}else{const next=new Uint8Array(nextOffset);next.set(data);next.set(r.body,at);data=next;await files.writeAtomic(partial,data);}
+   at=nextOffset;
   }
   const result=await files.read(partial);if(!result||result.length!==size||sha256Hex(result)!==hash){await files.writeAtomic(partial,new Uint8Array());throw Error('hash_mismatch');}await files.writeAtomic(path,result);await files.writeAtomic(partial,new Uint8Array());this.options.progress?.()?.advance(1);return result;
  }

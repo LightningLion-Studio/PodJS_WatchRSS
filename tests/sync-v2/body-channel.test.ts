@@ -63,7 +63,8 @@ function backend(auth={legacyDeviceId:'legacy-test',token:'synthetic'},maxPart=6
   if(p==='/carriers')return json({carriers:[...ready].sort().filter(id=>descriptors.get(id)!.body.entityKey===u.searchParams.get('entityKey')&&descriptors.get(id)!.body.bodyRevision===u.searchParams.get('bodyRevision')).map(id=>({carrierId:id,descriptor:descriptors.get(id)})),nextAfter:null});
   if(parts[2]==='objects'){
    const hash=parts[3]!,at=Number(u.searchParams.get('offset')),raw=objects.get(hash)!;if(failReadOnce&&at>0){failReadOnce=false;throw Error('interrupted download');}
-   return {status:200,headers:{'x-watchrss-body-total-bytes':String(raw.length),'x-watchrss-body-offset':String(at)},body:raw.slice(at,at+65536)};
+   const partSize=Math.min(maxPart,Number(u.searchParams.get('partSize')??65536));
+   return {status:200,headers:{'x-watchrss-body-total-bytes':String(raw.length),'x-watchrss-body-offset':String(at)},body:raw.slice(at,at+partSize)};
   }throw Error('unexpected path '+p);
  }};
  const http=()=>new BodyChannelHttp({enabled:true,origin:'http://127.0.0.1:18991',policy:{accountBaseUrl:'http://127.0.0.1:18991',allowLoopback:true},scope,transport,session:async()=>({accessToken:'synthetic',legacyDeviceId:'legacy-test',legacyEpoch:'legacy-epoch',legacyGeneration:'1'}),check:async()=>{}});
@@ -178,6 +179,26 @@ test('body_write closed returns its explicit error without uploading any bytes',
 test('ciphertext download resumes on reopen and verifies complete SHA before decode',async()=>{
  const p=await prepared(),b=backend(),cache=files();await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);const chunk=p.descriptor.body.chunks[0]!;b.loseRead();await expect(b.http().download(p.descriptor.body.carrierId,chunk.sha256,chunk.sizeBytes,cache,'cipher')).rejects.toThrow('interrupted download');
  const at=cache.map.get('cipher.part')!.length,start=b.calls.length;expect(await b.http().download(p.descriptor.body.carrierId,chunk.sha256,chunk.sizeBytes,cache,'cipher')).toEqual(p.objects.get(chunk.sha256)!);expect(b.calls[start]!.url).toContain('offset='+at);
+});
+for(const partSize of [65536,524288])test('carrier download accepts '+partSize+'-byte parts and a short tail',async()=>{
+ const raw=new Uint8Array(524288+23).fill(42),hash=sha256Hex(raw),b=backend(undefined,partSize);
+ b.objects.set(hash,raw);
+ const cache=files();
+ expect(await b.http().download(author,hash,raw.length,cache,'cipher')).toEqual(raw);
+ const queries=b.calls.map(call=>new URL(call.url).searchParams);
+ expect(queries.map(query=>query.get('offset'))).toEqual(Array.from({length:Math.ceil(raw.length/partSize)},(_,i)=>String(i*partSize)));
+ for(const query of queries)expect(query.get('partSize')).toBe('524288');
+});
+for(const {name,size,length} of [
+ {name:'empty part',size:524288+65536,length:0},
+ {name:'part above the maximum',size:524288+65536,length:524288+65536},
+ {name:'part larger than the remaining bytes',size:65536-1,length:65536},
+ {name:'unaligned intermediate part',size:524288+65536,length:65536+1},
+])test('carrier download rejects '+name,async()=>{
+ const b=backend(),cache=files();
+ b.transport.request=async()=>({status:200,headers:{'x-watchrss-body-total-bytes':String(size),'x-watchrss-body-offset':'0'},body:new Uint8Array(length)});
+ await expect(b.http().download(author,'f'.repeat(64),size,cache,'cipher')).rejects.toThrow('invalid_range');
+ expect(cache.map.size).toBe(0);
 });
 test('bad signature, changed identity, missing closure, tampered bytes and unavailable key do not decode a body',async()=>{
  const p=await prepared(),open=(descriptor:Carrier,extra:any={})=>openCarrier({descriptor,scope,binding:p.binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>key.slice(),read:async h=>p.objects.get(h)!,...extra});
