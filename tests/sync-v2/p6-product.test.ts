@@ -23,6 +23,20 @@ test('P6 product capsule receive → R0 → first snapshot → UI install → un
  try{expect(await product.start('account')).not.toBeNull();expect(ui).toBeDefined();expect(f.server.account.revision).toBe('1');expect(f.server.registrations).toHaveLength(1);expect((await ui.snapshot()).ownDeviceId).toBe(f.server.registrations[0].body.deviceId);expect((await f.db.query('SELECT count(*) n FROM memo_notes'))[0].n).toBe(1);expect(f.secrets.size).toBeGreaterThan(0);await product.stop();expect(ui).toBeUndefined();expect((await f.db.query('SELECT enabled FROM syncv2_control'))[0].enabled).toBe(0);await expect(product.start('account')).resolves.not.toBeNull();expect(f.server.account.revision).toBe('1');await product.stop();}finally{listener.stop(true);f.db.close();}
 });
 test('P6 product waits for creator without opening SQL projection when descriptor is absent',async()=>{const f=await fixture();try{f.server.present=false;const calls=f.db.calls;expect(await openApplicationSyncV2(f.options)).toBeNull();expect(f.db.calls).toBe(calls);expect(f.server.registrations).toHaveLength(0);}finally{f.db.close();}});
+test('an absent legacy attachment does not fail a completed note sync',async()=>{
+ const f=await fixture(),markdown='![Legacy image](assets/missing.png)';
+ await f.db.execute('UPDATE memo_notes SET markdown=?,content_hash=?',[markdown,sha256Hex(bytes(markdown))]);
+ f.options.repository.cloudNoteAsset=async()=>{throw Error('cloud_note_asset_missing');};
+ let opened:Awaited<ReturnType<typeof openApplicationSyncV2>>=null;
+ try{
+  opened=await openApplicationSyncV2(f.options);
+  expect(f.server.account.revision).toBe('1');
+  expect(await opened!.sync()).toEqual({completionError:null});
+  expect(await opened!.ui.snapshot()).toMatchObject({phase:'idle',errorCode:'cloud_note_asset_missing'});
+  expect(await f.db.query('SELECT markdown FROM memo_notes')).toEqual([{markdown}]);
+  expect(await f.db.query('SELECT asset_id FROM memo_assets')).toEqual([]);
+ }finally{await opened?.close();f.db.close();}
+});
 test('a warm v2 round refreshes cached read admission before retrying a checkpoint',async()=>{
  const f=await fixture();
  const transport=f.options.transport;

@@ -90,18 +90,26 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  await repository.cloudRestoreMetadata({ids:[],limit:1});
  await WatchAccountBusinessSql.initializeSchema(projectionSql(guardedHost));
  const rawBodyRepository=repository.cloudNotes&&repository.cloudNoteAsset&&repository.mergeCloudNoteAsset&&repository.cloudBookBody&&repository.receiveCloudBook?bodyChannelRepository(repository as BodyRepository):undefined;
- const bodyRepository=rawBodyRepository?{...rawBodyRepository,install:async(...args:Parameters<typeof rawBodyRepository.install>)=>{await assertCurrent();const install=()=>rawBodyRepository.install(...args);await (options.bodyInstall?options.bodyInstall(install):install());await assertCurrent();}}:undefined;
+ let missingNoteAssets=new Set<string>();
+ const bodyRepository=rawBodyRepository?{...rawBodyRepository,install:async(...args:Parameters<typeof rawBodyRepository.install>)=>{
+  await assertCurrent();
+  const install=()=>rawBodyRepository.install(...args);
+  await (options.bodyInstall?options.bodyInstall(install):install());
+  await assertCurrent();
+  if(args[0]==='asset')missingNoteAssets.delete(args[1]);
+ }}:undefined;
  let bodyError:string|null=null;
  localFactory=watchLocalProjection({enabled:true,host:guardedHost,identity,descriptor:fetched.descriptor,scope:fetched.scope,libraryId,accountScope,metadata:repository});
   const local=await localFactory.open();if(!local)throw Error('feature_disabled');
   const refreshAssets=async()=>{
    if(!repository.cloudNotes||!repository.cloudNoteAsset)return;
    const state=await local.store.readState(),current=state.cloud?.current;
-   const errors=await refreshNoteAssets(projectionSql(guardedHost),repository as BodyRepository,options.legacyDeviceId,options.now??Date.now,async(id,hash)=>{
+   const {errors,missingKeys}=await refreshNoteAssets(projectionSql(guardedHost),repository as BodyRepository,options.legacyDeviceId,options.now??Date.now,async(id,hash)=>{
     if(!state.account||current?.commitOid!==state.account.oid)return false;
     const entity=local.store.entityKeyFor('asset',id),entry=await local.store.cloudRow(current.treeRoot,entity);
     return entry?.meta.kind==='asset'&&entry.meta.logicalId===id&&!entry.row.deleted&&entry.row.bodyRevision===carrierBodyRevision('asset',entity,hash);
    });
+   missingNoteAssets=missingKeys;
    bodyError=errors[0]??null;
   };
   const crypto=createSyncV2Crypto(guardedHost),current=await content.current(),keys={id:unhex(installed.idKeyHex),content:current.key,version:current.version,readContentKey:async(v:number)=>(await content.at(v)).key};
@@ -251,7 +259,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    return {completionError};
   };
   const initialResult=await synchronize();
-  ui=options.createUi?.({bodyError:()=>bodyError,runtime:{pull:sync,publish:()=>runtime.publish(),resumeChoice:async()=>{await flush();},reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
+  ui=options.createUi?.({bodyError:()=>bodyError,missingNoteAssets:()=>missingNoteAssets.size>0,runtime:{pull:sync,publish:()=>runtime.publish(),resumeChoice:async()=>{await flush();},reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
   syncRound=synchronize;
   return {ui:ui!,bodyError:()=>bodyError,initialResult,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
  }catch(error){await close().catch(()=>{});throw productError(error);}

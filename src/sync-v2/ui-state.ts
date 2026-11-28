@@ -56,6 +56,7 @@ export interface SyncV2UiStateOptions {
  /** Product boundary keeps the legacy core error contract intact. */
  productErrors?:boolean;
  bodyError?:()=>string|null;
+ missingNoteAssets?:()=>boolean;
  /** The opened runtime, or null when Sync v2 is not open on this device. */
  runtime:SyncV2RuntimeHandle|null;
  /** The WatchAccountControl created through runtime.accountControl(...). */
@@ -185,7 +186,8 @@ export class WatchSyncV2UiState {
   const publication=this.publication(state),signingUnavailable=await this.o.runtime?.signingStatus?.()==='signing_state_unavailable';
   const errorCode=this.lastErrorCode??this.o.bodyError?.()??null;
   const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':signingUnavailable||unopenableNotes.length||state.cloud?.blockedCommitOid||errorCode==='storage_pressure'?'blocked':errorCode?'error':'idle';
-  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:signingUnavailable?'signing_state_unavailable':errorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
+  const notice=errorCode??(this.o.missingNoteAssets?.()?'cloud_note_asset_missing':null);
+  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:signingUnavailable?'signing_state_unavailable':notice,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
  }
  /** canMerge/reason only exist where the planner can answer: the open preview,
   * its fingerprint cache, or one fresh pendingChoice() pass. */

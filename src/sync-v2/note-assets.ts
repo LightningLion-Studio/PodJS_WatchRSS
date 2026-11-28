@@ -7,7 +7,7 @@ export const noteAssetMime=(id:string)=>/\.png$/i.test(id)?'image/png':/\.jpe?g$
 /** assetId is the literal storageKey in assets/<storageKey>, not the phone's
  * private NoteAssetEntity UUID. It is the same identity used by v2 closures. */
 export async function refreshNoteAssets(db:ProjectionSql,repository:{cloudNotes():Promise<{notes:MemoNote[];assetKeys:string[]}>;cloudNoteAsset(key:string):Promise<Uint8Array>},deviceId:string,now:()=>number=Date.now,matchesCloud?: (id:string,hash:string)=>Promise<boolean>){
- const snapshot=await repository.cloudNotes(),errors:string[]=[];
+ const snapshot=await repository.cloudNotes(),errors:string[]=[],missingKeys=new Set<string>();
  for(const id of snapshot.assetKeys){try{
   const bytes=await repository.cloudNoteAsset(id),hash=sha256Hex(bytes),old=(await db.query('SELECT * FROM memo_assets WHERE asset_id=?',[id]))[0];
   if(old&&old.local_sha256===hash)continue;
@@ -19,7 +19,12 @@ export async function refreshNoteAssets(db:ProjectionSql,repository:{cloudNotes(
   const updatedAt=Math.max(now(),old?Number(old.updated_at)+1:0);if(!Number.isSafeInteger(updatedAt))throw Error('counter_exhausted');
   const mime=noteAssetMime(id);
   await db.transaction([{sql:onlyChangedSql('INSERT INTO memo_assets(asset_id,mime,original_filename,updated_at,source_device_id,deleted,deleted_at,local_sha256) VALUES(?,?,?,?,?,0,0,?) ON CONFLICT(asset_id) DO UPDATE SET updated_at=excluded.updated_at,source_device_id=excluded.source_device_id,deleted=0,deleted_at=0,local_sha256=excluded.local_sha256'),params:[id,mime,id,updatedAt,deviceId,hash]}]);
- }catch(error){const code=String((error as Error).message);if(!errors.includes(code))errors.push(code);}}
- // Absence is not a tombstone: cloud history/conflicts may still reference it.
- return errors;
+ }catch(error){
+  const code=String((error as Error).message);
+  if(code==='cloud_note_asset_missing')missingKeys.add(id);
+  else if(!errors.includes(code))errors.push(code);
+ }}
+ // A missing local file can still be restored by the body channel if the
+ // authenticated index contains it. A legacy reference alone is not a row.
+ return {errors,missingKeys};
 }

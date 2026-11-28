@@ -35,6 +35,7 @@ export function syncV2Notices(state: SyncV2UiState | null | undefined): SyncV2No
   if (state.errorCode === 'storage_pressure') out.push({key: 'storage', title: '本机空间不足', detail: '有笔记超出本机可打开的大小，已原样保留在云端。', tone: 'attention'});
   else if (state.phase === 'error' && state.errorCode === 'feature_disabled') out.push({key: 'disabled', title: '云端暂不支持此操作', detail: '本机内容已保留，稍后会再试。', tone: 'muted', retry: '重试'});
   else if (state.phase === 'error' && state.errorCode) out.push({key: 'error', title: '同步没有完成', detail: syncV2ErrorText(state.errorCode), tone: 'error', retry: '重试'});
+  else if (state.errorCode === 'cloud_note_asset_missing') out.push({key: 'note-assets', title: '部分备忘录缺少附件', detail: '备忘录正文和附件引用已保留。', tone: 'attention'});
   if (state.unopenableNotes.length) out.push({key: 'unopenable', title: `有 ${state.unopenableNotes.length} 条笔记本机无法打开`, detail: '这些笔记太大，请在手机或小程序查看。', tone: 'muted', open: {label: '查看列表', target: 'unopenable'}});
   if (state.recoveryCopies.length) out.push({key: 'recovery', title: '可找回的本机修改', detail: '被替换的本机修改保留 7 天。', tone: 'muted', open: {label: '查看', target: 'recovery'}});
   if (state.gates.historyRestore) out.push({key: 'history', title: '历史版本', detail: '可以把云端资料回到较早的版本。', tone: 'muted', open: {label: '查看历史', target: 'history'}});

@@ -260,7 +260,7 @@ test('current account changes during download prevent native installation and le
  expect((await channel.sync()).errors).toContain('choice_stale');expect(installed).toBe(0);
 });
 test('asset metadata uses the Markdown storage key and survives a missing attachment without blocking others',async()=>{const f=new SqlFixture();try{
- await f.transaction([{sql:NOTE_ASSET_SCHEMA}]);const errors=await refreshNoteAssets(f,{cloudNotes:async()=>({notes:[],assetKeys:['image.png','missing.png']}),cloudNoteAsset:async id=>{if(id==='missing.png')throw Error('cloud_note_asset_missing');return new Uint8Array([1,2,3]);}},'watch',()=>10);expect(errors).toEqual(['cloud_note_asset_missing']);
+ await f.transaction([{sql:NOTE_ASSET_SCHEMA}]);const result=await refreshNoteAssets(f,{cloudNotes:async()=>({notes:[],assetKeys:['image.png','missing.png']}),cloudNoteAsset:async id=>{if(id==='missing.png')throw Error('cloud_note_asset_missing');return new Uint8Array([1,2,3]);}},'watch',()=>10);expect(result).toEqual({errors:[],missingKeys:new Set(['missing.png'])});
  const source=await SqlBusinessSource.open(f),rows=[];let after='';for(;;){const page=await source.page(after,32);rows.push(...page.rows);if(page.done)break;after=page.after;}
  expect(rows.find(r=>r.kind==='asset')).toMatchObject({logicalId:'image.png',value:{assetId:'image.png',originalFilename:'image.png',mime:'image/png',deleted:false}});
  }finally{f.close();}});
@@ -271,11 +271,11 @@ test('only the exact cloud attachment hash is adopted without a new business rev
   await installBusinessRevision(f);
   const before=await businessRevision(f),raw=new Uint8Array([1,2,3]);
   const repository={cloudNotes:async()=>({notes:[],assetKeys:['image.png']}),cloudNoteAsset:async()=>raw};
-  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async(_id,hash)=>hash===sha256Hex(raw))).toEqual([]);
+  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async(_id,hash)=>hash===sha256Hex(raw))).toEqual({errors:[],missingKeys:new Set()});
   expect(await businessRevision(f)).toEqual(before);
   expect(await f.query('SELECT updated_at,source_device_id,local_sha256 FROM memo_assets')).toEqual([{updated_at:1,source_device_id:'phone',local_sha256:sha256Hex(raw)}]);
   raw[0]=9;
-  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async()=>false)).toEqual([]);
+  expect(await refreshNoteAssets(f,repository,'watch',()=>2,async()=>false)).toEqual({errors:[],missingKeys:new Set()});
   expect(await businessRevision(f)).not.toEqual(before);
  }finally{f.close();}
 });
