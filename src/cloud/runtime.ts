@@ -67,6 +67,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
    // absent capability stays absent; adding an interface member cannot hide it.
    const proxy={
     cloudNotes:repo.cloudNotes?check=>invoke(()=>repo.cloudNotes!(current(check))):undefined,
+    cloudNoteAssetStat:repo.cloudNoteAssetStat?(key,check)=>invoke(()=>repo.cloudNoteAssetStat!(key,current(check))):undefined,
     cloudNoteAsset:repo.cloudNoteAsset?(key,check)=>invoke(()=>repo.cloudNoteAsset!(key,current(check))):undefined,
     mergeCloudNotes:repo.mergeCloudNotes?(notes,check)=>invoke(()=>repo.mergeCloudNotes!(notes,current(check))):undefined,
     mergeCloudNoteAsset:repo.mergeCloudNoteAsset?(key,bytes,expected)=>invoke(()=>repo.mergeCloudNoteAsset!(key,bytes,expected)):undefined,

@@ -2,7 +2,7 @@ import {NoteAssetFileIndex} from './notes/asset-files';
 import {registerNoteAssetPath} from './notes/presentation';
 import {idleHit} from './diagnostics/idle-counters';
 import {clearCloudSqlState} from './cloud/state-sql';
-import {createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from './notes/cloud-assets';
+import {createNoteAssetStat,createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from './notes/cloud-assets';
 import {readReaderBody} from './reader/body-state.ts';
 import {querySyncPages} from './sync/sql-pages.ts';
 import {readNovelDirectory} from "./reader/novel.ts";
@@ -497,6 +497,7 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
  return libraryRepository();
 }
 function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
+  noteAssetStat:createNoteAssetStat(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,noteAssetFiles),
   noteAssetReader:createNoteAssetReader(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,noteAssetFiles),
   noteAssetWriter:createNoteAssetWriter(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,noteAssetFiles),
   noteAssetCollector:createNoteAssetCollector(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),

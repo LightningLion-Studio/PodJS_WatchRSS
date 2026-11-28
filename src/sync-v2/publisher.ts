@@ -3,7 +3,7 @@ import {isBodyTombstone,tombstoneBodyDescription} from './body-binding';
 /** Durable index publication journal. No body worker or account-choice apply. */
 import {sameBusinessRevision} from './business-revision';
 import {checkedResumeOffset} from './resume';
-import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,digest,uint,type Scope} from './protocol';
+import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,digest,uint,type Kind,type Scope} from './protocol';
 import {hex} from '@podjs/framework/crypto';
 import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
@@ -62,7 +62,7 @@ export class WatchIndexPublisher {
   if(page.head!==id||page.headers?.[0]?.commitOid!==id)throw Error('ref_continuity_unavailable');return {body:page.headers[0].body,signature:page.headers[0].signature};
  }
  /** Reserve the author sequence before any signing. Crashes may leave gaps. */
- async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
+ async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string,recheckKeys:readonly string[]=[]){
   if(!this.http.indexWrite)throw Error('feature_disabled');const capabilities=await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
   let before=await this.store.readState();if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
   const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish||saved.preparingPublication)throw Error('publication_pending');
@@ -89,9 +89,21 @@ export class WatchIndexPublisher {
   let rowCount=root?await this.store.cloudRowCount(root):0;
   const baseOid=before.editBase.accountOid;
   const baseRoot=baseOid&&baseOid!==before.account?.oid?(await this.store.readHeader(baseOid))?.body.treeRoot:null;
-  const heldCreates:string[]=[];
-  let staged=false,heldEdits=false,heldOther=false,budgetReached=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
-  const prepStarted=Date.now(),maxRows=this.options.maxChangedRows??Number.POSITIVE_INFINITY,maxPrepMs=this.options.maxPrepareMillis??Number.POSITIVE_INFINITY;
+  const acknowledged=before.acknowledgedLocalChangeRevision;
+  // An old partial publication can have acknowledged every revision without
+  // comparing every candidate. Its first prepare must rebuild the baseline.
+  const knownBaseline=acknowledged!==undefined&&(saved.publicationHeld!==undefined||saved.publicationScan?.full===false||
+   saved.lastPublication?.heldEdits!==true||before.activeGeneration===before.editBase.accountOid&&saved.editCreates?.length);
+  const rebuild=checkpoint.publishRebuild??null;
+  const full=!knownBaseline||rebuild!==null&&saved.publicationRebuild!==rebuild;
+  const range=full?undefined:[acknowledged!,before.localChangeRevision] as const;
+  const groups:readonly (readonly Kind[])[]=[['folder','asset','source'],['note','rss-state'],['book'],['article','book-reading']];
+  const previous=saved.publicationScan;
+  const resume=previous&&previous.anchor===(before.account?.oid??null)&&previous.revision===before.localChangeRevision&&previous.rebuild===rebuild&&previous.full===full;
+  let group=resume?Number(previous.group):0,after=resume?String(previous.after):'';
+  const held=new Map<string,boolean>(resume?previous.held:[]);
+  let staged=false,budgetReached=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
+  const maxRows=this.options.maxChangedRows??Number.POSITIVE_INFINITY,maxPrepMs=this.options.maxPrepareMillis??Number.POSITIVE_INFINITY;
   try{
   if(root&&(saved.auditBinding!==businessAuditBinding(this.http.scope,this.keys.version,capabilities.features)||rowCount!==saved.current?.rowCount)){
    let after='';
@@ -106,7 +118,7 @@ export class WatchIndexPublisher {
    const existing=root?await this.store.cloudRow(root,entry.entityKey):null;
    // F1: a row this device cannot open is carried back unchanged (same OIDs);
    // R2: a local change against its quarantine baseline is held as unsent.
-   if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate)){heldEdits=true;heldOther=true;}return true;}
+   if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate)){held.set(entry.entityKey,false);}return true;}
    const c=copy(entry.candidate);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
    let mergeNoteClock=false;
    if(baseRoot&&c.meta.kind==='note'){
@@ -142,18 +154,16 @@ export class WatchIndexPublisher {
     c.addedAtMillis=existing.row.addedAtMillis;
     c.state={...existing.state,payload:{...existing.state.payload,updatedAt:clock.updatedAt,modifiedBy:clock.modifiedBy}};
    }
-   if(!existing&&(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs))){heldEdits=true;budgetReached=true;return false;}
+   if(!existing&&changedRows.length>=maxRows){budgetReached=true;return false;}
    let body;
    try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}
    catch(error){
     if((error as Error).message!=='body_channel_source_missing')throw error;
-    heldEdits=true;
-    if(!existing&&(c.meta.kind==='book'||c.meta.kind==='asset'))heldCreates.push(entry.entityKey);
-    else heldOther=true;
+    held.set(entry.entityKey,!existing&&(c.meta.kind==='book'||c.meta.kind==='asset'));
     return true;
    }
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)return true;
-   if(changedRows.length>=maxRows||(changedRows.length>0&&Date.now()-prepStarted>=maxPrepMs)){heldEdits=true;budgetReached=true;return false;}
+   if(changedRows.length>=maxRows){budgetReached=true;return false;}
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
    await reserveSequence();
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
@@ -166,25 +176,58 @@ export class WatchIndexPublisher {
    await stage();
    return true;
   };
-  const visited=new Set<string>();
-  if(Number.isFinite(maxRows)||Number.isFinite(maxPrepMs)){
-   // Publish closure dependencies before the rows that reference them.
-   for(const group of [['folder','asset','source'],['note','rss-state'],['book']] as const){
-    if(budgetReached)break;
-    const priority=await this.store.priorityCandidateKeys(group);
-    for(let at=0;at<priority.length&&!budgetReached;at+=16){
-     const batch=await this.store.candidateBatch(priority.slice(at,at+16));
-     for(const entry of batch){visited.add(entry.entityKey);if(!await processEntry(entry))break;}
-    }
-   }
+  const prepStarted=Date.now();
+  const extra=new Set<string>([...(saved.publicationHeld??[]),...(saved.editCreates??[]),...recheckKeys]);
+  const extraByGroup:string[][]=groups.map(()=>[]);
+  for(const key of extra){
+   const {kind}=await this.store.identityForEntity(key);
+   const priority=groups.findIndex(kinds=>kinds.includes(kind));
+   if(priority>=0)extraByGroup[priority]!.push(key);
   }
-  let after='';while(!budgetReached){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){if(visited.has(entry.entityKey))continue;if(!await processEntry(entry))break;}after=page.at(-1)!.entityKey;}
-  // A held candidate stays local until its original or baseline is available.
-  // Without publishable rows there is no new account state to commit.
-  if(heldEdits&&!changedRows.length&&!budgetReached)return {
-   skipped:true as const,heldEdits:true as const,changedRows:0,segments:{...this.segmentStats},
-   heldCreates:heldOther?[]:heldCreates,stateVersion:before.stateVersion,localRevision:before.localChangeRevision,
+  const outOfTime=()=>Date.now()-prepStarted>=maxPrepMs;
+  for(;group<groups.length&&!budgetReached;group++){
+   const extras=extraByGroup[group]!.sort();let at=0;
+   while(at<extras.length&&extras[at]!<=after)at++;
+   for(;;){
+    if(outOfTime()){budgetReached=true;break;}
+    const keys=await this.store.publicationKeys(after,32,groups[group]!,group===groups.length-1,range);
+    const end=keys.length===32?keys.at(-1)!:undefined;
+    while(at<extras.length&&(!end||extras[at]!<=end)){
+     const key=extras[at++]!;if(!keys.includes(key))keys.push(key);
+    }
+    if(!keys.length)break;
+    for(const key of keys.sort()){
+     if(outOfTime()){budgetReached=true;break;}
+     const [entry]=await this.store.candidateBatch([key]);
+     held.delete(key);
+     if(entry&&!await processEntry(entry))break;
+     after=key;
+    }
+    if(budgetReached||end===undefined)break;
+   }
+   if(budgetReached)break;
+   after='';
+  }
+  const heldEdits=budgetReached||held.size>0,heldCreates=[...held].every(([,create])=>create)?[...held.keys()]:[];
+  const scan={group,after,full,rebuild,revision:before.localChangeRevision,held:[...held]};
+  const progress=budgetReached?{publicationScan:{...scan,anchor:before.account?.oid??null}}:{
+   publicationScan:null,publicationHeld:[...held.keys()],publicationRebuild:rebuild,editCreates:heldCreates,
   };
+  const persistProgress=async()=>{
+   if(!budgetReached&&acknowledged===before.localChangeRevision&&Object.entries(progress).every(([key,value])=>Object.hasOwn(saved,key)&&canonical(saved[key])===canonical(value)))return;
+   const next=copy(before);
+   next.cloud={...saved,...progress};
+   if(!budgetReached)next.acknowledgedLocalChangeRevision=before.localChangeRevision;
+   await this.store.controlUpdate(before,next);
+   before=next;
+  };
+  // Persist a cursor even when the time budget expires among unchanged rows.
+  // A completed scan with held rows also records their exact recheck set.
+  if(!changedRows.length&&heldEdits){
+   await persistProgress();
+   return {skipped:true as const,heldEdits:true as const,chunked:budgetReached,changedRows:0,segments:{...this.segmentStats},
+    heldCreates:budgetReached?[]:heldCreates,stateVersion:before.stateVersion,localRevision:before.localChangeRevision};
+  }
   const sequence=await reserveSequence();
   const fetch=(id:string)=>this.http.object(id);
   const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,changedRows);for(const [id,raw]of tree.nodes)objects.set(id,raw);
@@ -193,7 +236,7 @@ export class WatchIndexPublisher {
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000};
   const account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account?.oid??null,expectedRevision:before.account?.revision??'0'}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   const total=await this.store.stageUpload(requestId,objects).then(()=>this.store.uploadCount(requestId));staged=true;const latest=await this.store.readState();if(!choiceCurrent(latest,{accountOid:before.account?.oid??null,accountRevision:before.account?.revision??'0',localChangeRevision:before.localChangeRevision})||latest.pendingChoice)throw Error('choice_stale');
-  const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued',...(heldEdits?{heldEdits:true}:{}),...(budgetReached?{chunked:true}:{})}};
+  const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued',publicationProgress:budgetReached?{publicationScan:{...scan,anchor:commit.oid}}:progress,heldCreates,...(heldEdits?{heldEdits:true}:{}),...(budgetReached?{chunked:true}:{})}};
   await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:total,rows:rowCount,changedRows:changedRows.length,chunked:budgetReached,deviceSequence:sequence,segments:{...this.segmentStats}};
   }catch(error){if(staged)await this.store.dropUpload(requestId).catch(()=>{});throw error;}
  }
@@ -418,10 +461,10 @@ export class WatchIndexPublisher {
      !publicationCurrent({...before,localChangeRevision:plan.capturedLocalRevision},{...plan,phase:'confirmed',result}))throw Error('choice_stale');
   const next=copy(before),newer=before.localChangeRevision!==plan.capturedLocalRevision;
   next.hasUnsentEdits=newer||plan.heldEdits===true;
-  next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;
+  if(!plan.chunked||!plan.publicationProgress)next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;
   next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};
-  next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};
+  next.cloud={...next.cloud,...plan.publicationProgress,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};
   await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);
-  return plan.chunked||plan.heldEdits?{...result,...(plan.chunked?{chunked:true}:{}),...(plan.heldEdits?{heldEdits:true}:{})}:result;
+  return plan.chunked||plan.heldEdits?{...result,...(plan.chunked?{chunked:true}:{}),...(plan.heldEdits?{heldEdits:true,heldCreates:plan.heldCreates??[],localRevision:plan.capturedLocalRevision}:{})}:result;
  }
 }

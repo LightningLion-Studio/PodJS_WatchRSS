@@ -84,7 +84,7 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
    const result=await (accountControl?accountControl.follow(window,authenticated.fingerprint):reader.pull(window,false,authenticated.fingerprint));
    if(!result?.readOnly)observed=authenticated;
    return {...result,expiresAtMillis:window.expiresAtMillis};
-  },async publish(useObservedWindow=false){
+  },async publish(useObservedWindow=false,recheckKeys:readonly string[]=[]){
    options.progress?.()?.stage('upload');
    const proof=useObservedWindow?observed:undefined;observed=undefined;
    const current=await local.store.readState();if(current.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(current.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(current.pendingChoice)throw Error('choice_pending');
@@ -94,13 +94,13 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
    const requestId=hex(await crypto.random(16));
    let prepared;
    try{
-    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId,recheckKeys);
    }catch(error){
     if((error as Error).message!=='projection_incomplete')throw error;
     // A local save may commit while the pull is acknowledging its applied head.
     await local.store.beginTailWindow();
     while((await local.store.checkpoint())?.phase==='tail')await local.store.catchUpPage(local.source);
-    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId,recheckKeys);
    }
    return prepared.skipped?prepared:publisher.flush();
   }};

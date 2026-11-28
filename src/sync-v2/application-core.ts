@@ -5,7 +5,6 @@ import {BodyChannelHttp} from './body-channel-http';
 import {WatchBodyChannel,independentBodyResolver} from './body-channel';
 import {bodyChannelRepository,type BodyRepository} from './body-channel-repository';
 import {refreshNoteAssets} from './note-assets';
-import {installBusinessRevision} from './business-revision';
 import {SyncV2Lifetime} from './lifetime';
 /** 26.4 P6-10 application opener. Runs only when SYNC_V2_PRODUCT.syncV2 is on,
  * the bootstrap announces syncV2 and the v1 account keys are ready. */
@@ -137,7 +136,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     if(!state.account||current?.commitOid!==state.account.oid)return false;
     const entity=local.store.entityKeyFor('asset',id),entry=await local.store.cloudRow(current.treeRoot,entity);
     return entry?.meta.kind==='asset'&&entry.meta.logicalId===id&&!entry.row.deleted&&entry.row.bodyRevision===carrierBodyRevision('asset',entity,hash);
-   });
+   },repository.cloudNoteAssetStat?.bind(repository));
    missingNoteAssets=missingKeys;
    bodyError=errors[0]??null;
   };
@@ -226,8 +225,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    await assertCurrent();
    options.progress?.()?.stage('compare');
    await runtime.http.refreshClosedReadGate();
-   await refreshAssets();await installBusinessRevision(projectionSql(guardedHost));
-   roundSchemaVersion=await local.store.roundSchemaVersion();
+   await refreshAssets();roundSchemaVersion=await local.refreshSource();
    await runtime.refreshTrustedTime();const deferred=await flush();
    if(deferred){
     options.progress?.()?.stage('compare');
@@ -251,12 +249,20 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
       await recoverConflict();
      }
     }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
-    if(pubResult?.skipped){
+    if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
+    if(pubResult?.skipped&&!pubResult.chunked){
      const followed=pubResult.heldCreates?.length?await control.followWithHeldCreates(pubResult.stateVersion,pubResult.heldCreates):undefined;
      return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,heldCreates:pubResult.heldCreates,...(publishedAny||followed?.applied?{refreshBodies:true}:{})};
     }
-    if(!pubResult?.chunked&&pubResult?.heldEdits&&Date.now()-roundStart<150_000)continue;
-    if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
+    if(!pubResult?.chunked&&pubResult?.heldEdits){
+     pulled=await runtime.pull();
+     if(pulled?.readOnly)return pulled;
+     const latest=await local.store.readState();
+     if(latest.account?.oid===pubResult.account?.commitOid&&latest.localChangeRevision===pubResult.localRevision&&!latest.pendingChoice&&latest.hasUnsentEdits){
+      const followed=pubResult.heldCreates?.length?await control.followWithHeldCreates(latest.stateVersion,pubResult.heldCreates):undefined;
+      return {...pulled,...followed,heldLocalRevision:pubResult.localRevision,heldCreates:pubResult.heldCreates,refreshBodies:true};
+     }
+    }
     // First-follow publication leaves the merged head unapplied locally.
     const followed=state.account&&state.activeGeneration===null||pubResult?.chunked?await runtime.pull():pulled;
     return {...followed,refreshBodies:true,...(pubResult?.chunked?{chunked:true}:{})};
@@ -279,8 +285,9 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     bodyWork=!!channel&&!result?.chunked&&await channel.hasWork();
     if(channel&&!result?.chunked&&(result?.refreshBodies||bodyWork)){
      let observation=result?.refreshBodies||result?.expiresAtMillis===undefined?await runtime.refreshAccount():result;
-     if(await channel.needsPublication()){
-      const publication=await runtime.publish();
+     const recheck=await channel.publicationKey();
+     if(recheck){
+      const publication=await runtime.publish(false,[recheck]);
       if(!publication?.skipped)observation=await runtime.refreshAccount();
      }
      await bodyRound(observation.expiresAtMillis);

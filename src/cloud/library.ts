@@ -29,6 +29,7 @@ import {canonical,type RecordDocument,type RecordWorkProgress} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
  cloudNotes?(check?:()=>void):Promise<{notes:MemoNote[];assetKeys:string[]}>;
+ cloudNoteAssetStat?(key:string,check?:()=>void):Promise<import('../notes/cloud-assets').NoteAssetStat|undefined>;
  cloudNoteAsset?(key:string,check?:()=>void):Promise<Uint8Array>;
  mergeCloudNotes?(notes:readonly MemoNote[],check?:()=>void):Promise<number>;
  mergeCloudNoteAsset?(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null):Promise<number>;

@@ -8,7 +8,7 @@ import {idleHit} from '../diagnostics/idle-counters';
 import type {BookFiles} from '../books/files';
 import type {BookState} from '../books/protocol';
 import {SqlBookStore} from '../books/store';
-import {noteAssetKeys} from '../notes/cloud-assets';
+import {noteAssetKeys,type NoteAssetStat} from '../notes/cloud-assets';
 import {MemoRepository} from '../notes/repository';
 import type {MemoNote} from '../notes/types';
 import type {SyncBodyCodec} from './article-body';
@@ -21,6 +21,7 @@ import type {SourceUriPort} from './source-store';
 
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
+ noteAssetStat?:(key:string,check?:()=>void)=>Promise<NoteAssetStat>;
  noteAssetReader?:(key:string,check?:()=>void)=>Promise<Uint8Array>;
  noteAssetWriter?:(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline)=>Promise<number>;
  noteAssetCollector?:(references:()=>Promise<ReadonlySet<string>>,check:()=>void)=>Promise<number>;
@@ -78,6 +79,7 @@ export class SqlLibraryBodyRepository {
   if((await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_merge_conflicts'")).length)for(const row of await this.db.query('SELECT base_markdown,local_markdown,remote_markdown FROM note_merge_conflicts'))texts.push(String(row.base_markdown),String(row.local_markdown),String(row.remote_markdown));
   check();return {notes,assetKeys:[...new Set(texts.flatMap(t=>[...noteAssetKeys(t)]))].sort()};
  }
+ async cloudNoteAssetStat(key:string,check?:()=>void){return this.ports.noteAssetStat?.(key,check);}
  async cloudNoteAsset(key:string,check?:()=>void){if(!this.ports.noteAssetReader)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetReader(key,check);}
  async mergeCloudNoteAsset(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null,deadline?:PublicationDeadline){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes,expectedTargetSha256,deadline);}
  /** Conservative empty adoption: logical saved/deleted/pending state also

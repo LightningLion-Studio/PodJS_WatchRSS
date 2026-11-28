@@ -65,9 +65,9 @@ export class WatchBodyChannel {
  }
  /** Existing P6 random placeholders need a hash binding even when their
   * business metadata has not changed. Preserve all existing P3 recipes. */
- async needsPublication(){
-  const state=await this.o.projection.readState(),head=state.cloud?.current;if(state.pendingChoice||state.cloud?.pendingPublish||!state.account||head?.commitOid!==state.account.oid)return false;
-  let after='';for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)return false;
+ async publicationKey(){
+  const state=await this.o.projection.readState(),head=state.cloud?.current;if(state.pendingChoice||state.cloud?.pendingPublish||!state.account||head?.commitOid!==state.account.oid)return;
+  let after='';for(;;){const page=await this.o.projection.cloudRows(head.treeRoot,after,16,262144);if(!page.length)return;
    for(const entry of page){const kind=entry.meta.kind;if(!['book','asset'].includes(kind)||entry.row.deleted||entry.row.recipeOid)continue;
     const c=await this.o.projection.readCandidate(entry.row.entityKey);if(!c||businessBodyWitness(kind,fromWire(kind,c.meta.payload,c.state.payload))!==businessBodyWitness(kind,fromWire(kind,entry.meta.payload,entry.state.payload)))continue;
     try{
@@ -83,7 +83,7 @@ export class WatchBodyChannel {
      }
      if(carrierBodyRevision(kind,entry.row.entityKey,hash)!==entry.row.bodyRevision){
       const carriers=await this.o.http.list(entry.row.entityKey,entry.row.bodyRevision);
-      if(!carriers.carriers.length)return true;
+      if(!carriers.carriers.length)return entry.row.entityKey as string;
      }
     }catch{await this.o.check();}
    }after=page.at(-1).row.entityKey;

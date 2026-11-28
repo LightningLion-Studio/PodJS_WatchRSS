@@ -6,12 +6,23 @@ import {sha256Hex} from '@podjs/framework/crypto';
 export type NoteAssetHost=<T>(method:string,args:Record<string,unknown>)=>Promise<T>;
 export const NOTE_IMAGE_LIMIT=5*1024*1024;
 export const NOTE_ARCHIVE_LIMIT=32*1024*1024;
-/** Read only stable complete assets; partial reads never become a publication. */
-export function createNoteAssetReader(host:NoteAssetHost,index?:NoteAssetFileIndex){return async(key:string,check:()=>void=()=>{})=>{
+export type NoteAssetStat={path:string;size:number;modified?:number;changeToken?:string};
+function checkedAssetKey(key:string){
  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(key))throw Error('cloud_note_asset_path_invalid');
- check();const path=index?await index.path(key):'notes/assets/'+key,stat=await host<{file:boolean;size:number}>('file.stat',{path});
- if(!stat.file)throw Error('cloud_note_asset_missing');
+}
+export function createNoteAssetStat(host:NoteAssetHost,index?:NoteAssetFileIndex){return async(key:string,check:()=>void=()=>{}):Promise<NoteAssetStat>=>{
+ checkedAssetKey(key);check();
+ const path=index?await index.path(key):'notes/assets/'+key;
+ const stat=await host<{file:boolean;size:number;modified?:number;changeToken?:string}>('file.stat',{path});
+ check();if(!stat.file)throw Error('cloud_note_asset_missing');
  if(!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>NOTE_IMAGE_LIMIT)throw Error('cloud_note_asset_too_large');
+ return {path,size:stat.size,modified:stat.modified,changeToken:stat.changeToken};
+};}
+/** Read only stable complete assets; partial reads never become a publication. */
+export function createNoteAssetReader(host:NoteAssetHost,index?:NoteAssetFileIndex){
+ const statAsset=createNoteAssetStat(host,index);
+ return async(key:string,check:()=>void=()=>{})=>{
+ const stat=await statAsset(key,check),path=stat.path;
  const hash=(await host<{sha256:string}>('file.hash',{path})).sha256,bytes=new Uint8Array(stat.size);
  for(let at=0;at<bytes.length;){check();const part=await host<{dataBase64:string;offset:number;size:number}>('file.read',{path,offset:at,maxBytes:Math.min(65536,bytes.length-at)}),raw=decodeBase64(part.dataBase64);
   if(part.offset!==at||part.size!==stat.size||raw.length!==Math.min(65536,bytes.length-at))throw Error('cloud_note_asset_read_incomplete');bytes.set(raw,at);at+=raw.length;

@@ -38,7 +38,8 @@ export interface SourcePage {rows:SourceRecord[];after:string;done:boolean}
 export interface SourceReader {
  /** Stable keyset token. The caller never passes offset or a full inventory. */
  page(after:string,limit:number):Promise<SourcePage>;
- /** Reserved keyed lookup for future incremental work; never read body recipes. */
+ /** Materialize the current value of one dirty business key. */
+ readonly tracksBookRemovals?:boolean;
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
 const CLOUD_ROWS_SCHEMA=`CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))`;
@@ -60,6 +61,8 @@ export const PROJECTION_SCHEMA=[...FOLLOW_PAGES_SCHEMA,SQL_STATE_SCHEMA,...SQL_P
  `CREATE TABLE IF NOT EXISTS syncv2_source_map(scope TEXT NOT NULL,source_table TEXT NOT NULL,locator TEXT NOT NULL,entity_key TEXT NOT NULL,PRIMARY KEY(scope,source_table,locator))`,
  `CREATE TABLE IF NOT EXISTS syncv2_tree_nodes(scope TEXT NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,prefix))`,
  `CREATE TABLE IF NOT EXISTS syncv2_change_log(scope TEXT NOT NULL,revision TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,revision,entity_key))`,
+ `CREATE INDEX IF NOT EXISTS syncv2_changes_by_revision ON syncv2_change_log(scope,substr('00000000000000000000'||revision,-20),entity_key)`,
+ `CREATE INDEX IF NOT EXISTS syncv2_identity_by_entity ON syncv2_identity_map(local_library,repo,entity_key,kind)`,
  `CREATE TABLE IF NOT EXISTS syncv2_upload_receipts(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))`,
  `CREATE TABLE IF NOT EXISTS syncv2_upload_replays(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
  `CREATE TABLE IF NOT EXISTS syncv2_checkpoint(scope TEXT PRIMARY KEY,binding TEXT NOT NULL,body TEXT NOT NULL)`,
@@ -79,7 +82,7 @@ export type NoteBinding={revision:string|null;life:'live'|'deleted'};
  * note candidate already admitted by the rc7 text budget. */
 const LONG_CANDIDATE_PAGE=12*1024*1024;
 export {PROJECTION_SOURCE_TABLES} from './business-revision';
-export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision;accountApplyVersion?:string};
+export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision;accountApplyVersion?:string;dirtyFrom?:string;dirtyAfter?:string;removedBooks?:boolean;publishRebuild?:string};
 /** Stored-ciphertext bound of one candidate or cloud-row page on the publish
  * and pull paths. A single long note may exceed it; it is then read alone. */
 export const PAGE_BYTES=384*1024;
@@ -164,18 +167,20 @@ export class WatchProjectionStore {
  private aad(purpose:string,id=''){return canonical({domain:'wrss.sync.v2/local-projection',version:2,scope:this.scope,libraryId:this.libraryId,purpose,id});}
  /** Reopening disabled must durably stop a previously enabled projection. */
  async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
-  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.filter(sql=>!sql.startsWith('CREATE TRIGGER')).map(sql=>({sql})));const infrastructureDdl=await stableSqlTriggers(this.db,PROJECTION_SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER')));const markerDdl=await installBusinessRevision(this.db);
+  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.filter(sql=>!sql.startsWith('CREATE TRIGGER')).map(sql=>({sql})));const infrastructureDdl=await stableSqlTriggers(this.db,PROJECTION_SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER')));
   if(!(await this.db.query('PRAGMA table_info(syncv2_write_gates)')).some(row=>row.name==='control_revision'))await this.db.transaction([{sql:"ALTER TABLE syncv2_write_gates ADD COLUMN control_revision TEXT NOT NULL DEFAULT '0'"}]);
+  const result=await stableSqlTriggers(this.db,["CREATE TRIGGER IF NOT EXISTS syncv2_identity_immutable BEFORE INSERT ON syncv2_identity_map WHEN EXISTS(SELECT 1 FROM syncv2_identity_map WHERE local_library=NEW.local_library AND repo=NEW.repo AND kind=NEW.kind AND logical_id=NEW.logical_id AND (entity_key!=NEW.entity_key OR mapping_version!=NEW.mapping_version)) BEGIN SELECT RAISE(ABORT,'identity_conflict');END"]);
+  const markerDdl=await this.refreshBusinessRevision();
   if(!(await this.db.query('SELECT 1 FROM syncv2_state WHERE scope=?',[this.scopeKey])).length){
-   const initial=initialState();initial.businessRevision=await businessRevision(this.db);const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
+   const initial=initialState();initial.businessRevision=await businessRevision(this.db);
    // This scope has never acknowledged a note. MemoRepository initializes a new
    // note with base_content_hash=content_hash, so that pair cannot prove sync.
    const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE deleted=0 OR content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
+   const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?)",witnesses.map(([table])=>table))).map(row=>String(row.name)));
    for(const [table,query]of witnesses)if(tables.has(table!)&&(await this.db.query(query!)).length){initial.hasUnsentEdits=true;break;}
    const body=await this.cipher.seal(this.aad('state'),initial);
    await this.db.transaction([{sql:'INSERT OR IGNORE INTO syncv2_state VALUES(?,?,?,?,?,?,0)',params:[this.scopeKey,'0','0',body,'0','0']}]);
   }
-  const result=await stableSqlTriggers(this.db,["CREATE TRIGGER IF NOT EXISTS syncv2_identity_immutable BEFORE INSERT ON syncv2_identity_map WHEN EXISTS(SELECT 1 FROM syncv2_identity_map WHERE local_library=NEW.local_library AND repo=NEW.repo AND kind=NEW.kind AND logical_id=NEW.logical_id AND (entity_key!=NEW.entity_key OR mapping_version!=NEW.mapping_version)) BEGIN SELECT RAISE(ABORT,'identity_conflict');END"]);
   result.ddl+=markerDdl.ddl+infrastructureDdl.ddl;result.unchanged+=markerDdl.unchanged+infrastructureDdl.unchanged;
   // A local test/diagnostic entry must activate explicitly. No cloud transport,
   // worker, settings migration, or account registration is attached here.
@@ -223,6 +228,7 @@ export class WatchProjectionStore {
    AND (SELECT schema_version FROM pragma_schema_version)=?`,
    [this.scopeKey,state.stateVersion,state.businessRevision?.epoch,state.businessRevision?.revision,schemaVersion])).length===1;
  }
+ async refreshBusinessRevision(){this.gate.require();return installBusinessRevision(this.db);}
  async roundSchemaVersion(){
   this.gate.require();return Number((await this.db.query('PRAGMA schema_version'))[0]?.schema_version ?? -1);
  }
@@ -407,8 +413,11 @@ export class WatchProjectionStore {
  }
  async resumeAccountProjection(before:SyncState,ref:SqlProgramRef,validateOnly=false){
   if(ref.binding!==this.scopeKey)throw Error('choice_stale');const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!saved)throw Error('sql_program_incomplete');const work=await this.cipher.open(this.aad('apply-work',ref.id),String(saved.body));if(work.membershipVersion!==1||work.phase!=='ready'||canonical(work.ref)!==canonical(Object.fromEntries(['binding','id','pages','fragments','operations','bytes','root'].map(k=>[k,(ref as any)[k]]))))throw Error('sql_program_incomplete');const cp=await this.checkpoint(),tail:Statement[]=[];
-  if(cp?.phase==='complete'){const next={...cp,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};tail.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
-  return [await this.applyProgram(ref.id).statement(ref,validateOnly),...tail,captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
+  if(cp?.phase==='complete'){const next={...cp,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};delete next.publishRebuild;tail.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
+  return [await this.applyProgram(ref.id).statement(ref,validateOnly),...tail,
+   {sql:'DELETE FROM syncv2_dirty'},
+   {sql:'UPDATE syncv2_dirty_window SET floor=(SELECT revision FROM business_sync_revision WHERE id=1),size=0 WHERE id=1'},
+   captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
  }
  accountProjectionReservationBytes(statements:Statement[]){let size=jsonBytes(JSON.stringify(statements)).length*2+32768;for(const s of statements){const program=(s as any).program;if(program)size+=program.bytes*6;}if(!Number.isSafeInteger(size))throw Error('storage_pressure');return size;}
  async validateAccountProjection(before:SyncState,statements:Statement[]){
@@ -420,7 +429,7 @@ export class WatchProjectionStore {
  /** Reset only the scan checkpoint. Retain candidates, IDs, edits and the DB. */
  async restartScan(){
   const before=await this.readState(),row=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('scan_not_started');
-  const cp:Checkpoint={R0:before.localChangeRevision,R1:null,after:'',tail:'0',phase:'scan',rows:0,tailEnd:null,businessRevision:before.businessRevision!};
+  const cp:Checkpoint={R0:before.localChangeRevision,R1:null,after:'',tail:'0',phase:'scan',rows:0,tailEnd:null,businessRevision:before.businessRevision!,publishRebuild:nextD64(before.stateVersion)};
   await this.observationUpdate(before,{...before},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),cp),this.scopeKey]}]);
  }
  async publicationUpdate(before:SyncState,next:SyncState,statements:Statement[]=[]){
@@ -474,9 +483,25 @@ export class WatchProjectionStore {
   this.gate.require();limit=await this.boundedLimit('SELECT length(body)'+(this.cipher.blocks?'+'+this.chunks('candidate').sizeSql('entity_key'):'')+' AS n FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
   const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.openCandidate(String(row.entity_key),row.body)});return out;
  }
- async priorityCandidateKeys(kinds:readonly Kind[]){
-  this.gate.require();if(!kinds.length)return [] as string[];
-  const rows=await this.db.query(`SELECT DISTINCT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY entity_key`,[this.libraryId,this.scope.repoId,...kinds]);
+ async publicationKeys(after:string,limit:number,kinds:readonly Kind[],includeUnmapped:boolean,revisionRange?:readonly [string,string]){
+  this.gate.require();
+  const priority=kinds.map(()=>'?').join(',');
+  // Older encrypted rows may have no mapping. They still require the same
+  // wire and identity validation as mapped rows before they can be published.
+  const kindFilter=`(i.kind IN (${priority})${includeUnmapped?' OR i.kind IS NULL':''})`;
+  // D64 includes unsigned values SQLite cannot cast to a signed integer.
+  // Match the expression index so the acknowledged history is never scanned.
+  const revision="substr('00000000000000000000'||revision,-20)";
+  const candidates=revisionRange?`(SELECT DISTINCT entity_key FROM syncv2_change_log WHERE scope=?
+    AND ${revision}>? AND ${revision}<=? AND entity_key>?) changes
+   CROSS JOIN syncv2_candidates c ON c.entity_key=changes.entity_key`:'syncv2_candidates c';
+  const params=revisionRange?[this.scopeKey,...revisionRange.map(r=>r.padStart(20,'0')),after]:[];
+  // Select only keys here, so the time budget can stop before the next decrypt.
+  const rows=await this.db.query(`SELECT c.entity_key FROM ${candidates}
+   LEFT JOIN syncv2_identity_map i ON i.local_library=? AND i.repo=? AND i.entity_key=c.entity_key
+   WHERE c.scope=? AND c.entity_key>? AND ${kindFilter}
+   GROUP BY c.entity_key ORDER BY c.entity_key LIMIT ?`,
+   [...params,this.libraryId,this.scope.repoId,this.scopeKey,after,...kinds,limit]);
   return rows.map(r=>String(r.entity_key));
  }
  async candidateBatch(entityKeys:readonly string[]){
@@ -566,10 +591,10 @@ export class WatchProjectionStore {
  async beginScan(binding:ScanBinding){
   const state=await this.readState();nextD64(state.stateVersion);const bind=canonical(binding),prior=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0],old=await this.checkpoint();
   if(prior?.binding===bind&&old&&(sameBusinessRevision(old.businessRevision,state.businessRevision)||old.phase!=='complete'&&old.businessRevision?.epoch===state.businessRevision?.epoch))return {hit:true,reason:sameBusinessRevision(old.businessRevision,state.businessRevision)?'same-binding-and-revision':'resume-prefix-then-reconcile',checkpoint:old};
-  const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!};
+  const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!,publishRebuild:nextD64(state.stateVersion)};
   await this.observationUpdate(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
  }
- private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>){
+ private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>,recheck=false){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
   if(!rows.length)return {statements,total};
   const prepared=rows.map(row=>{const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId);return {row,entity,candidate:candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis,this.segmentOptions())};});
@@ -591,21 +616,22 @@ export class WatchProjectionStore {
   }
   for(const {row,entity,candidate} of prepared){const mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
    const existing=existingIdentity.get(row.kind+'\0'+row.logicalId);if(existing&&existing!==entity)throw Error('identity_conflict');
-   if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
    const priorBody=existingCandidate.get(entity);
    const candidateDigest=digest(candidate);
+   const change=(hash:string):Statement=>({sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:hash})]});
    let hasPrior=false,priorDeletedNote=false;
    if(priorBody!==undefined){
     const cached=this.verifiedCandidates.get(entity);
     if(cached&&cached.bodyHash===digest(priorBody)){
-     if(!force&&cached.digest===candidateDigest)continue;
+     if(!force&&cached.digest===candidateDigest){if(recheck)statements.push(change(digest(priorBody)));continue;}
      hasPrior=true;priorDeletedNote=cached.deletedNote;
     }else{
      const priorValue=await this.openCandidate(entity,priorBody);
-     if(!force&&digest(priorValue)===candidateDigest)continue;
+     if(!force&&digest(priorValue)===candidateDigest){if(recheck)statements.push(change(digest(priorBody)));continue;}
      hasPrior=true;priorDeletedNote=priorValue.state.payload.deleted===true;
     }
    }
+   if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
    // rc7 25.3: a local deletion ends the note life in the same transaction.
    if(row.kind==='note'&&candidate.state.payload.deleted===true&&hasPrior&&!priorDeletedNote)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
    const spilled=await this.sealSpilled('candidate',entity,this.aad('candidate',entity),candidate),sealed=spilled.body;total+=sealed.length;statements.push(...spilled.statements);
@@ -615,7 +641,7 @@ export class WatchProjectionStore {
    treeChanges.push({key:entity,value:{candidateHash:sealedHash,rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
    statements.push({sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[...mapKey,entity]},
     {sql:'INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body,meta_bytes=excluded.meta_bytes,state_bytes=excluded.state_bytes,added_at=excluded.added_at,row_sequence=excluded.row_sequence',params:[this.scopeKey,entity,sealed,candidate.metaBytes,candidate.stateBytes,candidate.addedAtMillis,sequence]},
-    {sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:sealedHash})]});
+    change(sealedHash));
   }
   if(treeChanges.length){const enc=radixEncoder(),tree=await updateRadixIndex({read:readTree??(async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;}),encode:enc.encode,hash:sha256Hex},treeChanges);
    for(const row of tree.writes){const body=enc.text(row.node);total+=body.length;if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
@@ -625,29 +651,102 @@ export class WatchProjectionStore {
  /** One bounded page per invocation. Returning is the execution-budget pause;
   * the next host/guest reads the committed checkpoint and resumes its prefix. */
  async scanPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'scan',hook);}
+ private async dirtyBasis(before:BusinessRevision|undefined,after:BusinessRevision){
+  if(!before||before.epoch!==after.epoch)return undefined;
+  const row=(await this.db.query('SELECT 1 FROM syncv2_dirty_window WHERE id=1 AND floor<=CAST(? AS INTEGER)',[before.revision]))[0];
+  return row?before.revision:undefined;
+ }
+ private async dirtyPage(source:SourceReader,cp:Checkpoint,limit:number):Promise<SourcePage>{
+  const cursor=cp.dirtyAfter?JSON.parse(cp.dirtyAfter) as [string,string,string,number]:[cp.dirtyFrom!,'','',0] as const;
+  const [revision,table,locator,offset]=cursor;
+  const dirty=await this.db.query(`SELECT table_name,locator,CAST(revision AS TEXT) AS revision FROM syncv2_dirty
+   WHERE revision>CAST(? AS INTEGER) AND revision<=CAST(? AS INTEGER)
+    AND (revision,table_name,locator)${offset?'>=':'>'}(CAST(? AS INTEGER),?,?)
+   ORDER BY revision,table_name,locator LIMIT ?`,[cp.dirtyFrom,cp.businessRevision!.revision,revision,table,locator,limit]);
+  const rows:SourceRecord[]=[];let after=cp.dirtyAfter??'';
+  for(const key of dirty){
+   const name=String(key.table_name),id=String(key.locator),stamp=String(key.revision);
+   const records=await source.changed(name,id),start=stamp===revision&&name===table&&id===locator?offset:0,end=start+limit-rows.length;
+   rows.push(...records.slice(start,end));
+   after=canonical([stamp,name,id,end<records.length?end:0]);
+   if(rows.length===limit)return {rows,after,done:false};
+  }
+  return {rows,after,done:dirty.length<limit};
+ }
+ private async missingBooks(source:SourceReader,after:string,limit:number):Promise<SourcePage>{
+  // A full reconciliation also covers physical removals during a trigger gap.
+  const missing=await this.db.query(`SELECT i.logical_id,'hex-v1:'||hex(i.logical_id) AS locator FROM syncv2_identity_map i
+   JOIN syncv2_candidates c ON c.scope=? AND c.entity_key=i.entity_key
+   WHERE i.local_library=? AND i.repo=? AND i.kind='book' AND i.logical_id>?
+    AND NOT EXISTS(SELECT 1 FROM sync_books b WHERE b.book_id=i.logical_id)
+   ORDER BY i.logical_id LIMIT ?`,[this.scopeKey,this.libraryId,this.scope.repoId,after,limit]);
+  const rows:SourceRecord[]=[];
+  for(const book of missing)rows.push(...await source.changed('sync_books',String(book.locator)));
+  return {rows,after:String(missing.at(-1)?.logical_id??after),done:missing.length<limit};
+ }
  private async projectPage(source:SourceReader,limit:number,phase:'scan'|'tail',hook?:()=>void){
   const state=await this.readState();if(queuedReadOnly(state))throw new ObservationReadOnly();const revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!==phase)return cp;
+  const current=state.businessRevision!;
+  const canReadDirty=cp.dirtyFrom===undefined||await this.dirtyBasis({epoch:cp.businessRevision!.epoch,revision:cp.dirtyFrom},current)!==undefined;
+  const scan=canReadDirty&&cp.businessRevision?.epoch===current.epoch?cp:{...cp,after:'',rows:0,dirtyFrom:undefined,dirtyAfter:undefined,removedBooks:undefined,businessRevision:current,publishRebuild:revision};
   let effectiveLimit=Math.min(limit,this.adaptiveScanLimit);
   let page:SourcePage,prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
-  for(;;){page=await source.page(cp.after,effectiveLimit);if(page.rows.length>effectiveLimit||!page.done&&page.after===cp.after)throw Error('scan_no_progress');try{prepared=await this.prepareRows(page.rows,state.localChangeRevision,revision);break;}catch(error){if(effectiveLimit===1||(error as Error).message!=='page_too_large')throw error;effectiveLimit=Math.max(1,Math.floor(effectiveLimit/2));this.adaptiveScanLimit=Math.min(this.adaptiveScanLimit,effectiveLimit);}}
+  const incremental=scan.dirtyFrom!==undefined;
+  const after=incremental?scan.dirtyAfter??'':scan.after;
+  for(;;){
+   page=incremental?await this.dirtyPage(source,scan,effectiveLimit):scan.removedBooks?await this.missingBooks(source,scan.after,effectiveLimit):await source.page(scan.after,effectiveLimit);
+   if(page.rows.length>effectiveLimit||!page.done&&page.after===after)throw Error('scan_no_progress');
+   // A deleted article and its explicit tombstone can be witnessed by
+   // separate native locators in the same dirty page.
+   const rows=incremental?[...new Map(page.rows.map(row=>[row.kind+'\0'+row.logicalId,row])).values()]:page.rows;
+   try{prepared=await this.prepareRows(rows,state.localChangeRevision,revision,false,undefined,incremental);break;}catch(error){if(effectiveLimit===1||(error as Error).message!=='page_too_large')throw error;effectiveLimit=Math.max(1,Math.floor(effectiveLimit/2));this.adaptiveScanLimit=Math.min(this.adaptiveScanLimit,effectiveLimit);}
+  }
   if(prepared.total<192*1024&&effectiveLimit===this.adaptiveScanLimit&&this.adaptiveScanLimit<32)this.adaptiveScanLimit=Math.min(32,this.adaptiveScanLimit*2);
-  const nextCp:Checkpoint={...cp,after:page.after,rows:cp.rows+page.rows.length};
+  const nextCp:Checkpoint=incremental?{...scan,dirtyAfter:page.after}
+   :{...scan,after:page.after,rows:scan.rows+page.rows.length};
+  if(nextCp.dirtyFrom===undefined)delete nextCp.dirtyFrom;
+  if(nextCp.dirtyAfter===undefined)delete nextCp.dirtyAfter;
+  if(nextCp.removedBooks===undefined)delete nextCp.removedBooks;
   if(page.done){
-   nextCp.R1=state.localChangeRevision;
-   if(sameBusinessRevision(cp.businessRevision,state.businessRevision)){nextCp.phase='complete';nextCp.tailEnd=state.businessRevision!.revision;nextCp.tail=nextCp.tailEnd;}
-   else {nextCp.phase='tail';nextCp.after='';nextCp.rows=0;nextCp.businessRevision=state.businessRevision!;nextCp.tailEnd=null;}
+   if(!incremental&&!scan.removedBooks&&source.tracksBookRemovals){
+    nextCp.removedBooks=true;nextCp.after='';
+   }else {
+    delete nextCp.removedBooks;
+    nextCp.R1=state.localChangeRevision;
+    if(sameBusinessRevision(scan.businessRevision,current)){
+     nextCp.phase='complete';nextCp.tailEnd=current.revision;nextCp.tail=nextCp.tailEnd;
+     delete nextCp.dirtyFrom;delete nextCp.dirtyAfter;
+     // Other scopes with an older checkpoint detect the pruned range via floor.
+     prepared.statements.push(
+      {sql:'DELETE FROM syncv2_dirty WHERE revision<=CAST(? AS INTEGER)',params:[current.revision]},
+      {sql:'UPDATE syncv2_dirty_window SET floor=MAX(floor,CAST(? AS INTEGER)),size=size-changes() WHERE id=1',params:[current.revision]},
+     );
+    }else {
+     nextCp.phase='tail';nextCp.businessRevision=current;nextCp.tailEnd=null;delete nextCp.dirtyAfter;
+     const from=await this.dirtyBasis(scan.businessRevision,current);
+     if(from===undefined){
+      delete nextCp.dirtyFrom;nextCp.after='';nextCp.rows=0;nextCp.publishRebuild=revision;
+     }else nextCp.dirtyFrom=from;
+    }
+   }
   }
   await this.commit(state,{...state},[...prepared.statements,{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),nextCp),this.scopeKey]}],hook,true);return nextCp;
  }
- /** A global tiny witness cannot identify changed rows. Conservatively rescan
-  * in bounded pages; unchanged candidates and radix paths are not rewritten. */
  async beginTailWindow(){
-  const state=await this.readState();nextD64(state.stateVersion);const cp=await this.checkpoint();if(!cp||cp.phase!=='complete')throw Error('scan_not_complete');
+  const state=await this.readState(),revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp||cp.phase!=='complete')throw Error('scan_not_complete');
   if(sameBusinessRevision(cp.businessRevision,state.businessRevision))return cp;
-  const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,phase:'tail',after:'',rows:0,tailEnd:null,businessRevision:state.businessRevision!};
+  const from=await this.dirtyBasis(cp.businessRevision,state.businessRevision!);
+  const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,phase:'tail',tailEnd:null,businessRevision:state.businessRevision!,...(from===undefined?{after:'',rows:0,publishRebuild:revision}:{dirtyFrom:from})};
   delete next.accountApplyVersion;await this.observationUpdate(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
  }
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
+ async bookReferenced(id:string){
+  const state=await this.persistedState(),head=state.cloud?.current,published=state.cloud?.lastPublication?.result?.account;
+  if(state.cloud?.pendingPublish||published&&compareD64(published.revision,state.account?.revision??'0')>0)return true;
+  if(!state.account)return false;
+  if(head?.commitOid!==state.account.oid)return true;
+  return !!await this.cloudRow(head.treeRoot,this.entityKeyFor('book',id))||await this.cloudRowCount(head.treeRoot)!==head.rowCount;
+ }
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
  async readCandidates(kind:Kind,logicalIds:string[]){

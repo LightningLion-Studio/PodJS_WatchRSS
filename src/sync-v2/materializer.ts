@@ -4,7 +4,7 @@ import {conflictSet} from './note-conflict-set';
 import {importLegacy} from './notes-conflict';
 import {uint,type Kind} from './protocol';
 import {BUSINESS_FIELDS,fromWire} from './business';
-import {materializeFrozen,type Materialize} from './source';
+import {decodeLocator,materializeFrozen,type Materialize} from './source';
 import type {SourceRecord} from './store';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
 import {nativeTrim,type LocalArticleManifestStore} from '../sync/local-manifest';
@@ -23,7 +23,7 @@ async function pendingBookReading(db:ProjectionSql,bookId:string,chapter:number,
 }
 /** Uses the frozen legacy reader in its explicit read-only mode: no lookup
  * initialization, body scan, recipe computation, old cursor, or business writes. */
-export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>,previousBatchById?:(kind:Kind,logicalIds:string[])=>Promise<Map<string,any>>):Materialize {
+export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:Kind,logicalId:string)=>Promise<any>,previousBatchById?:(kind:Kind,logicalIds:string[])=>Promise<Map<string,any>>,bookReferenced?:(id:string)=>Promise<boolean>):Materialize {
  const sourceOptions=async(value:any)=>{
   const previous=await previousById?.('source',value.url),tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_preferences','source_media_preferences')")).map(r=>String(r.name)));
   if(previous?.meta.payload.sourceId!==undefined)value.sourceId=previous.meta.payload.sourceId;
@@ -39,10 +39,70 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
   }
   return value;
  };
+ const articleRegister=async(row:Record<string,unknown>):Promise<SourceRecord[]>=>{
+  const records=await materializeFrozen('article_register_state',row),record=records[0];
+  if(!record||!row.item_id||record.value.deleted)return records;
+  const value=record.value;
+  // The register owns the protected article metadata. Local Reader and save
+  // mutations update the native interaction tables without rewriting it.
+  const item=row.item_id;
+  const native=(await db.query(`SELECT a.is_read,a.is_saved,COALESCE(r.progress,a.reading_progress) AS progress,
+   COALESCE(r.changed_at,0) AS clock,COALESCE(r.position_bytes,0) AS position,
+   COALESCE(r.position_hash,'') AS hash,s.source_device_id AS source
+   FROM articles a LEFT JOIN article_reading_state r ON r.article_id=a.id
+   LEFT JOIN native_reading_sources s ON s.item_id=a.id AND s.changed_at=r.changed_at WHERE a.id=?`,[item]))[0];
+  if(!native)return records;
+  let device:string|undefined;
+  const localDevice=async()=>device??=String((await db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??value.sourceDeviceId??'');
+  const clock=Number(native.clock),reading={isRead:!!Number(native.is_read),readingProgress:Math.fround(Number(native.progress)),readingPositionChangedAt:clock,readingPositionBytes:Number(native.position),readingPositionContentHash:String(native.hash)};
+  if(reading.isRead!==(value.isRead??false)||reading.readingProgress!==Math.fround(value.readingProgress??0)||
+     clock!==(value.readingPositionChangedAt??0)||reading.readingPositionBytes!==(value.readingPositionBytes??0)||
+     reading.readingPositionContentHash!==(value.readingPositionContentHash??'')){
+   Object.assign(value,reading);
+   if(value.registerSources)value.registerSources.reading=native.source??await localDevice();
+  }
+  const saved=await db.query(`SELECT save_type,saved,changed_at,sort_order,source_device_id FROM sync_saved_states WHERE item_id=?
+   UNION ALL SELECT save_type,saved,changed_at,-sort_order,NULL FROM article_saved_states WHERE article_id=? ORDER BY changed_at DESC,source_device_id DESC`,[item,item]);
+  for(const type of ['favorite','watchLater']){
+   const state=saved.find(r=>r.save_type===type);
+   const on=state?!!Number(state.saved):type==='favorite'&&!!Number(native.is_saved);
+   const changedAt=Number(state?.changed_at??0),order=Number(state?.sort_order??0);
+   if(on===(value[type+'Saved']??false)&&changedAt===(value[type+'ChangedAt']??0)&&order===(value[type+'SortOrder']??0))continue;
+   value[type+'Saved']=on;value[type+'ChangedAt']=changedAt;value[type+'SortOrder']=order;
+   if(value.registerSources)value.registerSources[type]=state?.source_device_id??await localDevice();
+  }
+  return records;
+ };
+ const applyBookEvents=async(value:Record<string,any>)=>{
+  if(!(await db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_book_events'")).length)return;
+  const events=(await db.query('SELECT chapter_index,changed_at FROM sync_book_events WHERE book_id=?',[value.bookId]))
+   .filter(e=>!value.lifecycle||Number(e.changed_at)>value.lifecycle.startedAt);
+  const whole=events.some(e=>Number(e.chapter_index)===0);
+  value.deleted=value.deleted||whole;
+  value.deletedChapters=[...new Set([...value.deletedChapters,...events.map(e=>Number(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b);
+  value.deletionClock=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletionClock);
+  if(whole)value.deletedAt=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletedAt);
+ };
  const single:Materialize=async(table,row)=>{
+  if(table==='article_register_state')return articleRegister(row);
   if(table==='sync_books'){
-   const records=await materializeFrozen(table,row),value=records[0]!.value,tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_book_events')")).map(r=>String(r.name)));
-   if(tables.has('sync_book_events')){const events=(await db.query('SELECT chapter_index,changed_at FROM sync_book_events WHERE book_id=?',[value.bookId])).filter(e=>!value.lifecycle||Number(e.changed_at)>value.lifecycle.startedAt),whole=events.some(e=>Number(e.chapter_index)===0);value.deleted=value.deleted||whole;value.deletedChapters=[...new Set([...value.deletedChapters,...events.map(e=>Number(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b);value.deletionClock=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletionClock);if(whole)value.deletedAt=events.reduce((n,e)=>Math.max(n,Number(e.changed_at)),value.deletedAt);}
+   if(row.__removed){
+    const [id]=decodeLocator(String(row.__locator)),previous=await previousById?.('book',id!);
+    if(!previous)return [];
+    const value=fromWire('book',previous.meta.payload,previous.state.payload);
+    await applyBookEvents(value);
+    if(!value.deleted){
+     // Removing local storage alone does not erase an authenticated book.
+     // A live cloud row needs the native whole-book deletion event.
+     if(await bookReferenced?.(id!))return [];
+     const clock=Math.max(value.updatedAt,value.deletionClock,value.lifecycle?.startedAt??0)+1;
+     if(!Number.isSafeInteger(clock))throw Error('counter_exhausted');
+     Object.assign(value,{deleted:true,deletedAt:clock,deletionClock:clock});
+    }
+    return [{kind:'book',logicalId:id!,value,...(previous.meta.addedAtSource==='original'?{addedAtMillis:previous.addedAtMillis}:{})}];
+   }
+   const records=await materializeFrozen(table,row);
+   await applyBookEvents(records[0]!.value);
    return records;
   }
   if(table==='sync_book_reading_dirty'){
@@ -50,6 +110,12 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    for(const a of aliases){const value=await pendingBookReading(db,String(a.book_id),Number(a.chapter_index),a.state_json?JSON.parse(String(a.state_json)):undefined);if(value)out.push({kind:'book-reading' as const,logicalId:value.bookId+':'+value.chapterIndex,value});}return out;
   }
   if(table==='sync_book_reading'){
+   if(row.__removed){
+    const [id,chapter]=decodeLocator(String(row.__locator));
+    if(!(await db.query('SELECT 1 FROM sync_books WHERE book_id=?',[id])).length)return [];
+    const value=await pendingBookReading(db,id!,Number(chapter),undefined);
+    return value?[{kind:'book-reading',logicalId:id+':'+chapter,value}]:[];
+   }
    const tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_book_reading_dirty'")).map(r=>String(r.name)));
    if(tables.has('sync_book_reading_dirty')&&(await db.query('SELECT 1 FROM sync_book_reading_dirty d JOIN sync_book_aliases m ON m.item_id=d.item_id WHERE m.book_id=? AND m.chapter_index=? LIMIT 1',[row.book_id,row.chapter_index])).length){const value=await pendingBookReading(db,String(row.book_id),Number(row.chapter_index),JSON.parse(String(row.state_json)));return [{kind:'book-reading',logicalId:value.bookId+':'+value.chapterIndex,value}];}
   }
@@ -66,12 +132,14 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
   }
   if(table==='articles'){
    if(row.__removed){
-    const previous=await previousBySource?.(table,String(row.__locator));if(!previous)throw Error('source_tombstone_required');
-    const tombstone=(await db.query('SELECT * FROM sync_article_deletions WHERE article_id=?',[previous.meta.logicalId]))[0];if(!tombstone)throw Error('source_tombstone_required');
+    const previous=await previousBySource?.(table,String(row.__locator));if(!previous)return [];
+    const tombstone=(await db.query('SELECT * FROM sync_article_deletions WHERE article_id=?',[previous.meta.logicalId]))[0];if(!tombstone)return [];
     const value={...fromWire('article',previous.meta.payload,previous.state.payload),deleted:true,deletedAt:Number(tombstone.changed_at),sourceDeviceId:String(tombstone.source_device_id)};
     return [{kind:'article',logicalId:previous.meta.logicalId,value,...(previous.meta.addedAtSource==='original'?{addedAtMillis:previous.addedAtMillis}:{})}];
    }
-   if((await db.query('SELECT 1 FROM article_register_state WHERE item_id=?',[row.id])).length)return [];
+   const registered=(await db.query('SELECT * FROM article_register_state WHERE item_id=?',[row.id]))[0];
+   if(registered)return row.__locator?articleRegister(registered):[];
+   if(row.__relevant===0&&!await previousBySource?.(table,String(row.__locator)))return [];
    if((await db.query('SELECT 1 FROM sync_book_aliases WHERE item_id=?',[row.id])).length)return []; // Stable book/chapter identities have their own records.
    const page=await metadata.cloudRestoreMetadata({itemIds:[Number(row.id)],limit:1},undefined,true);
    if(page.articles.length!==1)throw Error('source_identity_missing');

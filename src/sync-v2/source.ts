@@ -11,7 +11,7 @@ export const BUSINESS_TABLE_KEYS:Readonly<Record<string,readonly string[]>>=Obje
  sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_assets:['asset_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],
 });
 export function encodeLocator(values:unknown[]){return 'hex-v1:'+values.map(value=>hex(encodeUtf8(String(value),'strict')).toUpperCase()).join(':');}
-function decodeLocator(value:string){
+export function decodeLocator(value:string){
  if(!value.startsWith('hex-v1:'))throw Error('invalid_locator');return value.slice(7).split(':').map(part=>{
   if(!/^(?:[0-9A-F]{2})*$/.test(part))throw Error('invalid_locator');const input=unhex(part.toLowerCase());let at=0,text='';while(at<input.length){const next=decodeUtf8Chunk(input,at);text+=next.text;at=next.next;}return text;
  });
@@ -74,29 +74,24 @@ export class SqlBusinessSource implements SourceReader {
   return {rows,after:canonical(next),done:next.table>=this.tables.length};
  }
 
- async changed(table:string,locator:string){
-  if(table==='note_merge_conflicts'){
-   const values=decodeLocator(locator),incident=(await this.db.query('SELECT note_id FROM note_merge_conflicts WHERE conflict_id=?',values))[0];
-   if(!incident)throw Error('source_reconciliation_required');
-   const row=await completeNoteRow(this.db,(await this.db.query(`SELECT ${this.notes} FROM memo_notes WHERE note_id=?`,[incident.note_id]))[0]??{});if(!row.note_id)throw Error('source_identity_missing');
-   return this.materialize('memo_notes',row);
-  }
-  if(['article_reading_state','article_saved_states','cloud_rss_article_ids','article_sync_encoding_cache','article_sync_content','article_native_sync_hash','sync_body_revision','sync_saved_states','sync_article_ids'].includes(table)){
-   const values=decodeLocator(locator);let id:unknown=values[0];
-   if(table==='sync_saved_states')id=(await this.db.query('SELECT item_id FROM sync_saved_states WHERE article_id=? AND save_type=?',values))[0]?.item_id;
-   if(table==='sync_article_ids')id=(await this.db.query('SELECT item_id FROM sync_article_ids WHERE article_id=?',values))[0]?.item_id;
-   const row=(await this.db.query('SELECT id FROM articles WHERE id=?',[id??null]))[0];if(!row)throw Error('source_tombstone_required');return this.materialize('articles',row);
-  }
+ get tracksBookRemovals(){return this.tables.includes('sync_books');}
 
-  const keys=BUSINESS_TABLE_KEYS[table];if(!keys)throw Error('source_reconciliation_required');
-  const values=decodeLocator(locator);if(!Array.isArray(values)||values.length!==keys.length)throw Error('invalid_locator');
-  const row=await this.complete(table,(await this.db.query(`SELECT ${this.columns(table)} FROM ${quote(table)} WHERE ${keys.map(k=>quote(k)+' IS ?').join(' AND ')}`,values))[0]);
-  // Physical removal is not a new logical tombstone. Preserve its previous
-  // candidate until the business tombstone materializer supplies the value.
-  if(!row)return this.materialize(table,{__removed:true,__locator:locator});return (await this.materialize(table,row)).map(record=>({...record,source:{table,locator}}));
+ async changed(table:string,locator:string):Promise<SourceRecord[]>{
+  const values=decodeLocator(locator);
+  if(table==='source-options')return this.changed('channels',locator);
+  const keys=BUSINESS_TABLE_KEYS[table];if(!keys||values.length!==keys.length)throw Error('invalid_locator');
+  if(!this.tables.includes(table))return [];
+  const extra=table==='articles'&&this.articleFilter?`,(${this.articleFilter}) AS __relevant`:'';
+  const row=await this.complete(table,(await this.db.query(`SELECT ${this.columns(table)}${extra} FROM ${quote(table)} WHERE ${keys.map(k=>quote(k)+' IS ?').join(' AND ')}`,values))[0]);
+  if(!row&&table!=='articles'&&table!=='sync_books'&&table!=='sync_book_reading')return [];
+  if(table==='sync_article_deletions'&&this.deletionFilter&&!(await this.db.query(`SELECT 1 FROM sync_article_deletions WHERE article_id=? AND ${this.deletionFilter}`,values)).length)return [];
+  const input={...(row??{__removed:true}),__locator:locator};
+  return (await this.materialize(table,input)).map(record=>({...record,source:{table,locator}}));
  }
+
 }
 export async function materializeFrozen(table:string,row:Record<string,unknown>):Promise<SourceRecord[]>{
+ if(row.__removed)return [];
  const json=(value:unknown)=>{if(typeof value!=='string')throw Error('source_record_invalid');return JSON.parse(value);};
  if(table==='syncv2_rss_states'){const value=json(row.state_json);return [{kind:'rss-state',logicalId:String(row.id),value}];}
  if(table==='sync_books'||table==='sync_book_reading'){

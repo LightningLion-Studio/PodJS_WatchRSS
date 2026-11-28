@@ -58,8 +58,14 @@ export class SqlReadingProgressStore {
   return task.finally(()=>{if(this.pending.get(articleId)===task)this.pending.delete(articleId);});
  }
  private async persist(articleId:number,value:ReadingProgress):Promise<void>{
-  await this.migrate(articleId);
   const fraction=Math.fround(value.progress);
+  const current=(await this.db.query('SELECT progress,state_json FROM article_reading_state WHERE article_id=?',[articleId]))[0];
+  if(!current)await this.migrate(articleId);
+  else if(Math.abs(Number(current.progress)-fraction)<0.001){
+   let offset=0,valid=true;
+   if(current.state_json)try{offset=normalizeReadingProgress(JSON.parse(String(current.state_json))).offset;}catch{valid=false;}
+   if(valid&&offset===value.offset)return;
+  }
   await this.db.transaction([
    {sql:`INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json)
     SELECT a.id,?,?,CAST(COALESCE(c.content_bytes,length(CAST(COALESCE(a.content,'') AS BLOB)))*?+0.5 AS INTEGER),COALESCE(c.body_hash,''),?

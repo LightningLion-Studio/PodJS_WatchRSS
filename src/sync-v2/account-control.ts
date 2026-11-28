@@ -306,7 +306,12 @@ export class WatchAccountControl {
   if(legacy){if(digest(legacy)!==intent.legacyHash)throw Error('choice_stale');applyRows=localRows;localRows=await this.legacyOverlay(localRows,legacy.entry,cloudRows);capturedKeys=legacy.entry.entityKeys;decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
   const retained=intent.legacyKey?null:await this.retainUnsentNotes(s,localRows,cloudRows);
   const records=this.records(retained?.rows??applyRows),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
-  if(retained?.changed){next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);}
+  if(retained?.recheck.length){
+   next.hasUnsentEdits=true;next.localChangeRevision=nextD64(s.localChangeRevision);
+   // These candidates were retained in the account apply, which also advances
+   // the dirty basis. They still differ from the selected cloud snapshot.
+   next.cloud.publicationHeld=retained.recheck;
+  }
   const statements=decision?decision.statements:await this.prepareRecordPlan(s,records);
   let release:undefined|(()=>Promise<void>)=await this.reserveProjection(statements,intent.requestId);
   const releaseProjection=async()=>{await release?.();release=undefined;};
@@ -334,8 +339,7 @@ export class WatchAccountControl {
   const localById=new Map(local.map(row=>[row.entityKey,row]));
   const unopenable=state.cloud?.unopenableNotes??{};
   const root=state.editBase.accountOid?(await this.o.store.readHeader(state.editBase.accountOid))?.body.treeRoot:null;
-  const localOnly:string[]=[];
-  let changed=false;
+  const localOnly:string[]=[],recheck=new Set<string>();
   for(const row of local){
    const c=row.candidate;
    if(c.meta.kind!=='note'||c.state.payload.deleted)continue;
@@ -354,16 +358,16 @@ export class WatchAccountControl {
     }
    }
    if(!selected){localOnly.push(row.entityKey);continue;}
-   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);changed=true;}
+   if(selected!==rows.get(selected.entityKey)){rows.set(selected.entityKey,selected);recheck.add(selected.entityKey);}
    const folder=selected.candidate.meta.payload.folderId;
    const p=selected.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];
    const dependencies=[...(folder?[this.o.store.entityKeyFor('folder',folder)]:[]),...texts.flatMap(text=>[...noteAssetKeys(text)].map(id=>this.o.store.entityKeyFor('asset',id)))];
    for(const key of dependencies){
     const dependency=localById.get(key),selected=rows.get(key);
-    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);changed=true;}
+    if(dependency&&(!selected||selected.candidate.state.payload.deleted)){rows.set(key,dependency);recheck.add(key);}
    }
   }
-  return {rows:[...rows.values()],changed,localOnly};
+  return {rows:[...rows.values()],recheck:[...recheck],localOnly};
  }
 
  /** Reusing text must still retain conflicts from each local memo. */
@@ -417,7 +421,7 @@ export class WatchAccountControl {
  }
 
  private applied(s:SyncState,commitOid:string,revision:string,generation:string,requestId:string){
-  const next=clone(s);next.pendingChoice=s.pendingChoice?.inboxKeys.length?s.pendingChoice:null;next.activeGeneration=commitOid;next.hasUnsentEdits=false;next.acknowledgedLocalChangeRevision=s.localChangeRevision;next.editBase={accountOid:commitOid,generation};next.cloud={...next.cloud,editBases:{},editCreates:[],pendingApplied:{requestId:digest(['applied',requestId,commitOid,revision]).slice(0,32),commitOid,refRevision:revision,rollbackGeneration:generation}};return next;
+  const next=clone(s);next.pendingChoice=s.pendingChoice?.inboxKeys.length?s.pendingChoice:null;next.activeGeneration=commitOid;next.hasUnsentEdits=false;next.acknowledgedLocalChangeRevision=s.localChangeRevision;next.editBase={accountOid:commitOid,generation};next.cloud={...next.cloud,editBases:{},editCreates:[],publicationHeld:[],publicationScan:null,pendingApplied:{requestId:digest(['applied',requestId,commitOid,revision]).slice(0,32),commitOid,refRevision:revision,rollbackGeneration:generation}};return next;
  }
  async chooseLocal(proof:object,requestId:string){return this.choose(proof,requestId,false);}
  async chooseMerge(proof:object,requestId:string){return this.choose(proof,requestId,true);}
@@ -547,6 +551,7 @@ export class WatchAccountControl {
   const requestId=digest(['follow',account]).slice(0,32),next=this.applied(before,account.oid,account.revision,account.generation,requestId);
   next.hasUnsentEdits=true;
   next.cloud.editCreates=keys;
+  next.cloud.publicationHeld=keys;
   const release=await this.reserveProjection(statements);
   try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}
   await this.flushApplied();

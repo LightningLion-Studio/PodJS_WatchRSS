@@ -1,5 +1,5 @@
 import {NoteAssetFileIndex} from '../notes/asset-files';
-import {createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from '../notes/cloud-assets';
+import {createNoteAssetStat,createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from '../notes/cloud-assets';
 import {checkpointedUtf8File} from '@podjs/framework/work-window';
 import {restoreRequestMetadata} from './restore-callsite';
 import {CLOUD_SYNC_SUSPENDED} from './execution';
@@ -52,7 +52,7 @@ export async function createBackgroundLibraryPorts(host:CloudHostRequest,readKv:
   finally{await host('file.delete',{path:input.path}).catch(()=>{});if(output)await host('file.delete',{path:output}).catch(()=>{});}
  }};
  const noteAssets=new NoteAssetFileIndex(db);
- const libraryPorts:SqlLibraryRepositoryPorts={noteAssetReader:createNoteAssetReader(host,noteAssets),noteAssetWriter:createNoteAssetWriter(host,noteAssets),noteAssetCollector:createNoteAssetCollector(host),bookFiles:createBookFiles(bookHost,ports.crypto.sha256),codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeStagedText:(key,value,checkpoint)=>writeResumable(key,value,checkpoint,true),
+ const libraryPorts:SqlLibraryRepositoryPorts={noteAssetStat:createNoteAssetStat(host,noteAssets),noteAssetReader:createNoteAssetReader(host,noteAssets),noteAssetWriter:createNoteAssetWriter(host,noteAssets),noteAssetCollector:createNoteAssetCollector(host),bookFiles:createBookFiles(bookHost,ports.crypto.sha256),codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeStagedText:(key,value,checkpoint)=>writeResumable(key,value,checkpoint,true),
   syncStagedText:async()=>{const synced=await articleHost<{synced:boolean}>('file.syncDirectory',{path:'article_content'});if(!synced.synced)throw Error('后台正文目录持久化失败');},
   storeText:(key,value,checkpoint)=>writer.storeText(key,value,()=>false,checkpoint)},migrateReading:id=>reading.migrate(id),prepareReadingMigration:ids=>reading.migrationStatements(ids),migrateReadingMany:ids=>reading.migrateMany(ids),cleanupRemovedContent:async({itemIds})=>{
   for(const id of itemIds){const directory=`offline/rss/${id}`;const listing=await host<{entries:{file:boolean;path:string}[]}>('file.list',{path:directory}).catch(()=>undefined);for(const e of listing?.entries??[])if(e.file&&e.path.startsWith(directory+'/')&&!e.path.slice(directory.length+1).includes('/'))await host('file.delete',{path:e.path});}
