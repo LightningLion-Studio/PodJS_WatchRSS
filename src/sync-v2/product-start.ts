@@ -5,7 +5,7 @@ import {SyncV2Lifetime} from './lifetime';
  * - on: open once after the v1 account and its keys are ready, then install
  *   the UI port;
  * - the only unmount point is stop() (logout, account switch, dispose). */
-export interface SyncV2RoundResult {completionError:string|null}
+export interface SyncV2RoundResult {completionError:string|null;chunked?:true}
 export interface SyncV2ProductSession<Port> {
  ui:Port;
  initialResult?:SyncV2RoundResult;

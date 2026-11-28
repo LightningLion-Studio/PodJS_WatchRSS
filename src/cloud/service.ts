@@ -102,7 +102,7 @@ export class WatchCloudSyncService {
  syncNow(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string):Promise<boolean>{
   return this.syncNowResult(manual,mode,expectedScope).then(result=>result.ok);
  }
- private failV2(error:unknown, member?:CloudMemberState) {
+ private failV2(error:unknown, member?:CloudMemberState, chunked=false) {
   const failure=error as {code?:unknown;message?:unknown}|undefined;
   const code=failure?.code??failure?.message;
   this.networkFailure=code==='cloud_v2_offline'||code==='transport_error'||isTransportFailure(error);
@@ -141,10 +141,11 @@ export class WatchCloudSyncService {
    case 'ETIMEDOUT': message='连接云端超时，\n请重试'; break;
    default: message=this.networkFailure?'无法连接云端，\n请检查网络':'云同步未能完成，\n请重试';
   }
-  const fastContinue=code==='projection_preparing'||code==='first_follow_pending'||code==='cloud_v2_pending';
+  const fastContinue=chunked||code==='projection_preparing'||code==='first_follow_pending';
   const heldBody=code==='body_channel_source_missing'||code==='body_channel_capacity_pending';
-  const retryAtMillis=heldBody||code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(fastContinue?1000:30_000);
-  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,continuationReady:fastContinue?true:undefined,retryable:!heldBody,retryAtMillis};
+  const terminal=heldBody||code==='cloud_v2_read_only'||code==='cloud_v2_pending'&&!chunked;
+  const retryAtMillis=terminal||code==='choice_pending'||code==='cloud_v2_repo_missing'?undefined:(this.ports.now??Date.now)()+(fastContinue?1000:30_000);
+  this.value={...this.value,v2Failure:attention?undefined:true,v2Attention:attention,continuationReady:fastContinue?true:undefined,retryable:!terminal,retryAtMillis};
   this.set(attention?'idle':'error',message,member);
  }
  syncNowResult(manual=false,mode:'all'|'recent128'='recent128',expectedScope?:string,note?:NoteSyncTimes):Promise<CloudSyncResult>{
@@ -167,13 +168,13 @@ export class WatchCloudSyncService {
    const result=await this.ports.syncV2?.(expectedScope);
    if(epoch!==this.statusEpoch)return false;
    if(!result)throw Error('cloud_v2_start_unavailable');
-   if(result.completionError)throw Error(result.completionError);
+   if(result.completionError)throw Object.assign(Error(result.completionError),{chunked:result.chunked});
    this.set('complete','云同步完成');
    return true;
   }).catch(original=>{const error=cloudSyncFailure(original,this.failureStage);this.failureStage=cloudFailureStage(error,this.failureStage);failure=cloudFormatFailure(error);const diagnostic=JSON.parse(recordFailureDiagnostic(error));failureCode=diagnostic.code;failureMethod=diagnostic.method;const cleanup=(error as {cleanupCode?:unknown})?.cleanupCode;if(typeof cleanup==='string'&&JSON.parse(recordFailureDiagnostic(Error(cleanup))).code!=='unclassified')cleanupCode=cleanup;if(epoch!==this.statusEpoch)return false;
   if(confirmed)return true;
   if(this.ports.primaryV2&&(this.failureStage==='sync_v2'||isTransportFailure(original)||failure==='timeout')&&failure!=='suspended'&&!isLibraryOwnerMismatch(original)){
-   this.failV2(original);
+   this.failV2(original,undefined,(original as {chunked?:boolean})?.chunked===true);
    return false;
   }
   this.networkFailure=isTransportFailure(error);

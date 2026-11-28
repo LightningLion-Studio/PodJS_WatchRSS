@@ -155,6 +155,9 @@ export class WatchIndexPublisher {
    }
   }
   let after='';while(!budgetReached){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){if(visited.has(entry.entityKey))continue;if(!await processEntry(entry))break;}after=page.at(-1)!.entityKey;}
+  // A held candidate stays local until its original or baseline is available.
+  // Without publishable rows there is no new account state to commit.
+  if(heldEdits&&!changedRows.length&&!budgetReached)return {skipped:true as const,heldEdits:true as const,changedRows:0};
   const fetch=(id:string)=>this.http.object(id);
   const tree=root?await updateTree(this.http.scope,root,id=>this.options.indexObjects?.read(id,fetch)??fetch(id),changedRows):buildTree(this.http.scope,changedRows);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);

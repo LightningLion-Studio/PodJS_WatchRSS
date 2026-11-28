@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {finishSyncV2Background} from '../../src/cloud/background-v2';
 import {readFileSync,mkdtempSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -30,4 +31,25 @@ test('full v2 headless bundle stays bounded and consent/account/network gates is
    expect(calls.some(c=>c.startsWith('http.')||c.startsWith('file.')||c==='cloud.acquire')).toBe(false);
   }
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test.each([
+ [null,'success'],
+ ['cloud_v2_read_only','failure'],
+ ['cloud_v2_pending','failure'],
+ ['choice_pending','failure'],
+ ['body_channel_source_missing','failure'],
+ ['body_channel_capacity_pending','failure'],
+ ['replay_detected','failure'],
+ ['body_channel_waiting_wifi','retry'],
+ ['transport_error','retry'],
+ ['network_timeout','retry'],
+] as const)('headless v2 maps %s to %s and retires the grant only at a terminal outcome',async(completionError,expected)=>{
+ let completed=0;
+ expect(await finishSyncV2Background({completionError},async()=>++completed)).toBe(expected);
+ expect(completed).toBe(expected==='retry'?0:1);
+});
+
+test('headless v2 continues a durable chunk as progress without retiring the grant',async()=>{
+ expect(await finishSyncV2Background({completionError:'cloud_v2_pending',chunked:true},async()=>{throw Error('grant retired');})).toEqual({status:'retry',progress:true});
 });

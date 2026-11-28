@@ -67,16 +67,17 @@ export function watchSyncV2(options:{enabled?:boolean;noteSegments?:boolean;inde
     proof.window.account.revision===(current.account?.revision??'0')&&proof.window.account.rollbackGeneration===current.rollbackGeneration;
    const author=await registerAuthor(bound?proof:await authenticateWithRevision(),now());
    const requestId=hex(await crypto.random(16));
+   let prepared;
    try{
-    await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
    }catch(error){
     if((error as Error).message!=='projection_incomplete')throw error;
     // A local save may commit while the pull is acknowledging its applied head.
     await local.store.beginTailWindow();
     while((await local.store.checkpoint())?.phase==='tail')await local.store.catchUpPage(local.source);
-    await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
+    prepared=await publisher.prepare(author.deviceId,author.alias,author.own,requestId);
    }
-   return publisher.flush();
+   return prepared.skipped?prepared:publisher.flush();
   }};
  })().catch(error=>{opened=undefined;destroy();throw error;});}};
 }

@@ -469,6 +469,12 @@ test('RVPODNOTES-02 missing new original holds only that entity and never invent
   let original:Uint8Array|undefined;const publisher=new WatchIndexPublisher(f.store,f.http,signer,keys,()=>100,independentBodyResolver({read:async()=>original,validate:async()=>{},install:async()=>{}},async()=>null,code=>pending.push(code)));
   await publisher.prepare(author,'key',{commitOid:null,revision:'0'},'e'.repeat(32));await publisher.flush();const reader=new WatchCloudIndex(f.store,f.http,signer,keys,async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);await reader.pull(server.window());
   const state=await f.store.readState();expect(await f.store.cloudRow(state.cloud.current.treeRoot,entity)).toBeNull();expect(await f.store.readCandidate(entity)).not.toBeNull();expect(state.hasUnsentEdits).toBe(true);expect(pending).toEqual(['body_channel_source_missing']);expect(await f.store.cloudRow(state.cloud.current.treeRoot,entityKey(idKey,scope.repoId,'note','n'))).not.toBeNull();
+  const head={...server.account};
+  for(const request of ['a','d']){
+   expect(await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},request.repeat(32))).toEqual({skipped:true,heldEdits:true,changedRows:0});
+   expect((await f.store.readState()).cloud.pendingPublish).toBeNull();
+   expect(server.account).toEqual(head);
+  }
   original=new Uint8Array([1,2,3]);await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},'b'.repeat(32));await publisher.flush();await reader.pull(server.window());const resumed=await f.store.readState();expect((await f.store.cloudRow(resumed.cloud.current.treeRoot,entity)).row.bodyRevision).toBe(carrierBodyRevision('asset',entity,sha256Hex(original)));expect(resumed.hasUnsentEdits).toBe(false);
  }finally{f.db.close();}
 });

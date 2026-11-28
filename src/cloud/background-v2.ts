@@ -9,6 +9,9 @@ import {WatchCloudClient} from './client';
 import {readCloudSecure} from './secure-read';
 import {secureCallsite} from './secure-callsite';
 import {CloudSyncDeadlineError} from './execution';
+import {isTransportFailure} from '../network/recovery';
+import {SyncV2Error} from '../sync-v2/http';
+import type {SyncV2RoundResult} from '../sync-v2/product-start';
 import {cloudHostFailure} from './host-capability';
 import {backgroundDiagnostics} from './background-diagnostic';
 import {recordFailureDiagnostic} from './record-diagnostic';
@@ -23,9 +26,23 @@ import {SqlLibraryBodyRepository} from '../sync/library-body-repository';
 import {watchAppVersion} from '../core/app-version';
 import {openApplicationSyncV2Core} from '../sync-v2/application-core';
 import {accountIdFromUserId} from '../sync-v2/signing';
-import {MANUAL_INTENT_KEY,readManualIntent,completeManualIntent,manualEpochKey} from './manual-handoff';
+import {MANUAL_INTENT_KEY,type ManualIntent,readManualIntent,completeManualIntent,manualEpochKey} from './manual-handoff';
 import {SyncProgress} from './sync-progress';
 import {cloudStatePort} from './state-sql';
+
+function retryableV2Background(error:unknown){
+ const code=(error as {code?:string;message?:string}|null)?.code??(error as Error|null)?.message;
+ if(code&&['cloud_v2_read_only','cloud_v2_pending','choice_pending','body_channel_source_missing','body_channel_capacity_pending','replay_detected'].includes(code))return false;
+ return error instanceof CloudSyncDeadlineError||isTransportFailure(error)||error instanceof SyncV2Error&&error.retryable||
+  !!code&&['body_channel_waiting_wifi','body_channel_pending','body_channel_bluetooth_pending','body_channel_source_pending','network_error','network_timeout','transport_error','cloud_account_busy','cloud_sync_suspended','window_expired','projection_preparing','first_follow_pending','ref_conflict','choice_stale'].includes(code);
+}
+
+export async function finishSyncV2Background(result:SyncV2RoundResult,complete:()=>Promise<unknown>):Promise<BackgroundOutcome>{
+ if(result.chunked)return {status:'retry',progress:true};
+ if(result.completionError&&retryableV2Background(Error(result.completionError)))return 'retry';
+ await complete();
+ return result.completionError?'failure':'success';
+}
 
 export async function runSyncV2Background(context:BackgroundContext):Promise<BackgroundOutcome>{
  if(!context.request)return 'failure';
@@ -36,7 +53,8 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   if(['cloud.release','secure.release','file.delete','file.closeText','crypto.closeSealedGzip'].includes(method))return window.cleanup(()=>raw<T>(method,args));
   guard.require();return bounded<T>(method,args);
  };
- const diagnostic=backgroundDiagnostics(raw);let cloudLease=false,summary:string|undefined;
+ const diagnostic=backgroundDiagnostics(raw);let cloudLease=false,summary:string|undefined,intent:ManualIntent|undefined;
+ const complete=async()=>{if(intent)await completeManualIntent(host,intent);};
  const progress=new SyncProgress(Date.now,()=>()=>{},line=>{summary=line;},'background');
  try{
   if(!await gate.initialize(()=>raw('app.buildInfo',{})))return 'failure';
@@ -51,7 +69,7 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
   const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion},{sha256:async()=>{throw Error('unused');}},guard),bootstrap=await client.bootstrap();
   if(!bootstrap.syncV2)return 'success'; // No announcement never licenses v1.
   const payload=context.payload as {manual?:boolean;token?:string}|null;
-  const saved=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY}),intent=readManualIntent(saved.value);
+  const saved=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(saved.value);
   if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
   if(intent){const epoch=await cloudStatePort(host).get(manualEpochKey(account));if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch||intent.version===1&&!epoch)return 'success';}
   if(!(await host<{acquired:boolean}>('cloud.acquire',{})).acquired)return 'busy';cloudLease=true;
@@ -71,26 +89,27 @@ export async function runSyncV2Background(context:BackgroundContext):Promise<Bac
     return now;
    };
    await session();const deviceId=await library.deviceId(),ports=createCloudHostPorts(host,guard),foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent:async()=>{await session();}}),device=bootstrap.devices.find(d=>d.deviceId===deviceId);
-   if(!device||device.revokedAt)return 'retry';
+   if(!device||device.revokedAt){await complete();return 'failure';}
    const ready=await foundation.keys.acceptBootstrap(account.userId,deviceId,bootstrap.keyEnvelopes,bootstrap,device.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);
-   if(ready!=='ready')return 'retry';
+   if(ready!=='ready'){await complete();return 'failure';}
    const cleanup:CloudHostRequest=(method,args)=>window.cleanup(()=>raw(method,args));
    progress.stage('compare');
    const opened=await openApplicationSyncV2Core({progress:()=>progress,host,cleanupHost:cleanup,transport,account,legacyDeviceId:deviceId,repository:library,session,keys:foundation.keys,bootstrap:async()=>{await session();return {accountId:accountIdFromUserId(account.userId),syncV2:bootstrap.syncV2,devices:bootstrap.devices,libraryEpoch:bootstrap.libraryEpoch,contentGeneration:bootstrap.contentGeneration};},allowBodies:async()=>!!intent||network.wifi&&network.metered===false});
    try{
-    if(!opened)return 'retry';
-    const code=opened.initialResult.completionError;
-    if(code){
-     diagnostic.report(recordFailureDiagnostic(Error(code)));
-     if(code==='choice_pending'||code==='body_channel_source_missing'||code==='body_channel_capacity_pending')return 'failure';
-     return 'retry';
-    }
-    if(intent)await completeManualIntent(host,intent);
+    const result=opened?.initialResult??{completionError:'cloud_v2_repo_missing'};
+    if(result.completionError&&!result.chunked)diagnostic.report(recordFailureDiagnostic(Error(result.completionError)));
+    const outcome=await finishSyncV2Background(result,complete);
+    if(outcome==='success')progress.finish('complete');
+    return outcome;
    }finally{await opened?.close();}
-   progress.finish('complete');
-   return 'success';
   });
- }catch(error){if(error instanceof CloudSyncDeadlineError)return 'retry';diagnostic.report(recordFailureDiagnostic(error));return 'retry';}
+ }catch(error){
+  if(error instanceof CloudSyncDeadlineError)return 'retry';
+  diagnostic.report(recordFailureDiagnostic(error));
+  if(retryableV2Background(error))return 'retry';
+  await complete().catch(cause=>{diagnostic.report(recordFailureDiagnostic(cause));});
+  return 'failure';
+ }
  finally{if(cloudLease)await window.cleanup(()=>raw('cloud.release',{}));await diagnostic.flush();progress.finish('incomplete');
   if(summary)await window.cleanup(()=>raw('log.append',{path:'app_log.txt',text:new Date().toISOString()+' [I] CloudSyncRound '+summary+'\n',maxBytes:5*1024*1024})).catch(()=>{});
  }

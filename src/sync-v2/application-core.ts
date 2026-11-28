@@ -34,6 +34,7 @@ export async function receiveApplicationIdentity(options:{host:CloudHostRequest;
 import type {SqlLibrarySessionRepository} from '../sync/library-repository';
 import {watchLocalProjection} from './index';
 import {watchSyncV2} from './runtime';
+import type {SyncV2RoundResult} from './product-start';
 import {PublicationLookupUnavailable} from './publisher';
 import {ensureR0Scan} from './product';
 import {stopExistingProjection} from './business-revision';
@@ -68,7 +69,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
  };
  const transport:HttpTransport={request:r=>lifetime.read(()=>options.transport.request({...r,background:lifetime}))};
  const held=new Set<Uint8Array>(),keyring:AccountKeyring={currentKeyVersion:u=>options.keys.currentKeyVersion(u),accountKey:async(u,v)=>{const key=await options.keys.accountKey(u,v);if(closed){key?.fill(0);throw Error('feature_disabled');}if(key)held.add(key);return key;}};
- let localFactory:ReturnType<typeof watchLocalProjection>|undefined,runtimeFactory:ReturnType<typeof watchSyncV2>|undefined,ui:Ui|undefined,installedRecord:{idKeyHex:string}|undefined,closed=false,activeClock=options.clock,syncRound:(()=>Promise<{completionError:string|null}>)|undefined;
+ let localFactory:ReturnType<typeof watchLocalProjection>|undefined,runtimeFactory:ReturnType<typeof watchSyncV2>|undefined,ui:Ui|undefined,installedRecord:{idKeyHex:string}|undefined,closed=false,activeClock=options.clock,syncRound:(()=>Promise<SyncV2RoundResult>)|undefined;
  let offClose=()=>{},closingPromise:Promise<void>|undefined;
  const close=()=>{
   if(closingPromise)return closingPromise;
@@ -214,11 +215,12 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     let pubResult:any;
     if(state.cloud?.pendingPublish){await flush();publishedAny=true;}
     else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
-     try{pubResult=await runtime.publish(true);publishedAny=true;}catch(error){
+     try{pubResult=await runtime.publish(true);publishedAny ||= !pubResult?.skipped;}catch(error){
       if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
       await recoverConflict();
      }
     }else return publishedAny?{...pulled,refreshBodies:true}:pulled;
+    if(pubResult?.skipped)return publishedAny?{...pulled,refreshBodies:true}:pulled;
     if(pubResult?.chunked&&Date.now()-roundStart<150_000)continue;
     // First-follow publication leaves the merged head unapplied locally.
     const followed=state.account&&state.activeGeneration===null||pubResult?.chunked?await runtime.pull():pulled;
@@ -236,8 +238,8 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
     if(channel&&!result?.chunked&&(result?.refreshBodies||await channel.hasWork())){
      let observation=result?.refreshBodies||result?.expiresAtMillis===undefined?await runtime.refreshAccount():result;
      if(await channel.needsPublication()){
-      await runtime.publish();
-      observation=await runtime.refreshAccount();
+      const publication=await runtime.publish();
+      if(!publication?.skipped)observation=await runtime.refreshAccount();
      }
      await bodyRound(observation.expiresAtMillis);
     }
@@ -245,17 +247,16 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
    }
    return result;
   };
-  const synchronize=async()=>{
+  const synchronize=async():Promise<SyncV2RoundResult>=>{
    const result=await sync();
    let completionError:string|null=null;
    const state=await local.store.readState();
    if(state.pendingChoice)completionError='choice_pending';
    else if(result?.readOnly||state.cloud?.blockedCommitOid||result?.applyDisabled&&state.account&&state.activeGeneration!==state.account.oid)completionError='cloud_v2_read_only';
-   // A held body cannot be repaired by retrying the same publication. Finish
-   // advancing the index before reporting any held body to the caller.
-   else if(result?.chunked)completionError='cloud_v2_pending';
+   else if(result?.chunked)return {completionError:'cloud_v2_pending',chunked:true};
+   else if(state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
    else if(bodyError)completionError=bodyError;
-   else if(state.hasUnsentEdits||state.cloud?.pendingPublish||state.cloud?.pendingApplied)completionError='cloud_v2_pending';
+   else if(state.hasUnsentEdits)completionError='cloud_v2_pending';
    return {completionError};
   };
   const initialResult=await synchronize();

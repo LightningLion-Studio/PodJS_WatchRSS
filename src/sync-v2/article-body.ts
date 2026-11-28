@@ -26,9 +26,11 @@ export async function buildArticleBody(crypto:EnvelopeCrypto,keys:ObjectKeys,sco
 export function articleBodyResolver(options:{crypto:EnvelopeCrypto;keys:ObjectKeys;scope:Scope;read:(id:string)=>Promise<Uint8Array|null|undefined>}):BodyResolver{
  return async(entry,existing)=>{
   if(entry.candidate.meta.kind!=='article')return null;
-  const plain=await options.read(entry.candidate.meta.logicalId);if(!plain)return null;
-  const revision=articleBodyRevision(entry.entityKey,plain);
-  if(existing?.row.bodyRevision===revision)return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,existing.row[k]])) as unknown as BodyManifest;
+  const plain=await options.read(entry.candidate.meta.logicalId);
+  const prior=existing?.manifest??existing?.row;
+  const revision=plain?articleBodyRevision(entry.entityKey,plain):null;
+  if(prior?.bodyRevision!=null&&(!plain||prior.bodyRevision===revision))return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,prior[k]])) as unknown as BodyManifest;
+  if(!plain||revision===null)return null;
   if(!plain.length)throw Error('invalid_schema');
   return {bodyRevision:revision,promiseId:revision,recipeOid:null,opaqueContentId:null,contentBytes:null};
  };
