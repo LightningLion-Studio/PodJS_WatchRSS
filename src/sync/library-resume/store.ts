@@ -6,6 +6,7 @@ export type Statement={sql:string;params?:SqlParams};
 export interface ReceiptBoundary {check?():void;transaction?(statements:Statement[]):Promise<void>;transactionChanges?(statements:Statement[]):Promise<number[]>;before:Statement[];after(outcome:Outcome):Statement[]}
 export type JobState='PLANNING'|'READY'|'TRANSFERRING'|'APPLIED'|'COMPLETE'|'CANCELLED';
 export interface Job {scope:string;jobId:string;planDigest:string;description:BeginPayload;state:JobState;connectionId:string;epoch:number;expiresAt:number;nextPage:number;completion:Completion|null;lease:Row|null;role:'receiver'|'source'}
+interface SourceBatch {objects:readonly ObjectDescriptor[];truncated:boolean}
 const lanes=new WeakMap<SqlDatabase,Promise<unknown>>();
 const parse=<T>(value:unknown):T=>{try{return JSON.parse(String(value)) as T;}catch{fail('JOURNAL_CORRUPT');}};
 /** Auxiliary tables live in the SAME business database. The single writer lane
@@ -161,7 +162,10 @@ export class ResumeStore {
   const rows=await this.db.query('SELECT kind,business_id,content_version FROM library_resume_source_acked WHERE scope=?',[scope]);
   return new Map(rows.map(r=>[String(r.kind)+'\0'+String(r.business_id),String(r.content_version)]));
  }
- sourceAckStatements(scope:string,descriptors:readonly ObjectDescriptor[]):Statement[]{
+ sourceAckStatements(scope:string,batch:SourceBatch|undefined):Statement[]{
+  // The completed round must not suppress objects in a fresh phone library.
+  if(!batch?.truncated)return [{sql:'DELETE FROM library_resume_source_acked WHERE scope=?',params:[scope]}];
+  const descriptors=batch.objects;
   const statements:Statement[]=[],at=this.now();
   for(let start=0;start<descriptors.length;start+=100){
    const part=descriptors.slice(start,start+100),params:(string|number)[]=[];
@@ -177,13 +181,13 @@ export class ResumeStore {
    {sql:"DELETE FROM library_resume_preparations WHERE scope=? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=? AND j.job_id!=? AND j.state NOT IN ('COMPLETE','CANCELLED'))",params:[job.scope,job.scope,job.jobId]},
   ];
  }
- async preparationSourceObjects(scope:string,jobId:string):Promise<ObjectDescriptor[]|undefined>{
+ async preparationSourceBatch(scope:string,jobId:string):Promise<SourceBatch|undefined>{
   await this.initialize();
   const rows=await this.db.query('SELECT body FROM library_resume_preparations WHERE scope=?',[scope]);
   for(const row of rows){
    try{
-    const parsed=parse<{bindings?:{jobId?:string}[];sourceObjects?:ObjectDescriptor[]}>(row.body);
-    if(parsed.bindings?.some(b=>b.jobId===jobId)&&Array.isArray(parsed.sourceObjects))return parsed.sourceObjects;
+    const parsed=parse<{bindings?:{jobId?:string}[];sourceObjects?:ObjectDescriptor[];sourceTruncated?:boolean}>(row.body);
+    if(parsed.bindings?.some(b=>b.jobId===jobId)&&Array.isArray(parsed.sourceObjects))return {objects:parsed.sourceObjects,truncated:parsed.sourceTruncated===true};
    }catch{}
   }
   return undefined;

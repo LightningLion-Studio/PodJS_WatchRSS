@@ -13,7 +13,7 @@ import {BUSINESS_FIELDS} from '../../sync-v2/business';
 import type {LocalTransferWrite} from '../../sync-v2/local-transfer-intake';
 
 export interface FrozenResumeArticle {prepared:PreparedArticle;binding:number|null;chunkHashes:string[]}
-export interface FrozenResumeInventory {articles:FrozenResumeArticle[];sources:readonly SyncedSource[];assets?:FrozenAsset[]}
+export interface FrozenResumeInventory {articles:FrozenResumeArticle[];sources:readonly SyncedSource[];assets?:FrozenAsset[];truncated:boolean}
 const ARTICLE_KEYS=['articleId','legacyArticleIds','sourceDeviceId','url','title','siteName','excerpt','imageUrl','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','rssSourceUrl','rssSourceTitle','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','isRead'] as const;
 export function resumeObjectKey(kind:ObjectDescriptor['kind'],businessId:string):string{return kind+'\0'+businessId;}
 export function resumeArticleVersion(m:PreparedArticle['manifest']):string{return D('wrss.library-resume.v1/article-version',[m.contentHash,m.metadataHash,m.bodyHash,String(m.updatedAt),String(m.deletedAt)]);}
@@ -66,11 +66,11 @@ export async function sourcePlan(repository:SqlLibrarySessionRepository,store:Re
  if(!full)for(const frozen of [...inventory.articles].sort((a,b)=>compareResumeArticles(a.prepared,b.prepared))){
   const p=frozen.prepared,m=p.manifest;if(!m.bodyAvailable&&!m.deleted)continue;
   const body=selected.has('articleBody')&&m.bodyAvailable&&!m.deleted,kind=body?'articleBody':'articleMetadata';if(!selected.has(kind))continue;
-  if(!admit(resumeArticleDescriptor(frozen,body),frozen))break;
+  if(!admit(resumeArticleDescriptor(frozen,body),frozen)){full=true;break;}
  }
  objects.sort((a,b)=>a.objectId<b.objectId?-1:1);
  let cachedId:string|undefined,cached:Uint8Array|undefined;
- return {objects,read:async(d,index)=>{if(d.kind==='noteAsset'){if(!readAsset)fail('SOURCE_CHANGED');const bytes=await readAsset(d.businessId);if(bytes.length!==d.size||hash(bytes)!==d.sha256)fail('SOURCE_CHANGED');return bytes.slice(index*CHUNK_BYTES,(index+1)*CHUNK_BYTES);}if(d.kind!=='articleBody')fail();if(cachedId!==d.objectId){const frozen=articles.get(d.objectId);if(!frozen)fail('SOURCE_CHANGED');cached=await repository.resumeReadBody(frozen);if(cached.length!==d.size||hash(cached)!==d.sha256)fail('SOURCE_CHANGED');cachedId=d.objectId;}const bytes=cached!.slice(index*CHUNK_BYTES,Math.min(d.size,(index+1)*CHUNK_BYTES));if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');return bytes;}};
+ return {objects,truncated:inventory.truncated===true||full,read:async(d,index)=>{if(d.kind==='noteAsset'){if(!readAsset)fail('SOURCE_CHANGED');const bytes=await readAsset(d.businessId);if(bytes.length!==d.size||hash(bytes)!==d.sha256)fail('SOURCE_CHANGED');return bytes.slice(index*CHUNK_BYTES,(index+1)*CHUNK_BYTES);}if(d.kind!=='articleBody')fail();if(cachedId!==d.objectId){const frozen=articles.get(d.objectId);if(!frozen)fail('SOURCE_CHANGED');cached=await repository.resumeReadBody(frozen);if(cached.length!==d.size||hash(cached)!==d.sha256)fail('SOURCE_CHANGED');cachedId=d.objectId;}const bytes=cached!.slice(index*CHUNK_BYTES,Math.min(d.size,(index+1)*CHUNK_BYTES));if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');return bytes;}};
 }
 export interface ResumeFileReader {read(path:string,size:number):Promise<Uint8Array>}
 export async function applyResumeObject(repository:SqlLibrarySessionRepository,files:ResumeFileReader,job:Job,d:ObjectDescriptor,path:string,boundary:ReceiptBoundary,protect?:LocalTransferWrite):Promise<void>{

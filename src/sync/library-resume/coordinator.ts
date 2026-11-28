@@ -6,7 +6,7 @@ import {D,offerDigest,preparationDigest,selectionDigest,requestDigest,planDigest
 import {ACTION,VERSION,CHUNK_BYTES,RETENTION,HARD_LIMITS,LIMIT_KEYS,resumeError,ResumeError,fail,exact,row,capability,binding,envelope,hex,utf8,hash,b64,strictJson,sorted,type Row,type Capability,type Selection,type Snapshot,type ObjectDescriptor,type BeginPayload,type Binding,type Envelope,type AppliedReceipt,type Completion} from './wire';
 import type {SyncFrameConnection} from '../session';
 
-export interface ResumeSourcePlan {objects:readonly ObjectDescriptor[];read(object:ObjectDescriptor,index:number):Promise<Uint8Array>}
+export interface ResumeSourcePlan {objects:readonly ObjectDescriptor[];truncated?:boolean;read(object:ObjectDescriptor,index:number):Promise<Uint8Array>}
 export interface ResumePorts {
  store:ResumeStore;chunks:VerifiedChunkStore;capability:Capability;
  accountScope:string;phoneDeviceId:string;watchDeviceId:string;connectionId:string;
@@ -106,7 +106,7 @@ export class LibraryResumeConnection {
   await this.ports.store.budget(0,Math.min(...bs.map(b=>b.selection.limits.maxJournalBytes)));const digest=preparationDigest(offer.digest,bs);if(digest!==p.preparationDigest)fail('PLAN_CONFLICT');
   if(this.bindings.length&&preparationDigest(this.selectedOffer!.digest,this.bindings)!==digest)fail('PLAN_CONFLICT');
   const reverse=bs.find(b=>b.direction==='watchToPhone');if(reverse?.intent==='create'){this.preparedSource=await this.ports.source(offer.watchSnapshot,reverse.selection);validateGraph(this.preparedSource.objects);for(const d of this.preparedSource.objects)descriptor(d,reverse.selection.limits);}
-  await this.ports.store.preparation(this.scope,digest,{phoneSnapshot:offer.payload.phoneSnapshot,watchSnapshot:offer.watchSnapshot,bindings:bs,...(this.preparedSource?{sourceObjects:this.preparedSource.objects}:{})});
+  await this.ports.store.preparation(this.scope,digest,{phoneSnapshot:offer.payload.phoneSnapshot,watchSnapshot:offer.watchSnapshot,bindings:bs,...(this.preparedSource?{sourceObjects:this.preparedSource.objects,sourceTruncated:this.preparedSource.truncated===true}:{})});
   this.bindings=bs;this.selectedOffer=offer;
   return {result:{step:'confirm',preparationDigest:digest},epoch:null,after:()=>{
    if(this.sourceWork||!bs.some(b=>b.direction==='watchToPhone'))return;
@@ -257,5 +257,24 @@ export class LibraryResumeConnection {
   }
  }
  private validateReceipt(r:AppliedReceipt,job:string,plan:string,id:string){exact(r,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);if(r.jobId!==job||r.planDigest!==plan||r.objectId!==id||r.receiverDeviceId!==this.ports.phoneDeviceId||!['merged','retainedLocal','alreadyPresent'].includes(r.outcome)||r.resultDigest!==D('wrss.library-resume.v1/applied',[r.jobId,r.planDigest,r.objectId,hex(r.applyRequestId,32),hex(r.applyRequestDigest),r.receiverDeviceId,r.outcome]))fail('RECEIPT_CONFLICT');}
- private async acceptCompletion(j:Job,c:Completion){if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{const latest=await this.ports.store.job(j.scope,j.jobId);if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');const descriptors=this.sourceDescriptions.get(j.jobId)??await this.ports.store.preparationSourceObjects(j.scope,j.jobId)??[];await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},{sql:'INSERT OR REPLACE INTO library_resume_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]},...this.ports.store.sourceAckStatements(j.scope,descriptors),...this.ports.store.cleanupCompletedSourceStatements(j)]);}));}
+ private async acceptCompletion(j:Job,c:Completion){
+  if(!c||c.state!=='COMPLETE'||c.objectCount!==j.description.objectCount||c.ackToInclusive!==j.description.watchSnapshot.toInclusive||c.completionDigest!==completion(j.jobId,j.planDigest,c.objectCount,c.receiptsRoot,c.ackToInclusive).completionDigest)fail('RECEIPT_CONFLICT');
+  await this.ports.authorize(()=>this.ports.store.exclusive(async()=>{
+   const latest=await this.ports.store.job(j.scope,j.jobId);
+   if(!latest||latest.connectionId!==this.ports.connectionId||latest.epoch!==j.epoch)fail('STALE_EPOCH');
+   if(latest.state==='COMPLETE'){
+    if(latest.completion?.completionDigest!==c.completionDigest)fail('RECEIPT_CONFLICT');
+    return;
+   }
+   const batch=await this.ports.store.preparationSourceBatch(j.scope,j.jobId);
+   await this.ports.store.db.transaction([
+    this.ports.store.guard(j),
+    {sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=? WHERE scope=? AND job_id=?",params:[JSON.stringify(c),j.scope,j.jobId]},
+    {sql:'INSERT OR REPLACE INTO library_resume_peer_ack VALUES(?,?,?)',params:[j.scope,j.jobId,JSON.stringify(c)]},
+    {sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]},
+    ...this.ports.store.sourceAckStatements(j.scope,batch),
+    ...this.ports.store.cleanupCompletedSourceStatements(j),
+   ]);
+  }));
+ }
 }

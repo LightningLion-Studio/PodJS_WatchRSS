@@ -15,6 +15,7 @@ function advertisedPartSize(headers:Record<string,string>){
 /** Separate namespace, no legacy snapshots/records calls and no v2 ACK writes. */
 export class BodyChannelHttp {
  readonly prefix:string;
+ private legacyDownloadPartSize=false;
  constructor(private readonly options:{enabled:boolean;origin:string;policy:OriginPolicy;scope:Scope;transport:HttpTransport;progress?:()=>import('../cloud/sync-progress').SyncProgress|undefined;session:()=>Promise<{accessToken:string;legacyDeviceId:string;legacyEpoch:string;legacyGeneration:string}>;check:()=>Promise<void>}){
   this.prefix=syncV2Origin(options.origin,options.policy)+'/functions/v1/cloud/bodies/v1';
  }
@@ -89,7 +90,15 @@ export class BodyChannelHttp {
   const partial=path+'.part';let data=await files.read(partial)??new Uint8Array();if(data.length>size){data=new Uint8Array();await files.writeAtomic(partial,data);}
   for(let at=data.length;at<size;){
    await check?.();
-   const r=await this.request('GET','/carriers/'+id+'/objects/'+hash+'?offset='+at+'&partSize='+MAX_PART_SIZE);
+   const partPath='/carriers/'+id+'/objects/'+hash+'?offset='+at;
+   const useLegacy=this.legacyDownloadPartSize;
+   let r;
+   try{r=await this.request('GET',partPath+(useLegacy?'':'&partSize='+MAX_PART_SIZE));}
+   catch(error){
+    if(useLegacy||!(error instanceof SyncV2Error)||error.code!=='invalid_schema'||(error as SyncV2Error&{status?:number}).status!==400)throw error;
+    this.legacyDownloadPartSize=true;
+    r=await this.request('GET',partPath);
+   }
    const header=(name:string)=>Object.entries(r.headers).find(([k])=>k.toLowerCase()===name)?.[1];
    if(header('x-watchrss-body-total-bytes')!==String(size)||header('x-watchrss-body-offset')!==String(at))throw Error('invalid_range');
    const length=r.body.length,nextOffset=at+length;

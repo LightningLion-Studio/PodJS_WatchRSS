@@ -62,38 +62,41 @@ export class SqlLibraryCloudRepository extends SqlLibraryBodyRepository implemen
   const acked=options.ackedVersions,includeBody=options.includeArticleBody??true,includeMetadata=options.includeArticleMetadata??true,includeSource=options.includeRssSource??true;
   const articles:FrozenResumeArticle[]=[],sources:SyncedSource[]=[];
   let objectCount=0,snapshotBytes=64,manifestBytes=0;
-  if(maxObjects>0&&includeSource){
+  let truncated=false;
+  if(includeSource){
    const exported=[...await this.sources.export(id,undefined,true)].sort(compareResumeSources);
    for(const source of exported){
     check();
-    if(objectCount>=maxObjects)break;
     if(acked?.get(resumeObjectKey('rssSource',source.url))===resumeSourceVersion(source))continue;
+    if(objectCount>=maxObjects){truncated=true;break;}
     const sBytes=resumeUtf8(JSON.stringify(source)).length+1,dBytes=resumeUtf8(JSON.stringify(resumeSourceDescriptor(source))).length;
-    if(objectCount>0&&(snapshotBytes+sBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes))break;
+    if(objectCount>0&&(snapshotBytes+sBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes)){truncated=true;break;}
     sources.push(source);objectCount++;snapshotBytes+=sBytes;manifestBytes+=dBytes;
    }
   }
-  if(objectCount<maxObjects&&(includeBody||includeMetadata)){
+  if((!truncated||objectCount<maxObjects)&&(includeBody||includeMetadata)){
    const local=new LocalArticleManifestStore(this.db,this.ports.codec,this.ports.text,this.ports.files,async()=>{throw Error('resume_read_only');});
    const prepared=(await local.snapshot(true,false,!!this.books,check,undefined,true)).filter(p=>p.manifest.bodyAvailable||p.manifest.deleted).sort(compareResumeArticles),bindings=local.projectionBindings();
    for(const p of prepared){
     check();
-    if(objectCount>=maxObjects)break;
     const body=includeBody&&p.manifest.bodyAvailable&&!p.manifest.deleted,kind=body?'articleBody':'articleMetadata';
     if(kind==='articleBody'?!includeBody:!includeMetadata)continue;
-    if(acked?.get(resumeObjectKey(kind,p.article.articleId))===resumeArticleVersion(p.manifest))continue;
+    const ackedVersion=acked?.get(resumeObjectKey(kind,p.article.articleId));
+    if(ackedVersion===resumeArticleVersion(p.manifest))continue;
+    if(objectCount>=maxObjects&&ackedVersion===undefined){truncated=true;break;}
     const full=body?await local.materializeRequested(p,undefined,true):p;
-    if(acked?.get(resumeObjectKey(kind,full.article.articleId))===resumeArticleVersion(full.manifest))continue;
+    if(ackedVersion===resumeArticleVersion(full.manifest))continue;
+    if(objectCount>=maxObjects){truncated=true;break;}
     const bytes=body?full.encodedBody:null,hashes:string[]=[];
     if(bytes)for(let at=0;at<bytes.length;at+=RESUME_CHUNK_BYTES)hashes.push(resumeHash(bytes.subarray(at,at+RESUME_CHUNK_BYTES)));
     const frozen:FrozenResumeArticle={prepared:{article:{...full.article,contentHtml:null,contentText:''},manifest:full.manifest,encodedBody:null},binding:bindings.get(p.article.articleId)??null,chunkHashes:hashes};
     const fBytes=resumeUtf8(JSON.stringify(frozen)).length+1,dBytes=resumeUtf8(JSON.stringify(resumeArticleDescriptor(frozen,body))).length;
-    if(objectCount>0&&(snapshotBytes+fBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes))break;
+    if(objectCount>0&&(snapshotBytes+fBytes>maxSnapshotBytes||manifestBytes+dBytes>maxManifestBytes)){truncated=true;break;}
     articles.push(frozen);objectCount++;snapshotBytes+=fBytes;manifestBytes+=dBytes;
    }
   }
   check();if(await libraryRevision(this.db)!==revision)throw Error('SOURCE_CHANGED');
-  return {articles,sources};
+  return {articles,sources,truncated};
  });}
  resumeReadBody(item:FrozenResumeArticle):Promise<Uint8Array>{return this.run(async()=>{
   const local=new LocalArticleManifestStore(this.db,this.ports.codec,this.ports.text,this.ports.files,async()=>{throw Error('resume_read_only');});

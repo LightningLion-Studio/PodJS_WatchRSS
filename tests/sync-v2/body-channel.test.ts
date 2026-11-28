@@ -180,6 +180,27 @@ test('ciphertext download resumes on reopen and verifies complete SHA before dec
  const p=await prepared(),b=backend(),cache=files();await b.http().upload(p.descriptor,async h=>p.objects.get(h)!);const chunk=p.descriptor.body.chunks[0]!;b.loseRead();await expect(b.http().download(p.descriptor.body.carrierId,chunk.sha256,chunk.sizeBytes,cache,'cipher')).rejects.toThrow('interrupted download');
  const at=cache.map.get('cipher.part')!.length,start=b.calls.length;expect(await b.http().download(p.descriptor.body.carrierId,chunk.sha256,chunk.sizeBytes,cache,'cipher')).toEqual(p.objects.get(chunk.sha256)!);expect(b.calls[start]!.url).toContain('offset='+at);
 });
+test('strict legacy download query falls back to 64 KiB once per instance',async()=>{
+ const raw=new Uint8Array(2*65536+23).fill(42),hash=sha256Hex(raw),b=backend(),cache=files();
+ b.objects.set(hash,raw);
+ const request=b.transport.request.bind(b.transport),offsets:number[]=[];
+ let rejected=0;
+ b.transport.request=async r=>{
+  const query=new URL(r.url).searchParams;
+  if([...query.keys()].some(key=>key!=='offset'&&!Object.hasOwn(scope,key))){
+   expect(query.get('partSize')).toBe('524288');
+   rejected++;
+   return {status:400,headers:{},body:jsonBytes({error:{code:'invalid_schema',retryable:false,retryAfterMillis:null,details:{}}})};
+  }
+  offsets.push(Number(query.get('offset')));
+  return request(r);
+ };
+ const http=b.http();
+ expect(await http.download(author,hash,raw.length,cache,'cipher')).toEqual(raw);
+ expect(await http.download(author,hash,raw.length,cache,'second')).toEqual(raw);
+ expect(rejected).toBe(1);
+ expect(offsets).toEqual([0,65536,131072,0,65536,131072]);
+});
 for(const partSize of [65536,524288])test('carrier download accepts '+partSize+'-byte parts and a short tail',async()=>{
  const raw=new Uint8Array(524288+23).fill(42),hash=sha256Hex(raw),b=backend(undefined,partSize);
  b.objects.set(hash,raw);

@@ -280,13 +280,14 @@ test('sourcePlan bounds >4096-object inventories to <=4096 deterministically and
    binding:null,
    chunkHashes:[],
   }));
-  const inventory={articles:[...tombstones,...activeArticles],sources};
+  const inventory={articles:[...tombstones,...activeArticles],sources,truncated:false};
   const witness={snapshotId:nonce(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0};
   await f.store.initialize();
   await f.store.saveSnapshot(scope,witness,inventory);
   const first=await sourcePlan(f.repository,f.store,scope,witness,sel);
   const second=await sourcePlan(f.repository,f.store,scope,witness,sel);
   expect(first.objects).toHaveLength(4096);
+  expect(first.truncated).toBe(true);
   expect(first.objects.map(o=>o.objectId)).toEqual(second.objects.map(o=>o.objectId));
   expect(first.objects.filter(o=>o.kind==='rssSource')).toHaveLength(10);
   expect(first.objects.filter(o=>o.kind==='articleBody')).toHaveLength(200);
@@ -295,7 +296,7 @@ test('sourcePlan bounds >4096-object inventories to <=4096 deterministically and
  }finally{f.sql.close();}
 },30000);
 
-test('ResumeApplicationService transfers >4096 local objects across sequential <=4096 batches without LIMIT_EXCEEDED',async()=>{
+for(const reset of [false,true])test(reset?'B2 redelivers all 4200 objects after the phone clears its library':'B2 continues a truncated batch and resends articles changed during the round',async()=>{
  const {ResumeApplicationService}=await import('../../src/sync/library-resume/host');
  const {WatchAccountStore}=await import('../../src/account/store');
  const {Peer,frames}=await import('../helpers/library-resume-fixture');
@@ -318,8 +319,12 @@ test('ResumeApplicationService transfers >4096 local objects across sequential <
 
   const values=new Map<string,string>(),account=new WatchAccountStore({get:k=>values.get(k)??null,set:(k,v)=>{values.set(k,v);},remove:k=>{values.delete(k);}});
   await account.save({...vectors.account,phoneMasked:'',installId:'BATCH',watchDeviceToken:'SYNTHETIC',tokenExpiresAtMillis:0,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:false,diagnosticsEnabled:false,sampleRate:0},updatedAtMillis:0});
-  const service=new ResumeApplicationService({store:f.store,chunks:f.chunks,account,repository:async()=>f.repository,randomId:async()=>nonce(),localPermission:()=>true,readFile:async()=>new Uint8Array()});
+  const service=new ResumeApplicationService({
+   store:f.store,chunks:f.chunks,account,repository:async()=>f.repository,randomId:async()=>nonce(),localPermission:()=>true,readFile:async()=>new Uint8Array(),
+   sleep:ms=>{let timer:ReturnType<typeof setTimeout>;return {result:new Promise<void>(resolve=>{timer=setTimeout(resolve,ms);}),cancel:()=>clearTimeout(timer!)};},
+  });
 
+  const phoneLibrary=new Map<string,ObjectDescriptor>();
   const runBatch=async()=>{
    const context={session:{}},pair=frames();
    const probe=await service.probe({deviceId:vectors.phoneDeviceId,supportedLibraryResumeVersions:[1]},context);
@@ -334,7 +339,7 @@ test('ResumeApplicationService transfers >4096 local objects across sequential <
    const bs=[{direction:'watchToPhone' as const,jobId:job,intent:'create' as const,selection}];
    const confirmed=await phone.request('prepare',{step:'confirm',offerRequestId:offered.requestId,bindings:bs,preparationDigest:preparationDigest(offerDigest(offerPayload,watchCap,watchSnap),bs)});
    expect(confirmed.success).toBe(true);
-   const received:ObjectDescriptor[]=[],receipts=new Map<string,AppliedReceipt>();
+   const received:ObjectDescriptor[]=[],byId=new Map<string,ObjectDescriptor>(),receipts=new Map<string,AppliedReceipt>();
    let expectedPages=0,declaredCount=-1;
    for(;;){
     const r=envelope(await pair.phone.readFrame(30000)),p=r.payload!;let result:Row;
@@ -347,6 +352,7 @@ test('ResumeApplicationService transfers >4096 local objects across sequential <
       break;
      case 'manifestPage':{
       const entries=p.entries as ObjectDescriptor[];received.push(...entries);
+      for(const object of entries)byId.set(object.objectId,object);
       const next=Number(p.pageIndex)+1,verified=next===expectedPages;
       result={pageIndex:p.pageIndex,pageDigest:p.pageDigest,nextManifestPage:next,manifestVerified:verified,state:verified?'READY':'PLANNING'};
       break;
@@ -360,6 +366,8 @@ test('ResumeApplicationService transfers >4096 local objects across sequential <
      }
      case 'putChunk':result={objectId:p.objectId,chunkIndex:p.chunkIndex,chunkState:'STAGED',objectState:'STAGED',receipt:null};break;
      case 'apply':{
+      const object=byId.get(String(p.objectId))!;
+      phoneLibrary.set(object.kind+':'+object.businessId,object);
       const receipt=appliedReceipt(r,String(p.objectId),vectors.phoneDeviceId,'merged');
       receipts.set(String(p.objectId),receipt);
       result={state:'APPLIED',receipt};
@@ -387,16 +395,20 @@ test('ResumeApplicationService transfers >4096 local objects across sequential <
   expect(batch1).toHaveLength(4096);
   expect(batch1.filter(o=>o.kind==='rssSource')).toHaveLength(5);
   expect(batch1.filter(o=>o.kind==='articleBody')).toHaveLength(15);
+  if(!reset)await f.db.execute("UPDATE articles SET title='Edited Article 0',content='<p>Updated Body 0</p>' WHERE id=1");
   const batch2=await runBatch();
-  expect(batch2).toHaveLength(4200-4096);
-  const allDelivered=new Set([...batch1,...batch2].map(o=>o.kind+':'+o.businessId));
-  expect(allDelivered.size).toBe(4200);
-  const batch3=await runBatch();
-  expect(batch3).toHaveLength(0);
-  // Editing an already-delivered article causes only that updated article to be resent.
-  await f.db.execute("UPDATE articles SET title='Edited Article 0',content='<p>Updated Body 0</p>' WHERE id=1");
-  const batch4=await runBatch();
-  expect(batch4).toHaveLength(1);
-  expect(batch4[0]!.kind).toBe('articleBody');
+  expect(batch2).toHaveLength(4200-4096+(reset?0:1));
+  expect(phoneLibrary.size).toBe(4200);
+  if(!reset){
+   const changed=batch2.filter(o=>o.kind==='articleBody');
+   expect(changed).toHaveLength(1);
+   expect(changed[0]!.contentVersion).not.toBe(batch1.find(o=>o.businessId===changed[0]!.businessId)!.contentVersion);
+   return;
+  }
+  const delivered=new Map(phoneLibrary);
+  phoneLibrary.clear();
+  expect(await runBatch()).toHaveLength(4096);
+  expect(await runBatch()).toHaveLength(4200-4096);
+  expect(phoneLibrary).toEqual(delivered);
  }finally{f.sql.close();}
-},60000);
+},120000);

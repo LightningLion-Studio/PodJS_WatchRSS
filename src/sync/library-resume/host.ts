@@ -23,7 +23,7 @@ interface Negotiation {peer:string;capability:Capability;account?:WatchAccountSt
  */
 export class ResumeApplicationService implements ResumeSessionPort {
  private readonly sessions=new WeakMap<object,Negotiation>();
- constructor(private readonly ports:{store:ResumeStore;chunks:VerifiedChunkStore;account:WatchAccountStore;repository:()=>Promise<SqlLibrarySessionRepository>;randomId:()=>Promise<string>;localPermission:()=>boolean;assetHost?:AssetHost;readFile:(path:string,size:number)=>Promise<Uint8Array>;intake?:LocalTransferIntake;changed?:()=>void;diagnostic?:(error:unknown)=>void}){}
+ constructor(private readonly ports:{store:ResumeStore;chunks:VerifiedChunkStore;account:WatchAccountStore;repository:()=>Promise<SqlLibrarySessionRepository>;randomId:()=>Promise<string>;localPermission:()=>boolean;assetHost?:AssetHost;sleep?:typeof delay;readFile:(path:string,size:number)=>Promise<Uint8Array>;intake?:LocalTransferIntake;changed?:()=>void;diagnostic?:(error:unknown)=>void}){}
  async probe(request:Row,context:SyncActionContext):Promise<Row>{
   this.sessions.delete(context.session);
   if(!Array.isArray(request.supportedLibraryResumeVersions)||!request.supportedLibraryResumeVersions.includes(1)||!this.ports.localPermission())return {};
@@ -52,7 +52,7 @@ export class ResumeApplicationService implements ResumeSessionPort {
   const protectAsset=intake?noteAssetIntake(run=>intake(account,watch,run),1,n.peer,check):undefined;
   const current=<T>(run:()=>Promise<T>)=>this.ports.account.withLibraryAccount(account,async()=>{check();const runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');await this.ports.store.observeClock(runtime.elapsedMillis);try{return await run();}catch(e){this.ports.diagnostic?.(e);throw resumeError(e);}});
   await current(()=>this.ports.store.exclusive(()=>this.ports.store.collect(scope,job=>this.ports.chunks.collect(D('wrss.library-resume.v1/native-scope',[scope,job.jobId]),true))));
-  const owner=new LibraryResumeConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize:current,check,sleep:delay,randomId:this.ports.randomId,
+  const owner=new LibraryResumeConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize:current,check,sleep:this.ports.sleep??delay,randomId:this.ports.randomId,
    protectNoteAsset:protectAsset?(job,object,stage,apply)=>{
     let original:Promise<Uint8Array>|undefined;
     const body={size:object.size,sha256:object.sha256,read:async(offset:number,length:number)=>{
@@ -68,7 +68,8 @@ export class ResumeApplicationService implements ResumeSessionPort {
     const maxJournalBytes=Math.min(n.capability.limits.maxJournalBytes,peer?.limits.maxJournalBytes??HARD_LIMITS.maxJournalBytes);
     const peerReceive=peer?new Set(peer.kinds.filter(k=>k.receive).map(k=>k.kind)):undefined;
     const acked=await this.ports.store.ackedSourceVersions(scope);
-    const frozenAssets=assets&&(!peerReceive||peerReceive.has('noteAsset'))?await assets.freeze(acked,maxObjects):undefined;
+    const frozen=assets&&(!peerReceive||peerReceive.has('noteAsset'))?await assets.freeze(acked,maxObjects):undefined;
+    const frozenAssets=frozen?.assets;
     const assetBytes=frozenAssets?utf8(JSON.stringify(frozenAssets)).length:0;
     const budgetCap=Math.max(256*1024,Math.floor(Math.min(32*1024*1024,maxJournalBytes-16*1024*1024)/3));
     const inventory=await repository.resumeFreeze(check,{
@@ -81,6 +82,7 @@ export class ResumeApplicationService implements ResumeSessionPort {
      includeRssSource:!peerReceive||peerReceive.has('rssSource'),
     });
     if(frozenAssets)inventory.assets=frozenAssets;
+    if(frozen?.truncated)inventory.truncated=true;
     return {witness:{snapshotId:await this.ports.randomId(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0},inventory};
    },
    source:(w,s)=>sourcePlan(repository,this.ports.store,scope,w,s,assets?.read.bind(assets)),
